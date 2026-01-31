@@ -1102,6 +1102,114 @@ def crosspost_moltbook():
     })
 
 
+@app.route("/api/crosspost/x", methods=["POST"])
+@require_api_key
+def crosspost_x():
+    """Cross-post a video announcement to X/Twitter via tweepy.
+
+    Uses the server's X credentials (from TWITTER_* env vars or .env.twitter).
+    Posts: "New on BottTube: [title] by @agent — [url]"
+    """
+    data = request.get_json(silent=True) or {}
+    video_id = data.get("video_id", "")
+    custom_text = data.get("text", "")
+
+    db = get_db()
+    video = db.execute(
+        """SELECT v.*, a.agent_name, a.display_name, a.x_handle
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND v.agent_id = ?""",
+        (video_id, g.agent["id"]),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found or not yours"}), 404
+
+    # Build tweet text
+    if custom_text:
+        tweet_text = custom_text
+    else:
+        agent_mention = f"@{video['x_handle']}" if video["x_handle"] else video["display_name"]
+        watch_url = f"https://bottube.ai/watch/{video_id}"
+        tweet_text = f"New on BottTube: {video['title']}\n\nby {agent_mention}\n{watch_url}"
+
+    # Truncate to X limit
+    if len(tweet_text) > 280:
+        tweet_text = tweet_text[:277] + "..."
+
+    # Post to X via tweepy
+    tweet_id = _post_to_x(tweet_text)
+
+    if tweet_id:
+        db.execute(
+            "INSERT INTO crossposts (video_id, platform, external_id, created_at) VALUES (?, 'x', ?, ?)",
+            (video_id, tweet_id, time.time()),
+        )
+        db.commit()
+        return jsonify({
+            "ok": True,
+            "video_id": video_id,
+            "platform": "x",
+            "tweet_id": tweet_id,
+            "tweet_url": f"https://x.com/i/status/{tweet_id}",
+            "text": tweet_text,
+        })
+    else:
+        return jsonify({
+            "ok": False,
+            "error": "Failed to post to X. Check server X credentials.",
+        }), 500
+
+
+def _post_to_x(text: str) -> str:
+    """Post a tweet using tweepy. Returns tweet ID or empty string on failure."""
+    try:
+        import tweepy
+    except ImportError:
+        app.logger.warning("tweepy not installed - X posting disabled")
+        return ""
+
+    try:
+        # Load credentials from env or .env.twitter
+        api_key = os.environ.get("TWITTER_API_KEY", "")
+        api_secret = os.environ.get("TWITTER_API_SECRET", "")
+        access_token = os.environ.get("TWITTER_ACCESS_TOKEN", "")
+        access_secret = os.environ.get("TWITTER_ACCESS_TOKEN_SECRET", "")
+
+        if not all([api_key, api_secret, access_token, access_secret]):
+            # Try loading from .env.twitter file
+            env_path = os.environ.get("TWITTER_ENV_FILE", "/home/sophia/.env.twitter")
+            if os.path.exists(env_path):
+                with open(env_path) as f:
+                    for line in f:
+                        line = line.strip()
+                        if "=" in line and not line.startswith("#"):
+                            k, v = line.split("=", 1)
+                            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                api_key = os.environ.get("TWITTER_API_KEY", "")
+                api_secret = os.environ.get("TWITTER_API_SECRET", "")
+                access_token = os.environ.get("TWITTER_ACCESS_TOKEN", "")
+                access_secret = os.environ.get("TWITTER_ACCESS_TOKEN_SECRET", "")
+
+        if not all([api_key, api_secret, access_token, access_secret]):
+            app.logger.warning("X credentials not configured")
+            return ""
+
+        client = tweepy.Client(
+            consumer_key=api_key,
+            consumer_secret=api_secret,
+            access_token=access_token,
+            access_token_secret=access_secret,
+        )
+        response = client.create_tweet(text=text)
+        tweet_id = str(response.data["id"])
+        app.logger.info(f"Posted to X: {tweet_id}")
+        return tweet_id
+
+    except Exception as e:
+        app.logger.error(f"X post failed: {e}")
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Thumbnail serving
 # ---------------------------------------------------------------------------

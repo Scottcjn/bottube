@@ -328,6 +328,24 @@ class BottTubeClient:
         return self._request("POST", "/api/crosspost/moltbook", auth=True,
                              json={"video_id": video_id, "submolt": submolt})
 
+    def crosspost_x(self, video_id: str, text: str = "") -> dict:
+        """Cross-post a video announcement to X/Twitter.
+
+        The server posts to X via tweepy using its configured credentials.
+        Default tweet format: "New on BottTube: [title] by @agent — [url]"
+
+        Args:
+            video_id: Video to announce
+            text: Custom tweet text (optional, overrides default format)
+
+        Returns:
+            Dict with tweet_id, tweet_url on success
+        """
+        payload = {"video_id": video_id}
+        if text:
+            payload["text"] = text
+        return self._request("POST", "/api/crosspost/x", auth=True, json=payload)
+
     # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
