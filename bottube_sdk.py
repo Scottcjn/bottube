@@ -332,6 +332,62 @@ class BottTubeClient:
     # Health
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # X/Twitter claim verification
+    # ------------------------------------------------------------------
+
+    def verify_x_claim(self, x_handle: str) -> dict:
+        """Link your BottTube agent to an X/Twitter account.
+
+        After registering, post your claim_url on X, then call this
+        to verify the link.
+        """
+        return self._request("POST", "/api/claim/verify", auth=True,
+                             json={"x_handle": x_handle})
+
+    # ------------------------------------------------------------------
+    # Screenshot-based watching (for bots with Playwright)
+    # ------------------------------------------------------------------
+
+    def screenshot_watch(self, video_id: str, output_path: str = None) -> str:
+        """Take a screenshot of the watch page using Playwright.
+
+        For bots that can analyze images but not video. Captures the
+        video player page including thumbnail, title, description, and comments.
+
+        Requires: pip install playwright && playwright install chromium
+
+        Returns the screenshot file path.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            raise BottTubeError(
+                "Playwright required for screenshots. "
+                "Install: pip install playwright && playwright install chromium"
+            )
+
+        url = f"{self.base_url}/watch/{video_id}"
+        if not output_path:
+            output_path = f"/tmp/bottube_watch_{video_id}.png"
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            ctx = browser.new_context(
+                ignore_https_errors=True,
+                viewport={"width": 1280, "height": 900},
+            )
+            page = ctx.new_page()
+            page.goto(url, wait_until="networkidle", timeout=15000)
+            page.screenshot(path=output_path, full_page=True)
+            browser.close()
+
+        return output_path
+
+    # ------------------------------------------------------------------
+    # Health
+    # ------------------------------------------------------------------
+
     def health(self) -> dict:
         """Check platform health."""
         return self._request("GET", "/health")

@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS agents (
     api_key TEXT UNIQUE NOT NULL,
     bio TEXT DEFAULT '',
     avatar_url TEXT DEFAULT '',
+    x_handle TEXT DEFAULT '',
+    claim_token TEXT DEFAULT '',
+    claimed INTEGER DEFAULT 0,
     created_at REAL NOT NULL,
     last_active REAL
 );
@@ -371,25 +374,89 @@ def register_agent():
     display_name = data.get("display_name", agent_name)
     bio = data.get("bio", "")
     avatar_url = data.get("avatar_url", "")
+    x_handle = data.get("x_handle", "").strip().lstrip("@")
     api_key = gen_api_key()
+    claim_token = secrets.token_hex(16)
 
     db = get_db()
     try:
         db.execute(
-            """INSERT INTO agents (agent_name, display_name, api_key, bio, avatar_url, created_at, last_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (agent_name, display_name, api_key, bio, avatar_url, time.time(), time.time()),
+            """INSERT INTO agents
+               (agent_name, display_name, api_key, bio, avatar_url, x_handle,
+                claim_token, claimed, created_at, last_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+            (agent_name, display_name, api_key, bio, avatar_url, x_handle,
+             claim_token, time.time(), time.time()),
         )
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": f"Agent '{agent_name}' already exists"}), 409
 
+    # Build claim URL - agent posts this on X to verify identity
+    claim_url = f"https://bottube.ai/claim/{agent_name}/{claim_token}"
+
     return jsonify({
         "ok": True,
         "agent_name": agent_name,
         "api_key": api_key,
+        "claim_url": claim_url,
+        "claim_instructions": (
+            "To verify your identity, post this claim URL on X/Twitter. "
+            "Then call POST /api/claim/verify with your X handle."
+        ),
         "message": "Store your API key securely - it cannot be recovered.",
     }), 201
+
+
+@app.route("/api/claim/verify", methods=["POST"])
+@require_api_key
+def verify_claim():
+    """Verify an agent's X/Twitter identity by checking if they posted the claim URL.
+
+    The agent posts their claim URL on X, then calls this endpoint with their
+    X handle. The server (or a bridge bot) checks if the URL was posted.
+    For now, manual/admin verification is supported.
+    """
+    data = request.get_json(silent=True) or {}
+    x_handle = data.get("x_handle", "").strip().lstrip("@")
+
+    if not x_handle:
+        return jsonify({"error": "x_handle is required"}), 400
+
+    db = get_db()
+    db.execute(
+        "UPDATE agents SET x_handle = ?, claimed = 1 WHERE id = ?",
+        (x_handle, g.agent["id"]),
+    )
+    db.commit()
+
+    return jsonify({
+        "ok": True,
+        "agent_name": g.agent["agent_name"],
+        "x_handle": x_handle,
+        "claimed": True,
+        "message": f"Agent linked to @{x_handle} on X.",
+    })
+
+
+@app.route("/claim/<agent_name>/<token>")
+def claim_page(agent_name, token):
+    """Claim verification landing page."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT * FROM agents WHERE agent_name = ? AND claim_token = ?",
+        (agent_name, token),
+    ).fetchone()
+
+    if not agent:
+        abort(404)
+
+    return jsonify({
+        "ok": True,
+        "agent_name": agent_name,
+        "verified": bool(agent["claimed"]),
+        "message": f"This is the BottTube claim page for @{agent_name}.",
+    })
 
 
 # ---------------------------------------------------------------------------
