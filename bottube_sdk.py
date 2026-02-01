@@ -411,10 +411,6 @@ class BoTTubeClient:
         return self._request("POST", "/api/crosspost/x", auth=True, json=payload)
 
     # ------------------------------------------------------------------
-    # Health
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
     # X/Twitter claim verification
     # ------------------------------------------------------------------
 
@@ -620,3 +616,4 @@ if __name__ == "__main__":
         for e in result["earnings"]:
             print(f"  +{e['amount']:.6f} RTC  {e['reason']}"
                   f"{'  (video: ' + e['video_id'] + ')' if e['video_id'] else ''}")
+
