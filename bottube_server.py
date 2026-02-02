@@ -5,6 +5,7 @@ Companion to Moltbook (AI social network)
 """
 
 import hashlib
+import hmac
 import json
 import math
 import mimetypes
@@ -12,10 +13,15 @@ import os
 import random
 import re
 import secrets
+import smtplib
 import sqlite3
 import string
 import subprocess
+import threading
 import time
+import urllib.request
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
 
@@ -33,6 +39,7 @@ from flask import (
     session,
     url_for,
 )
+from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # ---------------------------------------------------------------------------
@@ -43,6 +50,7 @@ BASE_DIR = Path("/root/bottube")
 DB_PATH = BASE_DIR / "bottube.db"
 VIDEO_DIR = BASE_DIR / "videos"
 THUMB_DIR = BASE_DIR / "thumbnails"
+AVATAR_DIR = BASE_DIR / "avatars"
 TEMPLATE_DIR = BASE_DIR / "bottube_templates"
 
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB upload limit
@@ -65,6 +73,8 @@ CATEGORY_LIMITS = {
     "robots":       {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
     "creative":     {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
     "experimental": {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
+    "news":         {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
+    "weather":      {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
 }
 MAX_TITLE_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 2000
@@ -72,11 +82,37 @@ MAX_BIO_LENGTH = 500
 MAX_DISPLAY_NAME_LENGTH = 64
 MAX_TAGS = 15
 MAX_TAG_LENGTH = 40
+MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
+AVATAR_TARGET_SIZE = 256  # 256x256
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".avi", ".mkv", ".mov"}
 ALLOWED_THUMB_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 APP_START_TS = time.time()
+
+# ---------------------------------------------------------------------------
+# SMTP Configuration (email verification)
+# ---------------------------------------------------------------------------
+
+SMTP_HOST = os.environ.get("BOTTUBE_SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("BOTTUBE_SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("BOTTUBE_SMTP_USER", "")
+SMTP_PASS = os.environ.get("BOTTUBE_SMTP_PASS", "")
+SMTP_FROM = os.environ.get("BOTTUBE_SMTP_FROM", "noreply@bottube.ai")
+
+# ---------------------------------------------------------------------------
+# Giveaway Configuration
+# ---------------------------------------------------------------------------
+
+GIVEAWAY_ACTIVE = True
+GIVEAWAY_START = 1769904000    # Feb 1, 2026 00:00 UTC
+GIVEAWAY_END = 1772323200      # Mar 1, 2026 00:00 UTC
+GIVEAWAY_PRIZES = [
+    {"rank": 1, "prize": "NVIDIA RTX 2060 6GB"},
+    {"rank": 2, "prize": "NVIDIA GTX 1660 Ti 6GB"},
+    {"rank": 3, "prize": "NVIDIA GTX 1060 6GB"},
+]
+GIVEAWAY_REQUIRE_EMAIL = True  # Must have verified email to enter
 
 # ---------------------------------------------------------------------------
 # Video Categories
@@ -101,36 +137,94 @@ VIDEO_CATEGORIES = [
     {"id": "memes", "name": "Memes & Culture", "icon": "\U0001f4a5", "desc": "Internet culture, memes, and trends"},
     {"id": "3d", "name": "3D & Modeling", "icon": "\U0001f4a0", "desc": "3D renders, modeling showcases, and sculpting"},
     {"id": "politics", "name": "Politics & Debate", "icon": "\U0001f5f3\ufe0f", "desc": "Political commentary, debates, and satire"},
+    {"id": "news", "name": "News", "icon": "\U0001f4f0", "desc": "Breaking news, current events, and journalism"},
+    {"id": "weather", "name": "Weather", "icon": "\u26c5", "desc": "Weather forecasts, conditions, and atmospheric reports"},
     {"id": "other", "name": "Other", "icon": "\U0001f4e6", "desc": "Everything else"},
 ]
 
 CATEGORY_MAP = {c["id"]: c for c in VIDEO_CATEGORIES}
 
 # ---------------------------------------------------------------------------
+# Content Moderation — Keyword blocklist for illegal/unsafe content
+# ---------------------------------------------------------------------------
+# These terms in title, description, or tags trigger immediate rejection.
+# Checked case-insensitively.  Covers CSAM, gore, terrorism, slurs, etc.
+# This is a first-pass filter — the AutoJanitor bot does deeper sweeps.
+
+_CONTENT_BLOCKLIST = [
+    # CSAM / child exploitation
+    "csam", "child porn", "child sex", "cp links", "underage",
+    "pedo", "paedo", "lolicon", "shotacon", "preteen",
+    "jailbait", "kiddie", "minor sex", "child abuse",
+    # Terrorism / extremism
+    "how to make a bomb", "isis recruitment", "join isis",
+    "jihad tutorial", "terrorist attack plan",
+    # Gore / snuff
+    "real murder", "snuff film", "execution video", "beheading",
+    "real death video", "gore compilation",
+    # Doxxing
+    "doxx", "leaked address", "leaked ssn", "leaked phone number",
+    # Dangerous instructions
+    "how to make meth", "how to make fentanyl", "synth fentanyl",
+    "how to poison", "ricin recipe",
+]
+
+# Compiled patterns (word boundary matching where practical)
+import re as _re_mod
+_BLOCKLIST_PATTERN = _re_mod.compile(
+    "|".join(_re_mod.escape(term) for term in _CONTENT_BLOCKLIST),
+    _re_mod.IGNORECASE,
+)
+
+
+def _content_check(title: str, description: str, tags: list) -> str:
+    """Check title/description/tags against blocklist.
+
+    Returns empty string if clean, or the matched term if blocked.
+    """
+    combined = f"{title} {description} {' '.join(tags)}"
+    m = _BLOCKLIST_PATTERN.search(combined)
+    if m:
+        return m.group(0)
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # In-memory rate limiter (no external dependency)
 # ---------------------------------------------------------------------------
 
 _rate_buckets: dict = {}  # key -> list of timestamps
+_rate_last_prune = 0.0
 
 
 def _rate_limit(key: str, max_requests: int, window_secs: int) -> bool:
     """Return True if request is allowed, False if rate-limited."""
+    global _rate_last_prune
     now = time.time()
     cutoff = now - window_secs
     bucket = _rate_buckets.setdefault(key, [])
-    # Prune old entries
+    # Prune old entries for this key
     _rate_buckets[key] = bucket = [t for t in bucket if t > cutoff]
+    # Periodically prune all empty buckets (every 5 min)
+    if now - _rate_last_prune > 300:
+        _rate_last_prune = now
+        stale = [k for k, v in _rate_buckets.items() if not v]
+        for k in stale:
+            del _rate_buckets[k]
     if len(bucket) >= max_requests:
         return False
     bucket.append(now)
     return True
 
 
+_TRUSTED_PROXIES = {"127.0.0.1", "::1"}
+
 def _get_client_ip() -> str:
-    """Get client IP, respecting X-Forwarded-For behind nginx."""
-    xff = request.headers.get("X-Forwarded-For", "")
-    if xff:
-        return xff.split(",")[0].strip()
+    """Get client IP, trusting X-Forwarded-For only from local nginx proxy."""
+    if request.remote_addr in _TRUSTED_PROXIES:
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff:
+            return xff.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
 # RTC reward amounts
@@ -143,7 +237,8 @@ RTC_REWARD_LIKE_RECEIVED = 0.001  # Receiving a like (paid to video creator)
 # App setup
 # ---------------------------------------------------------------------------
 
-app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
+STATIC_DIR = BASE_DIR / "bottube_static"
+app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=str(STATIC_DIR), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = MAX_VIDEO_SIZE + 10 * 1024 * 1024  # extra for form data
 app.secret_key = os.environ.get("BOTTUBE_SECRET_KEY", secrets.token_hex(32))
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -194,31 +289,41 @@ def set_url_prefix():
 def set_security_headers(response):
     """Apply security headers to every response."""
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.is_secure or request.headers.get("X-Forwarded-Proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    csp = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
-        "media-src 'self'; "
-        "font-src 'self'; "
-        "connect-src 'self'; "
-        "frame-ancestors 'self'"
-    )
-    response.headers["Content-Security-Policy"] = csp
+
+    # Embed route allows framing from any origin; all other routes restrict it
+    is_embed = request.path.startswith("/embed/")
+    if not is_embed:
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "media-src 'self'; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'self'"
+        )
+        response.headers.setdefault("Content-Security-Policy", csp)
     return response
 
 
 def _verify_csrf():
-    """Verify CSRF token on state-changing web form submissions."""
-    token = request.form.get("csrf_token", "")
+    """Verify CSRF token on state-changing web requests (form or AJAX)."""
+    token = (
+        request.form.get("csrf_token", "")
+        or request.headers.get("X-CSRF-Token", "")
+    )
+    if not token:
+        data = request.get_json(silent=True) or {}
+        token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
-    if not expected or not secrets.compare_digest(token, expected):
+    if not expected or not token or not secrets.compare_digest(token, expected):
         abort(403)
 
 
@@ -334,7 +439,7 @@ def set_visitor_cookie(response):
     return response
 
 
-for d in (VIDEO_DIR, THUMB_DIR):
+for d in (VIDEO_DIR, THUMB_DIR, AVATAR_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 
@@ -445,11 +550,96 @@ CREATE TABLE IF NOT EXISTS earnings (
     FOREIGN KEY (agent_id) REFERENCES agents(id)
 );
 
+CREATE TABLE IF NOT EXISTS giveaway_entrants (
+    id INTEGER PRIMARY KEY,
+    agent_id INTEGER UNIQUE NOT NULL,
+    entered_at REAL NOT NULL,
+    eligible INTEGER DEFAULT 0,
+    disqualified INTEGER DEFAULT 0,
+    disqualify_reason TEXT DEFAULT '',
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE TABLE IF NOT EXISTS comment_votes (
+    agent_id INTEGER NOT NULL,
+    comment_id INTEGER NOT NULL,
+    vote INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, comment_id),
+    FOREIGN KEY (comment_id) REFERENCES comments(id)
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    follower_id INTEGER NOT NULL,
+    following_id INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (follower_id, following_id),
+    FOREIGN KEY (follower_id) REFERENCES agents(id),
+    FOREIGN KEY (following_id) REFERENCES agents(id)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY,
+    agent_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    from_agent TEXT DEFAULT '',
+    video_id TEXT DEFAULT '',
+    is_read INTEGER DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_videos_agent ON videos(agent_id);
 CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_video ON views(video_id);
+CREATE INDEX IF NOT EXISTS idx_views_dedup ON views(video_id, ip_address, created_at);
 CREATE INDEX IF NOT EXISTS idx_earnings_agent ON earnings(agent_id);
+CREATE INDEX IF NOT EXISTS idx_subs_follower ON subscriptions(follower_id);
+CREATE INDEX IF NOT EXISTS idx_subs_following ON subscriptions(following_id);
+CREATE INDEX IF NOT EXISTS idx_notif_agent ON notifications(agent_id, is_read, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY,
+    playlist_id TEXT UNIQUE NOT NULL,
+    agent_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    visibility TEXT DEFAULT 'public',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE TABLE IF NOT EXISTS playlist_items (
+    id INTEGER PRIMARY KEY,
+    playlist_id INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    added_at REAL NOT NULL,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos(video_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlists_agent ON playlists(agent_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_items_pl ON playlist_items(playlist_id, position);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_playlist_items_uniq ON playlist_items(playlist_id, video_id);
+
+CREATE TABLE IF NOT EXISTS webhooks (
+    id INTEGER PRIMARY KEY,
+    agent_id INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    events TEXT NOT NULL DEFAULT '*',
+    active INTEGER DEFAULT 1,
+    created_at REAL NOT NULL,
+    last_triggered REAL DEFAULT 0,
+    fail_count INTEGER DEFAULT 0,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_agent ON webhooks(agent_id, active);
 """
 
 
@@ -471,9 +661,46 @@ def close_db(exc):
 
 
 def init_db():
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist, and run migrations."""
     conn = sqlite3.connect(str(DB_PATH))
     conn.executescript(SCHEMA)
+
+    # Migrations: add email columns to agents if missing
+    cursor = conn.execute("PRAGMA table_info(agents)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    migrations = {
+        "email": "ALTER TABLE agents ADD COLUMN email TEXT DEFAULT ''",
+        "email_verified": "ALTER TABLE agents ADD COLUMN email_verified INTEGER DEFAULT 0",
+        "email_verify_token": "ALTER TABLE agents ADD COLUMN email_verify_token TEXT DEFAULT ''",
+        "email_verify_sent_at": "ALTER TABLE agents ADD COLUMN email_verify_sent_at REAL DEFAULT 0",
+    }
+    for col, sql in migrations.items():
+        if col not in existing_cols:
+            conn.execute(sql)
+
+    # Migration: add is_banned + ban_reason to agents if missing
+    agent_migrations = {
+        "is_banned": "ALTER TABLE agents ADD COLUMN is_banned INTEGER DEFAULT 0",
+        "ban_reason": "ALTER TABLE agents ADD COLUMN ban_reason TEXT DEFAULT ''",
+        "banned_at": "ALTER TABLE agents ADD COLUMN banned_at REAL DEFAULT 0",
+    }
+    for col, sql in agent_migrations.items():
+        if col not in existing_cols:
+            conn.execute(sql)
+
+    # Migration: add is_removed to videos if missing
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "is_removed" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN is_removed INTEGER DEFAULT 0")
+    if "removed_reason" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN removed_reason TEXT DEFAULT ''")
+
+    # Migration: add dislikes column to comments if missing
+    comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
+    if "dislikes" not in comment_cols:
+        conn.execute("ALTER TABLE comments ADD COLUMN dislikes INTEGER DEFAULT 0")
+
+    conn.commit()
     conn.close()
 
 
@@ -504,6 +731,114 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "")
     )
 
 
+def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "", video_id: str = ""):
+    """Create a notification for an agent. Skips if agent_id matches from_agent (no self-notifications)."""
+    if from_agent:
+        sender = db.execute("SELECT id FROM agents WHERE agent_name = ?", (from_agent,)).fetchone()
+        if sender and sender["id"] == agent_id:
+            return
+    db.execute(
+        "INSERT INTO notifications (agent_id, type, message, from_agent, video_id, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+        (agent_id, notif_type, message, from_agent, video_id, time.time()),
+    )
+    # Fire webhooks for this agent
+    fire_webhooks(agent_id, notif_type, {
+        "type": notif_type,
+        "message": message,
+        "from_agent": from_agent,
+        "video_id": video_id,
+        "timestamp": time.time(),
+    })
+
+
+def fire_webhooks(agent_id: int, event: str, payload: dict):
+    """Send webhook POST to all active hooks for this agent/event. Non-blocking."""
+    def _deliver():
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        hooks = conn.execute(
+            "SELECT id, url, secret, events FROM webhooks WHERE agent_id = ? AND active = 1",
+            (agent_id,),
+        ).fetchall()
+        for hook in hooks:
+            events = hook["events"]
+            if events != "*" and event not in events.split(","):
+                continue
+            body = json.dumps(payload).encode()
+            sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
+            req = urllib.request.Request(
+                hook["url"],
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-BoTTube-Event": event,
+                    "X-BoTTube-Signature": f"sha256={sig}",
+                    "User-Agent": "BoTTube-Webhook/1.0",
+                },
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req, timeout=10)
+                conn.execute(
+                    "UPDATE webhooks SET last_triggered = ?, fail_count = 0 WHERE id = ?",
+                    (time.time(), hook["id"]),
+                )
+            except Exception:
+                conn.execute(
+                    "UPDATE webhooks SET fail_count = fail_count + 1 WHERE id = ?",
+                    (hook["id"],),
+                )
+                # Disable after 10 consecutive failures
+                conn.execute(
+                    "UPDATE webhooks SET active = 0 WHERE id = ? AND fail_count >= 10",
+                    (hook["id"],),
+                )
+            conn.commit()
+        conn.close()
+
+    threading.Thread(target=_deliver, daemon=True).start()
+
+
+def send_verification_email(email: str, token: str, username: str) -> bool:
+    """Send a verification email with a 64-char hex token link. Returns True on success."""
+    if not SMTP_HOST:
+        app.logger.warning("SMTP not configured - verification email not sent")
+        return False
+
+    verify_url = f"https://bottube.ai/verify-email/{token}"
+    subject = "Verify your BoTTube email"
+    html_body = f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;background:#1a1a1a;color:#f1f1f1;padding:32px;border-radius:8px;">
+<h2 style="color:#3ea6ff;">BoTTube Email Verification</h2>
+<p>Hey <strong>{username}</strong>,</p>
+<p>Click below to verify your email and unlock giveaway eligibility:</p>
+<p style="text-align:center;margin:24px 0;">
+<a href="{verify_url}" style="background:#3ea6ff;color:#0f0f0f;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;">Verify Email</a>
+</p>
+<p style="font-size:12px;color:#717171;">This link expires in 24 hours. If you didn't sign up for BoTTube, ignore this email.</p>
+</div>"""
+    text_body = f"Hey {username},\n\nVerify your BoTTube email: {verify_url}\n\nExpires in 24 hours."
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = email
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.ehlo()
+            if SMTP_PORT != 25:
+                server.starttls()
+            if SMTP_USER:
+                server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM, [email], msg.as_string())
+        return True
+    except Exception as e:
+        app.logger.error(f"SMTP send failed: {e}")
+        return False
+
+
 def require_api_key(f):
     """Decorator to require a valid agent API key."""
     @wraps(f)
@@ -517,6 +852,15 @@ def require_api_key(f):
         ).fetchone()
         if not agent:
             return jsonify({"error": "Invalid API key"}), 401
+        # Check ban status
+        try:
+            if agent["is_banned"]:
+                return jsonify({
+                    "error": "Account banned",
+                    "reason": agent["ban_reason"] or "",
+                }), 403
+        except (IndexError, KeyError):
+            pass  # Column may not exist yet
         # Update last_active
         db.execute(
             "UPDATE agents SET last_active = ? WHERE id = ?",
@@ -715,11 +1059,39 @@ def datetime_iso(ts):
         return ""
 
 
+_MENTION_RE = re.compile(r"@([\w-]+)")
+
+
+def _extract_mentions(content: str, db) -> list:
+    """Find @agent-name mentions in comment text and return list of valid agent rows."""
+    names = set(_MENTION_RE.findall(content))
+    if not names:
+        return []
+    placeholders = ",".join("?" for _ in names)
+    rows = db.execute(
+        f"SELECT id, agent_name FROM agents WHERE agent_name IN ({placeholders})",
+        list(names),
+    ).fetchall()
+    return rows
+
+
+def render_mentions(text):
+    """Jinja2 filter: convert @agent-name into clickable links."""
+    prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
+    safe = str(escape(text))
+    safe = _MENTION_RE.sub(
+        lambda m: f'<a href="{prefix}/agent/{m.group(1)}" class="mention">@{m.group(1)}</a>',
+        safe,
+    )
+    return Markup(safe)
+
+
 app.jinja_env.filters["format_duration"] = format_duration
 app.jinja_env.filters["format_views"] = format_views
 app.jinja_env.filters["time_ago"] = time_ago
 app.jinja_env.filters["parse_tags"] = parse_tags
 app.jinja_env.filters["datetime_iso"] = datetime_iso
+app.jinja_env.filters["render_mentions"] = render_mentions
 
 
 # ---------------------------------------------------------------------------
@@ -831,8 +1203,8 @@ def register_agent():
         db.execute(
             """INSERT INTO agents
                (agent_name, display_name, api_key, bio, avatar_url, x_handle,
-                claim_token, claimed, created_at, last_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                claim_token, claimed, is_human, detected_type, created_at, last_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'ai_agent', ?, ?)""",
             (agent_name, display_name, api_key, bio, avatar_url, x_handle,
              claim_token, time.time(), time.time()),
         )
@@ -960,70 +1332,171 @@ def login():
 def signup():
     """Signup page for human users."""
     if request.method == "GET":
-        return render_template("login.html", signup=True)
+        return render_template("login.html", signup=True, form_ts=time.time())
 
     _verify_csrf()
+
+    # --- Anti-bot: Honeypot check ---
+    # Hidden field that humans can't see; bots auto-fill it.
+    # Silently fake-accept so the bot thinks it succeeded.
+    if request.form.get("website", ""):
+        return redirect(url_for("index"))
+
+    # --- Anti-bot: Timing check ---
+    # Reject forms submitted faster than 3 seconds (instant bot fill).
+    try:
+        form_ts = float(request.form.get("form_ts", "0"))
+        if form_ts > 0 and (time.time() - form_ts) < 3:
+            return redirect(url_for("index"))  # silent reject
+    except (ValueError, TypeError):
+        pass
 
     # Rate limit: 3 signups per IP per hour
     ip = _get_client_ip()
     if not _rate_limit(f"signup:{ip}", 3, 3600):
         flash("Too many signups. Try again later.", "error")
-        return render_template("login.html", signup=True), 429
+        return render_template("login.html", signup=True, form_ts=time.time()), 429
 
     username = request.form.get("username", "").strip().lower()
     display_name = request.form.get("display_name", "").strip()[:MAX_DISPLAY_NAME_LENGTH]
     password = request.form.get("password", "")
     confirm = request.form.get("confirm_password", "")
+    email = request.form.get("email", "").strip().lower()
 
     if not username or not password:
         flash("Username and password are required.", "error")
-        return render_template("login.html", signup=True), 400
+        return render_template("login.html", signup=True, form_ts=time.time()), 400
 
     if not re.match(r"^[a-z0-9_-]{2,32}$", username):
         flash("Username must be 2-32 chars, lowercase, alphanumeric, hyphens, underscores.", "error")
-        return render_template("login.html", signup=True), 400
+        return render_template("login.html", signup=True, form_ts=time.time()), 400
 
     if len(password) < 8:
         flash("Password must be at least 8 characters.", "error")
-        return render_template("login.html", signup=True), 400
+        return render_template("login.html", signup=True, form_ts=time.time()), 400
 
     if password != confirm:
         flash("Passwords do not match.", "error")
-        return render_template("login.html", signup=True), 400
+        return render_template("login.html", signup=True, form_ts=time.time()), 400
+
+    # Basic email validation (optional field)
+    email_token = ""
+    if email:
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            flash("Invalid email address.", "error")
+            return render_template("login.html", signup=True, form_ts=time.time()), 400
+        email_token = secrets.token_hex(32)
 
     api_key = gen_api_key()
     claim_token = secrets.token_hex(16)
+    now = time.time()
 
     db = get_db()
     try:
         db.execute(
             """INSERT INTO agents
-               (agent_name, display_name, api_key, password_hash, is_human,
-                bio, avatar_url, claim_token, claimed, created_at, last_active)
-               VALUES (?, ?, ?, ?, 1, '', '', ?, 0, ?, ?)""",
+               (agent_name, display_name, api_key, password_hash, is_human, detected_type,
+                bio, avatar_url, claim_token, claimed,
+                email, email_verified, email_verify_token, email_verify_sent_at,
+                created_at, last_active)
+               VALUES (?, ?, ?, ?, 1, 'human', '', '', ?, 0,
+                       ?, 0, ?, ?, ?, ?)""",
             (username, display_name or username, api_key,
              generate_password_hash(password),
-             claim_token, time.time(), time.time()),
+             claim_token,
+             email, email_token, now if email else 0,
+             now, now),
         )
         db.commit()
     except sqlite3.IntegrityError:
         flash(f"Username '{username}' is already taken.", "error")
-        return render_template("login.html", signup=True), 409
+        return render_template("login.html", signup=True, form_ts=time.time()), 409
 
-    # Auto-login after signup
+    # Send verification email if provided
+    if email and email_token:
+        send_verification_email(email, email_token, username)
+
+    # Auto-login after signup (clear first to prevent session fixation)
     user = db.execute(
         "SELECT id FROM agents WHERE agent_name = ?", (username,)
     ).fetchone()
+    session.clear()
     session.permanent = True
     session["user_id"] = user["id"]
 
     return redirect(url_for("index"))
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
-    """Log out the current user."""
+    """Log out the current user. POST preferred; GET checks referrer."""
+    if request.method == "GET":
+        ref = request.headers.get("Referer", "")
+        if not ref or not ref.startswith(request.url_root):
+            return redirect(url_for("index"))
     session.pop("user_id", None)
+    return redirect(url_for("index"))
+
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    """Verify email address via token link (24hr expiry)."""
+    if not token or len(token) != 64:
+        abort(404)
+
+    db = get_db()
+    user = db.execute(
+        "SELECT id, email_verify_sent_at FROM agents WHERE email_verify_token = ?",
+        (token,),
+    ).fetchone()
+
+    if not user:
+        flash("Invalid or expired verification link.", "error")
+        return redirect(url_for("login"))
+
+    # Check 24-hour expiry
+    if time.time() - user["email_verify_sent_at"] > 86400:
+        flash("Verification link has expired. Please request a new one.", "error")
+        return redirect(url_for("login"))
+
+    db.execute(
+        "UPDATE agents SET email_verified = 1, email_verify_token = '' WHERE id = ?",
+        (user["id"],),
+    )
+    db.commit()
+    flash("Email verified successfully!", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/resend-verification")
+def resend_verification():
+    """Resend email verification. Rate limited to 3/hr."""
+    if not g.user:
+        return redirect(url_for("login"))
+
+    email = g.user["email"]
+    if not email:
+        flash("No email address on your account.", "error")
+        return redirect(url_for("index"))
+
+    if g.user["email_verified"]:
+        flash("Email already verified.", "error")
+        return redirect(url_for("index"))
+
+    ip = _get_client_ip()
+    if not _rate_limit(f"resend-email:{g.user['id']}", 3, 3600):
+        flash("Too many resend requests. Try again later.", "error")
+        return redirect(url_for("index"))
+
+    new_token = secrets.token_hex(32)
+    db = get_db()
+    db.execute(
+        "UPDATE agents SET email_verify_token = ?, email_verify_sent_at = ? WHERE id = ?",
+        (new_token, time.time(), g.user["id"]),
+    )
+    db.commit()
+    send_verification_email(email, new_token, g.user["agent_name"])
+    flash("Verification email resent. Check your inbox.", "success")
     return redirect(url_for("index"))
 
 
@@ -1058,9 +1531,30 @@ def upload_video():
     if category not in CATEGORY_MAP:
         category = "other"
 
-    # Rate limit: 10 uploads per agent per hour
-    if not _rate_limit(f"upload:{g.agent['id']}", 30, 3600):
-        return jsonify({"error": "Upload rate limit exceeded. Try again later."}), 429
+    # Rate limit: 5 uploads per agent per hour, 15 per day
+    if not _rate_limit(f"upload_h:{g.agent['id']}", 5, 3600):
+        return jsonify({"error": "Upload rate limit exceeded (max 5/hour). Try again later."}), 429
+    if not _rate_limit(f"upload_d:{g.agent['id']}", 15, 86400):
+        return jsonify({"error": "Daily upload limit exceeded (max 15/day). Try again tomorrow."}), 429
+
+    # Content moderation: check title/description/tags against blocklist
+    blocked_term = _content_check(title, description, tags)
+    if blocked_term:
+        app.logger.warning(
+            "CONTENT BLOCKED: agent=%s term='%s' title='%s'",
+            g.agent["agent_name"], blocked_term, title[:80],
+        )
+        # Auto-ban the agent for uploading prohibited content
+        db = get_db()
+        db.execute(
+            "UPDATE agents SET is_banned = 1, ban_reason = ?, banned_at = ? WHERE id = ?",
+            (f"Prohibited content: {blocked_term}", time.time(), g.agent["id"]),
+        )
+        db.commit()
+        return jsonify({
+            "error": "Content violates platform policy. Account suspended.",
+            "code": "CONTENT_POLICY_VIOLATION",
+        }), 403
 
     # Generate unique video ID
     video_id = gen_video_id()
@@ -1117,10 +1611,15 @@ def upload_video():
             "max_file_kb": max_file_bytes // 1024,
         }), 400
 
-    # Handle thumbnail
+    # Handle thumbnail (max 2MB)
     thumb_filename = ""
+    MAX_THUMB_SIZE = 2 * 1024 * 1024
     if "thumbnail" in request.files and request.files["thumbnail"].filename:
         thumb_file = request.files["thumbnail"]
+        thumb_file.seek(0, 2)
+        if thumb_file.tell() > MAX_THUMB_SIZE:
+            return jsonify({"error": "Thumbnail must be 2MB or smaller"}), 400
+        thumb_file.seek(0)
         thumb_ext = Path(thumb_file.filename).suffix.lower()
         if thumb_ext in ALLOWED_THUMB_EXT:
             thumb_filename = f"{video_id}{thumb_ext}"
@@ -1301,7 +1800,7 @@ def record_view(video_id):
     if not row:
         return jsonify({"error": "Video not found"}), 404
 
-    # Record view
+    # Record view (deduplicated: 1 view per IP per video per 30 min)
     agent_id = None
     api_key = request.headers.get("X-API-Key", "")
     if api_key:
@@ -1310,14 +1809,20 @@ def record_view(video_id):
             agent_id = agent["id"]
 
     ip = request.headers.get("X-Real-IP", request.remote_addr)
-    db.execute(
-        "INSERT INTO views (video_id, agent_id, ip_address, created_at) VALUES (?, ?, ?, ?)",
-        (video_id, agent_id, ip, time.time()),
-    )
-    db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
-    # Award RTC to video creator for the view
-    award_rtc(db, row["agent_id"], RTC_REWARD_VIEW, "video_view", video_id)
-    db.commit()
+    VIEW_COOLDOWN = 1800  # 30 minutes
+    recent = db.execute(
+        "SELECT 1 FROM views WHERE video_id = ? AND ip_address = ? AND created_at > ?",
+        (video_id, ip, time.time() - VIEW_COOLDOWN),
+    ).fetchone()
+    if not recent:
+        db.execute(
+            "INSERT INTO views (video_id, agent_id, ip_address, created_at) VALUES (?, ?, ?, ?)",
+            (video_id, agent_id, ip, time.time()),
+        )
+        db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
+        # Award RTC to video creator for the view
+        award_rtc(db, row["agent_id"], RTC_REWARD_VIEW, "video_view", video_id)
+        db.commit()
 
     d = video_to_dict(row)
     d["agent_name"] = row["agent_name"]
@@ -1416,6 +1921,14 @@ def add_comment(video_id):
         if not parent:
             return jsonify({"error": "Parent comment not found"}), 404
 
+    # Duplicate check: reject if same agent posted identical content on this video
+    existing = db.execute(
+        "SELECT id FROM comments WHERE video_id = ? AND agent_id = ? AND content = ?",
+        (video_id, g.agent["id"], content),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "Duplicate comment", "existing_id": existing["id"]}), 409
+
     db.execute(
         """INSERT INTO comments (video_id, agent_id, parent_id, content, created_at)
            VALUES (?, ?, ?, ?, ?)""",
@@ -1423,6 +1936,22 @@ def add_comment(video_id):
     )
     # Award RTC to commenter
     award_rtc(db, g.agent["id"], RTC_REWARD_COMMENT, "comment", video_id)
+    # Notify video owner
+    video_row = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if video_row:
+        preview = content[:80] + ("..." if len(content) > 80 else "")
+        notify(db, video_row["agent_id"], "comment",
+               f'@{g.agent["agent_name"]} commented on your video: "{preview}"',
+               from_agent=g.agent["agent_name"], video_id=video_id)
+    # Notify mentioned agents
+    mentioned = _extract_mentions(content, db)
+    owner_id = video_row["agent_id"] if video_row else None
+    for agent_row in mentioned:
+        if agent_row["id"] == g.agent["id"] or agent_row["id"] == owner_id:
+            continue
+        notify(db, agent_row["id"], "mention",
+               f'@{g.agent["agent_name"]} mentioned you in a comment: "{content[:80]}"',
+               from_agent=g.agent["agent_name"], video_id=video_id)
     db.commit()
 
     return jsonify({
@@ -1439,6 +1968,7 @@ def web_add_comment(video_id):
     """Add a comment from the web UI (requires login session)."""
     if not g.user:
         return jsonify({"error": "You must be signed in to comment.", "login_required": True}), 401
+    _verify_csrf()
 
     if not _rate_limit(f"comment:{g.user['id']}", 30, 3600):
         return jsonify({"error": "Comment rate limit exceeded. Try again later."}), 429
@@ -1455,19 +1985,54 @@ def web_add_comment(video_id):
     if len(content) > 5000:
         return jsonify({"error": "Comment too long (max 5000 chars)"}), 400
 
+    # Duplicate check: reject if same user posted identical content on this video
+    existing = db.execute(
+        "SELECT id FROM comments WHERE video_id = ? AND agent_id = ? AND content = ?",
+        (video_id, g.user["id"], content),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "Duplicate comment"}), 409
+
+    parent_id = data.get("parent_id")
+    if parent_id is not None:
+        parent_id = int(parent_id)
+        parent = db.execute(
+            "SELECT id FROM comments WHERE id = ? AND video_id = ?", (parent_id, video_id)
+        ).fetchone()
+        if not parent:
+            return jsonify({"error": "Parent comment not found"}), 404
+
     db.execute(
         """INSERT INTO comments (video_id, agent_id, parent_id, content, created_at)
-           VALUES (?, ?, NULL, ?, ?)""",
-        (video_id, g.user["id"], content, time.time()),
+           VALUES (?, ?, ?, ?, ?)""",
+        (video_id, g.user["id"], parent_id, content, time.time()),
     )
+    # Notify video owner
+    video_row = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if video_row:
+        preview = content[:80] + ("..." if len(content) > 80 else "")
+        notify(db, video_row["agent_id"], "comment",
+               f'@{g.user["agent_name"]} commented on your video: "{preview}"',
+               from_agent=g.user["agent_name"], video_id=video_id)
+    # Notify mentioned agents
+    mentioned = _extract_mentions(content, db)
+    owner_id = video_row["agent_id"] if video_row else None
+    for agent_row in mentioned:
+        if agent_row["id"] == g.user["id"] or agent_row["id"] == owner_id:
+            continue
+        notify(db, agent_row["id"], "mention",
+               f'@{g.user["agent_name"]} mentioned you in a comment: "{content[:80]}"',
+               from_agent=g.user["agent_name"], video_id=video_id)
     db.commit()
 
     return jsonify({
         "ok": True,
         "agent_name": g.user["agent_name"],
         "display_name": g.user["display_name"],
+        "is_human": bool(g.user["is_human"]),
         "content": content,
         "video_id": video_id,
+        "parent_id": parent_id,
     }), 201
 
 
@@ -1493,6 +2058,7 @@ def get_comments(video_id):
             "content": row["content"],
             "parent_id": row["parent_id"],
             "likes": row["likes"],
+            "dislikes": row["dislikes"] if "dislikes" in row.keys() else 0,
             "created_at": row["created_at"],
         })
 
@@ -1523,9 +2089,113 @@ def recent_comments():
             "content": row["content"],
             "parent_id": row["parent_id"],
             "likes": row["likes"],
+            "dislikes": row["dislikes"] if "dislikes" in row.keys() else 0,
             "created_at": row["created_at"],
         })
     return jsonify({"comments": comments, "count": len(comments)})
+
+
+# ---------------------------------------------------------------------------
+# Comment Votes (API key auth)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/comments/<int:comment_id>/vote", methods=["POST"])
+@require_api_key
+def vote_comment(comment_id):
+    """Like or dislike a comment."""
+    if not _rate_limit(f"cvote:{g.agent['id']}", 60, 3600):
+        return jsonify({"error": "Vote rate limit exceeded. Try again later."}), 429
+
+    db = get_db()
+    comment = db.execute("SELECT id, agent_id, likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    vote_val = data.get("vote", 0)
+    if vote_val not in (1, -1, 0):
+        return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
+
+    existing = db.execute(
+        "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+        (g.agent["id"], comment_id),
+    ).fetchone()
+
+    _apply_comment_vote(db, comment_id, comment["agent_id"], g.agent["id"], vote_val, existing)
+    db.commit()
+
+    updated = db.execute("SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
+    return jsonify({
+        "ok": True, "comment_id": comment_id,
+        "likes": updated["likes"], "dislikes": updated["dislikes"],
+        "your_vote": vote_val,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Comment Votes (web session auth)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/comments/<int:comment_id>/web-vote", methods=["POST"])
+def web_vote_comment(comment_id):
+    """Like or dislike a comment from the web UI (requires login session)."""
+    if not g.user:
+        return jsonify({"error": "You must be signed in to vote.", "login_required": True}), 401
+    _verify_csrf()
+
+    if not _rate_limit(f"cvote:{g.user['id']}", 60, 3600):
+        return jsonify({"error": "Vote rate limit exceeded. Try again later."}), 429
+
+    db = get_db()
+    comment = db.execute("SELECT id, agent_id, likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    vote_val = data.get("vote", 0)
+    if vote_val not in (1, -1, 0):
+        return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
+
+    existing = db.execute(
+        "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+        (g.user["id"], comment_id),
+    ).fetchone()
+
+    _apply_comment_vote(db, comment_id, comment["agent_id"], g.user["id"], vote_val, existing)
+    db.commit()
+
+    updated = db.execute("SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
+    return jsonify({
+        "ok": True, "comment_id": comment_id,
+        "likes": updated["likes"], "dislikes": updated["dislikes"],
+        "your_vote": vote_val,
+    })
+
+
+def _apply_comment_vote(db, comment_id, author_id, voter_id, vote_val, existing):
+    """Shared logic for applying a comment vote (API and web)."""
+    if vote_val == 0:
+        if existing:
+            if existing["vote"] == 1:
+                db.execute("UPDATE comments SET likes = MAX(0, likes - 1) WHERE id = ?", (comment_id,))
+            else:
+                db.execute("UPDATE comments SET dislikes = MAX(0, dislikes - 1) WHERE id = ?", (comment_id,))
+            db.execute("DELETE FROM comment_votes WHERE agent_id = ? AND comment_id = ?", (voter_id, comment_id))
+    elif existing:
+        if existing["vote"] != vote_val:
+            if vote_val == 1:
+                db.execute("UPDATE comments SET likes = likes + 1, dislikes = MAX(0, dislikes - 1) WHERE id = ?", (comment_id,))
+            else:
+                db.execute("UPDATE comments SET dislikes = dislikes + 1, likes = MAX(0, likes - 1) WHERE id = ?", (comment_id,))
+            db.execute("UPDATE comment_votes SET vote = ?, created_at = ? WHERE agent_id = ? AND comment_id = ?",
+                      (vote_val, time.time(), voter_id, comment_id))
+    else:
+        if vote_val == 1:
+            db.execute("UPDATE comments SET likes = likes + 1 WHERE id = ?", (comment_id,))
+        else:
+            db.execute("UPDATE comments SET dislikes = dislikes + 1 WHERE id = ?", (comment_id,))
+        db.execute("INSERT INTO comment_votes (agent_id, comment_id, vote, created_at) VALUES (?, ?, ?, ?)",
+                  (voter_id, comment_id, vote_val, time.time()))
 
 
 # ---------------------------------------------------------------------------
@@ -1562,34 +2232,36 @@ _CATEGORY_REDIRECTS = {
 
 @app.route("/category/<cat_id>")
 def category_browse(cat_id):
-    """Browse videos by category."""
+    """Browse videos by category with sorting."""
     if cat_id in _CATEGORY_REDIRECTS:
         return redirect(url_for("category_browse", cat_id=_CATEGORY_REDIRECTS[cat_id]), code=301)
     cat = CATEGORY_MAP.get(cat_id)
     if not cat:
         abort(404)
+
+    sort = request.args.get("sort", "recent")
+    order_clause = {
+        "views": "v.views DESC, v.created_at DESC",
+        "likes": "v.likes DESC, v.created_at DESC",
+    }.get(sort, "v.created_at DESC")
+    if sort not in ("recent", "views", "likes"):
+        sort = "recent"
+
     db = get_db()
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = 24
-    offset = (page - 1) * per_page
     videos = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
-           FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.category = ?
-           ORDER BY v.created_at DESC LIMIT ? OFFSET ?""",
-        (cat_id, per_page, offset),
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+            FROM videos v JOIN agents a ON v.agent_id = a.id
+            WHERE v.category = ?
+            ORDER BY {order_clause}
+            LIMIT 100""",
+        (cat_id,),
     ).fetchall()
-    total = db.execute(
-        "SELECT COUNT(*) FROM videos WHERE category = ?", (cat_id,)
-    ).fetchone()[0]
+
     return render_template(
         "category.html",
-        category=cat,
-        videos=[video_to_dict(v) for v in videos],
-        page=page,
-        total=total,
-        per_page=per_page,
-        categories=VIDEO_CATEGORIES,
+        cat=cat,
+        videos=videos,
+        sort=sort,
     )
 
 
@@ -1606,7 +2278,7 @@ def vote_video(video_id):
         return jsonify({"error": "Vote rate limit exceeded. Try again later."}), 429
 
     db = get_db()
-    video = db.execute("SELECT id, agent_id, likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    video = db.execute("SELECT id, agent_id, title, likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
@@ -1648,6 +2320,9 @@ def vote_video(video_id):
             db.execute("UPDATE videos SET likes = likes + 1 WHERE video_id = ?", (video_id,))
             # Award RTC to video creator for receiving a like
             award_rtc(db, video["agent_id"], RTC_REWARD_LIKE_RECEIVED, "like_received", video_id)
+            notify(db, video["agent_id"], "like",
+                   f'@{g.agent["agent_name"]} liked your video "{video["title"]}"',
+                   from_agent=g.agent["agent_name"], video_id=video_id)
         else:
             db.execute("UPDATE videos SET dislikes = dislikes + 1 WHERE video_id = ?", (video_id,))
         db.execute(
@@ -1676,12 +2351,13 @@ def web_vote_video(video_id):
     """Like or dislike a video from the web UI (requires login session)."""
     if not g.user:
         return jsonify({"error": "You must be signed in to vote.", "login_required": True}), 401
+    _verify_csrf()
 
     if not _rate_limit(f"vote:{g.user['id']}", 60, 3600):
         return jsonify({"error": "Vote rate limit exceeded. Try again later."}), 429
 
     db = get_db()
-    video = db.execute("SELECT id, agent_id, likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    video = db.execute("SELECT id, agent_id, title, likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
@@ -1714,6 +2390,9 @@ def web_vote_video(video_id):
         if vote_val == 1:
             db.execute("UPDATE videos SET likes = likes + 1 WHERE video_id = ?", (video_id,))
             award_rtc(db, video["agent_id"], RTC_REWARD_LIKE_RECEIVED, "like_received", video_id)
+            notify(db, video["agent_id"], "like",
+                   f'@{g.user["agent_name"]} liked your video "{video["title"]}"',
+                   from_agent=g.user["agent_name"], video_id=video_id)
         else:
             db.execute("UPDATE videos SET dislikes = dislikes + 1 WHERE video_id = ?", (video_id,))
         db.execute("INSERT INTO votes (agent_id, video_id, vote, created_at) VALUES (?, ?, ?, ?)",
@@ -1728,6 +2407,54 @@ def web_vote_video(video_id):
         "dislikes": updated["dislikes"],
         "your_vote": vote_val,
     })
+
+
+# ---------------------------------------------------------------------------
+# Web Subscribe/Unsubscribe (requires login session)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents/<agent_name>/web-subscribe", methods=["POST"])
+def web_subscribe(agent_name):
+    """Toggle subscription from the web UI (requires login session)."""
+    if not g.user:
+        return jsonify({"error": "You must be signed in to follow.", "login_required": True}), 401
+    _verify_csrf()
+
+    db = get_db()
+    target = db.execute("SELECT id, agent_name FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    if not target:
+        return jsonify({"error": "Agent not found"}), 404
+    if target["id"] == g.user["id"]:
+        return jsonify({"error": "Cannot follow yourself"}), 400
+
+    existing = db.execute(
+        "SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?",
+        (g.user["id"], target["id"]),
+    ).fetchone()
+
+    if existing:
+        db.execute(
+            "DELETE FROM subscriptions WHERE follower_id = ? AND following_id = ?",
+            (g.user["id"], target["id"]),
+        )
+        db.commit()
+        following = False
+    else:
+        db.execute(
+            "INSERT INTO subscriptions (follower_id, following_id, created_at) VALUES (?, ?, ?)",
+            (g.user["id"], target["id"], time.time()),
+        )
+        notify(db, target["id"], "subscribe",
+               f'@{g.user["agent_name"]} subscribed to you',
+               from_agent=g.user["agent_name"])
+        db.commit()
+        following = True
+
+    count = db.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (target["id"],)
+    ).fetchone()[0]
+
+    return jsonify({"ok": True, "following": following, "subscriber_count": count})
 
 
 # ---------------------------------------------------------------------------
@@ -1754,14 +2481,16 @@ def search_videos():
 
     total = db.execute(
         """SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?""",
+           WHERE COALESCE(a.is_banned, 0) = 0
+           AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)""",
         (like_q, like_q, like_q, like_q),
     ).fetchone()[0]
 
     rows = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?
+           WHERE COALESCE(a.is_banned, 0) = 0
+           AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
            ORDER BY v.views DESC, v.created_at DESC
            LIMIT ? OFFSET ?""",
         (like_q, like_q, like_q, like_q, per_page, offset),
@@ -1829,15 +2558,25 @@ def get_agent(agent_name):
 # Trending / Feed
 # ---------------------------------------------------------------------------
 
-@app.route("/api/trending")
-def trending():
-    """Get trending videos (weighted by recent views and likes)."""
-    db = get_db()
-    # Score: views in last 24h * 2 + likes * 3, minimum 1 view
-    cutoff = time.time() - 86400
+def _get_trending_videos(db, limit=20):
+    """Compute trending videos with improved scoring.
+
+    Score = (recent_views_24h * 2) + (likes * 3) + (recent_comments_24h * 4) + recency_bonus
+    recency_bonus: +10 if uploaded < 6h ago, +5 if < 24h ago
+    """
+    now = time.time()
+    cutoff_24h = now - 86400
+    cutoff_6h = now - 21600
+
     rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url,
-                  COALESCE(rv.recent_views, 0) AS recent_views
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                  COALESCE(rv.recent_views, 0) AS recent_views,
+                  COALESCE(rc.recent_comments, 0) AS recent_comments,
+                  CASE
+                      WHEN v.created_at > ? THEN 10
+                      WHEN v.created_at > ? THEN 5
+                      ELSE 0
+                  END AS recency_bonus
            FROM videos v
            JOIN agents a ON v.agent_id = a.id
            LEFT JOIN (
@@ -1845,10 +2584,33 @@ def trending():
                FROM views WHERE created_at > ?
                GROUP BY video_id
            ) rv ON rv.video_id = v.video_id
-           ORDER BY (COALESCE(rv.recent_views, 0) * 2 + v.likes * 3) DESC, v.created_at DESC
-           LIMIT 20""",
-        (cutoff,),
+           LEFT JOIN (
+               SELECT video_id, COUNT(*) AS recent_comments
+               FROM comments WHERE created_at > ?
+               GROUP BY video_id
+           ) rc ON rc.video_id = v.video_id
+           WHERE COALESCE(a.is_banned, 0) = 0
+           ORDER BY (
+               COALESCE(rv.recent_views, 0) * 2
+               + v.likes * 3
+               + COALESCE(rc.recent_comments, 0) * 4
+               + CASE
+                   WHEN v.created_at > ? THEN 10
+                   WHEN v.created_at > ? THEN 5
+                   ELSE 0
+               END
+           ) DESC, v.created_at DESC
+           LIMIT ?""",
+        (cutoff_6h, cutoff_24h, cutoff_24h, cutoff_24h, cutoff_6h, cutoff_24h, limit),
     ).fetchall()
+    return rows
+
+
+@app.route("/api/trending")
+def trending():
+    """Get trending videos (weighted by recent views, likes, comments, recency)."""
+    db = get_db()
+    rows = _get_trending_videos(db, limit=20)
 
     videos = []
     for row in rows:
@@ -1857,6 +2619,7 @@ def trending():
         d["display_name"] = row["display_name"]
         d["avatar_url"] = row["avatar_url"]
         d["recent_views"] = row["recent_views"]
+        d["recent_comments"] = row["recent_comments"]
         videos.append(d)
 
     return jsonify({"videos": videos})
@@ -1873,6 +2636,7 @@ def feed():
     rows = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
            ORDER BY v.created_at DESC
            LIMIT ? OFFSET ?""",
         (per_page, offset),
@@ -1887,6 +2651,941 @@ def feed():
         videos.append(d)
 
     return jsonify({"videos": videos, "page": page})
+
+
+# ---------------------------------------------------------------------------
+# Agent identity (whoami) & Platform stats
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents/me")
+@require_api_key
+def whoami():
+    """Get your own agent profile and stats."""
+    db = get_db()
+    agent = g.agent
+
+    video_count = db.execute(
+        "SELECT COUNT(*) FROM videos WHERE agent_id = ?", (agent["id"],)
+    ).fetchone()[0]
+    total_views = db.execute(
+        "SELECT COALESCE(SUM(views), 0) FROM videos WHERE agent_id = ?",
+        (agent["id"],),
+    ).fetchone()[0]
+    comment_count = db.execute(
+        "SELECT COUNT(*) FROM comments WHERE agent_id = ?", (agent["id"],)
+    ).fetchone()[0]
+    total_likes = db.execute(
+        "SELECT COALESCE(SUM(likes), 0) FROM videos WHERE agent_id = ?",
+        (agent["id"],),
+    ).fetchone()[0]
+
+    profile = agent_to_dict(agent, include_private=True)
+    profile["video_count"] = video_count
+    profile["total_views"] = total_views
+    profile["comment_count"] = comment_count
+    profile["total_likes"] = total_likes
+
+    return jsonify(profile)
+
+
+@app.route("/api/stats")
+def platform_stats():
+    """Get public platform statistics."""
+    db = get_db()
+    videos = db.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+    agents = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
+    humans = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 1").fetchone()[0]
+    total_views = db.execute("SELECT COALESCE(SUM(views), 0) FROM videos").fetchone()[0]
+    total_comments = db.execute("SELECT COUNT(*) FROM comments").fetchone()[0]
+    total_likes = db.execute("SELECT COALESCE(SUM(likes), 0) FROM videos").fetchone()[0]
+
+    top_agents = db.execute(
+        """SELECT a.agent_name, a.display_name, a.is_human,
+                  COUNT(v.id) as video_count,
+                  COALESCE(SUM(v.views), 0) as total_views
+           FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
+           GROUP BY a.id ORDER BY total_views DESC LIMIT 5"""
+    ).fetchall()
+
+    return jsonify({
+        "videos": videos,
+        "agents": agents,
+        "humans": humans,
+        "total_views": total_views,
+        "total_comments": total_comments,
+        "total_likes": total_likes,
+        "top_agents": [
+            {
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "is_human": bool(r["is_human"]),
+                "video_count": r["video_count"],
+                "total_views": r["total_views"],
+            }
+            for r in top_agents
+        ],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Profile Update
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents/me/profile", methods=["PATCH", "POST"])
+@require_api_key
+def update_profile():
+    """Update your agent profile (bio, display_name, avatar_url)."""
+    data = request.get_json(silent=True) or {}
+    ALLOWED = {"display_name", "bio", "avatar_url"}
+    updates = {k: v for k, v in data.items() if k in ALLOWED and isinstance(v, str)}
+    if not updates:
+        return jsonify({"error": "Provide at least one field: display_name, bio, avatar_url"}), 400
+
+    # Validate lengths
+    if "display_name" in updates and len(updates["display_name"]) > 50:
+        return jsonify({"error": "display_name must be 50 chars or fewer"}), 400
+    if "bio" in updates and len(updates["bio"]) > 500:
+        return jsonify({"error": "bio must be 500 chars or fewer"}), 400
+    if "avatar_url" in updates and len(updates["avatar_url"]) > 500:
+        return jsonify({"error": "avatar_url must be 500 chars or fewer"}), 400
+    if "avatar_url" in updates and updates["avatar_url"]:
+        from urllib.parse import urlparse
+        parsed = urlparse(updates["avatar_url"])
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return jsonify({"error": "avatar_url must be a valid http/https URL"}), 400
+
+    db = get_db()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    vals = list(updates.values()) + [g.agent["id"]]
+    db.execute(f"UPDATE agents SET {set_clause} WHERE id = ?", vals)
+    db.commit()
+
+    agent = db.execute("SELECT * FROM agents WHERE id = ?", (g.agent["id"],)).fetchone()
+    profile = agent_to_dict(agent, include_private=True)
+    profile["updated_fields"] = list(updates.keys())
+    return jsonify(profile)
+
+
+# ---------------------------------------------------------------------------
+# Subscriptions / Follow
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents/<agent_name>/subscribe", methods=["POST"])
+@require_api_key
+def subscribe_agent(agent_name):
+    """Follow another agent."""
+    db = get_db()
+    target = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?", (agent_name,)
+    ).fetchone()
+    if not target:
+        return jsonify({"error": "Agent not found"}), 404
+    if target["id"] == g.agent["id"]:
+        return jsonify({"error": "Cannot follow yourself"}), 400
+
+    existing = db.execute(
+        "SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?",
+        (g.agent["id"], target["id"]),
+    ).fetchone()
+    if existing:
+        return jsonify({"ok": True, "following": True, "message": "Already following"})
+
+    db.execute(
+        "INSERT INTO subscriptions (follower_id, following_id, created_at) VALUES (?, ?, ?)",
+        (g.agent["id"], target["id"], time.time()),
+    )
+    notify(db, target["id"], "subscribe",
+           f'@{g.agent["agent_name"]} subscribed to you',
+           from_agent=g.agent["agent_name"])
+    db.commit()
+
+    count = db.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (target["id"],)
+    ).fetchone()[0]
+    return jsonify({"ok": True, "following": True, "agent": agent_name, "follower_count": count})
+
+
+@app.route("/api/agents/<agent_name>/unsubscribe", methods=["POST"])
+@require_api_key
+def unsubscribe_agent(agent_name):
+    """Unfollow an agent."""
+    db = get_db()
+    target = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?", (agent_name,)
+    ).fetchone()
+    if not target:
+        return jsonify({"error": "Agent not found"}), 404
+
+    db.execute(
+        "DELETE FROM subscriptions WHERE follower_id = ? AND following_id = ?",
+        (g.agent["id"], target["id"]),
+    )
+    db.commit()
+    return jsonify({"ok": True, "following": False, "agent": agent_name})
+
+
+@app.route("/api/agents/me/subscriptions")
+@require_api_key
+def my_subscriptions():
+    """List agents you follow."""
+    db = get_db()
+    rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.is_human, a.avatar_url, s.created_at
+           FROM subscriptions s JOIN agents a ON s.following_id = a.id
+           WHERE s.follower_id = ?
+           ORDER BY s.created_at DESC""",
+        (g.agent["id"],),
+    ).fetchall()
+    return jsonify({
+        "subscriptions": [
+            {"agent_name": r["agent_name"], "display_name": r["display_name"],
+             "is_human": bool(r["is_human"]), "avatar_url": r["avatar_url"],
+             "followed_at": r["created_at"]}
+            for r in rows
+        ],
+        "count": len(rows),
+    })
+
+
+@app.route("/api/agents/<agent_name>/subscribers")
+def agent_subscribers(agent_name):
+    """List followers of an agent (public)."""
+    db = get_db()
+    target = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    if not target:
+        return jsonify({"error": "Agent not found"}), 404
+
+    rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.is_human, a.avatar_url
+           FROM subscriptions s JOIN agents a ON s.follower_id = a.id
+           WHERE s.following_id = ?
+           ORDER BY s.created_at DESC""",
+        (target["id"],),
+    ).fetchall()
+    return jsonify({
+        "subscribers": [
+            {"agent_name": r["agent_name"], "display_name": r["display_name"],
+             "is_human": bool(r["is_human"]), "avatar_url": r["avatar_url"]}
+            for r in rows
+        ],
+        "count": len(rows),
+    })
+
+
+@app.route("/api/feed/subscriptions")
+@require_api_key
+def subscription_feed():
+    """Get videos from agents you follow, newest first."""
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    offset = (page - 1) * per_page
+
+    db = get_db()
+    total = db.execute(
+        """SELECT COUNT(*) FROM videos v
+           WHERE v.agent_id IN (SELECT following_id FROM subscriptions WHERE follower_id = ?)""",
+        (g.agent["id"],),
+    ).fetchone()[0]
+
+    rows = db.execute(
+        """SELECT v.*, a.agent_name, a.display_name, a.is_human
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.agent_id IN (SELECT following_id FROM subscriptions WHERE follower_id = ?)
+           ORDER BY v.created_at DESC LIMIT ? OFFSET ?""",
+        (g.agent["id"], per_page, offset),
+    ).fetchall()
+
+    return jsonify({
+        "videos": [
+            {"video_id": r["video_id"], "title": r["title"], "description": r["description"],
+             "agent_name": r["agent_name"], "display_name": r["display_name"],
+             "is_human": bool(r["is_human"]), "views": r["views"], "likes": r["likes"],
+             "duration_sec": r["duration_sec"], "thumbnail": r["thumbnail"],
+             "created_at": r["created_at"]}
+            for r in rows
+        ],
+        "page": page, "per_page": per_page, "total": total,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents/me/notifications")
+@require_api_key
+def my_notifications():
+    """List notifications for the authenticated agent."""
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    offset = (page - 1) * per_page
+    unread_only = request.args.get("unread", "").lower() in ("1", "true", "yes")
+
+    db = get_db()
+    where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
+    total = db.execute(f"SELECT COUNT(*) FROM notifications {where}", (g.agent["id"],)).fetchone()[0]
+    rows = db.execute(
+        f"""SELECT id, type, message, from_agent, video_id, is_read, created_at
+            FROM notifications {where}
+            ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+        (g.agent["id"], per_page, offset),
+    ).fetchall()
+    return jsonify({
+        "notifications": [
+            {"id": r["id"], "type": r["type"], "message": r["message"],
+             "from_agent": r["from_agent"], "video_id": r["video_id"],
+             "is_read": bool(r["is_read"]), "created_at": r["created_at"]}
+            for r in rows
+        ],
+        "page": page, "per_page": per_page, "total": total,
+    })
+
+
+@app.route("/api/agents/me/notifications/count")
+@require_api_key
+def notification_count():
+    """Get unread notification count."""
+    db = get_db()
+    count = db.execute(
+        "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
+        (g.agent["id"],),
+    ).fetchone()[0]
+    return jsonify({"unread": count})
+
+
+@app.route("/api/agents/me/notifications/read", methods=["POST"])
+@require_api_key
+def mark_notifications_read():
+    """Mark notifications as read. Send {ids: [1,2,3]} or {all: true}."""
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        db.execute("UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0", (g.agent["id"],))
+    else:
+        ids = data.get("ids", [])
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            db.execute(
+                f"UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND id IN ({placeholders})",
+                [g.agent["id"]] + list(ids),
+            )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# Web notification endpoints (session auth)
+
+@app.route("/api/notifications/unread-count")
+def web_notification_count():
+    """Get unread notification count for logged-in web user."""
+    if not g.user:
+        return jsonify({"unread": 0})
+    db = get_db()
+    count = db.execute(
+        "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
+        (g.user["id"],),
+    ).fetchone()[0]
+    return jsonify({"unread": count})
+
+
+@app.route("/api/notifications/web-list")
+def web_notification_list():
+    """Get notifications for the logged-in web user."""
+    if not g.user:
+        return jsonify({"error": "Login required", "login_required": True}), 401
+    db = get_db()
+    rows = db.execute(
+        """SELECT id, type, message, from_agent, video_id, is_read, created_at
+           FROM notifications WHERE agent_id = ?
+           ORDER BY created_at DESC LIMIT 30""",
+        (g.user["id"],),
+    ).fetchall()
+    return jsonify({
+        "notifications": [
+            {"id": r["id"], "type": r["type"], "message": r["message"],
+             "from_agent": r["from_agent"], "video_id": r["video_id"],
+             "is_read": bool(r["is_read"]), "created_at": r["created_at"]}
+            for r in rows
+        ],
+    })
+
+
+@app.route("/api/notifications/web-read", methods=["POST"])
+def web_mark_read():
+    """Mark notifications as read from web UI."""
+    if not g.user:
+        return jsonify({"error": "Login required"}), 401
+    _verify_csrf()
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        db.execute("UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0", (g.user["id"],))
+    else:
+        ids = data.get("ids", [])
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            db.execute(
+                f"UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND id IN ({placeholders})",
+                [g.user["id"]] + list(ids),
+            )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Playlists (API + Web)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/playlists", methods=["POST"])
+@require_api_key
+def api_create_playlist():
+    """Create a new playlist."""
+    data = request.get_json(silent=True) or {}
+    title = str(data.get("title", "")).strip()[:200]
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+    description = str(data.get("description", "")).strip()[:2000]
+    visibility = data.get("visibility", "public")
+    if visibility not in ("public", "unlisted", "private"):
+        visibility = "public"
+
+    playlist_id = gen_video_id()
+    now = time.time()
+    db = get_db()
+    db.execute(
+        "INSERT INTO playlists (playlist_id, agent_id, title, description, visibility, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+        (playlist_id, g.agent["id"], title, description, visibility, now, now),
+    )
+    db.commit()
+    return jsonify({"ok": True, "playlist_id": playlist_id, "title": title}), 201
+
+
+@app.route("/api/playlists/<playlist_id>", methods=["GET"])
+def api_get_playlist(playlist_id):
+    """Get playlist details and items."""
+    db = get_db()
+    pl = db.execute(
+        """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
+           FROM playlists p JOIN agents a ON p.agent_id = a.id
+           WHERE p.playlist_id = ?""",
+        (playlist_id,),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found"}), 404
+
+    # Private playlists only visible to owner
+    if pl["visibility"] == "private":
+        owner_id = pl["agent_id"]
+        viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+        if viewer_id != owner_id:
+            return jsonify({"error": "Playlist not found"}), 404
+
+    items = db.execute(
+        """SELECT pi.position, pi.added_at,
+                  v.video_id, v.title, v.thumbnail, v.duration_sec, v.views, v.created_at as video_created,
+                  a.agent_name, a.display_name
+           FROM playlist_items pi
+           JOIN videos v ON pi.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE pi.playlist_id = ?
+           ORDER BY pi.position ASC""",
+        (pl["id"],),
+    ).fetchall()
+
+    return jsonify({
+        "playlist_id": pl["playlist_id"],
+        "title": pl["title"],
+        "description": pl["description"],
+        "visibility": pl["visibility"],
+        "owner": pl["agent_name"],
+        "owner_display": pl["display_name"] or pl["agent_name"],
+        "created_at": pl["created_at"],
+        "item_count": len(items),
+        "items": [
+            {
+                "position": it["position"],
+                "video_id": it["video_id"],
+                "title": it["title"],
+                "thumbnail": it["thumbnail"],
+                "duration_sec": it["duration_sec"],
+                "views": it["views"],
+                "agent_name": it["agent_name"],
+                "display_name": it["display_name"],
+            }
+            for it in items
+        ],
+    })
+
+
+@app.route("/api/playlists/<playlist_id>", methods=["PATCH"])
+@require_api_key
+def api_update_playlist(playlist_id):
+    """Update playlist title, description, or visibility."""
+    db = get_db()
+    pl = db.execute(
+        "SELECT * FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.agent["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+
+    data = request.get_json(silent=True) or {}
+    sets, vals = [], []
+    if "title" in data:
+        title = str(data["title"]).strip()[:200]
+        if title:
+            sets.append("title = ?")
+            vals.append(title)
+    if "description" in data:
+        sets.append("description = ?")
+        vals.append(str(data["description"]).strip()[:2000])
+    if "visibility" in data and data["visibility"] in ("public", "unlisted", "private"):
+        sets.append("visibility = ?")
+        vals.append(data["visibility"])
+
+    if sets:
+        sets.append("updated_at = ?")
+        vals.append(time.time())
+        vals.append(pl["id"])
+        db.execute(f"UPDATE playlists SET {', '.join(sets)} WHERE id = ?", vals)
+        db.commit()
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/playlists/<playlist_id>", methods=["DELETE"])
+@require_api_key
+def api_delete_playlist(playlist_id):
+    """Delete a playlist you own."""
+    db = get_db()
+    pl = db.execute(
+        "SELECT id FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.agent["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+    db.execute("DELETE FROM playlist_items WHERE playlist_id = ?", (pl["id"],))
+    db.execute("DELETE FROM playlists WHERE id = ?", (pl["id"],))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/playlists/<playlist_id>/items", methods=["POST"])
+@require_api_key
+def api_add_playlist_item(playlist_id):
+    """Add a video to a playlist."""
+    db = get_db()
+    pl = db.execute(
+        "SELECT id FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.agent["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+
+    data = request.get_json(silent=True) or {}
+    vid = data.get("video_id", "")
+    if not vid or not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (vid,)).fetchone():
+        return jsonify({"error": "Invalid video_id"}), 400
+
+    # Check duplicate
+    if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
+        return jsonify({"error": "Video already in playlist"}), 409
+
+    # Get next position
+    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
+    db.execute(
+        "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) VALUES (?,?,?,?)",
+        (pl["id"], vid, max_pos + 1, time.time()),
+    )
+    db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
+    db.commit()
+    return jsonify({"ok": True, "position": max_pos + 1}), 201
+
+
+@app.route("/api/playlists/<playlist_id>/items/<video_id>", methods=["DELETE"])
+@require_api_key
+def api_remove_playlist_item(playlist_id, video_id):
+    """Remove a video from a playlist."""
+    db = get_db()
+    pl = db.execute(
+        "SELECT id FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.agent["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+
+    removed = db.execute(
+        "DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+        (pl["id"], video_id),
+    ).rowcount
+    if removed:
+        db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
+        db.commit()
+    return jsonify({"ok": True, "removed": removed > 0})
+
+
+@app.route("/api/agents/me/playlists")
+def api_my_playlists():
+    """List current user's playlists (API key or session auth)."""
+    uid = None
+    if hasattr(g, "agent") and g.agent:
+        uid = g.agent["id"]
+    elif g.user:
+        uid = g.user["id"]
+    if not uid:
+        return jsonify({"error": "Login required"}), 401
+    db = get_db()
+    playlists = db.execute(
+        """SELECT p.playlist_id, p.title, p.description, p.visibility, p.created_at, p.updated_at,
+                  (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) as item_count
+           FROM playlists p WHERE p.agent_id = ? ORDER BY p.updated_at DESC""",
+        (uid,),
+    ).fetchall()
+    return jsonify({
+        "playlists": [
+            {
+                "playlist_id": p["playlist_id"],
+                "title": p["title"],
+                "description": p["description"],
+                "visibility": p["visibility"],
+                "item_count": p["item_count"],
+                "created_at": p["created_at"],
+                "updated_at": p["updated_at"],
+            }
+            for p in playlists
+        ]
+    })
+
+
+@app.route("/api/agents/<agent_name>/playlists")
+def api_agent_playlists(agent_name):
+    """List an agent's public playlists."""
+    db = get_db()
+    agent = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+
+    # Show private playlists only to owner
+    viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+    if viewer_id == agent["id"]:
+        vis_filter = ""
+    else:
+        vis_filter = "AND p.visibility = 'public'"
+
+    playlists = db.execute(
+        f"""SELECT p.playlist_id, p.title, p.description, p.visibility, p.created_at, p.updated_at,
+                   (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) as item_count
+            FROM playlists p
+            WHERE p.agent_id = ? {vis_filter}
+            ORDER BY p.updated_at DESC""",
+        (agent["id"],),
+    ).fetchall()
+
+    return jsonify({
+        "playlists": [
+            {
+                "playlist_id": p["playlist_id"],
+                "title": p["title"],
+                "description": p["description"],
+                "visibility": p["visibility"],
+                "item_count": p["item_count"],
+                "created_at": p["created_at"],
+                "updated_at": p["updated_at"],
+            }
+            for p in playlists
+        ]
+    })
+
+
+# ── Playlist web routes ──
+
+@app.route("/playlist/<playlist_id>")
+def playlist_page(playlist_id):
+    """View a playlist."""
+    db = get_db()
+    pl = db.execute(
+        """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
+           FROM playlists p JOIN agents a ON p.agent_id = a.id
+           WHERE p.playlist_id = ?""",
+        (playlist_id,),
+    ).fetchone()
+    if not pl:
+        abort(404)
+
+    if pl["visibility"] == "private":
+        viewer_id = g.user["id"] if g.user else None
+        if viewer_id != pl["agent_id"]:
+            abort(404)
+
+    items = db.execute(
+        """SELECT pi.position, v.video_id, v.title, v.thumbnail, v.duration_sec,
+                  v.views, v.created_at as video_created,
+                  a.agent_name, a.display_name, a.avatar_url
+           FROM playlist_items pi
+           JOIN videos v ON pi.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE pi.playlist_id = ?
+           ORDER BY pi.position ASC""",
+        (pl["id"],),
+    ).fetchall()
+
+    return render_template("playlist.html", playlist=pl, items=items)
+
+
+@app.route("/playlists/new", methods=["GET", "POST"])
+def create_playlist_web():
+    """Web form to create a playlist."""
+    if not g.user:
+        return redirect(url_for("login"))
+
+    if request.method == "GET":
+        return render_template("playlist_new.html")
+
+    _verify_csrf()
+    title = request.form.get("title", "").strip()[:200]
+    if not title:
+        flash("Title is required.", "error")
+        return render_template("playlist_new.html")
+
+    description = request.form.get("description", "").strip()[:2000]
+    visibility = request.form.get("visibility", "public")
+    if visibility not in ("public", "unlisted", "private"):
+        visibility = "public"
+
+    playlist_id = gen_video_id()
+    now = time.time()
+    db = get_db()
+    db.execute(
+        "INSERT INTO playlists (playlist_id, agent_id, title, description, visibility, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+        (playlist_id, g.user["id"], title, description, visibility, now, now),
+    )
+    db.commit()
+    return redirect(f"/playlist/{playlist_id}")
+
+
+@app.route("/playlist/<playlist_id>/add", methods=["POST"])
+def web_add_to_playlist(playlist_id):
+    """Add a video to playlist from web UI (AJAX)."""
+    if not g.user:
+        return jsonify({"error": "Login required", "login_required": True}), 401
+    _verify_csrf()
+    db = get_db()
+    pl = db.execute(
+        "SELECT id FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.user["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+
+    data = request.get_json(silent=True) or {}
+    vid = data.get("video_id", "")
+    if not vid or not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (vid,)).fetchone():
+        return jsonify({"error": "Invalid video"}), 400
+
+    if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
+        return jsonify({"error": "Already in playlist"}), 409
+
+    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
+    db.execute(
+        "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) VALUES (?,?,?,?)",
+        (pl["id"], vid, max_pos + 1, time.time()),
+    )
+    db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/playlist/<playlist_id>/remove", methods=["POST"])
+def web_remove_from_playlist(playlist_id):
+    """Remove a video from playlist from web UI (AJAX)."""
+    if not g.user:
+        return jsonify({"error": "Login required"}), 401
+    _verify_csrf()
+    db = get_db()
+    pl = db.execute(
+        "SELECT id FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.user["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+
+    data = request.get_json(silent=True) or {}
+    vid = data.get("video_id", "")
+    db.execute("DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid))
+    db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Webhooks (API only - for bot agents)
+# ---------------------------------------------------------------------------
+
+WEBHOOK_EVENTS = ["comment", "like", "subscribe", "new_video", "mention", "*"]
+
+
+@app.route("/api/webhooks", methods=["GET"])
+@require_api_key
+def list_webhooks():
+    """List your webhook subscriptions."""
+    db = get_db()
+    hooks = db.execute(
+        "SELECT id, url, events, active, created_at, last_triggered, fail_count FROM webhooks WHERE agent_id = ?",
+        (g.agent["id"],),
+    ).fetchall()
+    return jsonify({
+        "webhooks": [
+            {
+                "id": h["id"],
+                "url": h["url"],
+                "events": h["events"],
+                "active": bool(h["active"]),
+                "created_at": h["created_at"],
+                "last_triggered": h["last_triggered"],
+                "fail_count": h["fail_count"],
+            }
+            for h in hooks
+        ]
+    })
+
+
+@app.route("/api/webhooks", methods=["POST"])
+@require_api_key
+def create_webhook():
+    """Register a new webhook endpoint."""
+    db = get_db()
+
+    # Limit to 5 webhooks per agent
+    count = db.execute("SELECT COUNT(*) FROM webhooks WHERE agent_id = ?", (g.agent["id"],)).fetchone()[0]
+    if count >= 5:
+        return jsonify({"error": "Maximum 5 webhooks per agent"}), 400
+
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    if not url or not url.startswith("https://"):
+        return jsonify({"error": "url must be a valid HTTPS URL"}), 400
+
+    events = data.get("events", "*")
+    if isinstance(events, list):
+        events = ",".join(events)
+    # Validate event names
+    for ev in events.split(","):
+        ev = ev.strip()
+        if ev and ev not in WEBHOOK_EVENTS:
+            return jsonify({"error": f"Unknown event: {ev}. Valid: {WEBHOOK_EVENTS}"}), 400
+
+    wh_secret = secrets.token_hex(32)
+    now = time.time()
+    db.execute(
+        "INSERT INTO webhooks (agent_id, url, secret, events, active, created_at) VALUES (?,?,?,?,1,?)",
+        (g.agent["id"], url, wh_secret, events, now),
+    )
+    db.commit()
+
+    return jsonify({
+        "ok": True,
+        "secret": wh_secret,
+        "url": url,
+        "events": events,
+        "note": "Save the secret! It's used to verify webhook signatures via X-BoTTube-Signature header (HMAC-SHA256).",
+    }), 201
+
+
+@app.route("/api/webhooks/<int:hook_id>", methods=["DELETE"])
+@require_api_key
+def delete_webhook(hook_id):
+    """Delete one of your webhooks."""
+    db = get_db()
+    removed = db.execute(
+        "DELETE FROM webhooks WHERE id = ? AND agent_id = ?",
+        (hook_id, g.agent["id"]),
+    ).rowcount
+    db.commit()
+    if not removed:
+        return jsonify({"error": "Webhook not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/webhooks/<int:hook_id>/test", methods=["POST"])
+@require_api_key
+def test_webhook(hook_id):
+    """Send a test event to a webhook."""
+    db = get_db()
+    hook = db.execute(
+        "SELECT * FROM webhooks WHERE id = ? AND agent_id = ?",
+        (hook_id, g.agent["id"]),
+    ).fetchone()
+    if not hook:
+        return jsonify({"error": "Webhook not found"}), 404
+
+    test_payload = {
+        "type": "test",
+        "message": "This is a test webhook from BoTTube",
+        "from_agent": g.agent["agent_name"],
+        "video_id": "",
+        "timestamp": time.time(),
+    }
+    body = json.dumps(test_payload).encode()
+    sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
+
+    req = urllib.request.Request(
+        hook["url"],
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-BoTTube-Event": "test",
+            "X-BoTTube-Signature": f"sha256={sig}",
+            "User-Agent": "BoTTube-Webhook/1.0",
+        },
+        method="POST",
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        return jsonify({"ok": True, "status": resp.status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+# ---------------------------------------------------------------------------
+# Video Deletion
+# ---------------------------------------------------------------------------
+
+@app.route("/api/videos/<video_id>", methods=["DELETE"])
+@require_api_key
+def delete_video(video_id):
+    """Delete one of your own videos."""
+    db = get_db()
+    video = db.execute(
+        "SELECT * FROM videos WHERE video_id = ? AND agent_id = ?",
+        (video_id, g.agent["id"]),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found or not yours"}), 404
+
+    # Delete physical files
+    try:
+        vfile = VIDEO_DIR / video["filename"]
+        if vfile.exists():
+            vfile.unlink()
+    except Exception:
+        pass
+    try:
+        if video["thumbnail"]:
+            tfile = THUMB_DIR / video["thumbnail"]
+            if tfile.exists():
+                tfile.unlink()
+    except Exception:
+        pass
+
+    # Delete related records (comment_votes before comments due to FK)
+    db.execute("DELETE FROM comment_votes WHERE comment_id IN (SELECT id FROM comments WHERE video_id = ?)", (video_id,))
+    db.execute("DELETE FROM comments WHERE video_id = ?", (video_id,))
+    db.execute("DELETE FROM votes WHERE video_id = ?", (video_id,))
+    db.execute("DELETE FROM views WHERE video_id = ?", (video_id,))
+    db.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+    db.commit()
+
+    return jsonify({"ok": True, "deleted": video_id, "title": video["title"]})
 
 
 # ---------------------------------------------------------------------------
@@ -2185,6 +3884,115 @@ def serve_avatar(agent_name):
                     headers={"Cache-Control": "public, max-age=86400"})
 
 
+@app.route("/avatars/<filename>")
+def serve_avatar_file(filename):
+    """Serve uploaded avatar images."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        abort(404)
+    return send_from_directory(str(AVATAR_DIR), filename)
+
+
+@app.route("/api/agents/me/avatar", methods=["POST"])
+@require_api_key
+def upload_avatar():
+    """Upload or auto-generate a profile avatar (256x256).
+
+    If a file is provided via multipart ``avatar`` field, it is resized to
+    256x256 center-crop via ffmpeg and saved.  If **no file** is provided the
+    server auto-generates a unique avatar using ffmpeg (colored background +
+    initial letter) so bots can call this with an empty body to get a default
+    avatar assigned.
+
+    Rate limit: 5 per agent per hour.
+    """
+    agent = g.agent
+    if not _rate_limit(f"avatar:{agent['id']}", 5, 3600):
+        return jsonify({"error": "Rate limited — max 5 avatar uploads per hour"}), 429
+
+    import tempfile
+
+    out_name = f"{agent['id']}.jpg"
+    out_path = AVATAR_DIR / out_name
+
+    f = request.files.get("avatar")
+    if f and f.filename:
+        # --- User/agent supplied an image ---
+        ext = Path(f.filename).suffix.lower()
+        if ext not in ALLOWED_THUMB_EXT:
+            return jsonify({"error": f"Invalid file type. Allowed: {', '.join(sorted(ALLOWED_THUMB_EXT))}"}), 400
+
+        # Read and check size
+        data = f.read()
+        if len(data) > MAX_AVATAR_SIZE:
+            return jsonify({"error": f"File too large. Max {MAX_AVATAR_SIZE // (1024*1024)} MB"}), 400
+
+        # Save to temp, resize with ffmpeg
+        tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        try:
+            tmp.write(data)
+            tmp.close()
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", tmp.name,
+                    "-vf", f"scale={AVATAR_TARGET_SIZE}:{AVATAR_TARGET_SIZE}"
+                           f":force_original_aspect_ratio=increase,"
+                           f"crop={AVATAR_TARGET_SIZE}:{AVATAR_TARGET_SIZE}",
+                    "-frames:v", "1",
+                    str(out_path),
+                ],
+                capture_output=True, timeout=30,
+            )
+            if result.returncode != 0 or not out_path.exists():
+                return jsonify({"error": "ffmpeg resize failed", "detail": result.stderr.decode()[-300:]}), 500
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
+    else:
+        # --- Auto-generate avatar from agent name ---
+        name = agent["agent_name"]
+        h = hashlib.md5(name.encode()).hexdigest()
+        r = int(h[0:2], 16)
+        g_val = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+        # Ensure the color isn't too dark
+        brightness = (r + g_val + b) / 3
+        if brightness < 80:
+            r = min(255, r + 80)
+            g_val = min(255, g_val + 80)
+            b = min(255, b + 80)
+        bg_hex = f"{r:02x}{g_val:02x}{b:02x}"
+        initial = (name.replace("-", " ").replace("_", " ").split()[0][0]
+                   if name else "?").upper()
+        display = agent.get("display_name") or name
+        # Truncate display name for the bottom text
+        bot_label = display[:16]
+
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", f"color=c=0x{bg_hex}:s=256x256:d=1",
+                "-vf", (
+                    f"drawtext=text='{initial}':"
+                    f"fontsize=140:fontcolor=white:x=(w-tw)/2:y=(h-th)/2-10,"
+                    f"drawtext=text='{bot_label}':"
+                    f"fontsize=18:fontcolor=white@0.7:x=(w-tw)/2:y=h-35"
+                ),
+                "-frames:v", "1",
+                str(out_path),
+            ],
+            capture_output=True, timeout=15,
+        )
+        if result.returncode != 0 or not out_path.exists():
+            return jsonify({"error": "Avatar generation failed", "detail": result.stderr.decode()[-300:]}), 500
+
+    # Update DB
+    avatar_url = f"/avatars/{out_name}"
+    db = get_db()
+    db.execute("UPDATE agents SET avatar_url = ? WHERE id = ?", (avatar_url, agent["id"]))
+    db.commit()
+
+    return jsonify({"ok": True, "avatar_url": avatar_url})
+
+
 # ---------------------------------------------------------------------------
 # HTML frontend routes
 # ---------------------------------------------------------------------------
@@ -2194,26 +4002,12 @@ def index():
     """Homepage with trending and recent videos."""
     db = get_db()
 
-    # Trending (recent views weighted)
-    cutoff = time.time() - 86400
-    trending_rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url,
-                  COALESCE(rv.recent_views, 0) AS recent_views
-           FROM videos v
-           JOIN agents a ON v.agent_id = a.id
-           LEFT JOIN (
-               SELECT video_id, COUNT(*) AS recent_views
-               FROM views WHERE created_at > ?
-               GROUP BY video_id
-           ) rv ON rv.video_id = v.video_id
-           ORDER BY (COALESCE(rv.recent_views, 0) * 2 + v.likes * 3) DESC
-           LIMIT 8""",
-        (cutoff,),
-    ).fetchall()
+    # Trending (improved algorithm: views + likes + comments + recency)
+    trending_rows = _get_trending_videos(db, limit=8)
 
     # Recent
     recent_rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
            ORDER BY v.created_at DESC LIMIT 12""",
     ).fetchall()
@@ -2240,7 +4034,7 @@ def watch(video_id):
     """Video player page."""
     db = get_db()
     video = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url,
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
                   a.rtc_address, a.btc_address, a.eth_address,
                   a.sol_address, a.ltc_address, a.erg_address, a.paypal_email
            FROM videos v JOIN agents a ON v.agent_id = a.id
@@ -2251,18 +4045,24 @@ def watch(video_id):
     if not video:
         abort(404)
 
-    # Record view
+    # Record view (deduplicated: 1 view per IP per video per 30 min)
     ip = request.headers.get("X-Real-IP", request.remote_addr)
-    db.execute(
-        "INSERT INTO views (video_id, ip_address, created_at) VALUES (?, ?, ?)",
-        (video_id, ip, time.time()),
-    )
-    db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
-    db.commit()
+    VIEW_COOLDOWN = 1800  # 30 minutes
+    recent = db.execute(
+        "SELECT 1 FROM views WHERE video_id = ? AND ip_address = ? AND created_at > ?",
+        (video_id, ip, time.time() - VIEW_COOLDOWN),
+    ).fetchone()
+    if not recent:
+        db.execute(
+            "INSERT INTO views (video_id, ip_address, created_at) VALUES (?, ?, ?)",
+            (video_id, ip, time.time()),
+        )
+        db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
+        db.commit()
 
     # Get comments
     comments = db.execute(
-        """SELECT c.*, a.agent_name, a.display_name, a.avatar_url
+        """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM comments c JOIN agents a ON c.agent_id = a.id
            WHERE c.video_id = ?
            ORDER BY c.created_at ASC""",
@@ -2271,7 +4071,7 @@ def watch(video_id):
 
     # Related videos (same agent or random)
     related = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
            WHERE v.video_id != ?
            ORDER BY CASE WHEN v.agent_id = ? THEN 0 ELSE 1 END, RANDOM()
@@ -2279,17 +4079,32 @@ def watch(video_id):
         (video_id, video["agent_id"]),
     ).fetchall()
 
+    # Subscription data for follow button
+    subscriber_count = db.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?",
+        (video["agent_id"],),
+    ).fetchone()[0]
+
+    is_following = False
+    if g.user:
+        is_following = bool(db.execute(
+            "SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?",
+            (g.user["id"], video["agent_id"]),
+        ).fetchone())
+
     return render_template(
         "watch.html",
         video=video,
         comments=comments,
         related=related,
+        subscriber_count=subscriber_count,
+        is_following=is_following,
     )
 
 
 @app.route("/embed/<video_id>")
 def embed(video_id):
-    """Lightweight embed player for iframes and Twitter player cards."""
+    """Branded embed player for iframes and Twitter player cards."""
     db = get_db()
     video = db.execute(
         "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
@@ -2298,20 +4113,88 @@ def embed(video_id):
     if not video:
         abort(404)
 
-    w = video["width"] or 512
-    h = video["height"] or 512
+    title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
+    creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
+
     html = f"""<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>*{{margin:0;padding:0}}body{{background:#000;display:flex;align-items:center;justify-content:center;height:100vh}}
-video{{max-width:100%;max-height:100%;object-fit:contain}}</style>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#000;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
+video{{max-width:100%;max-height:100%;object-fit:contain;display:block}}
+.overlay{{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;background:linear-gradient(transparent,rgba(0,0,0,0.85));
+ opacity:0;transition:opacity 0.3s;pointer-events:none;display:flex;align-items:flex-end;justify-content:space-between}}
+body:hover .overlay{{opacity:1}}
+.info{{color:#fff;min-width:0}}
+.title{{font:600 14px/1.3 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}}
+.creator{{font:12px -apple-system,sans-serif;color:#aaa;margin-top:2px}}
+.brand{{pointer-events:auto;text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
+ font:700 12px -apple-system,sans-serif;white-space:nowrap;flex-shrink:0}}
+.brand:hover{{background:#65b8ff}}
+</style>
 </head><body>
 <video controls autoplay playsinline>
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
+<div class="overlay">
+<div class="info"><div class="title">{title_esc}</div><div class="creator">{creator_esc}</div></div>
+<a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank">BoTTube</a>
+</div>
 </body></html>"""
-    return Response(html, mimetype="text/html")
+    resp = Response(html, mimetype="text/html")
+    # Allow embedding in any iframe
+    resp.headers["X-Frame-Options"] = "ALLOWALL"
+    resp.headers.pop("Content-Security-Policy", None)
+    return resp
+
+
+@app.route("/oembed")
+def oembed():
+    """oEmbed discovery endpoint. Returns JSON with iframe embed HTML."""
+    url = request.args.get("url", "")
+    fmt = request.args.get("format", "json")
+
+    if fmt != "json":
+        return jsonify({"error": "Only JSON format supported"}), 501
+
+    # Extract video_id from URL
+    match = re.search(r"/watch/([A-Za-z0-9_-]{11})", url)
+    if not match:
+        return jsonify({"error": "Invalid URL"}), 404
+
+    video_id = match.group(1)
+    db = get_db()
+    video = db.execute(
+        "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        (video_id,),
+    ).fetchone()
+
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    w = request.args.get("maxwidth", video["width"] or 512, type=int)
+    h = request.args.get("maxheight", video["height"] or 512, type=int)
+    # Clamp dimensions
+    w = min(w, 1920)
+    h = min(h, 1080)
+
+    return jsonify({
+        "version": "1.0",
+        "type": "video",
+        "provider_name": "BoTTube",
+        "provider_url": "https://bottube.ai",
+        "title": video["title"],
+        "author_name": video["display_name"] or video["agent_name"],
+        "author_url": f"https://bottube.ai/agent/{video['agent_name']}",
+        "width": w,
+        "height": h,
+        "html": f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>',
+        "thumbnail_url": f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video["thumbnail"] else "",
+        "thumbnail_width": 320,
+        "thumbnail_height": 180,
+    })
 
 
 @app.route("/agents")
@@ -2351,11 +4234,203 @@ def channel(agent_name):
         (agent["id"],),
     ).fetchone()[0]
 
+    subscriber_count = db.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?",
+        (agent["id"],),
+    ).fetchone()[0]
+
+    is_following = False
+    if g.user:
+        is_following = bool(db.execute(
+            "SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?",
+            (g.user["id"], agent["id"]),
+        ).fetchone())
+
+    # Public playlists (or all if viewing own channel)
+    viewer_id = g.user["id"] if g.user else None
+    pl_filter = "" if viewer_id == agent["id"] else "AND p.visibility = 'public'"
+    playlists = db.execute(
+        f"""SELECT p.playlist_id, p.title, p.visibility, p.updated_at,
+                   (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) as item_count
+            FROM playlists p WHERE p.agent_id = ? {pl_filter}
+            ORDER BY p.updated_at DESC LIMIT 20""",
+        (agent["id"],),
+    ).fetchall()
+
     return render_template(
         "channel.html",
         agent=agent,
         videos=videos,
         total_views=total_views,
+        subscriber_count=subscriber_count,
+        is_following=is_following,
+        playlists=playlists,
+    )
+
+
+@app.route("/docs")
+def docs_page():
+    """API documentation page."""
+    return render_template("docs.html")
+
+
+# ── Blog routes ──────────────────────────────────────────────────────
+BLOG_POSTS = [
+    {
+        "slug": "what-is-bottube",
+        "template": "blog_bottube.html",
+        "title": "What is BoTTube? The First Video Platform Built for AI Agents",
+        "description": "BoTTube is a video-sharing platform where AI agents and humans create, upload, and interact with video content side by side. 131+ videos, 21 AI agents, open API, MIT licensed.",
+        "author": "Scott Boudreaux",
+        "date": "2026-02-01",
+        "pub_rfc": "Sat, 01 Feb 2026 12:00:00 +0000",
+    },
+    {
+        "slug": "rustchain-proof-of-antiquity",
+        "template": "blog_rustchain.html",
+        "title": "RustChain: The Blockchain That Rewards Vintage Hardware",
+        "description": "A blockchain powered by Proof of Antiquity where a PowerPC G4 from 1999 earns 2.5x more than modern hardware. Six hardware fingerprint checks prevent VM spoofing.",
+        "author": "Scott Boudreaux",
+        "date": "2026-02-01",
+        "pub_rfc": "Sat, 01 Feb 2026 12:30:00 +0000",
+    },
+    {
+        "slug": "elyan-labs-ecosystem",
+        "template": "blog_elyan_labs.html",
+        "title": "The Elyan Labs Ecosystem: Open Source AI From Vintage Iron to Video Agents",
+        "description": "How vintage PowerPC Macs, an IBM POWER8 mainframe, AI video agents, and a blockchain all connect in one open source ecosystem. 45+ repos, all MIT licensed.",
+        "author": "Scott Boudreaux",
+        "date": "2026-02-01",
+        "pub_rfc": "Sat, 01 Feb 2026 13:00:00 +0000",
+    },
+]
+
+
+@app.route("/blog")
+def blog_index():
+    """Blog listing page."""
+    return render_template("blog.html")
+
+
+@app.route("/blog/<slug>")
+def blog_post(slug):
+    """Individual blog post."""
+    for post in BLOG_POSTS:
+        if post["slug"] == slug:
+            return render_template(post["template"])
+    abort(404)
+
+
+@app.route("/blog/rss")
+def blog_rss():
+    """RSS 2.0 feed for blog articles."""
+    base = "https://bottube.ai"
+    items = []
+    for post in BLOG_POSTS:
+        link = f"{base}/blog/{post['slug']}"
+        items.append(f"""    <item>
+      <title><![CDATA[{post["title"]}]]></title>
+      <link>{link}</link>
+      <guid isPermaLink="true">{link}</guid>
+      <pubDate>{post["pub_rfc"]}</pubDate>
+      <dc:creator><![CDATA[{post["author"]}]]></dc:creator>
+      <description><![CDATA[{post["description"]}]]></description>
+    </item>""")
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>BoTTube Blog - Elyan Labs</title>
+    <link>{base}/blog</link>
+    <description>Articles about BoTTube, RustChain, AI agents, and the Elyan Labs open source ecosystem.</description>
+    <language>en-us</language>
+    <lastBuildDate>{BLOG_POSTS[0]["pub_rfc"]}</lastBuildDate>
+    <atom:link href="{base}/blog/rss" rel="self" type="application/rss+xml"/>
+{chr(10).join(items)}
+  </channel>
+</rss>"""
+
+    resp = app.response_class(xml, mimetype="application/rss+xml")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/dashboard")
+def dashboard_page():
+    """Creator dashboard for logged-in users."""
+    if not g.user:
+        return redirect(url_for("login"))
+
+    db = get_db()
+    uid = g.user["id"]
+
+    # Your videos with stats
+    videos = db.execute(
+        """SELECT video_id, title, thumbnail, views, likes, dislikes, duration_sec, category, created_at
+           FROM videos WHERE agent_id = ? ORDER BY created_at DESC""",
+        (uid,),
+    ).fetchall()
+
+    # Aggregate stats
+    totals = db.execute(
+        """SELECT COALESCE(SUM(views), 0) as total_views,
+                  COALESCE(SUM(likes), 0) as total_likes,
+                  COUNT(*) as video_count
+           FROM videos WHERE agent_id = ?""",
+        (uid,),
+    ).fetchone()
+
+    subscriber_count = db.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (uid,)
+    ).fetchone()[0]
+
+    total_comments = db.execute(
+        """SELECT COUNT(*) FROM comments c
+           JOIN videos v ON c.video_id = v.video_id
+           WHERE v.agent_id = ?""",
+        (uid,),
+    ).fetchone()[0]
+
+    # Playlists
+    playlists = db.execute(
+        """SELECT p.playlist_id, p.title, p.visibility, p.updated_at,
+                  (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) as item_count
+           FROM playlists p WHERE p.agent_id = ?
+           ORDER BY p.updated_at DESC""",
+        (uid,),
+    ).fetchall()
+
+    # Recent notifications (last 10)
+    notifications = db.execute(
+        """SELECT type, message, from_agent, video_id, is_read, created_at
+           FROM notifications WHERE agent_id = ?
+           ORDER BY created_at DESC LIMIT 10""",
+        (uid,),
+    ).fetchall()
+
+    # RTC balance
+    rtc_balance = g.user.get("rtc_balance", 0) or 0
+
+    # Recent earnings (last 10)
+    earnings = db.execute(
+        """SELECT amount, reason, video_id, created_at
+           FROM earnings WHERE agent_id = ?
+           ORDER BY created_at DESC LIMIT 10""",
+        (uid,),
+    ).fetchall()
+
+    return render_template(
+        "dashboard.html",
+        videos=videos,
+        totals=totals,
+        subscriber_count=subscriber_count,
+        total_comments=total_comments,
+        playlists=playlists,
+        notifications=notifications,
+        rtc_balance=rtc_balance,
+        earnings=earnings,
     )
 
 
@@ -2375,7 +4450,7 @@ def search_page():
         db = get_db()
         like_q = f"%{q}%"
         videos = db.execute(
-            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
                FROM videos v JOIN agents a ON v.agent_id = a.id
                WHERE v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?
                ORDER BY v.views DESC, v.created_at DESC
@@ -2384,6 +4459,32 @@ def search_page():
         ).fetchall()
 
     return render_template("search.html", query=q, videos=videos)
+
+
+@app.route("/trending")
+def trending_page():
+    """Dedicated trending page with top 50 videos."""
+    db = get_db()
+    rows = _get_trending_videos(db, limit=50)
+    return render_template("trending.html", videos=rows)
+
+
+@app.route("/categories")
+def categories_page():
+    """Browse all video categories."""
+    db = get_db()
+    # Count videos per category in one query
+    rows = db.execute(
+        "SELECT category, COUNT(*) as cnt FROM videos GROUP BY category"
+    ).fetchall()
+    counts = {r["category"]: r["cnt"] for r in rows}
+    total = sum(counts.values())
+    return render_template(
+        "categories.html",
+        categories=VIDEO_CATEGORIES,
+        counts=counts,
+        total_videos=total,
+    )
 
 
 @app.route("/upload", methods=["GET", "POST"])
@@ -2469,10 +4570,16 @@ def upload_page():
         flash(f"Video too large after processing ({final_size // 1024} KB). Max: {max_file_bytes // 1024} KB.", "error")
         return render_template("upload.html", categories=VIDEO_CATEGORIES)
 
-    # Thumbnail
+    # Thumbnail (max 2MB)
     thumb_filename = ""
+    MAX_THUMB_SIZE = 2 * 1024 * 1024
     if "thumbnail" in request.files and request.files["thumbnail"].filename:
         thumb_file = request.files["thumbnail"]
+        thumb_file.seek(0, 2)
+        if thumb_file.tell() > MAX_THUMB_SIZE:
+            flash("Thumbnail must be 2MB or smaller.", "error")
+            return redirect(url_for("upload_page"))
+        thumb_file.seek(0)
         thumb_ext = Path(thumb_file.filename).suffix.lower()
         if thumb_ext in ALLOWED_THUMB_EXT:
             thumb_filename = f"{video_id}{thumb_ext}"
@@ -2499,16 +4606,162 @@ def upload_page():
 
 
 # ---------------------------------------------------------------------------
+# Giveaway
+# ---------------------------------------------------------------------------
+
+@app.route("/giveaway")
+def giveaway_page():
+    """GPU giveaway landing page with countdown, prizes, and leaderboard."""
+    db = get_db()
+    now = time.time()
+
+    # Check if user has entered
+    user_entered = False
+    user_eligible = False
+    if g.user:
+        entry = db.execute(
+            "SELECT * FROM giveaway_entrants WHERE agent_id = ?", (g.user["id"],)
+        ).fetchone()
+        user_entered = entry is not None
+        try:
+            email_verified = g.user["email_verified"]
+        except (IndexError, KeyError):
+            email_verified = 0
+        user_eligible = (
+            g.user["is_human"] == 1
+            and email_verified == 1
+        )
+
+    # Get leaderboard: top 50 entrants by RTC earned
+    leaderboard = db.execute(
+        """SELECT a.agent_name, a.display_name, a.rtc_balance,
+                  COUNT(v.id) AS video_count,
+                  COALESCE(SUM(v.views), 0) AS total_views,
+                  ge.entered_at
+           FROM giveaway_entrants ge
+           JOIN agents a ON ge.agent_id = a.id
+           LEFT JOIN videos v ON v.agent_id = a.id
+           WHERE ge.disqualified = 0
+           GROUP BY a.id
+           ORDER BY a.rtc_balance DESC
+           LIMIT 50""",
+    ).fetchall()
+
+    total_entrants = db.execute(
+        "SELECT COUNT(*) FROM giveaway_entrants WHERE disqualified = 0"
+    ).fetchone()[0]
+
+    return render_template(
+        "giveaway.html",
+        prizes=GIVEAWAY_PRIZES,
+        giveaway_active=GIVEAWAY_ACTIVE,
+        giveaway_start=GIVEAWAY_START,
+        giveaway_end=GIVEAWAY_END,
+        leaderboard=leaderboard,
+        total_entrants=total_entrants,
+        user_entered=user_entered,
+        user_eligible=user_eligible,
+        now=now,
+    )
+
+
+@app.route("/giveaway/enter", methods=["POST"])
+def giveaway_enter():
+    """Enter the giveaway. Requires logged-in human with verified email."""
+    _verify_csrf()
+
+    if not g.user:
+        flash("You must be signed in to enter.", "error")
+        return redirect(url_for("login"))
+
+    if not GIVEAWAY_ACTIVE:
+        flash("The giveaway is not currently active.", "error")
+        return redirect(url_for("giveaway_page"))
+
+    now = time.time()
+    if now < GIVEAWAY_START:
+        flash("The giveaway hasn't started yet.", "error")
+        return redirect(url_for("giveaway_page"))
+    if now > GIVEAWAY_END:
+        flash("The giveaway has ended.", "error")
+        return redirect(url_for("giveaway_page"))
+
+    if not g.user["is_human"]:
+        flash("Only human accounts can enter the giveaway.", "error")
+        return redirect(url_for("giveaway_page"))
+
+    try:
+        email_verified = g.user["email_verified"]
+    except (IndexError, KeyError):
+        email_verified = 0
+    if GIVEAWAY_REQUIRE_EMAIL and not email_verified:
+        flash("You must verify your email before entering. Check your profile.", "error")
+        return redirect(url_for("giveaway_page"))
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO giveaway_entrants (agent_id, entered_at, eligible) VALUES (?, ?, 1)",
+            (g.user["id"], now),
+        )
+        db.commit()
+        flash("You're in! Earn RTC to climb the leaderboard.", "success")
+    except sqlite3.IntegrityError:
+        flash("You've already entered the giveaway.", "error")
+
+    return redirect(url_for("giveaway_page"))
+
+
+@app.route("/api/giveaway/leaderboard")
+def giveaway_leaderboard_api():
+    """JSON API: giveaway leaderboard for external consumption."""
+    db = get_db()
+    rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.rtc_balance,
+                  COUNT(v.id) AS video_count,
+                  COALESCE(SUM(v.views), 0) AS total_views
+           FROM giveaway_entrants ge
+           JOIN agents a ON ge.agent_id = a.id
+           LEFT JOIN videos v ON v.agent_id = a.id
+           WHERE ge.disqualified = 0
+           GROUP BY a.id
+           ORDER BY a.rtc_balance DESC
+           LIMIT 50""",
+    ).fetchall()
+
+    return jsonify({
+        "leaderboard": [
+            {
+                "rank": i + 1,
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "rtc_balance": round(r["rtc_balance"], 4),
+                "video_count": r["video_count"],
+                "total_views": r["total_views"],
+            }
+            for i, r in enumerate(rows)
+        ],
+        "prizes": GIVEAWAY_PRIZES,
+        "giveaway_active": GIVEAWAY_ACTIVE,
+        "ends_at": GIVEAWAY_END,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Admin: Visitor Analytics
 # ---------------------------------------------------------------------------
 
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_2026_secure")
+ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+if not ADMIN_KEY:
+    ADMIN_KEY = secrets.token_hex(32)
+    print(f"[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set. Generated ephemeral key: {ADMIN_KEY}")
 
 
 @app.route("/api/admin/visitors")
 def admin_visitors():
-    """View visitor analytics. Requires admin key."""
-    if request.args.get("key") != ADMIN_KEY:
+    """View visitor analytics. Requires admin key via header."""
+    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    if not provided or provided != ADMIN_KEY:
         abort(403)
 
     hours = min(168, max(1, request.args.get("hours", 24, type=int)))
@@ -2561,6 +4814,525 @@ def admin_visitors():
         "scrapers": stats["scrapers"],
         "top_paths": dict(top_paths),
         "top_ips": dict(top_ips),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Admin: Duplicate Comment Scraper
+# ---------------------------------------------------------------------------
+
+@app.route("/api/admin/duplicate-comments")
+def admin_duplicate_comments():
+    """Find and optionally remove duplicate comments.
+
+    Duplicates = same agent_id + video_id + content (exact match).
+    Keeps the OLDEST comment (lowest id), removes newer copies.
+
+    Query params:
+        key       - admin key (required)
+        dry_run   - if "0", actually delete; default is dry-run
+        window_h  - only check comments from last N hours (default: all)
+    """
+    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    if not provided or provided != ADMIN_KEY:
+        abort(403)
+
+    dry_run = request.args.get("dry_run", "1") != "0"
+    window_h = request.args.get("window_h", 0, type=int)
+
+    db = get_db()
+
+    # Build the query to find duplicates
+    where_clause = ""
+    params = []
+    if window_h > 0:
+        cutoff = time.time() - window_h * 3600
+        where_clause = "WHERE c1.created_at > ?"
+        params.append(cutoff)
+
+    # Find all duplicate groups: same agent_id + video_id + content
+    rows = db.execute(f"""
+        SELECT c1.agent_id, c1.video_id, c1.content, COUNT(*) as cnt,
+               MIN(c1.id) as keep_id, GROUP_CONCAT(c1.id) as all_ids
+        FROM comments c1
+        {where_clause}
+        GROUP BY c1.agent_id, c1.video_id, c1.content
+        HAVING cnt > 1
+        ORDER BY cnt DESC
+    """, params).fetchall()
+
+    duplicates = []
+    total_to_remove = 0
+
+    for row in rows:
+        all_ids = [int(x) for x in row["all_ids"].split(",")]
+        keep_id = row["keep_id"]
+        remove_ids = [i for i in all_ids if i != keep_id]
+        total_to_remove += len(remove_ids)
+
+        agent = db.execute("SELECT agent_name FROM agents WHERE id = ?",
+                           (row["agent_id"],)).fetchone()
+        agent_name = agent["agent_name"] if agent else f"agent#{row['agent_id']}"
+
+        duplicates.append({
+            "agent": agent_name,
+            "video_id": row["video_id"],
+            "content_preview": row["content"][:80],
+            "count": row["cnt"],
+            "keeping": keep_id,
+            "removing": remove_ids,
+        })
+
+    removed = 0
+    if not dry_run and total_to_remove > 0:
+        for dup in duplicates:
+            for rid in dup["removing"]:
+                db.execute("DELETE FROM comment_votes WHERE comment_id = ?", (rid,))
+                db.execute("DELETE FROM comments WHERE id = ?", (rid,))
+                removed += 1
+        db.commit()
+
+    return jsonify({
+        "dry_run": dry_run,
+        "duplicate_groups": len(duplicates),
+        "total_duplicates": total_to_remove,
+        "removed": removed,
+        "details": duplicates[:50],
+    })
+
+
+@app.route("/api/admin/comment-cleanup", methods=["POST"])
+def admin_comment_cleanup():
+    """Full comment cleanup: remove duplicates + optionally prune bot spam.
+
+    POST JSON:
+        key          - admin key (required)
+        remove_dupes - remove exact duplicates (default true)
+        max_similar  - max near-identical comments per agent per video (default 3)
+    """
+    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    if not provided or provided != ADMIN_KEY:
+        abort(403)
+
+    data = request.get_json(silent=True) or {}
+    remove_dupes = data.get("remove_dupes", True)
+    max_similar = data.get("max_similar", 3)
+
+    db = get_db()
+    removed_dupes = 0
+    removed_spam = 0
+
+    # Phase 1: Exact duplicates (same agent + video + content)
+    if remove_dupes:
+        rows = db.execute("""
+            SELECT agent_id, video_id, content, COUNT(*) as cnt,
+                   MIN(id) as keep_id, GROUP_CONCAT(id) as all_ids
+            FROM comments
+            GROUP BY agent_id, video_id, content
+            HAVING cnt > 1
+        """).fetchall()
+
+        for row in rows:
+            all_ids = [int(x) for x in row["all_ids"].split(",")]
+            keep_id = row["keep_id"]
+            for rid in all_ids:
+                if rid != keep_id:
+                    db.execute("DELETE FROM comment_votes WHERE comment_id = ?", (rid,))
+                    db.execute("DELETE FROM comments WHERE id = ?", (rid,))
+                    removed_dupes += 1
+
+    # Phase 2: Excessive comments from same agent on same video
+    if max_similar > 0:
+        heavy = db.execute("""
+            SELECT agent_id, video_id, COUNT(*) as cnt
+            FROM comments
+            GROUP BY agent_id, video_id
+            HAVING cnt > ?
+        """, (max_similar,)).fetchall()
+
+        for row in heavy:
+            excess = db.execute("""
+                SELECT id FROM comments
+                WHERE agent_id = ? AND video_id = ?
+                ORDER BY created_at ASC
+                LIMIT -1 OFFSET ?
+            """, (row["agent_id"], row["video_id"], max_similar)).fetchall()
+
+            for c in excess:
+                db.execute("DELETE FROM comment_votes WHERE comment_id = ?", (c["id"],))
+                db.execute("DELETE FROM comments WHERE id = ?", (c["id"],))
+                removed_spam += 1
+
+    if removed_dupes > 0 or removed_spam > 0:
+        db.commit()
+
+    return jsonify({
+        "removed_duplicates": removed_dupes,
+        "removed_excess": removed_spam,
+        "max_similar_per_video": max_similar,
+        "total_removed": removed_dupes + removed_spam,
+    })
+
+
+# ---------------------------------------------------------------------------
+# RSS Feeds
+# ---------------------------------------------------------------------------
+
+def _xml_escape(s: str) -> str:
+    """Escape a string for use in XML outside CDATA sections."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+def _cdata_safe(s: str) -> str:
+    """Escape ]]> inside CDATA sections to prevent breakout."""
+    return s.replace("]]>", "]]]]><![CDATA[>")
+
+
+@app.route("/agent/<agent_name>/rss")
+def agent_rss(agent_name):
+    """RSS 2.0 feed for a channel's videos."""
+    db = get_db()
+    agent = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    if not agent:
+        abort(404)
+
+    videos = db.execute(
+        """SELECT video_id, title, description, created_at, duration_sec, thumbnail, views
+           FROM videos WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50""",
+        (agent["id"],),
+    ).fetchall()
+
+    base = request.url_root.rstrip("/").replace("http://", "https://")
+    prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
+
+    items = []
+    for v in videos:
+        pub_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(v["created_at"]))
+        link = f"{base}{prefix}/watch/{v['video_id']}"
+        desc = v["description"] or v["title"]
+        thumb_tag = ""
+        if v["thumbnail"]:
+            thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
+            thumb_tag = f'<img src="{thumb_url}" /><br/>'
+        items.append(f"""    <item>
+      <title><![CDATA[{_cdata_safe(v["title"])}]]></title>
+      <link>{link}</link>
+      <guid isPermaLink="true">{link}</guid>
+      <pubDate>{pub_date}</pubDate>
+      <description><![CDATA[{thumb_tag}{_cdata_safe(desc)}]]></description>
+    </item>""")
+
+    channel_link = f"{base}{prefix}/agent/{agent_name}"
+    display = _xml_escape(agent["display_name"] or agent["agent_name"])
+    build_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>{display} - BoTTube</title>
+    <link>{channel_link}</link>
+    <description><![CDATA[Videos by {_cdata_safe(display)} on BoTTube]]></description>
+    <language>en-us</language>
+    <lastBuildDate>{build_date}</lastBuildDate>
+    <atom:link href="{base}{prefix}/agent/{agent_name}/rss" rel="self" type="application/rss+xml"/>
+{chr(10).join(items)}
+  </channel>
+</rss>"""
+
+    resp = app.response_class(xml, mimetype="application/rss+xml")
+    resp.headers["Cache-Control"] = "public, max-age=600"
+    return resp
+
+
+# Global RSS feed (latest videos across all channels)
+@app.route("/rss")
+def global_rss():
+    """RSS 2.0 feed for all recent videos on BoTTube."""
+    db = get_db()
+    videos = db.execute(
+        """SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail,
+                  a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           ORDER BY v.created_at DESC LIMIT 50""",
+    ).fetchall()
+
+    base = request.url_root.rstrip("/").replace("http://", "https://")
+    prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
+
+    items = []
+    for v in videos:
+        pub_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(v["created_at"]))
+        link = f"{base}{prefix}/watch/{v['video_id']}"
+        author_display = _xml_escape(v["display_name"] or v["agent_name"])
+        desc = v["description"] or v["title"]
+        thumb_tag = ""
+        if v["thumbnail"]:
+            thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
+            thumb_tag = f'<img src="{thumb_url}" /><br/>'
+        items.append(f"""    <item>
+      <title><![CDATA[{_cdata_safe(v["title"])}]]></title>
+      <link>{link}</link>
+      <guid isPermaLink="true">{link}</guid>
+      <pubDate>{pub_date}</pubDate>
+      <author>{_xml_escape(v["agent_name"])}</author>
+      <description><![CDATA[{thumb_tag}By {_cdata_safe(author_display)} - {_cdata_safe(desc)}]]></description>
+    </item>""")
+
+    build_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>BoTTube - Latest Videos</title>
+    <link>{base}{prefix}/</link>
+    <description>Latest videos from AI agents on BoTTube</description>
+    <language>en-us</language>
+    <lastBuildDate>{build_date}</lastBuildDate>
+    <atom:link href="{base}{prefix}/rss" rel="self" type="application/rss+xml"/>
+{chr(10).join(items)}
+  </channel>
+</rss>"""
+
+    resp = app.response_class(xml, mimetype="application/rss+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# SEO & Crawler Routes (robots.txt, sitemap.xml)
+# ---------------------------------------------------------------------------
+from seo_routes import seo_bp
+app.register_blueprint(seo_bp)
+
+# ---------------------------------------------------------------------------
+# Admin: Content Moderation (Ban / Unban / Nuke)
+# ---------------------------------------------------------------------------
+
+
+def _require_admin():
+    """Check admin key from header or query param. Returns None if OK, or error response."""
+    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    if not provided or provided != ADMIN_KEY:
+        return jsonify({"error": "Forbidden"}), 403
+    return None
+
+
+@app.route("/api/admin/ban", methods=["POST"])
+def admin_ban_agent():
+    """Ban an agent by name. Requires admin key.
+
+    POST JSON: {"agent_name": "fredrick", "reason": "spam"}
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    agent_name = data.get("agent_name", "").strip()
+    reason = data.get("reason", "Banned by admin").strip()
+
+    if not agent_name:
+        return jsonify({"error": "agent_name required"}), 400
+
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name, is_banned FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return jsonify({"error": f"Agent '{agent_name}' not found"}), 404
+
+    if agent["is_banned"]:
+        return jsonify({"ok": True, "already_banned": True, "agent": agent_name})
+
+    db.execute(
+        "UPDATE agents SET is_banned = 1, ban_reason = ?, banned_at = ? WHERE id = ?",
+        (reason, time.time(), agent["id"]),
+    )
+    db.commit()
+    app.logger.warning("ADMIN BAN: agent=%s reason='%s'", agent_name, reason)
+    return jsonify({"ok": True, "banned": agent_name, "reason": reason})
+
+
+@app.route("/api/admin/unban", methods=["POST"])
+def admin_unban_agent():
+    """Unban an agent by name. Requires admin key.
+
+    POST JSON: {"agent_name": "fredrick"}
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    agent_name = data.get("agent_name", "").strip()
+
+    if not agent_name:
+        return jsonify({"error": "agent_name required"}), 400
+
+    db = get_db()
+    db.execute(
+        "UPDATE agents SET is_banned = 0, ban_reason = '', banned_at = 0 WHERE agent_name = ?",
+        (agent_name,),
+    )
+    db.commit()
+    app.logger.info("ADMIN UNBAN: agent=%s", agent_name)
+    return jsonify({"ok": True, "unbanned": agent_name})
+
+
+@app.route("/api/admin/nuke", methods=["POST"])
+def admin_nuke_agent():
+    """Ban an agent AND remove all their videos + comments. Nuclear option.
+
+    POST JSON: {"agent_name": "fredrick", "reason": "spam bot"}
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    agent_name = data.get("agent_name", "").strip()
+    reason = data.get("reason", "Nuked by admin").strip()
+
+    if not agent_name:
+        return jsonify({"error": "agent_name required"}), 400
+
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return jsonify({"error": f"Agent '{agent_name}' not found"}), 404
+
+    agent_id = agent["id"]
+
+    # Ban the agent
+    db.execute(
+        "UPDATE agents SET is_banned = 1, ban_reason = ?, banned_at = ? WHERE id = ?",
+        (reason, time.time(), agent_id),
+    )
+
+    # Remove all their videos (mark as removed, delete files)
+    videos = db.execute(
+        "SELECT video_id, filename, thumbnail FROM videos WHERE agent_id = ?",
+        (agent_id,),
+    ).fetchall()
+
+    removed_videos = 0
+    for v in videos:
+        # Delete video file
+        vpath = VIDEO_DIR / v["filename"]
+        vpath.unlink(missing_ok=True)
+        # Delete thumbnail
+        if v["thumbnail"]:
+            tpath = THUMB_DIR / v["thumbnail"]
+            tpath.unlink(missing_ok=True)
+        removed_videos += 1
+
+    # Delete video records
+    db.execute("DELETE FROM videos WHERE agent_id = ?", (agent_id,))
+    # Delete their comments
+    removed_comments = db.execute(
+        "SELECT changes()", ()
+    ).fetchone()
+    db.execute("DELETE FROM comments WHERE agent_id = ?", (agent_id,))
+    # Delete their votes
+    db.execute("DELETE FROM votes WHERE agent_id = ?", (agent_id,))
+
+    db.commit()
+    app.logger.warning(
+        "ADMIN NUKE: agent=%s videos=%d reason='%s'",
+        agent_name, removed_videos, reason,
+    )
+    return jsonify({
+        "ok": True,
+        "nuked": agent_name,
+        "videos_removed": removed_videos,
+        "reason": reason,
+    })
+
+
+@app.route("/api/admin/remove-video", methods=["POST"])
+def admin_remove_video():
+    """Remove a specific video by ID. Requires admin key.
+
+    POST JSON: {"video_id": "abc123", "reason": "policy violation"}
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    video_id = data.get("video_id", "").strip()
+    reason = data.get("reason", "Removed by admin").strip()
+
+    if not video_id:
+        return jsonify({"error": "video_id required"}), 400
+
+    db = get_db()
+    video = db.execute(
+        "SELECT id, filename, thumbnail, agent_id FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": f"Video '{video_id}' not found"}), 404
+
+    # Delete files
+    vpath = VIDEO_DIR / video["filename"]
+    vpath.unlink(missing_ok=True)
+    if video["thumbnail"]:
+        tpath = THUMB_DIR / video["thumbnail"]
+        tpath.unlink(missing_ok=True)
+
+    # Delete record
+    db.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+    db.commit()
+
+    app.logger.warning("ADMIN REMOVE VIDEO: %s reason='%s'", video_id, reason)
+    return jsonify({"ok": True, "removed": video_id, "reason": reason})
+
+
+@app.route("/api/admin/scan-content", methods=["GET"])
+def admin_scan_content():
+    """Scan recent videos against the content blocklist. Requires admin key.
+
+    Returns any flagged content. Does NOT auto-remove (use nuke/remove for that).
+    Query params: hours=24 (how far back to scan)
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    hours = min(168, max(1, request.args.get("hours", 24, type=int)))
+    cutoff = time.time() - hours * 3600
+
+    db = get_db()
+    videos = db.execute(
+        "SELECT v.video_id, v.title, v.description, v.tags, v.category, "
+        "v.created_at, a.agent_name "
+        "FROM videos v JOIN agents a ON v.agent_id = a.id "
+        "WHERE v.created_at > ? ORDER BY v.created_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    flagged = []
+    for v in videos:
+        tags = json.loads(v["tags"]) if v["tags"] else []
+        term = _content_check(v["title"], v["description"], tags)
+        if term:
+            flagged.append({
+                "video_id": v["video_id"],
+                "title": v["title"],
+                "agent": v["agent_name"],
+                "matched_term": term,
+                "category": v["category"],
+            })
+
+    return jsonify({
+        "scanned": len(videos),
+        "flagged": len(flagged),
+        "results": flagged,
+        "hours": hours,
     })
 
 
