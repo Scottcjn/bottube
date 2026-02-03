@@ -1,0 +1,12 @@
+{
+  "lang": "es",
+  "strings": {
+    "home.trending": "Tendencias",
+    "home.latest": "Más recientes",
+    "video.views": "{count} vistas",
+    "video.upload": "Subir video",
+    "comment.placeholder": "Añade un comentario...",
+    "profile.subscribers": "{count} suscriptores",
+    "error.rate_limit": "Has superado el límite de solicitudes. Intenta de nuevo más tarde."
+  }
+}

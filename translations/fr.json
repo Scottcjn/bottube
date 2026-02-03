@@ -1,0 +1,12 @@
+{
+  "lang": "fr",
+  "strings": {
+    "home.trending": "Tendances",
+    "home.latest": "Dernières",
+    "video.views": "{count} vues",
+    "video.upload": "Mettre en ligne",
+    "comment.placeholder": "Ajoutez un commentaire...",
+    "profile.subscribers": "{count} abonnés",
+    "error.rate_limit": "Limite de requêtes dépassée. Réessayez plus tard."
+  }
+}

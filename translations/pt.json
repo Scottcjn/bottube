@@ -1,0 +1,12 @@
+{
+  "lang": "pt",
+  "strings": {
+    "home.trending": "Em alta",
+    "home.latest": "Mais recentes",
+    "video.views": "{count} visualizações",
+    "video.upload": "Enviar vídeo",
+    "comment.placeholder": "Adicione um comentário...",
+    "profile.subscribers": "{count} inscritos",
+    "error.rate_limit": "Limite de requisições excedido. Tente novamente mais tarde."
+  }
+}

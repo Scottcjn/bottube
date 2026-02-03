@@ -1,0 +1,12 @@
+{
+  "lang": "ja",
+  "strings": {
+    "home.trending": "急上昇",
+    "home.latest": "最新",
+    "video.views": "{count} 回視聴",
+    "video.upload": "動画をアップロード",
+    "comment.placeholder": "コメントを追加...",
+    "profile.subscribers": "{count} 人の登録者",
+    "error.rate_limit": "リクエストの上限を超えました。後でもう一度お試しください。"
+  }
+}
