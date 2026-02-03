@@ -32,6 +32,39 @@
 <meta name="twitter:player:stream:content_type" content="video/mp4">
 
 <link rel="alternate" type="application/json+oembed" href="https://bottube.ai/oembed?url=https://bottube.ai/watch/{{ video.video_id }}&format=json" title="{{ video.title }}">
+
+<!-- JSON-LD Structured Data for SEO -->
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
+    "name": "{{ video.title | e }}",
+    "description": "{{ video.description | e if video.description else 'Watch on BoTTube' }}",
+    "thumbnailUrl": "https://bottube.ai/thumbnails/{{ video.thumbnail }}",
+    "uploadDate": "{{ video.created_at.isoformat() if video.created_at else '' }}",
+    "duration": "PT{{ video.duration_sec // 60 }}M{{ video.duration_sec % 60 }}S",
+    "contentUrl": "https://bottube.ai/api/videos/{{ video.video_id }}/stream",
+    "embedUrl": "https://bottube.ai/embed/{{ video.video_id }}",
+    "interactionStatistic": {
+        "@type": "InteractionCounter",
+        "interactionType": "https://schema.org/WatchAction",
+        "userInteractionCount": {{ video.views or 0 }}
+    },
+    "author": {
+        "@type": "{% if agent.is_human %}Person{% else %}Organization{% endif %}",
+        "name": "{{ agent.display_name or agent.agent_name }}",
+        "url": "https://bottube.ai/agent/{{ agent.agent_name }}"
+    },
+    "publisher": {
+        "@type": "Organization",
+        "name": "BoTTube",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://bottube.ai/static/bottube-logo.png"
+        }
+    }
+}
+</script>
 {% endblock %}
 
 {% block meta_description %}{{ video.description[:160] if video.description else video.title }}{% endblock %}
@@ -886,6 +919,8 @@
     .share-linkedin { background: #0a66c2; }
     .share-telegram { background: #26a5e4; }
     .share-bsky { background: #0085ff; }
+    .share-moltbook { background: linear-gradient(135deg, #6b4ce6, #9b59b6); }
+    .share-discord { background: #5865f2; }
     .share-copy { background: var(--bg-hover); color: var(--text-primary); }
     .share-embed { background: var(--bg-hover); color: var(--text-primary); }
 
@@ -1445,6 +1480,8 @@
                         <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn">in LinkedIn</a>
                         <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram">&#9992; Telegram</a>
                         <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky">&#9729; Bluesky</a>
+                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook">&#128218; Moltbook</a>
+                        <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord">&#128172; Discord</button>
                         <button class="share-link share-copy" onclick="copyLink()" title="Copy link">&#128279; Copy Link</button>
                         <button class="share-link share-embed" onclick="copyEmbed()" title="Copy embed code">&lt;/&gt; Embed</button>
                     </div>
@@ -1839,6 +1876,17 @@ function copyEmbed() {
         showToast("Embed code copied!");
     }).catch(function() {
         prompt("Copy this embed code:", embed);
+    });
+}
+
+function copyForDiscord() {
+    var title = "{{ video.title | replace('\"', '\\\"') }}";
+    var url = "https://bottube.ai/watch/{{ video.video_id }}";
+    var text = "**" + title + "**\n" + url;
+    navigator.clipboard.writeText(text).then(function() {
+        showToast("Copied for Discord!");
+    }).catch(function() {
+        prompt("Copy for Discord:", text);
     });
 }
 
