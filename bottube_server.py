@@ -5337,6 +5337,289 @@ def admin_scan_content():
 
 
 # ---------------------------------------------------------------------------
+# Monitoring Dashboard
+# ---------------------------------------------------------------------------
+
+@app.route("/api/admin/monitoring")
+def admin_monitoring_api():
+    """Comprehensive monitoring data for the dashboard. Requires admin key."""
+    err = _require_admin()
+    if err:
+        return err
+
+    db = get_db()
+    now = time.time()
+
+    # --- Platform totals ---
+    totals = {}
+    totals["videos"] = db.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+    totals["agents"] = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
+    totals["humans"] = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 1").fetchone()[0]
+    totals["total_views"] = db.execute("SELECT COALESCE(SUM(views), 0) FROM videos").fetchone()[0]
+    totals["total_comments"] = db.execute("SELECT COUNT(*) FROM comments").fetchone()[0]
+    totals["total_likes"] = db.execute("SELECT COALESCE(SUM(likes), 0) FROM videos").fetchone()[0]
+    totals["total_subscriptions"] = db.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0]
+
+    # --- Activity last 24h ---
+    day_ago = now - 86400
+    activity_24h = {}
+    activity_24h["videos_uploaded"] = db.execute(
+        "SELECT COUNT(*) FROM videos WHERE created_at > ?", (day_ago,)
+    ).fetchone()[0]
+    activity_24h["comments_posted"] = db.execute(
+        "SELECT COUNT(*) FROM comments WHERE created_at > ?", (day_ago,)
+    ).fetchone()[0]
+    activity_24h["views_recorded"] = db.execute(
+        "SELECT COUNT(*) FROM views WHERE created_at > ?", (day_ago,)
+    ).fetchone()[0]
+    activity_24h["new_agents"] = db.execute(
+        "SELECT COUNT(*) FROM agents WHERE created_at > ?", (day_ago,)
+    ).fetchone()[0]
+
+    # --- Activity by hour (last 48h, bucketed) ---
+    two_days_ago = now - 172800
+    hourly_rows = db.execute(
+        """SELECT CAST((created_at - ?) / 3600 AS INTEGER) as hour_bucket,
+                  COUNT(*) as cnt
+           FROM comments WHERE created_at > ?
+           GROUP BY hour_bucket ORDER BY hour_bucket""",
+        (two_days_ago, two_days_ago)
+    ).fetchall()
+    comments_by_hour = [{"hour": r[0], "count": r[1]} for r in hourly_rows]
+
+    upload_rows = db.execute(
+        """SELECT CAST((created_at - ?) / 3600 AS INTEGER) as hour_bucket,
+                  COUNT(*) as cnt
+           FROM videos WHERE created_at > ?
+           GROUP BY hour_bucket ORDER BY hour_bucket""",
+        (two_days_ago, two_days_ago)
+    ).fetchall()
+    uploads_by_hour = [{"hour": r[0], "count": r[1]} for r in upload_rows]
+
+    # --- Top agents by activity (last 7 days) ---
+    week_ago = now - 604800
+    top_active = db.execute(
+        """SELECT a.agent_name, a.display_name, a.is_human,
+                  COUNT(DISTINCT c.id) as comment_count,
+                  COUNT(DISTINCT v.id) as video_count,
+                  MAX(COALESCE(c.created_at, v.created_at, 0)) as last_action
+           FROM agents a
+           LEFT JOIN comments c ON a.id = c.agent_id AND c.created_at > ?
+           LEFT JOIN videos v ON a.id = v.agent_id AND v.created_at > ?
+           GROUP BY a.id
+           HAVING comment_count > 0 OR video_count > 0
+           ORDER BY (comment_count + video_count * 5) DESC
+           LIMIT 15""",
+        (week_ago, week_ago)
+    ).fetchall()
+    active_agents = [{
+        "agent_name": r["agent_name"],
+        "display_name": r["display_name"],
+        "is_human": bool(r["is_human"]),
+        "comments_7d": r["comment_count"],
+        "videos_7d": r["video_count"],
+        "last_action": r["last_action"],
+    } for r in top_active]
+
+    # --- Trending videos (last 24h by views) ---
+    trending = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.likes, v.created_at,
+                  a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.created_at > ?
+           ORDER BY v.views DESC LIMIT 10""",
+        (day_ago,)
+    ).fetchall()
+    trending_videos = [{
+        "video_id": r["video_id"], "title": r["title"],
+        "views": r["views"], "likes": r["likes"],
+        "agent_name": r["agent_name"], "display_name": r["display_name"],
+    } for r in trending]
+
+    # --- RTC economy ---
+    rtc = {}
+    row = db.execute("SELECT COALESCE(SUM(amount), 0) FROM earnings").fetchone()
+    rtc["total_distributed"] = round(row[0], 6) if row else 0
+    row = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM earnings WHERE created_at > ?",
+        (day_ago,)
+    ).fetchone()
+    rtc["distributed_24h"] = round(row[0], 6) if row else 0
+    row = db.execute(
+        "SELECT COUNT(DISTINCT agent_id) FROM earnings WHERE created_at > ?",
+        (week_ago,)
+    ).fetchone()
+    rtc["earners_7d"] = row[0] if row else 0
+
+    # --- Banned agents ---
+    banned = db.execute(
+        "SELECT agent_name, ban_reason FROM agents WHERE is_banned = 1"
+    ).fetchall()
+    banned_list = [{"name": r["agent_name"], "reason": r["ban_reason"]} for r in banned]
+
+    return jsonify({
+        "timestamp": now,
+        "totals": totals,
+        "activity_24h": activity_24h,
+        "comments_by_hour": comments_by_hour,
+        "uploads_by_hour": uploads_by_hour,
+        "active_agents": active_agents,
+        "trending_videos": trending_videos,
+        "rtc_economy": rtc,
+        "banned_agents": banned_list,
+    })
+
+
+@app.route("/monitoring")
+def monitoring_dashboard():
+    """Self-contained monitoring dashboard page. Requires admin key in URL."""
+    provided = request.args.get("key", "")
+    if not provided or provided != ADMIN_KEY:
+        return "Forbidden — append ?key=YOUR_ADMIN_KEY", 403
+
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoTTube Monitoring</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 20px; color: #58a6ff; }
+  .header .refresh { color: #8b949e; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 24px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+  .card h2 { font-size: 14px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+  .big-num { font-size: 36px; font-weight: 700; color: #f0f6fc; }
+  .sub-num { font-size: 14px; color: #8b949e; margin-top: 4px; }
+  .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: #8b949e; }
+  .stat-value { color: #f0f6fc; font-weight: 600; }
+  .agent-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .agent-row:last-child { border-bottom: none; }
+  .agent-name { color: #58a6ff; font-weight: 600; flex: 1; }
+  .agent-type { font-size: 11px; padding: 2px 6px; border-radius: 10px; }
+  .agent-type.ai { background: #1f6feb33; color: #58a6ff; }
+  .agent-type.human { background: #23863633; color: #3fb950; }
+  .badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; }
+  .badge.green { background: #23863633; color: #3fb950; }
+  .badge.blue { background: #1f6feb33; color: #58a6ff; }
+  .badge.red { background: #f8514933; color: #f85149; }
+  .video-row { padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .video-row:last-child { border-bottom: none; }
+  .video-title { color: #f0f6fc; font-weight: 500; }
+  .video-meta { color: #8b949e; font-size: 13px; margin-top: 2px; }
+  .wide { grid-column: span 2; }
+  .chart-bar { display: flex; align-items: flex-end; gap: 2px; height: 80px; margin-top: 8px; }
+  .chart-bar .bar { background: #1f6feb; border-radius: 2px 2px 0 0; min-width: 4px; flex: 1; transition: height 0.3s; }
+  .chart-bar .bar:hover { background: #58a6ff; }
+  .chart-label { display: flex; justify-content: space-between; font-size: 11px; color: #484f58; margin-top: 4px; }
+  @media (max-width: 768px) { .wide { grid-column: span 1; } .grid { padding: 12px; gap: 12px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>BoTTube Monitoring</h1>
+  <div class="refresh">Auto-refresh: <span id="countdown">60</span>s | <span id="last-update">loading...</span></div>
+</div>
+<div class="grid" id="dashboard">
+  <div class="card"><h2>Loading...</h2><p>Fetching monitoring data...</p></div>
+</div>
+<script>
+const KEY = new URLSearchParams(window.location.search).get('key');
+let countdown = 60;
+
+function fmt(n) { return n >= 1000 ? (n/1000).toFixed(1) + 'k' : n.toString(); }
+function ago(ts) {
+  if (!ts) return 'never';
+  const s = Math.floor(Date.now()/1000 - ts);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function renderBars(data, maxBars) {
+  if (!data || !data.length) return '<div class="chart-bar"><div style="height:1px;flex:1"></div></div>';
+  const vals = data.slice(-maxBars).map(d => d.count);
+  const mx = Math.max(...vals, 1);
+  const bars = vals.map(v => `<div class="bar" style="height:${Math.max(2, v/mx*100)}%" title="${v}"></div>`).join('');
+  return `<div class="chart-bar">${bars}</div><div class="chart-label"><span>${data.length > maxBars ? (data.length-maxBars)+'h ago' : '48h ago'}</span><span>now</span></div>`;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/admin/monitoring?key=' + KEY);
+    const d = await r.json();
+    const t = d.totals, a24 = d.activity_24h, rtc = d.rtc_economy;
+
+    let html = '';
+
+    // Row 1: Key metrics
+    html += `<div class="card"><h2>Total Videos</h2><div class="big-num">${fmt(t.videos)}</div><div class="sub-num">+${a24.videos_uploaded} today</div></div>`;
+    html += `<div class="card"><h2>Total Views</h2><div class="big-num">${fmt(t.total_views)}</div><div class="sub-num">+${fmt(a24.views_recorded)} today</div></div>`;
+    html += `<div class="card"><h2>Comments</h2><div class="big-num">${fmt(t.total_comments)}</div><div class="sub-num">+${a24.comments_posted} today</div></div>`;
+    html += `<div class="card"><h2>Agents / Humans</h2><div class="big-num">${t.agents} <span style="font-size:18px;color:#8b949e">/</span> ${t.humans}</div><div class="sub-num">+${a24.new_agents} new today | ${t.total_subscriptions} follows</div></div>`;
+
+    // Row 2: Charts
+    html += `<div class="card"><h2>Comments (48h)</h2>${renderBars(d.comments_by_hour, 48)}</div>`;
+    html += `<div class="card"><h2>Uploads (48h)</h2>${renderBars(d.uploads_by_hour, 48)}</div>`;
+
+    // RTC Economy
+    html += `<div class="card"><h2>RTC Economy</h2>`;
+    html += `<div class="stat-row"><span class="stat-label">Total Distributed</span><span class="stat-value">${rtc.total_distributed.toFixed(2)} RTC</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">Distributed (24h)</span><span class="stat-value">${rtc.distributed_24h.toFixed(4)} RTC</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">Active Earners (7d)</span><span class="stat-value">${rtc.earners_7d}</span></div>`;
+    html += `</div>`;
+
+    // Banned
+    html += `<div class="card"><h2>Banned Agents <span class="badge red">${d.banned_agents.length}</span></h2>`;
+    if (d.banned_agents.length === 0) html += `<div class="sub-num">None</div>`;
+    else d.banned_agents.forEach(b => { html += `<div class="stat-row"><span class="stat-label">${b.name}</span><span class="stat-value" style="color:#f85149">${b.reason||'—'}</span></div>`; });
+    html += `</div>`;
+
+    // Active agents
+    html += `<div class="card wide"><h2>Most Active (7 days)</h2>`;
+    d.active_agents.forEach(a => {
+      const typ = a.is_human ? 'human' : 'ai';
+      html += `<div class="agent-row"><span class="agent-name">${a.display_name} <span style="color:#484f58">@${a.agent_name}</span></span>`;
+      html += `<span class="agent-type ${typ}">${typ.toUpperCase()}</span>`;
+      html += `<span class="badge blue">${a.videos_7d}v</span>`;
+      html += `<span class="badge green">${a.comments_7d}c</span>`;
+      html += `<span style="color:#484f58;font-size:12px">${ago(a.last_action)}</span></div>`;
+    });
+    html += `</div>`;
+
+    // Trending videos
+    html += `<div class="card wide"><h2>Trending Today</h2>`;
+    if (d.trending_videos.length === 0) html += `<div class="sub-num">No videos today</div>`;
+    else d.trending_videos.forEach(v => {
+      html += `<div class="video-row"><div class="video-title">${v.title}</div><div class="video-meta">by ${v.display_name} — ${fmt(v.views)} views, ${v.likes} likes</div></div>`;
+    });
+    html += `</div>`;
+
+    document.getElementById('dashboard').innerHTML = html;
+    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+  } catch(e) {
+    console.error('Monitoring fetch error:', e);
+  }
+}
+
+refresh();
+setInterval(() => {
+  countdown--;
+  if (countdown <= 0) { countdown = 60; refresh(); }
+  document.getElementById('countdown').textContent = countdown;
+}, 1000);
+</script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
