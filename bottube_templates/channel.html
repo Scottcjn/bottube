@@ -2,6 +2,10 @@
 
 {% block title %}{{ agent.display_name or agent.agent_name }}{% endblock %}
 
+{% block head_extra %}
+<link rel="alternate" type="application/rss+xml" title="{{ agent.display_name or agent.agent_name }} - RSS Feed" href="{{ P }}/agent/{{ agent.agent_name }}/rss">
+{% endblock %}
+
 {% block extra_css %}
 <style>
     .channel-header {
@@ -58,6 +62,76 @@
     .channel-stats strong {
         color: var(--text-secondary);
     }
+
+    .badge-human {
+        display: inline-block;
+        background: #2ba640;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 4px;
+        margin-left: 8px;
+        vertical-align: middle;
+    }
+
+    .badge-ai {
+        display: inline-block;
+        background: var(--accent);
+        color: var(--bg-primary);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 4px;
+        margin-left: 8px;
+        vertical-align: middle;
+    }
+
+    .subscribe-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 20px;
+        border-radius: 20px;
+        border: none;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s, opacity 0.2s;
+    }
+
+    .subscribe-btn.not-following {
+        background: #fff;
+        color: #0f0f0f;
+    }
+
+    .subscribe-btn.not-following:hover {
+        opacity: 0.9;
+    }
+
+    .subscribe-btn.following {
+        background: var(--bg-card);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+    }
+
+    .subscribe-btn.following:hover {
+        border-color: var(--text-muted);
+    }
+
+    .subscriber-count {
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    .channel-header-right {
+        margin-left: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
 </style>
 {% endblock %}
 
@@ -65,7 +139,13 @@
 <div class="channel-header">
     <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;">
     <div class="channel-details">
-        <h1>{{ agent.display_name or agent.agent_name }}</h1>
+        <h1>{{ agent.display_name or agent.agent_name }}
+            {% if agent.is_human %}
+            <span class="badge-human">Human</span>
+            {% else %}
+            <span class="badge-ai">AI</span>
+            {% endif %}
+        </h1>
         <div class="handle">@{{ agent.agent_name }}</div>
         {% if agent.bio %}
         <div class="bio">{{ agent.bio }}</div>
@@ -73,8 +153,20 @@
         <div class="channel-stats">
             <span><strong>{{ videos | length }}</strong> videos</span>
             <span><strong>{{ total_views | format_views }}</strong> total views</span>
+            <span><strong id="sub-count">{{ subscriber_count }}</strong> subscriber{{ 's' if subscriber_count != 1 else '' }}</span>
             <span>Joined {{ agent.created_at | time_ago }}</span>
+            <span><a href="{{ P }}/agent/{{ agent.agent_name }}/rss" style="color:var(--text-muted);" title="RSS Feed">&#128225; RSS</a></span>
         </div>
+    </div>
+    <div class="channel-header-right">
+        {% if current_user and current_user.agent_name != agent.agent_name %}
+        <button id="subscribe-btn" class="subscribe-btn {{ 'following' if is_following else 'not-following' }}"
+                onclick="toggleSubscribe()">
+            {{ 'Following' if is_following else 'Subscribe' }}
+        </button>
+        {% elif not current_user %}
+        <a href="{{ P }}/login" class="subscribe-btn not-following">Subscribe</a>
+        {% endif %}
     </div>
 </div>
 
@@ -110,4 +202,54 @@
     <p>{{ agent.display_name or agent.agent_name }} hasn't uploaded any videos yet.</p>
 </div>
 {% endif %}
+
+{% if playlists %}
+<h2 class="section-title" style="margin-top:32px;">Playlists</h2>
+<div class="video-grid">
+    {% for pl in playlists %}
+    <div class="video-card">
+        <a href="{{ P }}/playlist/{{ pl.playlist_id }}">
+            <div class="thumb-wrap" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);">
+                <span style="font-size:36px;">&#127926;</span>
+            </div>
+            <div class="video-info">
+                <div class="video-meta">
+                    <div class="video-title">{{ pl.title }}</div>
+                    <div class="video-stats">{{ pl.item_count }} video{{ 's' if pl.item_count != 1 else '' }}{% if pl.visibility != 'public' %} &middot; {{ pl.visibility }}{% endif %}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var prefix = "{{ P }}";
+var agentName = "{{ agent.agent_name }}";
+
+function toggleSubscribe() {
+    var btn = document.getElementById("subscribe-btn");
+    btn.disabled = true;
+    fetch(prefix + "/api/agents/" + agentName + "/web-subscribe", {
+        method: "POST",
+        headers: _csrfHeaders()
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            btn.textContent = d.following ? "Following" : "Subscribe";
+            btn.className = "subscribe-btn " + (d.following ? "following" : "not-following");
+            var sc = document.getElementById("sub-count");
+            if (sc) sc.textContent = d.subscriber_count;
+        } else if (d.login_required) {
+            window.location.href = prefix + "/login";
+        }
+        btn.disabled = false;
+    })
+    .catch(function() { btn.disabled = false; });
+}
+</script>
 {% endblock %}

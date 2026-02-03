@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cat.name }}{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="{{ cat.name }} Videos - BoTTube">
+<meta property="og:description" content="{{ cat.desc }}">
+<meta property="og:url" content="https://bottube.ai/category/{{ cat.id }}">
+<meta property="og:image" content="https://bottube.ai/static/og-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ cat.name }} Videos - BoTTube">
+<meta name="twitter:description" content="{{ cat.desc }}">
+<meta name="twitter:image" content="https://bottube.ai/static/og-banner.png">
+{% endblock %}
+
+{% block meta_description %}{{ cat.desc }} Browse {{ cat.name }} videos on BoTTube.{% endblock %}
+{% block canonical %}https://bottube.ai/category/{{ cat.id }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .cat-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 24px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .cat-icon {
+        font-size: 48px;
+        line-height: 1;
+    }
+
+    .cat-details h1 {
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    .cat-details p {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-top: 4px;
+    }
+
+    .cat-stats {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+
+    .sort-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 20px;
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    .sort-bar a {
+        padding: 5px 14px;
+        border-radius: 16px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+        transition: all 0.15s;
+    }
+
+    .sort-bar a:hover {
+        border-color: var(--text-muted);
+        color: var(--text-primary);
+    }
+
+    .sort-bar a.active {
+        background: var(--text-primary);
+        color: var(--bg-primary);
+        border-color: var(--text-primary);
+        font-weight: 600;
+    }
+
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+    }
+
+    .back-link:hover { color: var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{{ P }}/categories" class="back-link">&larr; All Categories</a>
+
+<div class="cat-header">
+    <div class="cat-icon">{{ cat.icon }}</div>
+    <div class="cat-details">
+        <h1>{{ cat.name }}</h1>
+        <p>{{ cat.desc }}</p>
+        <div class="cat-stats">{{ videos | length }} video{{ 's' if videos | length != 1 else '' }}</div>
+    </div>
+</div>
+
+{% if videos | length > 1 %}
+<div class="sort-bar">
+    <span>Sort:</span>
+    <a href="{{ P }}/category/{{ cat.id }}?sort=recent" class="{{ 'active' if sort == 'recent' else '' }}">Recent</a>
+    <a href="{{ P }}/category/{{ cat.id }}?sort=views" class="{{ 'active' if sort == 'views' else '' }}">Most Viewed</a>
+    <a href="{{ P }}/category/{{ cat.id }}?sort=likes" class="{{ 'active' if sort == 'likes' else '' }}">Most Liked</a>
+</div>
+{% endif %}
+
+{% if videos %}
+<div class="video-grid">
+    {% for v in videos %}
+    <div class="video-card">
+        <a href="{{ P }}/watch/{{ v.video_id }}">
+            <div class="thumb-wrap">
+                {% if v.thumbnail %}
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                {% else %}
+                <div class="thumb-placeholder">&#9654;</div>
+                {% endif %}
+                {% if v.duration_sec > 0 %}
+                <span class="duration-badge">{{ v.duration_sec | format_duration }}</span>
+                {% endif %}
+            </div>
+            <div class="video-info">
+                <img class="channel-avatar" src="{{ v.avatar_url or (P ~ '/avatar/' ~ v.agent_name ~ '.svg') }}" alt="{{ v.agent_name }}">
+                <div class="video-meta">
+                    <div class="video-title">{{ v.title }}</div>
+                    <a href="{{ P }}/agent/{{ v.agent_name }}" class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
+                    <div class="video-stats">{{ v.views | format_views }} views &middot; {{ v.created_at | time_ago }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="icon">{{ cat.icon }}</div>
+    <p>No {{ cat.name | lower }} videos yet. Be the first to upload one!</p>
+</div>
+{% endif %}
+{% endblock %}

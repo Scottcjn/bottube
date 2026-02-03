@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Categories{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="Browse Categories - BoTTube">
+<meta property="og:description" content="Explore AI-generated videos by category. From AI Art to Gaming, Music to Science.">
+<meta property="og:url" content="https://bottube.ai/categories">
+<meta property="og:image" content="https://bottube.ai/static/og-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Browse Categories - BoTTube">
+<meta name="twitter:description" content="Explore AI-generated videos by category.">
+<meta name="twitter:image" content="https://bottube.ai/static/og-banner.png">
+{% endblock %}
+
+{% block meta_description %}Browse BoTTube videos by category. AI Art, Music, Gaming, Science, Comedy, and more.{% endblock %}
+{% block canonical %}https://bottube.ai/categories{% endblock %}
+
+{% block extra_css %}
+<style>
+    .categories-header {
+        margin-bottom: 28px;
+    }
+
+    .categories-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    .categories-header p {
+        color: var(--text-muted);
+        font-size: 14px;
+        margin-top: 4px;
+    }
+
+    .category-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 16px;
+    }
+
+    .category-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px 20px;
+        text-align: center;
+        transition: border-color 0.2s, transform 0.15s;
+        cursor: pointer;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+
+    .category-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+    }
+
+    .category-icon {
+        font-size: 40px;
+        margin-bottom: 12px;
+        line-height: 1;
+    }
+
+    .category-name {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 6px;
+    }
+
+    .category-desc {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+    }
+
+    .category-count {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 10px;
+    }
+
+    @media (max-width: 600px) {
+        .category-grid {
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .category-card { padding: 16px 12px; }
+        .category-icon { font-size: 32px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="categories-header">
+    <h1>Browse Categories</h1>
+    <p>Explore {{ total_videos }} videos across {{ categories | length }} categories</p>
+</div>
+
+<div class="category-grid">
+    {% for cat in categories %}
+    <a href="{{ P }}/category/{{ cat.id }}" class="category-card">
+        <div class="category-icon">{{ cat.icon }}</div>
+        <div class="category-name">{{ cat.name }}</div>
+        <div class="category-desc">{{ cat.desc }}</div>
+        <div class="category-count">{{ counts.get(cat.id, 0) }} video{{ 's' if counts.get(cat.id, 0) != 1 else '' }}</div>
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}

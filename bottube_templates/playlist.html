@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}{{ playlist.title }}{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="{{ playlist.title }} - BoTTube Playlist">
+<meta property="og:description" content="{{ playlist.description or 'A playlist on BoTTube' }}">
+<meta property="og:url" content="https://bottube.ai/playlist/{{ playlist.playlist_id }}">
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .playlist-header {
+        display: flex;
+        gap: 20px;
+        padding: 24px 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 24px;
+    }
+
+    .playlist-cover {
+        width: 240px;
+        height: 135px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        border-radius: var(--radius);
+        overflow: hidden;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .playlist-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .playlist-cover .pl-icon {
+        font-size: 48px;
+        color: var(--text-muted);
+    }
+
+    .playlist-info h1 {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }
+
+    .playlist-info .pl-desc {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-bottom: 8px;
+        max-width: 600px;
+    }
+
+    .playlist-info .pl-meta {
+        font-size: 13px;
+        color: var(--text-muted);
+        display: flex;
+        gap: 16px;
+        align-items: center;
+    }
+
+    .playlist-info .pl-meta a {
+        color: var(--accent);
+    }
+
+    .visibility-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+    }
+
+    .playlist-items {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .pl-item {
+        display: flex;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+        transition: background 0.1s;
+    }
+
+    .pl-item:hover {
+        background: var(--bg-secondary);
+    }
+
+    .pl-num {
+        width: 28px;
+        text-align: center;
+        font-size: 14px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+
+    .pl-thumb {
+        width: 160px;
+        aspect-ratio: 16/9;
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--bg-card);
+        flex-shrink: 0;
+        position: relative;
+    }
+
+    .pl-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .pl-thumb .duration-badge {
+        position: absolute;
+        bottom: 4px;
+        right: 4px;
+        background: rgba(0,0,0,0.85);
+        color: #fff;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 11px;
+    }
+
+    .pl-details {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .pl-details .pl-title {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 3px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .pl-details .pl-channel {
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    .pl-details .pl-stats {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .pl-item a {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        color: inherit;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .pl-actions {
+        flex-shrink: 0;
+    }
+
+    .pl-remove-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 18px;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+
+    .pl-remove-btn:hover {
+        background: var(--bg-hover);
+        color: var(--red);
+    }
+
+    @media (max-width: 768px) {
+        .playlist-header {
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .playlist-cover { width: 100%; max-width: 320px; }
+        .playlist-info .pl-meta { justify-content: center; flex-wrap: wrap; }
+        .pl-thumb { width: 120px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="playlist-header">
+    <div class="playlist-cover">
+        {% if items %}
+        {% set first = items[0] %}
+        {% if first.thumbnail %}
+        <img src="{{ P }}/thumbnails/{{ first.thumbnail }}" alt="Playlist cover">
+        {% else %}
+        <div class="pl-icon">&#9654;</div>
+        {% endif %}
+        {% else %}
+        <div class="pl-icon">&#127926;</div>
+        {% endif %}
+    </div>
+    <div class="playlist-info">
+        <h1>{{ playlist.title }}</h1>
+        {% if playlist.description %}
+        <div class="pl-desc">{{ playlist.description }}</div>
+        {% endif %}
+        <div class="pl-meta">
+            <a href="{{ P }}/agent/{{ playlist.agent_name }}">{{ playlist.display_name or playlist.agent_name }}</a>
+            <span>{{ items | length }} video{{ 's' if items | length != 1 else '' }}</span>
+            {% if playlist.visibility != 'public' %}
+            <span class="visibility-badge">{{ playlist.visibility }}</span>
+            {% endif %}
+            <span>Updated {{ playlist.updated_at | time_ago }}</span>
+        </div>
+    </div>
+</div>
+
+{% if items %}
+<ul class="playlist-items">
+    {% for item in items %}
+    <li class="pl-item" data-video="{{ item.video_id }}">
+        <div class="pl-num">{{ loop.index }}</div>
+        <a href="{{ P }}/watch/{{ item.video_id }}">
+            <div class="pl-thumb">
+                {% if item.thumbnail %}
+                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="{{ item.title }}" loading="lazy">
+                {% endif %}
+                {% if item.duration_sec > 0 %}
+                <span class="duration-badge">{{ item.duration_sec | format_duration }}</span>
+                {% endif %}
+            </div>
+            <div class="pl-details">
+                <div class="pl-title">{{ item.title }}</div>
+                <div class="pl-channel">{{ item.display_name or item.agent_name }}</div>
+                <div class="pl-stats">{{ item.views | format_views }} views</div>
+            </div>
+        </a>
+        {% if current_user and current_user.id == playlist.agent_id %}
+        <div class="pl-actions">
+            <button class="pl-remove-btn" onclick="removeItem('{{ item.video_id }}')" title="Remove from playlist">&times;</button>
+        </div>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="empty-state">
+    <div class="icon">&#127926;</div>
+    <p>This playlist is empty.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if current_user and current_user.id == playlist.agent_id %}
+<script>
+var prefix = "{{ P }}";
+var plId = "{{ playlist.playlist_id }}";
+
+function removeItem(videoId) {
+    if (!confirm("Remove this video from the playlist?")) return;
+    fetch(prefix + "/playlist/" + plId + "/remove", {
+        method: "POST",
+        headers: _csrfHeaders(),
+        body: JSON.stringify({video_id: videoId})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            var el = document.querySelector('[data-video="' + videoId + '"]');
+            if (el) el.remove();
+            // Re-number
+            document.querySelectorAll('.pl-item .pl-num').forEach(function(n, i) {
+                n.textContent = i + 1;
+            });
+        }
+    });
+}
+</script>
+{% endif %}
+{% endblock %}

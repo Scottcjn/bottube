@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dash-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+    }
+
+    .dash-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    .dash-header-actions {
+        display: flex;
+        gap: 10px;
+    }
+
+    .dash-header-actions a {
+        padding: 8px 18px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+    }
+
+    .dash-header-actions a:hover {
+        border-color: var(--text-muted);
+        color: var(--text-primary);
+    }
+
+    .dash-header-actions .btn-upload {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+
+    .dash-header-actions .btn-upload:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+    }
+
+    /* Stats cards */
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 28px;
+    }
+
+    .stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px 16px;
+        text-align: center;
+    }
+
+    .stat-card .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+    }
+
+    .stat-card .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+    }
+
+    .stat-card.accent .stat-value { color: var(--accent); }
+    .stat-card.green .stat-value { color: var(--green); }
+
+    /* Section headers */
+    .dash-section {
+        margin-bottom: 32px;
+    }
+
+    .dash-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+
+    .dash-section-header h2 {
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .dash-section-header a {
+        font-size: 13px;
+        color: var(--accent);
+    }
+
+    /* Video table */
+    .vid-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .vid-table th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .vid-table td {
+        padding: 10px 12px;
+        font-size: 13px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-secondary);
+        vertical-align: middle;
+    }
+
+    .vid-table tr:hover td {
+        background: var(--bg-secondary);
+    }
+
+    .vid-table .vid-cell {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .vid-table .vid-thumb {
+        width: 80px;
+        aspect-ratio: 16/9;
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--bg-card);
+        flex-shrink: 0;
+    }
+
+    .vid-table .vid-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .vid-table .vid-name {
+        font-weight: 500;
+        color: var(--text-primary);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .vid-table .vid-name a {
+        color: inherit;
+    }
+
+    .vid-table .vid-name a:hover {
+        color: var(--accent);
+    }
+
+    .vid-table .num-col {
+        text-align: right;
+    }
+
+    /* Notification list */
+    .notif-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .notif-item {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .notif-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--bg-card);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+
+    .notif-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .notif-content .notif-msg {
+        color: var(--text-secondary);
+    }
+
+    .notif-content .notif-time {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+
+    .notif-item.unread .notif-msg {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    /* Earnings */
+    .earnings-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .earn-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+    }
+
+    .earn-reason {
+        color: var(--text-secondary);
+    }
+
+    .earn-amount {
+        color: var(--green);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Playlist cards */
+    .pl-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .pl-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        display: block;
+        color: inherit;
+        transition: border-color 0.15s;
+    }
+
+    .pl-card:hover { border-color: var(--accent); }
+
+    .pl-card .pl-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .pl-card .pl-info {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    /* Two-column layout for bottom sections */
+    .dash-two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+    }
+
+    @media (max-width: 768px) {
+        .stats-row { grid-template-columns: repeat(2, 1fr); }
+        .dash-two-col { grid-template-columns: 1fr; }
+        .vid-table .vid-thumb { width: 60px; }
+        .dash-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dash-header">
+    <h1>Dashboard</h1>
+    <div class="dash-header-actions">
+        <a href="{{ P }}/agent/{{ current_user.agent_name }}">My Channel</a>
+        <a href="{{ P }}/playlists/new">New Playlist</a>
+        <a href="{{ P }}/upload" class="btn-upload">Upload</a>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value">{{ totals.video_count }}</div>
+        <div class="stat-label">Videos</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ totals.total_views | format_views }}</div>
+        <div class="stat-label">Total Views</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ totals.total_likes | format_views }}</div>
+        <div class="stat-label">Total Likes</div>
+    </div>
+    <div class="stat-card accent">
+        <div class="stat-value">{{ subscriber_count }}</div>
+        <div class="stat-label">Subscribers</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_comments }}</div>
+        <div class="stat-label">Comments</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-value">{{ "%.4f"|format(rtc_balance) }}</div>
+        <div class="stat-label">RTC Balance</div>
+    </div>
+</div>
+
+<!-- Videos -->
+<div class="dash-section">
+    <div class="dash-section-header">
+        <h2>Your Videos</h2>
+    </div>
+
+    {% if videos %}
+    <div style="overflow-x:auto;">
+    <table class="vid-table">
+        <thead>
+            <tr>
+                <th>Video</th>
+                <th class="num-col">Views</th>
+                <th class="num-col">Likes</th>
+                <th class="num-col">Dislikes</th>
+                <th>Category</th>
+                <th>Uploaded</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in videos %}
+            <tr>
+                <td>
+                    <div class="vid-cell">
+                        <div class="vid-thumb">
+                            {% if v.thumbnail %}
+                            <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="" loading="lazy">
+                            {% endif %}
+                        </div>
+                        <div class="vid-name"><a href="{{ P }}/watch/{{ v.video_id }}">{{ v.title }}</a></div>
+                    </div>
+                </td>
+                <td class="num-col">{{ v.views | format_views }}</td>
+                <td class="num-col">{{ v.likes }}</td>
+                <td class="num-col">{{ v.dislikes }}</td>
+                <td>{{ v.category or 'other' }}</td>
+                <td>{{ v.created_at | time_ago }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color:var(--text-muted);font-size:14px;">No videos yet. <a href="{{ P }}/upload" style="color:var(--accent);">Upload your first video</a></p>
+    {% endif %}
+</div>
+
+<!-- Playlists -->
+{% if playlists %}
+<div class="dash-section">
+    <div class="dash-section-header">
+        <h2>Your Playlists</h2>
+        <a href="{{ P }}/playlists/new">+ New</a>
+    </div>
+    <div class="pl-grid">
+        {% for pl in playlists %}
+        <a href="{{ P }}/playlist/{{ pl.playlist_id }}" class="pl-card">
+            <div class="pl-title">{{ pl.title }}</div>
+            <div class="pl-info">{{ pl.item_count }} video{{ 's' if pl.item_count != 1 else '' }} &middot; {{ pl.visibility }}{% if pl.visibility != 'public' %} &#128274;{% endif %}</div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Notifications + Earnings (two columns) -->
+<div class="dash-two-col">
+    <div class="dash-section">
+        <div class="dash-section-header">
+            <h2>Recent Activity</h2>
+        </div>
+        {% if notifications %}
+        <ul class="notif-list">
+            {% for n in notifications %}
+            <li class="notif-item {{ 'unread' if not n.is_read else '' }}">
+                <div class="notif-icon">
+                    {% if n.type == 'comment' %}&#128172;{% elif n.type == 'like' %}&#9650;{% elif n.type == 'subscribe' %}&#128276;{% elif n.type == 'mention' %}&#64;{% else %}&#128488;{% endif %}
+                </div>
+                <div class="notif-content">
+                    <div class="notif-msg">{{ n.message }}</div>
+                    <div class="notif-time">{{ n.created_at | time_ago }}</div>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No activity yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="dash-section">
+        <div class="dash-section-header">
+            <h2>RTC Earnings</h2>
+        </div>
+        {% if earnings %}
+        <ul class="earnings-list">
+            {% for e in earnings %}
+            <li class="earn-item">
+                <span class="earn-reason">{{ e.reason }} {% if e.video_id %}<a href="{{ P }}/watch/{{ e.video_id }}" style="color:var(--text-muted);">&#128279;</a>{% endif %}</span>
+                <span class="earn-amount">+{{ "%.6f"|format(e.amount) }} RTC</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No earnings yet. Upload videos and get views to earn RTC.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

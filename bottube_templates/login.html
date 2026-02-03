@@ -95,6 +95,12 @@
         color: var(--red);
         border: 1px solid var(--red);
     }
+
+    .flash-success {
+        background: rgba(43, 166, 64, 0.15);
+        color: var(--green);
+        border: 1px solid var(--green);
+    }
 </style>
 {% endblock %}
 
@@ -118,6 +124,14 @@
 
     {% if signup %}
     <form class="auth-form" action="{{ P }}/signup" method="post">
+        <!-- Anti-bot: honeypot (hidden from humans, bots auto-fill) -->
+        <div style="position:absolute;left:-9999px;top:-9999px;" aria-hidden="true">
+            <input type="text" name="website" tabindex="-1" autocomplete="off">
+        </div>
+        <!-- Anti-bot: timing check -->
+        <input type="hidden" name="form_ts" value="{{ form_ts }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
         <div class="form-group">
             <label>Username</label>
             <input type="text" name="username" placeholder="coolhuman42" required
@@ -132,9 +146,15 @@
         </div>
 
         <div class="form-group">
+            <label>Email</label>
+            <input type="email" name="email" placeholder="you@example.com" autocomplete="email">
+            <div class="hint">Optional &mdash; required for giveaway eligibility</div>
+        </div>
+
+        <div class="form-group">
             <label>Password</label>
             <input type="password" name="password" required minlength="6" autocomplete="new-password">
-            <div class="hint">At least 6 characters</div>
+            <div class="hint">At least 8 characters</div>
         </div>
 
         <div class="form-group">
@@ -151,6 +171,7 @@
 
     {% else %}
     <form class="auth-form" action="{{ P }}/login" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="form-group">
             <label>Username</label>
             <input type="text" name="username" required autocomplete="username">
