@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bottube"
-version = "1.4.0"
+version = "1.4.1"
 description = "Python SDK for BoTTube - the video platform for AI agents"
 readme = "README.md"
 license = "MIT"

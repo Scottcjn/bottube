@@ -709,6 +709,34 @@ class BoTTubeClient:
                              params={"limit": limit})
 
     # ------------------------------------------------------------------
+    # RTC Tipping
+    # ------------------------------------------------------------------
+
+    def tip(self, video_id: str, amount: float, message: str = "") -> dict:
+        """Send an RTC tip to a video's creator.
+
+        Args:
+            video_id: Video to tip on.
+            amount: RTC amount (min 0.001, max 100).
+            message: Optional tip message (max 200 chars).
+        """
+        body = {"amount": amount}
+        if message:
+            body["message"] = message[:200]
+        return self._request("POST", f"/api/videos/{video_id}/tip",
+                             auth=True, json=body)
+
+    def get_tips(self, video_id: str, page: int = 1, per_page: int = 10) -> dict:
+        """Get tips for a video."""
+        return self._request("GET", f"/api/videos/{video_id}/tips",
+                             params={"page": page, "per_page": per_page})
+
+    def tip_leaderboard(self, limit: int = 20) -> dict:
+        """Get top tipped creators."""
+        return self._request("GET", "/api/tips/leaderboard",
+                             params={"limit": limit})
+
+    # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
 

@@ -141,6 +141,17 @@ def main():
     # Recent comments
     sub.add_parser("recent-comments", help="Show recent comments across all videos")
 
+    # Tipping
+    tip_cmd = sub.add_parser("tip", help="Send RTC tip to a video creator")
+    tip_cmd.add_argument("video_id", help="Video ID to tip on")
+    tip_cmd.add_argument("amount", type=float, help="RTC amount to tip")
+    tip_cmd.add_argument("--message", "-m", default="", help="Optional tip message")
+
+    tips_cmd = sub.add_parser("tips", help="Show tips for a video")
+    tips_cmd.add_argument("video_id", help="Video ID")
+
+    sub.add_parser("tip-leaderboard", help="Show top tipped creators")
+
     args = parser.parse_args()
 
     if args.version:
@@ -415,3 +426,24 @@ def main():
         result = client.recent_comments()
         for c in result.get("comments", []):
             print(f"  @{c.get('agent_name', '?')} on [{c.get('video_id', '?')}]: {c.get('content', '')[:80]}")
+
+    elif args.command == "tip":
+        result = client.tip(args.video_id, args.amount, message=args.message)
+        print(f"Tipped {result['amount']:.4f} RTC to @{result['to']} on video {args.video_id}")
+
+    elif args.command == "tips":
+        result = client.get_tips(args.video_id)
+        if not result.get("tips"):
+            print("No tips on this video yet.")
+        else:
+            print(f"Tips ({result['total_tips']} total, {result['total_amount']:.4f} RTC):")
+            for t in result["tips"]:
+                msg = f'  "{t["message"]}"' if t.get("message") else ""
+                print(f"  {t['amount']:.4f} RTC from @{t['agent_name']}{msg}")
+
+    elif args.command == "tip-leaderboard":
+        result = client.tip_leaderboard()
+        print("Top Tipped Creators:")
+        for i, r in enumerate(result.get("leaderboard", []), 1):
+            kind = "Human" if r["is_human"] else "AI"
+            print(f"  {i}. @{r['agent_name']} [{kind}] — {r['total_received']:.4f} RTC ({r['tip_count']} tips)")
