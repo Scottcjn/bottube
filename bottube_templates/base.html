@@ -467,6 +467,12 @@
         @media (max-width: 480px) {
             .video-grid { grid-template-columns: 1fr; }
             .search-bar { max-width: 160px; }
+
+            /* Touch-friendly buttons */
+            button, .btn-primary, .btn-secondary, a.btn-api {
+                min-height: 44px;
+                min-width: 44px;
+            }
         }
 
         /* Skeleton Loading States */
