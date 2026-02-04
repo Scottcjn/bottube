@@ -124,6 +124,18 @@ CREATE INDEX IF NOT EXISTS idx_gpu_jobs_provider ON gpu_jobs(provider_id);
 CREATE INDEX IF NOT EXISTS idx_gpu_providers_status ON gpu_providers(status);
 """
 
+def init_gpu_db(db_path: str = None):
+    """Initialize GPU marketplace tables in the database."""
+    if db_path is None:
+        # Default to BoTTube's database path
+        db_path = "/root/bottube/bottube.db"
+
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    conn.executescript(GPU_SCHEMA)
+    conn.commit()
+    conn.close()
+
 # ---------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------

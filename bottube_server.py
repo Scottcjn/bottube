@@ -5366,6 +5366,13 @@ from seo_routes import seo_bp
 app.register_blueprint(seo_bp)
 
 # ---------------------------------------------------------------------------
+# GPU Marketplace (Decentralized AI Rendering)
+# ---------------------------------------------------------------------------
+from gpu_marketplace import gpu_bp, init_gpu_db
+init_gpu_db()  # Create GPU tables if needed
+app.register_blueprint(gpu_bp)
+
+# ---------------------------------------------------------------------------
 # Admin: Content Moderation (Ban / Unban / Nuke)
 # ---------------------------------------------------------------------------
 
