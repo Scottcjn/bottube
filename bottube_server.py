@@ -733,6 +733,13 @@ def init_db():
     if "dislikes" not in comment_cols:
         conn.execute("ALTER TABLE comments ADD COLUMN dislikes INTEGER DEFAULT 0")
 
+    # Migration: add method and tx_hash to tips if missing
+    tip_cols = {row[1] for row in conn.execute("PRAGMA table_info(tips)").fetchall()}
+    if "method" not in tip_cols:
+        conn.execute("ALTER TABLE tips ADD COLUMN method TEXT DEFAULT 'internal'")
+    if "tx_hash" not in tip_cols:
+        conn.execute("ALTER TABLE tips ADD COLUMN tx_hash TEXT DEFAULT ''")
+
     conn.commit()
     conn.close()
 
@@ -764,7 +771,7 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "")
     )
 
 
-def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "", video_id: str = ""):
+def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "", video_id: str = "", extra_data: dict = None):
     """Create a notification for an agent. Skips if agent_id matches from_agent (no self-notifications)."""
     if from_agent:
         sender = db.execute("SELECT id FROM agents WHERE agent_name = ?", (from_agent,)).fetchone()
@@ -775,13 +782,16 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
         (agent_id, notif_type, message, from_agent, video_id, time.time()),
     )
     # Fire webhooks for this agent
-    fire_webhooks(agent_id, notif_type, {
+    payload = {
         "type": notif_type,
         "message": message,
         "from_agent": from_agent,
         "video_id": video_id,
         "timestamp": time.time(),
-    })
+    }
+    if extra_data:
+        payload.update(extra_data)
+    fire_webhooks(agent_id, notif_type, payload)
 
 
 def fire_webhooks(agent_id: int, event: str, payload: dict):
@@ -3454,7 +3464,7 @@ def web_remove_from_playlist(playlist_id):
 # Webhooks (API only - for bot agents)
 # ---------------------------------------------------------------------------
 
-WEBHOOK_EVENTS = ["comment", "like", "subscribe", "new_video", "mention", "*"]
+WEBHOOK_EVENTS = ["comment", "like", "subscribe", "new_video", "mention", "tip", "*"]
 
 
 @app.route("/api/webhooks", methods=["GET"])
@@ -3787,7 +3797,8 @@ def tip_video(video_id):
     notify(db, video["agent_id"], "tip",
            f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC on "{video["title"]}"'
            + (f': "{message}"' if message else ""),
-           from_agent=g.agent["agent_name"], video_id=video_id)
+           from_agent=g.agent["agent_name"], video_id=video_id,
+           extra_data={"amount": amount, "currency": "RTC"})
 
     db.commit()
     return jsonify({"ok": True, "amount": amount, "video_id": video_id,
@@ -3851,13 +3862,92 @@ def web_tip_video(video_id):
     notify(db, video["agent_id"], "tip",
            f'@{g.user["agent_name"]} tipped {amount:.4f} RTC on "{video["title"]}"'
            + (f': "{message}"' if message else ""),
-           from_agent=g.user["agent_name"], video_id=video_id)
+           from_agent=g.user["agent_name"], video_id=video_id,
+           extra_data={"amount": amount, "currency": "RTC"})
 
     db.commit()
     new_balance = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
     return jsonify({"ok": True, "amount": amount, "video_id": video_id,
                     "to": video["creator_name"], "message": message,
                     "new_balance": round(new_balance["rtc_balance"], 6)})
+
+
+@app.route("/api/videos/<video_id>/tip/onchain", methods=["POST"])
+@require_api_key
+def record_onchain_tip(video_id):
+    """Record a tip that was sent on-chain (verified via transaction)."""
+    data = request.get_json(force=True, silent=True) or {}
+    amount = data.get("amount")
+    tx_hash = data.get("tx_hash")
+    message = str(data.get("message", ""))[:200].strip()
+
+    if not amount or not tx_hash:
+        return jsonify({"error": "amount and tx_hash are required"}), 400
+
+    try:
+        amount = round(float(amount), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+
+    db = get_db()
+    # Check if this tx_hash has already been recorded
+    existing = db.execute("SELECT 1 FROM tips WHERE tx_hash = ?", (tx_hash,)).fetchone()
+    if existing:
+        return jsonify({"error": "Transaction already recorded"}), 409
+
+    video = db.execute(
+        "SELECT v.agent_id, v.title, a.agent_name AS creator_name "
+        "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    # Record tip
+    db.execute(
+        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, method, tx_hash, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 'onchain', ?, ?)",
+        (g.agent["id"], video["agent_id"], video_id, amount, message, tx_hash, time.time()),
+    )
+
+    # Log earnings for recipient
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        (video["agent_id"], amount, "onchain_tip_received", video_id, time.time()),
+    )
+
+    # Notify recipient with Webhook bonus!
+    notify(db, video["agent_id"], "tip",
+           f'@{g.agent["agent_name"]} sent an on-chain tip of {amount:.4f} RTC on "{video["title"]}"',
+           from_agent=g.agent["agent_name"], video_id=video_id,
+           extra_data={"amount": amount, "currency": "RTC", "method": "onchain", "tx_hash": tx_hash})
+
+    db.commit()
+    return jsonify({"ok": True, "amount": amount, "video_id": video_id, "tx_hash": tx_hash})
+
+
+@app.route("/api/rustchain/health")
+def rustchain_health():
+    """Check connectivity to RustChain Node 1."""
+    try:
+        url = "https://50.28.86.131/health"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            return jsonify({"ok": True, "rustchain": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/rustchain/balance/<wallet>")
+def rustchain_balance(wallet):
+    """Get RTC balance for a wallet address from RustChain."""
+    try:
+        url = f"https://50.28.86.131/wallet/balance?miner_id={wallet}"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.route("/api/videos/<video_id>/tips")
@@ -3869,7 +3959,7 @@ def get_video_tips(video_id):
     offset = (page - 1) * per_page
 
     tips = db.execute(
-        """SELECT t.amount, t.message, t.created_at,
+        """SELECT t.amount, t.message, t.created_at, t.method, t.tx_hash,
                   a.agent_name, a.display_name, a.avatar_url
            FROM tips t JOIN agents a ON t.from_agent_id = a.id
            WHERE t.video_id = ?
@@ -3891,6 +3981,8 @@ def get_video_tips(video_id):
                 "avatar_url": t["avatar_url"] or "",
                 "amount": t["amount"],
                 "message": t["message"],
+                "method": t["method"],
+                "tx_hash": t["tx_hash"],
                 "created_at": t["created_at"],
             }
             for t in tips
