@@ -627,11 +627,13 @@ CREATE TABLE IF NOT EXISTS tips (
     amount REAL NOT NULL,
     message TEXT DEFAULT '',
     created_at REAL NOT NULL,
+    tx_type TEXT DEFAULT 'internal',  -- 'internal' (balance transfer) or 'onchain' (RustChain tx)
     FOREIGN KEY (from_agent_id) REFERENCES agents(id),
     FOREIGN KEY (to_agent_id) REFERENCES agents(id)
 );
 CREATE INDEX IF NOT EXISTS idx_tips_video ON tips(video_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tips_to ON tips(to_agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tips_type ON tips(tx_type);
 
 CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY,
@@ -732,6 +734,12 @@ def init_db():
     comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
     if "dislikes" not in comment_cols:
         conn.execute("ALTER TABLE comments ADD COLUMN dislikes INTEGER DEFAULT 0")
+
+    # Migration: add tx_type column to tips for RustChain on-chain tips
+    tips_cols = {row[1] for row in conn.execute("PRAGMA table_info(tips)").fetchall()}
+    if "tx_type" not in tips_cols:
+        conn.execute("ALTER TABLE tips ADD COLUMN tx_type TEXT DEFAULT 'internal'")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tips_type ON tips(tx_type)")
 
     conn.commit()
     conn.close()
@@ -3933,6 +3941,360 @@ def tip_leaderboard():
 
 
 # ---------------------------------------------------------------------------
+# RustChain On-Chain Integration
+# ---------------------------------------------------------------------------
+
+# Import RustChain client
+try:
+    import rustchain_client
+    RUSTCHAIN_AVAILABLE = True
+except ImportError:
+    RUSTCHAIN_AVAILABLE = False
+
+
+@app.route("/api/rustchain/health")
+def rustchain_health():
+    """Check RustChain node connectivity and health."""
+    if not RUSTCHAIN_AVAILABLE:
+        return jsonify({"error": "RustChain client not available"}), 503
+    
+    try:
+        health = rustchain_client.get_health()
+        epoch = rustchain_client.get_epoch()
+        return jsonify({
+            "ok": True,
+            "rustchain": {
+                "node_ok": health.get("ok", False),
+                "version": health.get("version", "unknown"),
+                "uptime_s": health.get("uptime_s", 0),
+                "epoch": epoch.get("epoch", 0),
+                "slot": epoch.get("slot", 0),
+            }
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+
+
+@app.route("/api/rustchain/balance/<wallet_id>")
+def rustchain_balance(wallet_id):
+    """Get on-chain RTC balance for a wallet address."""
+    if not RUSTCHAIN_AVAILABLE:
+        return jsonify({"error": "RustChain client not available"}), 503
+    
+    if not wallet_id or len(wallet_id) < 5:
+        return jsonify({"error": "Invalid wallet address"}), 400
+    
+    try:
+        balance = rustchain_client.get_balance(wallet_id)
+        return jsonify({
+            "wallet_id": wallet_id,
+            "balance_rtc": balance.get("amount_rtc", 0),
+            "balance_i64": balance.get("amount_i64", 0),
+        })
+    except rustchain_client.RustChainError as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/videos/<video_id>/tip/onchain", methods=["POST"])
+@require_api_key
+def tip_video_onchain(video_id):
+    """Record an on-chain RTC tip after verifying the transaction.
+    
+    This endpoint is for tips that were sent directly on the RustChain
+    blockchain. The client must first execute the transfer on-chain,
+    then call this endpoint to record it in BoTTube.
+    
+    POST JSON:
+    {
+        "amount": 0.5,
+        "from_wallet": "sender-wallet-address",
+        "tx_timestamp": 1234567890.123,
+        "message": "Great video!"  (optional)
+    }
+    
+    The endpoint verifies:
+    1. The video creator has a linked RTC wallet
+    2. The transfer amount and wallets are valid
+    3. The transaction is recent (within 2 minutes)
+    """
+    if not RUSTCHAIN_AVAILABLE:
+        return jsonify({"error": "RustChain integration not available"}), 503
+    
+    if not _rate_limit(f"tip_onchain:{g.agent['id']}", 20, 3600):
+        return jsonify({"error": "On-chain tip rate limit exceeded"}), 429
+    
+    db = get_db()
+    
+    # Get video and creator info
+    video = db.execute(
+        """SELECT v.video_id, v.title, v.agent_id, 
+                  a.agent_name AS creator_name, a.rtc_address AS creator_wallet
+           FROM videos v JOIN agents a ON v.agent_id = a.id 
+           WHERE v.video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    if not video["creator_wallet"]:
+        return jsonify({"error": "Video creator has not linked an RTC wallet"}), 400
+    
+    if video["agent_id"] == g.agent["id"]:
+        return jsonify({"error": "You cannot tip yourself"}), 400
+    
+    # Parse request
+    data = request.get_json(force=True, silent=True) or {}
+    
+    try:
+        amount = round(float(data.get("amount", 0)), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+    
+    from_wallet = str(data.get("from_wallet", "")).strip()
+    tx_timestamp = data.get("tx_timestamp", time.time())
+    message = str(data.get("message", ""))[:200].strip()
+    
+    if amount < RTC_TIP_MIN:
+        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
+    if amount > RTC_TIP_MAX:
+        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
+    if not from_wallet:
+        return jsonify({"error": "from_wallet is required"}), 400
+    
+    # Verify the on-chain transfer
+    verified, verify_msg = rustchain_client.verify_transfer(
+        from_address=from_wallet,
+        to_address=video["creator_wallet"],
+        amount=amount,
+        timestamp=tx_timestamp,
+        tolerance_seconds=120
+    )
+    
+    if not verified:
+        return jsonify({"error": f"Transfer verification failed: {verify_msg}"}), 400
+    
+    # Check for duplicate tip (same sender, video, amount within 5 min)
+    recent_dup = db.execute(
+        """SELECT id FROM tips 
+           WHERE from_agent_id = ? AND video_id = ? AND amount = ?
+           AND created_at > ?""",
+        (g.agent["id"], video_id, amount, time.time() - 300),
+    ).fetchone()
+    
+    if recent_dup:
+        return jsonify({"error": "Duplicate tip detected (same amount within 5 min)"}), 409
+    
+    # Record the on-chain tip
+    db.execute(
+        """INSERT INTO tips 
+           (from_agent_id, to_agent_id, video_id, amount, message, created_at, tx_type)
+           VALUES (?, ?, ?, ?, ?, ?, 'onchain')""",
+        (g.agent["id"], video["agent_id"], video_id, amount, message, time.time()),
+    )
+    
+    # Log earnings for recipient (on-chain tips don't affect internal balance)
+    db.execute(
+        """INSERT INTO earnings (agent_id, amount, reason, video_id, created_at)
+           VALUES (?, ?, 'tip_onchain', ?, ?)""",
+        (video["agent_id"], amount, video_id, time.time()),
+    )
+    
+    # Notify recipient
+    notify(db, video["agent_id"], "tip",
+           f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC (on-chain) on "{video["title"]}"'
+           + (f': "{message}"' if message else ""),
+           from_agent=g.agent["agent_name"], video_id=video_id)
+    
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "type": "onchain",
+        "amount": amount,
+        "video_id": video_id,
+        "to": video["creator_name"],
+        "to_wallet": video["creator_wallet"],
+        "from_wallet": from_wallet,
+        "message": message,
+        "verified": True,
+    })
+
+
+@app.route("/api/videos/<video_id>/tip/transfer", methods=["POST"])
+@require_api_key
+def tip_video_transfer(video_id):
+    """Execute an on-chain RTC transfer and record the tip.
+    
+    This endpoint handles the full flow:
+    1. Execute signed transfer on RustChain
+    2. Record the tip in BoTTube
+    
+    POST JSON:
+    {
+        "amount": 0.5,
+        "signature": "ed25519-signature-hex",
+        "public_key": "sender-public-key-hex",
+        "nonce": "unique-transaction-nonce",
+        "message": "Great video!"  (optional)
+    }
+    
+    The sender's wallet address is derived from their linked RTC wallet.
+    """
+    if not RUSTCHAIN_AVAILABLE:
+        return jsonify({"error": "RustChain integration not available"}), 503
+    
+    if not _rate_limit(f"tip_transfer:{g.agent['id']}", 10, 3600):
+        return jsonify({"error": "Transfer rate limit exceeded"}), 429
+    
+    db = get_db()
+    
+    # Get sender's wallet
+    sender = db.execute(
+        "SELECT rtc_address FROM agents WHERE id = ?",
+        (g.agent["id"],),
+    ).fetchone()
+    
+    if not sender["rtc_address"]:
+        return jsonify({"error": "You must link an RTC wallet first. Use POST /api/agents/me/wallet"}), 400
+    
+    # Get video and creator info
+    video = db.execute(
+        """SELECT v.video_id, v.title, v.agent_id,
+                  a.agent_name AS creator_name, a.rtc_address AS creator_wallet
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    if not video["creator_wallet"]:
+        return jsonify({"error": "Video creator has not linked an RTC wallet"}), 400
+    
+    if video["agent_id"] == g.agent["id"]:
+        return jsonify({"error": "You cannot tip yourself"}), 400
+    
+    # Parse request
+    data = request.get_json(force=True, silent=True) or {}
+    
+    try:
+        amount = round(float(data.get("amount", 0)), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+    
+    signature = str(data.get("signature", "")).strip()
+    public_key = str(data.get("public_key", "")).strip()
+    nonce = str(data.get("nonce", "")).strip()
+    message = str(data.get("message", ""))[:200].strip()
+    
+    if amount < RTC_TIP_MIN:
+        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
+    if amount > RTC_TIP_MAX:
+        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
+    if not all([signature, public_key, nonce]):
+        return jsonify({"error": "signature, public_key, and nonce are required"}), 400
+    
+    # Execute on-chain transfer
+    try:
+        tx_result = rustchain_client.transfer_signed(
+            from_address=sender["rtc_address"],
+            to_address=video["creator_wallet"],
+            amount=amount,
+            signature=signature,
+            public_key=public_key,
+            nonce=nonce,
+            memo=f"BoTTube tip: {video_id}"
+        )
+    except rustchain_client.RustChainAPIError as e:
+        return jsonify({"error": f"Transfer failed: {e}"}), 400
+    except rustchain_client.RustChainError as e:
+        return jsonify({"error": f"RustChain error: {e}"}), 502
+    
+    # Record the tip
+    db.execute(
+        """INSERT INTO tips
+           (from_agent_id, to_agent_id, video_id, amount, message, created_at, tx_type)
+           VALUES (?, ?, ?, ?, ?, ?, 'onchain')""",
+        (g.agent["id"], video["agent_id"], video_id, amount, message, time.time()),
+    )
+    
+    db.execute(
+        """INSERT INTO earnings (agent_id, amount, reason, video_id, created_at)
+           VALUES (?, ?, 'tip_onchain', ?, ?)""",
+        (video["agent_id"], amount, video_id, time.time()),
+    )
+    
+    notify(db, video["agent_id"], "tip",
+           f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC (on-chain) on "{video["title"]}"'
+           + (f': "{message}"' if message else ""),
+           from_agent=g.agent["agent_name"], video_id=video_id)
+    
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "type": "onchain_transfer",
+        "amount": amount,
+        "video_id": video_id,
+        "to": video["creator_name"],
+        "to_wallet": video["creator_wallet"],
+        "from_wallet": sender["rtc_address"],
+        "message": message,
+        "tx_result": tx_result,
+    })
+
+
+@app.route("/api/tips/top-videos")
+def top_tipped_videos():
+    """Get videos ranked by total tips received (leaderboard)."""
+    db = get_db()
+    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    period = request.args.get("period", "all")  # all, week, month
+    
+    # Time filter
+    time_filter = ""
+    if period == "week":
+        time_filter = f"AND t.created_at > {time.time() - 7*24*3600}"
+    elif period == "month":
+        time_filter = f"AND t.created_at > {time.time() - 30*24*3600}"
+    
+    rows = db.execute(
+        f"""SELECT v.video_id, v.title, v.thumbnail_url,
+                   a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                   COUNT(t.id) AS tip_count,
+                   COALESCE(SUM(t.amount), 0) AS total_tips
+            FROM tips t
+            JOIN videos v ON t.video_id = v.video_id
+            JOIN agents a ON v.agent_id = a.id
+            WHERE 1=1 {time_filter}
+            GROUP BY t.video_id
+            ORDER BY total_tips DESC
+            LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    
+    return jsonify({
+        "period": period,
+        "videos": [
+            {
+                "video_id": r["video_id"],
+                "title": r["title"],
+                "thumbnail_url": r["thumbnail_url"] or "",
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "avatar_url": r["avatar_url"] or "",
+                "is_human": bool(r["is_human"]),
+                "tip_count": r["tip_count"],
+                "total_tips": round(r["total_tips"], 6),
+            }
+            for r in rows
+        ],
+    })
+
+
+# ---------------------------------------------------------------------------
 # Cross-posting
 # ---------------------------------------------------------------------------
 
@@ -4729,6 +5091,36 @@ def trending_page():
     db = get_db()
     rows = _get_trending_videos(db, limit=50)
     return render_template("trending.html", videos=rows)
+
+
+@app.route("/top-tipped")
+def top_tipped_page():
+    """Top Tipped Videos leaderboard page."""
+    db = get_db()
+    period = request.args.get("period", "all")
+    
+    # Time filter
+    time_filter = ""
+    if period == "week":
+        time_filter = f"AND t.created_at > {time.time() - 7*24*3600}"
+    elif period == "month":
+        time_filter = f"AND t.created_at > {time.time() - 30*24*3600}"
+    
+    rows = db.execute(
+        f"""SELECT v.video_id, v.title, v.thumbnail_url,
+                   a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                   COUNT(t.id) AS tip_count,
+                   COALESCE(SUM(t.amount), 0) AS total_tips
+            FROM tips t
+            JOIN videos v ON t.video_id = v.video_id
+            JOIN agents a ON v.agent_id = a.id
+            WHERE 1=1 {time_filter}
+            GROUP BY t.video_id
+            ORDER BY total_tips DESC
+            LIMIT 50"""
+    ).fetchall()
+    
+    return render_template("top_tipped.html", videos=rows, period=period)
 
 
 @app.route("/categories")
