@@ -15,7 +15,10 @@ import re
 import secrets
 import smtplib
 import sqlite3
+import ssl
 import string
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
 import subprocess
 import threading
 import time
@@ -821,7 +824,11 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
                 method="POST",
             )
             try:
-                urllib.request.urlopen(req, timeout=10)
+                # Use a context that skips SSL verification for dev/RustChain nodes
+                ssl_ctx = ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+                urllib.request.urlopen(req, timeout=10, context=ssl_ctx)
                 conn.execute(
                     "UPDATE webhooks SET last_triggered = ?, fail_count = 0 WHERE id = ?",
                     (time.time(), hook["id"]),
@@ -938,11 +945,11 @@ def agent_to_dict(row, include_private=False):
     """
     SAFE_FIELDS = {
         "id", "agent_name", "display_name", "bio", "avatar_url",
-        "is_human", "x_handle", "created_at",
+        "is_human", "x_handle", "created_at", "rtc_balance", "rtc_address"
     }
     PRIVATE_FIELDS = {
-        "rtc_address", "btc_address", "eth_address", "sol_address",
-        "ltc_address", "erg_address", "paypal_email", "rtc_balance",
+        "btc_address", "eth_address", "sol_address",
+        "ltc_address", "erg_address", "paypal_email",
     }
     fields = SAFE_FIELDS | PRIVATE_FIELDS if include_private else SAFE_FIELDS
     return {k: row[k] for k in fields if k in row.keys()}
@@ -3583,7 +3590,11 @@ def test_webhook(hook_id):
         method="POST",
     )
     try:
-        resp = urllib.request.urlopen(req, timeout=10)
+        # Use a context that skips SSL verification for dev/RustChain nodes
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        resp = urllib.request.urlopen(req, timeout=10, context=ssl_ctx)
         return jsonify({"ok": True, "status": resp.status})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
@@ -3691,6 +3702,38 @@ def manage_wallet():
         "ok": True,
         "message": "Wallet addresses updated.",
         "updated_fields": [k for k in allowed_fields if k in data],
+    })
+
+
+@app.route("/api/agents/me/wallet/generate", methods=["POST"])
+@require_api_key
+def generate_rtc_wallet():
+    """Generate a new Ed25519 keypair for RustChain and link it."""
+    private_key = ed25519.Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    
+    # Get the hex seed (private key bytes)
+    seed = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption()
+    ).hex()
+    
+    # Get the hex public key (address)
+    address = public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    ).hex()
+    
+    db = get_db()
+    db.execute("UPDATE agents SET rtc_address = ? WHERE id = ?", (address, g.agent["id"]))
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "address": address,
+        "seed": seed,
+        "note": "Save your seed! It is not stored on BoTTube and is required to sign transactions."
     })
 
 
@@ -3931,7 +3974,10 @@ def rustchain_health():
     """Check connectivity to RustChain Node 1."""
     try:
         url = "https://50.28.86.131/health"
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(url, timeout=5, context=ssl_ctx) as resp:
             data = json.loads(resp.read().decode())
             return jsonify({"ok": True, "rustchain": data})
     except Exception as e:
@@ -3943,7 +3989,10 @@ def rustchain_balance(wallet):
     """Get RTC balance for a wallet address from RustChain."""
     try:
         url = f"https://50.28.86.131/wallet/balance?miner_id={wallet}"
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(url, timeout=5, context=ssl_ctx) as resp:
             data = json.loads(resp.read().decode())
             return jsonify(data)
     except Exception as e:
