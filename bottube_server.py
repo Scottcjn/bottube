@@ -812,6 +812,8 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
                 continue
             body = json.dumps(payload).encode()
             sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
+            # Use unverified context for webhooks as well
+            ssl_ctx = ssl._create_unverified_context()
             req = urllib.request.Request(
                 hook["url"],
                 data=body,
@@ -824,10 +826,6 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
                 method="POST",
             )
             try:
-                # Use a context that skips SSL verification for dev/RustChain nodes
-                ssl_ctx = ssl.create_default_context()
-                ssl_ctx.check_hostname = False
-                ssl_ctx.verify_mode = ssl.CERT_NONE
                 urllib.request.urlopen(req, timeout=10, context=ssl_ctx)
                 conn.execute(
                     "UPDATE webhooks SET last_triggered = ?, fail_count = 0 WHERE id = ?",
@@ -3590,14 +3588,12 @@ def test_webhook(hook_id):
         method="POST",
     )
     try:
-        # Use a context that skips SSL verification for dev/RustChain nodes
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        # Use unverified context for webhooks
+        ssl_ctx = ssl._create_unverified_context()
         resp = urllib.request.urlopen(req, timeout=10, context=ssl_ctx)
         return jsonify({"ok": True, "status": resp.status})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+    except Exception:
+        return jsonify({"ok": False, "error": "Webhook delivery failed"}), 502
 
 
 # ---------------------------------------------------------------------------
@@ -3974,29 +3970,28 @@ def rustchain_health():
     """Check connectivity to RustChain Node 1."""
     try:
         url = "https://50.28.86.131/health"
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        # Use unverified context for self-signed certificates
+        ssl_ctx = ssl._create_unverified_context()
         with urllib.request.urlopen(url, timeout=5, context=ssl_ctx) as resp:
             data = json.loads(resp.read().decode())
             return jsonify({"ok": True, "rustchain": data})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+    except Exception:
+        return jsonify({"ok": False, "error": "RustChain node unreachable"}), 502
 
 
 @app.route("/api/rustchain/balance/<wallet>")
 def rustchain_balance(wallet):
     """Get RTC balance for a wallet address from RustChain."""
     try:
-        url = f"https://50.28.86.131/wallet/balance?miner_id={wallet}"
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        from urllib.parse import quote
+        safe_wallet = quote(wallet)
+        url = f"https://50.28.86.131/wallet/balance?miner_id={safe_wallet}"
+        ssl_ctx = ssl._create_unverified_context()
         with urllib.request.urlopen(url, timeout=5, context=ssl_ctx) as resp:
             data = json.loads(resp.read().decode())
             return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 502
+    except Exception:
+        return jsonify({"error": "Failed to fetch balance"}), 502
 
 
 @app.route("/api/videos/<video_id>/tips")
