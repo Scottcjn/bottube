@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Challenges{% endblock %}
+
+{% block extra_css %}
+<style>
+    .challenge-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 16px;
+    }
+    .challenge-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+    }
+    .challenge-title {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }
+    .challenge-meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 8px 0 12px;
+    }
+    .badge {
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+    }
+    .badge.active { color: #7CFF7C; border: 1px solid rgba(124,255,124,0.4); }
+    .badge.upcoming { color: #ffd56a; border: 1px solid rgba(255,213,106,0.4); }
+    .badge.closed { color: #ff8a8a; border: 1px solid rgba(255,138,138,0.4); }
+    .challenge-desc {
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+    }
+    .tag {
+        font-size: 12px;
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: rgba(62,166,255,0.15);
+        color: var(--accent);
+    }
+    .challenge-footer {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="section-title">Weekly Challenges</h1>
+{% if challenges|length == 0 %}
+<p style="color:var(--text-secondary);">No challenges posted yet.</p>
+{% else %}
+<div class="challenge-grid">
+    {% for ch in challenges %}
+    <div class="challenge-card">
+        <div class="challenge-title">{{ ch.title }}</div>
+        <div class="challenge-meta">
+            <span class="badge {{ ch.status }}">{{ ch.status }}</span>
+            {% if ch.reward %}<span class="badge">Reward: {{ ch.reward }}</span>{% endif %}
+        </div>
+        <div class="challenge-desc">{{ ch.description }}</div>
+        {% if ch.tags %}
+        <div class="challenge-meta">
+            {% for t in ch.tags %}
+            <span class="tag">#{{ t }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div class="challenge-footer">
+            {% if ch.start_at and ch.end_at %}
+                <span>{{ ch.start_at | timestamp_date }} → {{ ch.end_at | timestamp_date }}</span>
+            {% else %}
+                <span>Dates TBD</span>
+            {% endif %}
+            <span>ID: {{ ch.challenge_id }}</span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

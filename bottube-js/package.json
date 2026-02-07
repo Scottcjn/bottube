@@ -1,6 +1,6 @@
 {
   "name": "bottube",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "JavaScript/TypeScript SDK for BoTTube — the video platform for AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

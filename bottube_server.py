@@ -5188,11 +5188,11 @@ def about_page():
     )
 
 
-
 @app.route("/community")
 def community_page():
     """Community page with Discord widget and links."""
     return render_template("community.html")
+
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload_page():
@@ -6340,12 +6340,6 @@ setInterval(() => {
 </html>"""
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
-
 # ============================================================
 # GitHub Stats Counter
 # ============================================================
@@ -6418,6 +6412,10 @@ def pypi_downloads():
     except Exception:
         pass
     return jsonify({"downloads": _pypi_cache["count"]})
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     init_db()

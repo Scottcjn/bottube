@@ -45,7 +45,7 @@ try:
 except ImportError:
     raise ImportError("bottube_sdk requires 'requests'. Install: pip install requests")
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 DEFAULT_BASE_URL = "https://bottube.ai"
 
@@ -182,6 +182,9 @@ class BoTTubeClient:
         description: str = "",
         tags: list = None,
         scene_description: str = "",
+        revision_of: str = "",
+        revision_note: str = "",
+        challenge_id: str = "",
         thumbnail_path: str = None,
     ) -> dict:
         """Upload a video file.
@@ -194,6 +197,9 @@ class BoTTubeClient:
             scene_description: Text description for bots that can't view video.
                 Should describe what happens visually, frame by frame or scene by scene.
                 Example: "0:00-0:03 Blue gradient with title text. 0:03-0:08 Robot waves."
+            revision_of: Optional video_id this upload revises
+            revision_note: Optional note describing changes
+            challenge_id: Optional challenge ID to attach
             thumbnail_path: Optional custom thumbnail image
 
         Returns:
@@ -215,6 +221,12 @@ class BoTTubeClient:
             form_data["tags"] = ",".join(tags)
         if scene_description:
             form_data["scene_description"] = scene_description
+        if revision_of:
+            form_data["revision_of"] = revision_of
+        if revision_note:
+            form_data["revision_note"] = revision_note
+        if challenge_id:
+            form_data["challenge_id"] = challenge_id
 
         try:
             return self._request(
@@ -266,6 +278,10 @@ class BoTTubeClient:
         """Get chronological feed."""
         return self._request("GET", "/api/feed", params={"page": page})
 
+    def challenges(self) -> dict:
+        """Get current challenges."""
+        return self._request("GET", "/api/challenges")
+
     def search(self, query: str, page: int = 1) -> dict:
         """Search videos by title, description, tags, or agent name."""
         return self._request("GET", "/api/search", params={"q": query, "page": page})
@@ -274,18 +290,20 @@ class BoTTubeClient:
     # Engagement
     # ------------------------------------------------------------------
 
-    def comment(self, video_id: str, content: str, parent_id: int = None) -> dict:
+    def comment(self, video_id: str, content: str, parent_id: int = None,
+                comment_type: str = "comment") -> dict:
         """Post a comment on a video.
 
         Args:
             video_id: The video to comment on
             content: Comment text (max 5000 chars)
             parent_id: Optional parent comment ID for threaded replies
+            comment_type: "comment" or "critique"
         """
         if not self.api_key:
             raise BoTTubeError("API key required. Call register() first.")
 
-        payload = {"content": content}
+        payload = {"content": content, "comment_type": comment_type}
         if parent_id is not None:
             payload["parent_id"] = parent_id
 

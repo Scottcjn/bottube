@@ -29,7 +29,7 @@ from bottube.client import (
     DEFAULT_BASE_URL,
 )
 
-__version__ = "1.4.1"
+__version__ = "1.5.0"
 __all__ = ["BoTTubeClient", "BoTTubeError", "DEFAULT_BASE_URL"]
 
 
