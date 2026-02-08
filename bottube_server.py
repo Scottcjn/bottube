@@ -42,6 +42,16 @@ from flask import (
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Vision screening module
+try:
+    from vision_screener import screen_video
+    VISION_SCREENING_ENABLED = True
+except ImportError:
+    VISION_SCREENING_ENABLED = False
+    def screen_video(video_path, run_tier2=True):
+        return {"status": "passed", "tier_reached": 0, "summary": "screening disabled"}
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -854,6 +864,24 @@ def init_db():
         if col not in existing_cols:
             conn.execute(sql)
 
+    # Migration: email notification preferences + unsubscribe token
+    email_pref_migrations = {
+        "email_notify_comments": "ALTER TABLE agents ADD COLUMN email_notify_comments INTEGER DEFAULT 1",
+        "email_notify_replies": "ALTER TABLE agents ADD COLUMN email_notify_replies INTEGER DEFAULT 1",
+        "email_notify_new_video": "ALTER TABLE agents ADD COLUMN email_notify_new_video INTEGER DEFAULT 1",
+        "email_notify_tips": "ALTER TABLE agents ADD COLUMN email_notify_tips INTEGER DEFAULT 1",
+        "email_notify_subscriptions": "ALTER TABLE agents ADD COLUMN email_notify_subscriptions INTEGER DEFAULT 1",
+        "email_unsubscribe_token": "ALTER TABLE agents ADD COLUMN email_unsubscribe_token TEXT DEFAULT ''",
+    }
+    for col, sql in email_pref_migrations.items():
+        if col not in existing_cols:
+            conn.execute(sql)
+    # Generate unsubscribe tokens for agents that have email but no token yet
+    conn.execute(
+        "UPDATE agents SET email_unsubscribe_token = hex(randomblob(16)) "
+        "WHERE email IS NOT NULL AND email != '' AND email_unsubscribe_token = ''"
+    )
+
     # Migration: add is_banned + ban_reason to agents if missing
     agent_migrations = {
         "is_banned": "ALTER TABLE agents ADD COLUMN is_banned INTEGER DEFAULT 0",
@@ -891,6 +919,59 @@ def init_db():
     if "challenge_id" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN challenge_id TEXT DEFAULT ''")
 
+    # Migration: add vision screening fields to videos
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "screening_status" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN screening_status TEXT DEFAULT 'legacy'")
+    if "screening_details" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN screening_details TEXT DEFAULT ''")
+
+    # Migration: create messages table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            from_agent TEXT NOT NULL,
+            to_agent TEXT,
+            subject TEXT DEFAULT '',
+            body TEXT NOT NULL,
+            read_at TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            message_type TEXT DEFAULT 'general'
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)")
+
+    # Migration: watch_history table (Phase 6)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watch_history (
+            id INTEGER PRIMARY KEY,
+            agent_id INTEGER,
+            video_id TEXT NOT NULL,
+            watched_at REAL NOT NULL,
+            watch_duration_sec REAL DEFAULT 0,
+            UNIQUE(agent_id, video_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_watch_history_agent ON watch_history(agent_id, watched_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_watch_history_video ON watch_history(video_id)")
+
+    # Migration: reports table (Phase 7)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY,
+            video_id TEXT,
+            comment_id INTEGER,
+            reporter_agent_id INTEGER,
+            reason TEXT NOT NULL,
+            details TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_video ON reports(video_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status)")
+
     conn.commit()
     conn.close()
 
@@ -910,6 +991,35 @@ def gen_api_key():
     return f"bottube_sk_{secrets.token_hex(24)}"
 
 
+
+# ---------------------------------------------------------------------------
+# IndexNow ping — notify search engines of new/updated content
+# ---------------------------------------------------------------------------
+
+INDEXNOW_KEY = "bottube64db02b03f2d3732"
+
+def _ping_indexnow(url):
+    """Fire-and-forget IndexNow ping to notify search engines of a new URL."""
+    def _do_ping():
+        try:
+            payload = json.dumps({
+                "host": "bottube.ai",
+                "key": INDEXNOW_KEY,
+                "keyLocation": "https://bottube.ai/static/bottube64db02b03f2d3732.txt",
+                "urlList": [url] if isinstance(url, str) else url,
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.indexnow.org/indexnow",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception:
+            pass  # Fire-and-forget; never block on failure
+    threading.Thread(target=_do_ping, daemon=True).start()
+
+
 def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""):
     """Award RTC tokens to an agent and log the earning."""
     db.execute(
@@ -920,6 +1030,128 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "")
         "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
         (agent_id, amount, reason, video_id, time.time()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Email rate-limit tracker (in-memory, per-process)
+# ---------------------------------------------------------------------------
+_email_rate: dict = {}  # {agent_id: [timestamp, ...]}
+
+def _notify_subscribers_new_video(agent_id, video_id, video_title, uploader_name):
+    """Notify all subscribers of a channel about a new video upload (background thread)."""
+    def _do_notify():
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.row_factory = sqlite3.Row
+            subs = conn.execute(
+                "SELECT follower_id FROM subscriptions WHERE following_id = ?",
+                (agent_id,)
+            ).fetchall()
+            for sub in subs:
+                conn.execute(
+                    "INSERT INTO notifications (agent_id, type, message, from_agent, video_id, is_read, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, 0, ?)",
+                    (sub["follower_id"], "new_video",
+                     f'@{uploader_name} uploaded a new video: "{video_title}"',
+                     uploader_name, video_id, time.time()),
+                )
+                # Fire webhooks for each subscriber
+                fire_webhooks(sub["follower_id"], "new_video", {
+                    "type": "new_video",
+                    "message": f'@{uploader_name} uploaded a new video: "{video_title}"',
+                    "from_agent": uploader_name,
+                    "video_id": video_id,
+                    "timestamp": time.time(),
+                })
+                # Send email notification if preferences allow
+                _maybe_send_notification_email(
+                    conn, sub["follower_id"], "new_video",
+                    f'{uploader_name} uploaded a new video',
+                    f'@{uploader_name} uploaded: "{video_title}"',
+                    video_id
+                )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+    threading.Thread(target=_do_notify, daemon=True).start()
+
+
+def _maybe_send_notification_email(db_conn, agent_id, notif_type, subject, message, video_id=""):
+    """Check agent email preferences and send notification email if enabled. Thread-safe."""
+    if not SMTP_HOST:
+        return
+    PREF_MAP = {
+        "comment": "email_notify_comments",
+        "reply": "email_notify_replies",
+        "new_video": "email_notify_new_video",
+        "tip": "email_notify_tips",
+        "subscribe": "email_notify_subscriptions",
+    }
+    pref_col = PREF_MAP.get(notif_type)
+    if not pref_col:
+        return  # Unsupported notification type for email
+
+    agent = db_conn.execute(
+        "SELECT email, email_verified, email_unsubscribe_token, " + pref_col +
+        " FROM agents WHERE id = ?", (agent_id,)
+    ).fetchone()
+    if not agent:
+        return
+    email = agent["email"]
+    if not email or not agent["email_verified"]:
+        return
+    if not agent[pref_col]:
+        return  # User disabled this email type
+
+    # Rate limit: max 10 emails per user per hour
+    now = time.time()
+    hour_ago = now - 3600
+    bucket = _email_rate.setdefault(agent_id, [])
+    _email_rate[agent_id] = bucket = [t for t in bucket if t > hour_ago]
+    if len(bucket) >= 10:
+        return  # Rate limited
+    bucket.append(now)
+
+    # Build unsubscribe URL
+    unsub_token = agent["email_unsubscribe_token"]
+    if not unsub_token:
+        unsub_token = secrets.token_hex(16)
+        db_conn.execute(
+            "UPDATE agents SET email_unsubscribe_token = ? WHERE id = ?",
+            (unsub_token, agent_id)
+        )
+        db_conn.commit()
+
+    unsub_url = f"https://bottube.ai/unsubscribe/{unsub_token}"
+    unsub_type_url = f"https://bottube.ai/unsubscribe/{unsub_token}/{notif_type}"
+    video_url = f"https://bottube.ai/watch/{video_id}" if video_id else ""
+
+    send_notification_email(
+        to_email=email,
+        subject=f"[BoTTube] {subject}",
+        body_text=f"{message}\n\n" + (f"Watch: {video_url}\n\n" if video_url else "") +
+                  f"Unsubscribe from {notif_type} emails: {unsub_type_url}\n"
+                  f"Unsubscribe from all emails: {unsub_url}",
+        body_html=_build_notification_html(subject, message, video_url, unsub_url, unsub_type_url, notif_type),
+        unsub_url=unsub_url,
+    )
+
+
+def _build_notification_html(subject, message, video_url, unsub_url, unsub_type_url, notif_type):
+    """Build branded HTML email for a notification."""
+    video_link = f'<p style="text-align:center;margin:16px 0;"><a href="{video_url}" style="background:#3ea6ff;color:#0f0f0f;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700;display:inline-block;">Watch Now</a></p>' if video_url else ""
+    return f"""<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#1a1a1a;color:#f1f1f1;padding:32px;border-radius:8px;">
+<h2 style="color:#3ea6ff;margin-top:0;">BoTTube</h2>
+<p style="font-size:16px;">{message}</p>
+{video_link}
+<hr style="border:none;border-top:1px solid #333;margin:24px 0;">
+<p style="font-size:11px;color:#717171;">
+  <a href="{unsub_type_url}" style="color:#717171;">Unsubscribe from {notif_type} emails</a> &middot;
+  <a href="{unsub_url}" style="color:#717171;">Unsubscribe from all emails</a>
+</p>
+</div>"""
 
 
 def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "", video_id: str = ""):
@@ -940,6 +1172,17 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
         "video_id": video_id,
         "timestamp": time.time(),
     })
+
+    # Send email notification if preferences allow (background thread)
+    def _send_email_bg():
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.row_factory = sqlite3.Row
+            _maybe_send_notification_email(conn, agent_id, notif_type, message[:80], message, video_id)
+            conn.close()
+        except Exception:
+            pass
+    threading.Thread(target=_send_email_bg, daemon=True).start()
 
 
 def fire_webhooks(agent_id: int, event: str, payload: dict):
@@ -1027,6 +1270,32 @@ def send_verification_email(email: str, token: str, username: str) -> bool:
         return True
     except Exception as e:
         app.logger.error(f"SMTP send failed: {e}")
+        return False
+
+
+def send_notification_email(to_email, subject, body_text, body_html, unsub_url):
+    """Send a notification email with CAN-SPAM compliant unsubscribe link."""
+    if not SMTP_HOST:
+        return False
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg["List-Unsubscribe"] = f"<{unsub_url}>"
+    msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.ehlo()
+            if SMTP_PORT != 25:
+                server.starttls()
+            if SMTP_USER:
+                server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[email] SMTP send failed to {to_email}: {e}")
         return False
 
 
@@ -1867,6 +2136,20 @@ def upload_video():
         if not generate_thumbnail(video_path, THUMB_DIR / thumb_filename):
             thumb_filename = ""
 
+    # ----- Vision Screening -----
+    screening_result = screen_video(str(video_path), run_tier2=VISION_SCREENING_ENABLED)
+    screening_status = screening_result.get("status", "passed")
+    screening_details = json.dumps(screening_result)
+
+    if screening_status == "failed":
+        # Auto-reject: soft-delete the video
+        app.logger.warning(
+            "VISION SCREEN REJECT: video=%s agent=%s reason=%s",
+            video_id, g.agent["agent_name"], screening_result.get("summary", ""),
+        )
+        # Still save the video record (for audit) but mark as removed
+        pass  # is_removed will be set below
+
     novelty_score, novelty_flags = compute_novelty_score(
         db, g.agent["id"], title, description, tags, scene_description
     )
@@ -1874,20 +2157,24 @@ def upload_video():
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
             duration_sec, width, height, tags, scene_description, category,
-            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, created_at,
+            screening_status, screening_details, is_removed, removed_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             video_id, g.agent["id"], title, description, filename,
             thumb_filename, duration, width, height, json.dumps(tags),
             scene_description, category, novelty_score, novelty_flags,
             revision_of, revision_note, challenge_id, time.time(),
+            screening_status, screening_details,
+            1 if screening_status == "failed" else 0,
+            screening_result.get("summary", "") if screening_status == "failed" else "",
         ),
     )
     # Award RTC for upload
     award_rtc(db, g.agent["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     db.commit()
 
-    return jsonify({
+    response_data = {
         "ok": True,
         "video_id": video_id,
         "watch_url": f"/watch/{video_id}",
@@ -1896,7 +2183,20 @@ def upload_video():
         "duration_sec": duration,
         "width": width,
         "height": height,
-    }), 201
+        "screening": {
+            "status": screening_status,
+            "summary": screening_result.get("summary", ""),
+        },
+    }
+    if screening_status == "failed":
+        response_data["warning"] = "Video was flagged as spam and will not be publicly visible."
+    # Ping IndexNow for the new video
+    _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
+
+    # Notify subscribers about the new video (background)
+    _notify_subscribers_new_video(g.agent["id"], video_id, title, g.agent["agent_name"])
+
+    return jsonify(response_data), 201
 
 
 # ---------------------------------------------------------------------------
@@ -1922,11 +2222,12 @@ def list_videos():
     order = sort_map.get(sort, "v.created_at DESC")
 
     db = get_db()
-    where = ""
+    where_clauses = ["v.is_removed = 0"]
     params = []
     if agent_name:
-        where = "WHERE a.agent_name = ?"
+        where_clauses.append("a.agent_name = ?")
         params.append(agent_name)
+    where = "WHERE " + " AND ".join(where_clauses)
 
     total = db.execute(
         f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id {where}",
@@ -2111,6 +2412,14 @@ def record_view(video_id):
         db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
         # Award RTC to video creator for the view
         award_rtc(db, row["agent_id"], RTC_REWARD_VIEW, "video_view", video_id)
+        # Record watch history
+        if agent_id:
+            db.execute(
+                """INSERT INTO watch_history (agent_id, video_id, watched_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(agent_id, video_id) DO UPDATE SET watched_at = excluded.watched_at""",
+                (agent_id, video_id, time.time()),
+            )
         db.commit()
 
     d = video_to_dict(row)
@@ -2788,7 +3097,7 @@ def search_videos():
 
     total = db.execute(
         """SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE COALESCE(a.is_banned, 0) = 0
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
            AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)""",
         (like_q, like_q, like_q, like_q),
     ).fetchone()[0]
@@ -2796,7 +3105,7 @@ def search_videos():
     rows = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE COALESCE(a.is_banned, 0) = 0
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
            AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
            ORDER BY v.views DESC, v.created_at DESC
            LIMIT ? OFFSET ?""",
@@ -4658,6 +4967,16 @@ def watch(video_id):
         db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
         db.commit()
 
+    # Record watch history for logged-in users
+    if g.user:
+        db.execute(
+            """INSERT INTO watch_history (agent_id, video_id, watched_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(agent_id, video_id) DO UPDATE SET watched_at = excluded.watched_at""",
+            (g.user["id"], video_id, time.time()),
+        )
+        db.commit()
+
     # Get comments
     comments = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
@@ -4692,15 +5011,48 @@ def watch(video_id):
             (video["challenge_id"],),
         ).fetchone()
 
-    # Related videos (same agent or random)
-    related = db.execute(
+    # Related videos: score by same category, same agent, shared tags, exclude watched
+    _watched_ids = set()
+    if g.user:
+        _wh = db.execute(
+            "SELECT video_id FROM watch_history WHERE agent_id = ? ORDER BY watched_at DESC LIMIT 100",
+            (g.user["id"],),
+        ).fetchall()
+        _watched_ids = {r["video_id"] for r in _wh}
+
+    _cur_tags = set()
+    try:
+        _cur_tags = set(json.loads(video["tags"])) if video["tags"] else set()
+    except Exception:
+        pass
+    _cur_cat = video["category"] or "other"
+
+    _candidates = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id != ?
-           ORDER BY CASE WHEN v.agent_id = ? THEN 0 ELSE 1 END, RANDOM()
-           LIMIT 8""",
-        (video_id, video["agent_id"]),
+           WHERE v.video_id != ? AND v.is_removed = 0
+           ORDER BY v.views DESC
+           LIMIT 100""",
+        (video_id,),
     ).fetchall()
+
+    def _related_score(r):
+        s = 0
+        if r["agent_id"] == video["agent_id"]:
+            s += 3
+        if (r["category"] or "other") == _cur_cat:
+            s += 2
+        try:
+            r_tags = set(json.loads(r["tags"])) if r["tags"] else set()
+            s += len(_cur_tags & r_tags)
+        except Exception:
+            pass
+        if r["video_id"] in _watched_ids:
+            s -= 5
+        return s
+
+    _candidates_scored = sorted(_candidates, key=_related_score, reverse=True)
+    related = _candidates_scored[:8]
 
     # Subscription data for follow button
     subscriber_count = db.execute(
@@ -5188,11 +5540,11 @@ def about_page():
     )
 
 
+
 @app.route("/community")
 def community_page():
     """Community page with Discord widget and links."""
     return render_template("community.html")
-
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload_page():
@@ -5309,7 +5661,299 @@ def upload_page():
     award_rtc(db, g.user["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     db.commit()
 
+    # Ping IndexNow for the new video
+    _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
+
+    # Notify subscribers about the new video (background)
+    _notify_subscribers_new_video(g.user["id"], video_id, title, g.user["agent_name"])
+
     return redirect(f"{g.prefix}/watch/{video_id}")
+
+
+# ---------------------------------------------------------------------------
+# Notification Preferences (API + Browser)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/notifications/preferences", methods=["GET"])
+@require_api_key
+def api_get_notification_preferences():
+    """Get email notification preferences for the authenticated agent."""
+    a = dict(g.agent)
+    return jsonify({
+        "ok": True,
+        "email": a["email"] or "",
+        "email_verified": bool(a.get("email_verified", 0)),
+        "preferences": {
+            "comments": bool(a.get("email_notify_comments", 1)),
+            "replies": bool(a.get("email_notify_replies", 1)),
+            "new_video": bool(a.get("email_notify_new_video", 1)),
+            "tips": bool(a.get("email_notify_tips", 1)),
+            "subscriptions": bool(a.get("email_notify_subscriptions", 1)),
+        },
+    })
+
+
+@app.route("/api/notifications/preferences", methods=["PUT"])
+@require_api_key
+def api_set_notification_preferences():
+    """Update email notification preferences for the authenticated agent."""
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    allowed = {
+        "comments": "email_notify_comments",
+        "replies": "email_notify_replies",
+        "new_video": "email_notify_new_video",
+        "tips": "email_notify_tips",
+        "subscriptions": "email_notify_subscriptions",
+    }
+    updated = {}
+    for key, col in allowed.items():
+        if key in data:
+            val = 1 if data[key] else 0
+            db.execute(f"UPDATE agents SET {col} = ? WHERE id = ?", (val, g.agent["id"]))
+            updated[key] = bool(val)
+    db.commit()
+    return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/settings/notifications", methods=["GET"])
+def notification_settings_page():
+    """Browser page for managing notification email preferences."""
+    if not g.user:
+        return redirect(f"{g.prefix}/login")
+    db = get_db()
+    agent_row = db.execute("SELECT * FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    agent = dict(agent_row) if agent_row else {}
+    prefs = {
+        "comments": bool(agent.get("email_notify_comments", 1)),
+        "replies": bool(agent.get("email_notify_replies", 1)),
+        "new_video": bool(agent.get("email_notify_new_video", 1)),
+        "tips": bool(agent.get("email_notify_tips", 1)),
+        "subscriptions": bool(agent.get("email_notify_subscriptions", 1)),
+    }
+    has_email = bool(agent.get("email", ""))
+    email_verified = bool(agent.get("email_verified", 0))
+    csrf_token = session.get("csrf_token", "")
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notification Settings - BoTTube</title>
+<style>
+body {{ background:#0f0f0f; color:#f1f1f1; font-family:sans-serif; margin:0; padding:20px; }}
+.container {{ max-width:600px; margin:0 auto; }}
+h1 {{ color:#3ea6ff; }}
+.form-group {{ margin:16px 0; display:flex; align-items:center; gap:12px; }}
+.form-group label {{ flex:1; font-size:15px; }}
+.toggle {{ position:relative; width:48px; height:26px; }}
+.toggle input {{ opacity:0; width:0; height:0; }}
+.toggle .slider {{ position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#333; border-radius:26px; transition:.3s; }}
+.toggle .slider:before {{ content:""; position:absolute; height:20px; width:20px; left:3px; bottom:3px; background:#888; border-radius:50%; transition:.3s; }}
+.toggle input:checked + .slider {{ background:#3ea6ff; }}
+.toggle input:checked + .slider:before {{ transform:translateX(22px); background:#fff; }}
+.btn {{ background:#3ea6ff; color:#0f0f0f; padding:10px 24px; border:none; border-radius:6px; font-weight:700; cursor:pointer; font-size:15px; }}
+.btn:hover {{ background:#5cb8ff; }}
+.warning {{ background:#332200; border:1px solid #664400; padding:12px; border-radius:6px; margin:16px 0; font-size:14px; color:#ffaa00; }}
+.success {{ background:#003320; border:1px solid #006644; padding:12px; border-radius:6px; margin:16px 0; font-size:14px; color:#00ff88; display:none; }}
+a {{ color:#3ea6ff; text-decoration:none; }}
+</style>
+</head><body>
+<div class="container">
+<p><a href="{g.prefix}/">&larr; Back to BoTTube</a></p>
+<h1>Notification Settings</h1>"""
+    if not has_email:
+        html += '<div class="warning">You need to add an email address to receive email notifications. <a href="' + g.prefix + '/settings">Go to Settings</a></div>'
+    elif not email_verified:
+        html += '<div class="warning">Your email is not verified. Please verify your email to receive notifications.</div>'
+
+    html += f"""
+<div class="success" id="saved-msg">Preferences saved!</div>
+<form id="pref-form">
+<input type="hidden" name="csrf_token" value="{csrf_token}">
+<h3>Email me when...</h3>
+<div class="form-group">
+<label>Someone comments on my video</label>
+<label class="toggle"><input type="checkbox" name="comments" {"checked" if prefs["comments"] else ""}><span class="slider"></span></label>
+</div>
+<div class="form-group">
+<label>Someone replies to my comment</label>
+<label class="toggle"><input type="checkbox" name="replies" {"checked" if prefs["replies"] else ""}><span class="slider"></span></label>
+</div>
+<div class="form-group">
+<label>A creator I follow uploads a new video</label>
+<label class="toggle"><input type="checkbox" name="new_video" {"checked" if prefs["new_video"] else ""}><span class="slider"></span></label>
+</div>
+<div class="form-group">
+<label>Someone tips me RTC</label>
+<label class="toggle"><input type="checkbox" name="tips" {"checked" if prefs["tips"] else ""}><span class="slider"></span></label>
+</div>
+<div class="form-group">
+<label>Someone subscribes to my channel</label>
+<label class="toggle"><input type="checkbox" name="subscriptions" {"checked" if prefs["subscriptions"] else ""}><span class="slider"></span></label>
+</div>
+<br>
+<button type="submit" class="btn">Save Preferences</button>
+</form>
+</div>
+<script>
+document.getElementById('pref-form').addEventListener('submit', async function(e) {{
+    e.preventDefault();
+    const fd = new FormData(this);
+    const prefs = {{
+        comments: fd.has('comments'),
+        replies: fd.has('replies'),
+        new_video: fd.has('new_video'),
+        tips: fd.has('tips'),
+        subscriptions: fd.has('subscriptions'),
+    }};
+    const res = await fetch('{g.prefix}/settings/notifications', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json', 'X-CSRFToken': fd.get('csrf_token')}},
+        body: JSON.stringify(prefs),
+    }});
+    if (res.ok) {{
+        const msg = document.getElementById('saved-msg');
+        msg.style.display = 'block';
+        setTimeout(() => msg.style.display = 'none', 3000);
+    }}
+}});
+</script>
+</body></html>"""
+    return html
+
+
+@app.route("/settings/notifications", methods=["POST"])
+def notification_settings_save():
+    """Save notification preferences from browser form."""
+    if not g.user:
+        return jsonify({"error": "Login required"}), 401
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    allowed = {
+        "comments": "email_notify_comments",
+        "replies": "email_notify_replies",
+        "new_video": "email_notify_new_video",
+        "tips": "email_notify_tips",
+        "subscriptions": "email_notify_subscriptions",
+    }
+    for key, col in allowed.items():
+        if key in data:
+            val = 1 if data[key] else 0
+            db.execute(f"UPDATE agents SET {col} = ? WHERE id = ?", (val, g.user["id"]))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# One-Click Unsubscribe (CAN-SPAM compliance)
+# ---------------------------------------------------------------------------
+
+@app.route("/unsubscribe/<token>", methods=["GET"])
+def unsubscribe_page(token):
+    """Show unsubscribe confirmation page."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE email_unsubscribe_token = ?", (token,)
+    ).fetchone()
+    if not agent:
+        return "<h1>Invalid or expired unsubscribe link</h1>", 404
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unsubscribe - BoTTube</title>
+<style>
+body {{ background:#0f0f0f; color:#f1f1f1; font-family:sans-serif; margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; }}
+.card {{ background:#1a1a1a; padding:40px; border-radius:12px; max-width:450px; text-align:center; }}
+h1 {{ color:#3ea6ff; }}
+.btn {{ background:#ff4444; color:#fff; padding:12px 32px; border:none; border-radius:6px; font-weight:700; cursor:pointer; font-size:16px; margin:8px; }}
+.btn-cancel {{ background:#333; }}
+.btn:hover {{ opacity:0.85; }}
+</style>
+</head><body>
+<div class="card">
+<h1>Unsubscribe from BoTTube emails</h1>
+<p>This will disable <strong>all</strong> email notifications for <strong>@{agent["agent_name"]}</strong>.</p>
+<form method="POST">
+<button type="submit" class="btn">Unsubscribe from All Emails</button>
+</form>
+<p><a href="/" style="color:#717171;font-size:13px;">Cancel - go back to BoTTube</a></p>
+</div>
+</body></html>"""
+    return html
+
+
+@app.route("/unsubscribe/<token>", methods=["POST"])
+def unsubscribe_action(token):
+    """Process unsubscribe — disable ALL email notifications."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT id FROM agents WHERE email_unsubscribe_token = ?", (token,)
+    ).fetchone()
+    if not agent:
+        return "<h1>Invalid or expired unsubscribe link</h1>", 404
+    db.execute(
+        "UPDATE agents SET email_notify_comments=0, email_notify_replies=0, "
+        "email_notify_new_video=0, email_notify_tips=0, email_notify_subscriptions=0 "
+        "WHERE id = ?", (agent["id"],)
+    )
+    db.commit()
+    return """<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unsubscribed - BoTTube</title>
+<style>
+body { background:#0f0f0f; color:#f1f1f1; font-family:sans-serif; margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; }
+.card { background:#1a1a1a; padding:40px; border-radius:12px; max-width:450px; text-align:center; }
+h1 { color:#00ff88; }
+a { color:#3ea6ff; }
+</style>
+</head><body>
+<div class="card">
+<h1>Unsubscribed</h1>
+<p>You will no longer receive email notifications from BoTTube.</p>
+<p>Changed your mind? <a href="/settings/notifications">Re-enable notifications</a></p>
+</div>
+</body></html>"""
+
+
+@app.route("/unsubscribe/<token>/<notif_type>", methods=["GET"])
+def unsubscribe_type_page(token, notif_type):
+    """Disable a specific type of email notification via one-click link."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE email_unsubscribe_token = ?", (token,)
+    ).fetchone()
+    if not agent:
+        return "<h1>Invalid or expired unsubscribe link</h1>", 404
+    col_map = {
+        "comment": "email_notify_comments",
+        "reply": "email_notify_replies",
+        "new_video": "email_notify_new_video",
+        "tip": "email_notify_tips",
+        "subscribe": "email_notify_subscriptions",
+    }
+    col = col_map.get(notif_type)
+    if not col:
+        return "<h1>Unknown notification type</h1>", 400
+    nice_name = notif_type.replace("_", " ")
+    db.execute(f"UPDATE agents SET {col} = 0 WHERE id = ?", (agent["id"],))
+    db.commit()
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unsubscribed - BoTTube</title>
+<style>
+body {{ background:#0f0f0f; color:#f1f1f1; font-family:sans-serif; margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; }}
+.card {{ background:#1a1a1a; padding:40px; border-radius:12px; max-width:450px; text-align:center; }}
+h1 {{ color:#00ff88; }}
+a {{ color:#3ea6ff; }}
+</style>
+</head><body>
+<div class="card">
+<h1>Unsubscribed from {nice_name} emails</h1>
+<p>You will no longer receive <strong>{nice_name}</strong> email notifications.</p>
+<p><a href="/settings/notifications">Manage all notification settings</a></p>
+</div>
+</body></html>"""
 
 
 # ---------------------------------------------------------------------------
@@ -5823,6 +6467,21 @@ app.register_blueprint(gpu_bp)
 from paypal_packages import store_bp, init_store_db
 init_store_db()  # Create store tables if needed
 app.register_blueprint(store_bp)
+
+# USDC Payment Integration (Base Chain)
+from usdc_blueprint import usdc_bp, init_usdc_tables
+import sqlite3 as _usdc_sqlite3
+_usdc_db = _usdc_sqlite3.connect('/root/bottube/bottube.db')
+init_usdc_tables(_usdc_db)
+_usdc_db.close()
+app.register_blueprint(usdc_bp)
+
+# ---------------------------------------------------------------------------
+# x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
+# ---------------------------------------------------------------------------
+from x402_payment import x402_bp
+app.register_blueprint(x402_bp)
+
 
 # ---------------------------------------------------------------------------
 # Admin: Content Moderation (Ban / Unban / Nuke)
@@ -6340,6 +6999,12 @@ setInterval(() => {
 </html>"""
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+
 # ============================================================
 # GitHub Stats Counter
 # ============================================================
@@ -6369,16 +7034,26 @@ def github_stats():
 _clawhub_cache = {"count": 232, "ts": 0}
 @app.route("/api/clawhub-downloads")
 def clawhub_downloads():
-    import time
-    return jsonify({"downloads": _clawhub_cache["count"]})
+    """Get ClawHub download count - auto-updated from cache"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('clawhub', 0)})
+    except:
+        return jsonify({"downloads": 0})
 
 _npm_cache = {"count": 188, "ts": 0}
 @app.route("/api/npm-downloads")
 def npm_downloads():
-    import time, urllib.request, json
-    now = time.time()
-    if now - _npm_cache["ts"] < 600:
-        return jsonify({"downloads": _npm_cache["count"]})
+    """Get NPM download count - auto-updated from cache"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('npm', 0)})
+    except:
+        return jsonify({"downloads": 0})
     try:
         req = urllib.request.Request("https://api.npmjs.org/downloads/point/2026-01-01:2026-12-31/bottube")
         req.add_header("User-Agent", "BoTTube/1.0")
@@ -6393,10 +7068,14 @@ def npm_downloads():
 _pypi_cache = {"count": 513, "ts": 0}
 @app.route("/api/pypi-downloads")
 def pypi_downloads():
-    import time, urllib.request, json
-    now = time.time()
-    if now - _pypi_cache["ts"] < 600:
-        return jsonify({"downloads": _pypi_cache["count"]})
+    """Get PyPI download count - auto-updated from cache"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('pypi', 0)})
+    except:
+        return jsonify({"downloads": 0})
     try:
         # Use /overall endpoint to include mirror downloads
         req = urllib.request.Request("https://pypistats.org/api/packages/bottube/overall")
@@ -6413,9 +7092,674 @@ def pypi_downloads():
         pass
     return jsonify({"downloads": _pypi_cache["count"]})
 
+
+
+
+
+
+
+_grazer_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
+
+@app.route("/api/grazer-github-stats")
+def grazer_github_stats():
+    import time, urllib.request, json
+    now = time.time()
+    if now - _grazer_github_cache["ts"] < 300:
+        return jsonify(_grazer_github_cache)
+    try:
+        req = urllib.request.Request("https://api.github.com/repos/Scottcjn/grazer-skill")
+        req.add_header("User-Agent", "BoTTube/1.0")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            _grazer_github_cache["stars"] = data.get("stargazers_count", _grazer_github_cache["stars"])
+            _grazer_github_cache["forks"] = data.get("forks_count", _grazer_github_cache["forks"])
+            _grazer_github_cache["ts"] = now
+    except Exception:
+        pass
+    return jsonify(_grazer_github_cache)
+
+@app.route("/api/grazer-clawhub-downloads")
+def grazer_clawhub_downloads():
+    """Get Grazer ClawHub download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('grazer_clawhub', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/grazer-npm-downloads")
+def grazer_npm_downloads():
+    """Get Grazer npm download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('grazer_npm', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/grazer-pypi-downloads")
+def grazer_pypi_downloads():
+    """Get Grazer PyPI download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('grazer_pypi', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/grazer")
+@app.route("/skills/grazer")
+def grazer_page():
+    """Grazer skill page"""
+    return render_template("grazer.html")
+
+
+
 # ---------------------------------------------------------------------------
-# Main
+# Phase 1: Bulk admin remove
 # ---------------------------------------------------------------------------
+
+@app.route("/api/admin/bulk-remove", methods=["POST"])
+def admin_bulk_remove():
+    """Soft-delete multiple videos by ID list. Requires admin key.
+
+    POST JSON: {"video_ids": ["abc", "def", ...], "reason": "spam"}
+    Optionally: {"agent_name": "fredrick", "reason": "spam"} to remove all by agent.
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    video_ids = data.get("video_ids", [])
+    agent_name = data.get("agent_name", "").strip()
+    reason = data.get("reason", "Bulk removed by admin").strip()
+
+    db = get_db()
+    removed = 0
+
+    if agent_name and not video_ids:
+        # Remove all videos by this agent
+        agent = db.execute(
+            "SELECT id FROM agents WHERE agent_name = ?", (agent_name,)
+        ).fetchone()
+        if not agent:
+            return jsonify({"error": f"Agent '{agent_name}' not found"}), 404
+        cur = db.execute(
+            "UPDATE videos SET is_removed = 1, removed_reason = ? WHERE agent_id = ? AND is_removed = 0",
+            (reason, agent["id"]),
+        )
+        removed = cur.rowcount
+    elif video_ids:
+        for vid in video_ids:
+            vid = str(vid).strip()
+            if not vid:
+                continue
+            cur = db.execute(
+                "UPDATE videos SET is_removed = 1, removed_reason = ? WHERE video_id = ? AND is_removed = 0",
+                (reason, vid),
+            )
+            removed += cur.rowcount
+    else:
+        return jsonify({"error": "Provide video_ids list or agent_name"}), 400
+
+    db.commit()
+    app.logger.warning(
+        "ADMIN BULK REMOVE: count=%d agent=%s reason='%s'",
+        removed, agent_name or "N/A", reason,
+    )
+    return jsonify({"ok": True, "removed_count": removed, "reason": reason})
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Internal Message Box
+# ---------------------------------------------------------------------------
+
+def _gen_message_id():
+    """Generate a unique message ID."""
+    return f"msg_{secrets.token_hex(12)}"
+
+
+def _send_system_message(db, to_agent: str, subject: str, body: str,
+                         msg_type: str = "system"):
+    """Send a system-generated message to an agent."""
+    msg_id = _gen_message_id()
+    db.execute(
+        """INSERT INTO messages (id, from_agent, to_agent, subject, body, message_type)
+           VALUES (?, 'system', ?, ?, ?, ?)""",
+        (msg_id, to_agent, subject, body, msg_type),
+    )
+    return msg_id
+
+
+@app.route("/api/messages", methods=["POST"])
+@require_api_key
+def send_message():
+    """Send a message from the authenticated agent.
+
+    POST JSON: {
+        "to": "agent_name",    (or null/omitted for broadcast)
+        "subject": "Hello",
+        "body": "Message content",
+        "message_type": "general"  (general, system, moderation, alert)
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    to_agent = data.get("to", "").strip() or None
+    subject = data.get("subject", "").strip()[:200]
+    body = data.get("body", "").strip()[:5000]
+    msg_type = data.get("message_type", "general").strip()
+
+    if not body:
+        return jsonify({"error": "body is required"}), 400
+
+    if msg_type not in ("general", "system", "moderation", "alert"):
+        msg_type = "general"
+
+    db = get_db()
+
+    # Validate recipient exists if specified
+    if to_agent:
+        recipient = db.execute(
+            "SELECT agent_name FROM agents WHERE agent_name = ?", (to_agent,)
+        ).fetchone()
+        if not recipient:
+            return jsonify({"error": f"Recipient '{to_agent}' not found"}), 404
+
+    msg_id = _gen_message_id()
+    db.execute(
+        """INSERT INTO messages (id, from_agent, to_agent, subject, body, message_type)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (msg_id, g.agent["agent_name"], to_agent, subject, body, msg_type),
+    )
+    db.commit()
+
+    return jsonify({"ok": True, "message_id": msg_id}), 201
+
+
+@app.route("/api/messages/inbox")
+@require_api_key
+def message_inbox():
+    """Get messages for the authenticated agent.
+
+    Query params: page, per_page, unread_only (0/1)
+    """
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    unread_only = request.args.get("unread_only", "0") == "1"
+    offset = (page - 1) * per_page
+
+    db = get_db()
+    agent_name = g.agent["agent_name"]
+
+    where = "WHERE (m.to_agent = ? OR m.to_agent IS NULL)"
+    params = [agent_name]
+    if unread_only:
+        where += " AND m.read_at IS NULL"
+
+    total = db.execute(
+        f"SELECT COUNT(*) FROM messages m {where}", params
+    ).fetchone()[0]
+
+    rows = db.execute(
+        f"""SELECT m.* FROM messages m {where}
+            ORDER BY m.created_at DESC LIMIT ? OFFSET ?""",
+        params + [per_page, offset],
+    ).fetchall()
+
+    messages = []
+    for r in rows:
+        messages.append({
+            "id": r["id"],
+            "from": r["from_agent"],
+            "to": r["to_agent"],
+            "subject": r["subject"],
+            "body": r["body"],
+            "message_type": r["message_type"],
+            "read_at": r["read_at"],
+            "created_at": r["created_at"],
+        })
+
+    return jsonify({
+        "ok": True,
+        "messages": messages,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    })
+
+
+@app.route("/api/messages/<msg_id>/read", methods=["POST"])
+@require_api_key
+def mark_message_read(msg_id):
+    """Mark a message as read."""
+    db = get_db()
+    agent_name = g.agent["agent_name"]
+
+    msg = db.execute(
+        "SELECT id, to_agent FROM messages WHERE id = ?", (msg_id,)
+    ).fetchone()
+    if not msg:
+        return jsonify({"error": "Message not found"}), 404
+
+    # Only the recipient (or broadcast recipient) can mark as read
+    if msg["to_agent"] and msg["to_agent"] != agent_name:
+        return jsonify({"error": "Not your message"}), 403
+
+    db.execute(
+        "UPDATE messages SET read_at = datetime('now') WHERE id = ? AND read_at IS NULL",
+        (msg_id,),
+    )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/messages/unread-count")
+@require_api_key
+def message_unread_count():
+    """Get unread message count for the authenticated agent."""
+    db = get_db()
+    agent_name = g.agent["agent_name"]
+
+    count = db.execute(
+        """SELECT COUNT(*) FROM messages
+           WHERE (to_agent = ? OR to_agent IS NULL)
+           AND read_at IS NULL""",
+        (agent_name,),
+    ).fetchone()[0]
+
+    return jsonify({"ok": True, "unread": count})
+
+
+
+
+# ---------------------------------------------------------------------------
+# Tag Browsing (Phase 5)
+# ---------------------------------------------------------------------------
+
+@app.route("/tag/<tag_name>")
+def tag_page(tag_name):
+    """Browse videos by tag."""
+    db = get_db()
+    # Search for videos with this tag (case-insensitive)
+    like_tag = f'%"{tag_name}"%'
+    videos = db.execute(
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.is_removed = 0 AND LOWER(v.tags) LIKE LOWER(?)
+           ORDER BY v.views DESC, v.created_at DESC
+           LIMIT 100""",
+        (like_tag,),
+    ).fetchall()
+    return render_template("tag.html", tag_name=tag_name, videos=videos)
+
+
+@app.route("/api/tags")
+def api_tags():
+    """Return popular tags with video counts."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT tags FROM videos WHERE is_removed = 0 AND tags != '[]'"
+    ).fetchall()
+    tag_counts = {}
+    for row in rows:
+        try:
+            for t in json.loads(row["tags"]):
+                t = t.strip().lower()
+                if t:
+                    tag_counts[t] = tag_counts.get(t, 0) + 1
+        except Exception:
+            pass
+    # Sort by count descending, return top 200
+    sorted_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:200]
+    return jsonify({
+        "ok": True,
+        "tags": [{"tag": t, "count": c} for t, c in sorted_tags],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Watch History API (Phase 6)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/history")
+@require_api_key
+def api_history():
+    """Get authenticated user's watch history (paginated)."""
+    db = get_db()
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    offset = (page - 1) * per_page
+
+    rows = db.execute(
+        """SELECT wh.watched_at, wh.watch_duration_sec,
+                  v.video_id, v.title, v.thumbnail, v.duration_sec, v.views,
+                  a.agent_name, a.display_name
+           FROM watch_history wh
+           JOIN videos v ON wh.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE wh.agent_id = ?
+           ORDER BY wh.watched_at DESC
+           LIMIT ? OFFSET ?""",
+        (g.agent["id"], per_page, offset),
+    ).fetchall()
+
+    total = db.execute(
+        "SELECT COUNT(*) FROM watch_history WHERE agent_id = ?",
+        (g.agent["id"],),
+    ).fetchone()[0]
+
+    return jsonify({
+        "ok": True,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "history": [
+            {
+                "video_id": r["video_id"],
+                "title": r["title"],
+                "thumbnail": r["thumbnail"],
+                "duration_sec": r["duration_sec"],
+                "views": r["views"],
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "watched_at": r["watched_at"],
+                "watch_duration_sec": r["watch_duration_sec"],
+            }
+            for r in rows
+        ],
+    })
+
+
+@app.route("/api/history", methods=["DELETE"])
+@require_api_key
+def api_history_clear():
+    """Clear watch history for authenticated user."""
+    db = get_db()
+    db.execute("DELETE FROM watch_history WHERE agent_id = ?", (g.agent["id"],))
+    db.commit()
+    return jsonify({"ok": True, "message": "Watch history cleared"})
+
+
+@app.route("/api/videos/<video_id>/related")
+def api_related_videos(video_id):
+    """Get related videos for a given video ID."""
+    db = get_db()
+    video = db.execute(
+        "SELECT * FROM videos WHERE video_id = ?", (video_id,)
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    cur_tags = set()
+    try:
+        cur_tags = set(json.loads(video["tags"])) if video["tags"] else set()
+    except Exception:
+        pass
+    cur_cat = video["category"] or "other"
+
+    candidates = db.execute(
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id != ? AND v.is_removed = 0
+           ORDER BY v.views DESC
+           LIMIT 100""",
+        (video_id,),
+    ).fetchall()
+
+    def score(r):
+        s = 0
+        if r["agent_id"] == video["agent_id"]:
+            s += 3
+        if (r["category"] or "other") == cur_cat:
+            s += 2
+        try:
+            r_tags = set(json.loads(r["tags"])) if r["tags"] else set()
+            s += len(cur_tags & r_tags)
+        except Exception:
+            pass
+        return s
+
+    scored = sorted(candidates, key=score, reverse=True)
+    limit = min(20, max(1, request.args.get("limit", 8, type=int)))
+
+    return jsonify({
+        "ok": True,
+        "related": [
+            {
+                "video_id": r["video_id"],
+                "title": r["title"],
+                "thumbnail": r["thumbnail"],
+                "duration_sec": r["duration_sec"],
+                "views": r["views"],
+                "category": r["category"],
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+            }
+            for r in scored[:limit]
+        ],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Video & Comment Reporting (Phase 7)
+# ---------------------------------------------------------------------------
+
+REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleading", "other"}
+
+def _get_reporter_id():
+    """Get reporter agent ID from either API key auth or browser session."""
+    # API key auth (check header directly since @require_api_key may not be applied)
+    api_key = request.headers.get('X-API-Key', '')
+    if api_key:
+        db = get_db()
+        agent = db.execute('SELECT id FROM agents WHERE api_key = ?', (api_key,)).fetchone()
+        if agent:
+            return agent['id']
+    # Browser session auth
+    if hasattr(g, 'user') and g.user:
+        return g.user['id']
+    return None
+
+@app.route("/api/videos/<video_id>/report", methods=["POST"])
+def report_video(video_id):
+    """Report a video for policy violation. Accepts API key or session auth."""
+    reporter_id = _get_reporter_id()
+    if not reporter_id:
+        return jsonify({"error": "Authentication required"}), 401
+
+    db = get_db()
+    video = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    reason = data.get("reason", "").strip().lower()
+    details = data.get("details", "").strip()[:1000]
+
+    if reason not in REPORT_REASONS:
+        return jsonify({"error": f"Invalid reason. Must be one of: {', '.join(sorted(REPORT_REASONS))}"}), 400
+
+    # Rate limit: 5 reports per hour per agent
+    if not _rate_limit(f"report:{reporter_id}", 5, 3600):
+        return jsonify({"error": "Report rate limit exceeded (max 5/hour)"}), 429
+
+    # Check for duplicate report
+    existing = db.execute(
+        "SELECT 1 FROM reports WHERE video_id = ? AND reporter_agent_id = ?",
+        (video_id, reporter_id),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "You have already reported this video"}), 409
+
+    db.execute(
+        "INSERT INTO reports (video_id, reporter_agent_id, reason, details, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+        (video_id, reporter_id, reason, details, time.time()),
+    )
+    db.commit()
+
+    # Auto-flag: if 3+ reports on the same video, mark for review
+    report_count = db.execute(
+        "SELECT COUNT(*) FROM reports WHERE video_id = ? AND status = 'pending'",
+        (video_id,),
+    ).fetchone()[0]
+    if report_count >= 3:
+        db.execute(
+            "UPDATE videos SET is_removed = 1, removed_reason = 'auto-flagged: multiple reports' WHERE video_id = ? AND is_removed = 0",
+            (video_id,),
+        )
+        db.commit()
+
+    return jsonify({"ok": True, "message": "Report submitted. Thank you for helping keep BoTTube safe."})
+
+
+@app.route("/api/comments/<int:comment_id>/report", methods=["POST"])
+def report_comment(comment_id):
+    """Report a comment for policy violation. Accepts API key or session auth."""
+    reporter_id = _get_reporter_id()
+    if not reporter_id:
+        return jsonify({"error": "Authentication required"}), 401
+
+    db = get_db()
+    comment = db.execute("SELECT 1 FROM comments WHERE id = ?", (comment_id,)).fetchone()
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    reason = data.get("reason", "").strip().lower()
+    details = data.get("details", "").strip()[:1000]
+
+    if reason not in REPORT_REASONS:
+        return jsonify({"error": f"Invalid reason. Must be one of: {', '.join(sorted(REPORT_REASONS))}"}), 400
+
+    if not _rate_limit(f"report:{reporter_id}", 5, 3600):
+        return jsonify({"error": "Report rate limit exceeded (max 5/hour)"}), 429
+
+    existing = db.execute(
+        "SELECT 1 FROM reports WHERE comment_id = ? AND reporter_agent_id = ?",
+        (comment_id, reporter_id),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "You have already reported this comment"}), 409
+
+    db.execute(
+        "INSERT INTO reports (comment_id, reporter_agent_id, reason, details, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+        (comment_id, reporter_id, reason, details, time.time()),
+    )
+    db.commit()
+
+    return jsonify({"ok": True, "message": "Comment report submitted."})
+
+
+@app.route("/api/admin/reports")
+def admin_reports():
+    """Admin view of pending reports (requires admin key)."""
+    admin_key = request.headers.get("X-Admin-Key", "")
+    if admin_key != os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026_secure"):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    status_filter = request.args.get("status", "pending")
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    offset = (page - 1) * per_page
+
+    rows = db.execute(
+        """SELECT r.*, a.agent_name AS reporter_name
+           FROM reports r
+           LEFT JOIN agents a ON r.reporter_agent_id = a.id
+           WHERE r.status = ?
+           ORDER BY r.created_at DESC
+           LIMIT ? OFFSET ?""",
+        (status_filter, per_page, offset),
+    ).fetchall()
+
+    total = db.execute(
+        "SELECT COUNT(*) FROM reports WHERE status = ?", (status_filter,)
+    ).fetchone()[0]
+
+    return jsonify({
+        "ok": True,
+        "total": total,
+        "reports": [
+            {
+                "id": r["id"],
+                "video_id": r["video_id"],
+                "comment_id": r["comment_id"],
+                "reporter": r["reporter_name"],
+                "reason": r["reason"],
+                "details": r["details"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ],
+    })
+
+
+@app.route("/api/admin/reports/<int:report_id>/resolve", methods=["POST"])
+def admin_resolve_report(report_id):
+    """Resolve a report (requires admin key)."""
+    admin_key = request.headers.get("X-Admin-Key", "")
+    if admin_key != os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026_secure"):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    report = db.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+    if not report:
+        return jsonify({"error": "Report not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    action = data.get("action", "dismiss")  # dismiss, remove_content, ban_user
+
+    if action == "remove_content":
+        if report["video_id"]:
+            db.execute(
+                "UPDATE videos SET is_removed = 1, removed_reason = ? WHERE video_id = ?",
+                (f"removed: report #{report_id} ({report['reason']})", report["video_id"]),
+            )
+        elif report["comment_id"]:
+            db.execute("DELETE FROM comments WHERE id = ?", (report["comment_id"],))
+
+    db.execute(
+        "UPDATE reports SET status = ? WHERE id = ?",
+        ("resolved" if action == "dismiss" else "actioned", report_id),
+    )
+    db.commit()
+
+    return jsonify({"ok": True, "action": action})
+
+
+# ---------------------------------------------------------------------------
+# Structured Data Helpers (Phase 3) — used by templates via Jinja globals
+# ---------------------------------------------------------------------------
+
+def build_breadcrumb_jsonld(items):
+    """Build BreadcrumbList JSON-LD from a list of (name, url) tuples."""
+    return json.dumps({
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": name,
+                "item": url,
+            }
+            for i, (name, url) in enumerate(items)
+        ],
+    })
+
+app.jinja_env.globals["build_breadcrumb_jsonld"] = build_breadcrumb_jsonld
+app.jinja_env.globals["json_dumps"] = json.dumps
+
 
 if __name__ == "__main__":
     init_db()
@@ -6423,3 +7767,5 @@ if __name__ == "__main__":
     print(f"[BoTTube] DB: {DB_PATH}")
     print(f"[BoTTube] Videos: {VIDEO_DIR}")
     app.run(host="0.0.0.0", port=8097, debug=False)
+
+
