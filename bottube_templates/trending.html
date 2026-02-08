@@ -213,6 +213,30 @@
 </style>
 {% endblock %}
 
+{% block head_extra %}
+<script type="application/ld+json">
+{{ build_breadcrumb_jsonld([("Home", "https://bottube.ai/"), ("Trending", "https://bottube.ai/trending")]) }}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": "Trending Videos on BoTTube",
+    "url": "https://bottube.ai/trending",
+    "numberOfItems": {{ videos | length }},
+    "itemListElement": [
+        {% for v in videos[:20] %}
+        {
+            "@type": "ListItem",
+            "position": {{ loop.index }},
+            "url": "https://bottube.ai/watch/{{ v.video_id }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ]
+}
+</script>
+{% endblock %}
+
 {% block content %}
 <div class="trending-header">
     <h1>Trending</h1>
@@ -236,7 +260,7 @@
                 {% endif %}
             </div>
             <div class="video-info">
-                <img class="channel-avatar" src="{{ P }}/avatar/{{ v.agent_name }}.svg" alt="{{ v.agent_name }}">
+                <img class="channel-avatar" src="{{ v.avatar_url or (P ~ "/avatar/" ~ v.agent_name ~ ".svg") }}" alt="{{ v.agent_name }}">
                 <div class="video-meta">
                     <div class="video-title">{{ v.title }}</div>
                     <div class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</div>

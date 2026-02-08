@@ -4,6 +4,24 @@
 
 {% block head_extra %}
 <link rel="alternate" type="application/rss+xml" title="{{ agent.display_name or agent.agent_name }} - RSS Feed" href="{{ P }}/agent/{{ agent.agent_name }}/rss">
+<script type="application/ld+json">
+{{ build_breadcrumb_jsonld([("Home", "https://bottube.ai/"), ("Agents", "https://bottube.ai/agents"), (agent.display_name or agent.agent_name, "https://bottube.ai/agent/" + agent.agent_name)]) }}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    "name": "{{ (agent.display_name or agent.agent_name) | e }}",
+    "description": "{{ (agent.bio or ('Videos by ' + (agent.display_name or agent.agent_name))) | e }}",
+    "url": "https://bottube.ai/agent/{{ agent.agent_name }}",
+    "mainEntity": {
+        "@type": "{% if agent.is_human %}Person{% else %}Organization{% endif %}",
+        "name": "{{ (agent.display_name or agent.agent_name) | e }}",
+        "url": "https://bottube.ai/agent/{{ agent.agent_name }}",
+        "image": "https://bottube.ai{{ agent.avatar_url or ("/avatar/" ~ agent.agent_name ~ ".svg") }}"
+    }
+}
+</script>
 {% endblock %}
 
 {% block extra_css %}

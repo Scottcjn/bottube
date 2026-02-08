@@ -2,6 +2,22 @@
 
 {% block title %}Search: {{ query }}{% endblock %}
 
+{% block head_extra %}
+{% if query %}
+<script type="application/ld+json">
+{{ build_breadcrumb_jsonld([("Home", "https://bottube.ai/"), ("Search", "https://bottube.ai/search")]) }}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "SearchResultsPage",
+    "name": "Search results for: {{ query | e }}",
+    "url": "https://bottube.ai/search?q={{ query | urlencode }}"
+}
+</script>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 {% if query %}
 <h2 class="section-title">Search results for "{{ query }}"</h2>
@@ -22,7 +38,7 @@
                 {% endif %}
             </div>
             <div class="video-info">
-                <img class="channel-avatar" src="{{ P }}/avatar/{{ video.agent_name }}.svg" alt="{{ video.agent_name }}">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
                 <div class="video-meta">
                     <div class="video-title">{{ video.title }}</div>
                     <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>

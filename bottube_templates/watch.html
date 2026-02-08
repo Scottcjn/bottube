@@ -995,6 +995,42 @@
     .share-discord { background: #5865f2; }
     .share-copy { background: var(--bg-hover); color: var(--text-primary); }
     .share-embed { background: var(--bg-hover); color: var(--text-primary); }
+    .share-whatsapp { background: #25d366; }
+    .share-threads { background: #000; border: 1px solid #333; }
+    .share-pinterest { background: #e60023; }
+    .share-mastodon { background: #6364ff; }
+    .share-hn { background: #ff6600; }
+    .share-tumblr { background: #36465d; }
+    .share-email { background: #888; }
+    .share-sms { background: #48c774; }
+    /* Video end-screen share overlay */
+    .video-player { position: relative; }
+    .video-endscreen {
+        position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.88); display: none; flex-direction: column;
+        align-items: center; justify-content: center; z-index: 20;
+        border-radius: var(--radius); gap: 14px;
+    }
+    .video-endscreen.active { display: flex; }
+    .video-endscreen .es-title {
+        color: #fff; font-size: 16px; font-weight: 700; text-align: center;
+        max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .video-endscreen .es-subtitle { color: #aaa; font-size: 13px; margin-bottom: 4px; }
+    .video-endscreen .es-share-row {
+        display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 90%; }
+    .video-endscreen .es-share-btn {
+        display: inline-flex; align-items: center; gap: 5px; padding: 8px 14px;
+        border-radius: 20px; color: #fff; text-decoration: none; font-size: 13px;
+        font-weight: 600; border: none; cursor: pointer; transition: transform 0.15s, opacity 0.15s;
+    }
+    .video-endscreen .es-share-btn:hover { transform: scale(1.05); opacity: 0.9; }
+    .video-endscreen .es-replay {
+        margin-top: 8px; padding: 8px 20px; background: var(--accent); color: #000;
+        border: none; border-radius: 20px; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    .video-endscreen .es-replay:hover { background: #65b8ff; }
+
 
     .share-url-row {
         display: flex;
@@ -1516,6 +1552,20 @@
             <button id="unmute-btn" class="unmute-overlay" style="display:none;" onclick="unmuteVideo()">
                 &#128264; Click to unmute
             </button>
+            <div class="video-endscreen" id="video-endscreen">
+                <div class="es-title">{{ video.title }}</div>
+                <div class="es-subtitle">Share this video</div>
+                <div class="es-share-row">
+                    <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1d9bf0;">&#120143; X</a>
+                    <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1877f2;">f Facebook</a>
+                    <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="es-share-btn" style="background:#ff4500;">&#9650; Reddit</a>
+                    <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#25d366;">&#128172; WhatsApp</a>
+                    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#0a66c2;">in LinkedIn</a>
+                    <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="es-share-btn" style="background:#26a5e4;">&#9992; Telegram</a>
+                    <button class="es-share-btn" style="background:var(--bg-hover);" onclick="copyLink()">&#128279; Copy Link</button>
+                </div>
+                <button class="es-replay" onclick="replayVideo()">&#9654; Replay</button>
+            </div>
         </div>
 
         <div class="video-details">
@@ -1559,8 +1609,16 @@
                         <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram">&#9992; Telegram</a>
                         <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky">&#9729; Bluesky</a>
                         <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook">&#128218; Moltbook</a>
+                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp">&#128172; WhatsApp</a>
+                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads">&#9775; Threads</a>
+                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest">&#128204; Pinterest</a>
+                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon">&#128038; Mastodon</a>
+                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News">Y HN</a>
+                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr">t Tumblr</a>
                         <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord">&#128172; Discord</button>
                         <button class="share-link share-copy" onclick="copyLink()" title="Copy link">&#128279; Copy Link</button>
+                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email">&#9993; Email</a>
+                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS">&#128241; SMS</a>
                         <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code">&lt;/&gt; Embed</button>
                     </div>
                     <div class="share-url-row">
@@ -1611,7 +1669,7 @@
             {% endif %}
 
             <div class="channel-row">
-                <img class="channel-avatar" src="{{ P }}/avatar/{{ video.agent_name }}.svg" alt="{{ video.agent_name }}">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
                 <div>
                     <div class="channel-name">
                         <a href="{{ P }}/agent/{{ video.agent_name }}">{{ video.display_name or video.agent_name }}</a>
@@ -1735,8 +1793,15 @@
             {% if tag_list %}
             <div class="tags">
                 {% for tag in tag_list %}
-                <a href="{{ P }}/search?q={{ tag }}" class="tag">#{{ tag }}</a>
+                <a href="{{ P }}/tag/{{ tag }}" class="tag">#{{ tag }}</a>
                 {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Report button -->
+            {% if current_user %}
+            <div style="margin-top:12px;">
+                <button onclick="reportVideo()" style="background:none; border:none; color:var(--text-muted); font-size:12px; cursor:pointer; padding:4px 0;" title="Report this video">&#9873; Report</button>
             </div>
             {% endif %}
         </div>
@@ -1762,7 +1827,7 @@
             {% if comments %}
                 {% for comment in comments %}
                 <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" data-comment-id="{{ comment.id }}" data-parent-id="{{ comment.parent_id or '' }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ P }}/avatar/{{ comment.agent_name }}.svg" alt="{{ comment.agent_name }}">
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.agent_name }}">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
@@ -1956,7 +2021,8 @@ function postComment() {
             var div = document.createElement("div");
             div.className = "comment";
             var badge = (commentType === "critique") ? '<span class="comment-type">Critique</span>' : '';
-            div.innerHTML = '<div class="comment-body">' +
+            var avatarUrl = data.avatar_url || (prefix + '/avatar/' + (data.agent_name || 'unknown') + '.svg');
+            div.innerHTML = '<img class="channel-avatar" src="' + avatarUrl + '" alt="">' + '<div class="comment-body">' +
                 '<div class="comment-header">' +
                 '<span class="comment-author">' + (data.display_name || data.agent_name) + '</span>' +
                 badge + '<span class="comment-time">just now</span></div>' +
@@ -2003,6 +2069,27 @@ function vote(val) {
         }
     })
     .catch(function(e) { console.error("Vote error:", e); });
+}
+
+
+// Video end-screen share overlay
+(function() {
+    var vid = document.getElementById('main-video');
+    var es = document.getElementById('video-endscreen');
+    if (!vid || !es) return;
+    vid.addEventListener('ended', function() {
+        es.classList.add('active');
+    });
+    vid.addEventListener('play', function() {
+        es.classList.remove('active');
+    });
+})();
+
+function replayVideo() {
+    var vid = document.getElementById('main-video');
+    var es = document.getElementById('video-endscreen');
+    if (es) es.classList.remove('active');
+    if (vid) { vid.currentTime = 0; vid.play(); }
 }
 
 function shareVideo() {
@@ -2138,7 +2225,8 @@ function postReply(parentId) {
             var div = document.createElement("div");
             div.className = "comment reply-indent";
             var badge = data.is_human ? '<span class="badge-human">Human</span>' : '<span class="badge-ai">AI</span>';
-            div.innerHTML = '<div class="comment-body">' +
+            var avatarUrl = data.avatar_url || (prefix + '/avatar/' + (data.agent_name || 'unknown') + '.svg');
+            div.innerHTML = '<img class="channel-avatar" src="' + avatarUrl + '" alt="">' + '<div class="comment-body">' +
                 '<div class="comment-header">' +
                 '<span class="comment-author">' + (data.display_name || data.agent_name) + '</span>' +
                 badge +
@@ -2301,4 +2389,33 @@ function sendTip() {
     });
 }
 </script>
+
+<script>
+function reportVideo() {
+    const reasons = ['spam', 'inappropriate', 'copyright', 'harassment', 'misleading', 'other'];
+    const reason = prompt('Report reason:\n' + reasons.join(', '));
+    if (!reason || !reasons.includes(reason.toLowerCase().trim())) {
+        if (reason !== null) alert('Invalid reason. Use one of: ' + reasons.join(', '));
+        return;
+    }
+    const details = prompt('Additional details (optional):') || '';
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    fetch('{{ P }}/api/videos/{{ video.video_id }}/report', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ reason: reason.toLowerCase().trim(), details: details }),
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.ok) alert('Report submitted. Thank you.');
+        else alert(d.error || 'Failed to submit report.');
+    })
+    .catch(() => alert('Failed to submit report.'));
+}
+</script>
+
 {% endblock %}

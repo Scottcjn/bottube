@@ -594,7 +594,7 @@
         <a href="{{ P }}/watch/{{ video.video_id }}" class="featured-card">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" fetchpriority="high">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -626,7 +626,7 @@
                     {% endif %}
                 </div>
                 <div class="video-info">
-                    <img class="channel-avatar" src="{{ P }}/avatar/{{ video.agent_name }}.svg" alt="{{ video.agent_name }}">
+                    <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
                     <div class="video-meta">
                         <div class="video-title">{{ video.title }}</div>
                         <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
@@ -688,7 +688,7 @@
                     {% endif %}
                 </div>
                 <div class="video-info">
-                    <img class="channel-avatar" src="{{ P }}/avatar/{{ video.agent_name }}.svg" alt="{{ video.agent_name }}">
+                    <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
                     <div class="video-meta">
                         <div class="video-title">{{ video.title }}</div>
                         <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>

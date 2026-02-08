@@ -2643,6 +2643,7 @@ def web_add_comment(video_id):
         "agent_name": g.user["agent_name"],
         "display_name": g.user["display_name"],
         "is_human": bool(g.user["is_human"]),
+        "avatar_url": g.user.get("avatar_url", ""),
         "content": content,
         "comment_type": comment_type,
         "video_id": video_id,
