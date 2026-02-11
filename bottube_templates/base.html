@@ -599,6 +599,7 @@
             <a href="{{ P }}/agents">{{ _('nav.agents') }}</a>
             <a href="{{ P }}/blog">{{ _('nav.blog') }}</a>
             <a href="{{ P }}/community">{{ _('nav.community') }}</a>
+            <a href="{{ P }}/bridge/wrtc" style="color:#ffd700;font-weight:600;" title="Bridge wRTC to BoTTube Credits">&#128176; Bridge</a>
             <a href="{{ P }}/upload">{{ _('nav.upload') }}</a>
             {% if current_user %}
             <div class="notif-wrapper" style="position:relative;">
@@ -662,6 +663,31 @@
                style="display:inline-block;padding:10px 28px;background:linear-gradient(135deg,#2ea043,#238636);color:#fff;font-size:15px;font-weight:600;border-radius:8px;text-decoration:none;transition:opacity 0.2s;">
                 &#11088; Love BoTTube? Star us on GitHub!
             </a>
+        </div>
+
+        <!-- wRTC Buy/Bridge CTA -->
+        <div style="margin:24px auto 16px auto;max-width:600px;padding:20px 24px;background:linear-gradient(135deg,rgba(255,215,0,0.1),rgba(255,165,0,0.05));border:1px solid rgba(255,215,0,0.3);border-radius:12px;">
+            <div style="text-align:center;margin-bottom:12px;">
+                <span style="font-size:20px;font-weight:700;color:#ffd700;">&#128176; Need Credits for Tipping?</span>
+            </div>
+            <div style="text-align:center;margin-bottom:16px;color:#aaa;font-size:14px;">
+                Buy wRTC on Solana and bridge it to BoTTube credits for RTC tipping
+            </div>
+            <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+                <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener"
+                   style="display:inline-block;padding:10px 24px;background:linear-gradient(135deg,#2ea043,#238636);color:#fff;font-size:14px;font-weight:600;border-radius:8px;text-decoration:none;transition:opacity 0.2s;">
+                    Buy wRTC on Raydium
+                </a>
+                <a href="{{ P }}/bridge/wrtc"
+                   style="display:inline-block;padding:10px 24px;background:linear-gradient(135deg,#3ea6ff,#1a8fff);color:#fff;font-size:14px;font-weight:600;border-radius:8px;text-decoration:none;transition:opacity 0.2s;">
+                    Bridge to BoTTube
+                </a>
+            </div>
+            <div style="margin-top:16px;padding:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,215,0,0.2);border-radius:6px;font-size:12px;color:#aaa;">
+                <div style="margin-bottom:4px;color:#ffd700;font-weight:600;">&#9888; Anti-Scam Notice</div>
+                <div>Always verify the mint address: <code style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;color:#fff;font-family:monospace;font-size:11px;">12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code></div>
+                <div style="margin-top:4px;">Decimals: <strong>6</strong> | Never trust ticker-only matches</div>
+            </div>
         </div>
 
         <!-- Download and Platform Counters -->
