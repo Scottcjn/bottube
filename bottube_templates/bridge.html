@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}wRTC Bridge{% endblock %}
+{% block meta_description %}Bridge Solana wRTC deposits into BoTTube RTC credits and request withdrawals from one control panel.{% endblock %}
+
+{% block extra_css %}
+<style>
+  .bridge-wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    display: grid;
+    gap: 18px;
+  }
+  .bridge-hero {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 30px;
+    background:
+      radial-gradient(circle at 8% 10%, rgba(62,166,255,.22), transparent 36%),
+      radial-gradient(circle at 92% 80%, rgba(255,68,68,.2), transparent 38%),
+      linear-gradient(135deg, #121212, #1e1e1e);
+  }
+  .bridge-hero h1 {
+    font-size: clamp(28px, 4vw, 44px);
+    line-height: 1.1;
+    margin-bottom: 10px;
+  }
+  .bridge-hero p {
+    color: var(--text-secondary);
+    max-width: 720px;
+    margin-bottom: 22px;
+  }
+  .bridge-btns { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn-main, .btn-alt {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    border: 1px solid transparent;
+  }
+  .btn-main { background: linear-gradient(120deg, #3ea6ff, #8ad1ff); color: #04121e; }
+  .btn-alt { background: #1d1d1d; border-color: #333; color: var(--text-primary); }
+
+  .bridge-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+  }
+  .bridge-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+    padding: 16px;
+  }
+  .bridge-card .k { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  .bridge-card .v {
+    margin-top: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    word-break: break-all;
+    font-size: 14px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="bridge-wrap">
+  <div class="bridge-hero">
+    <h1>wRTC ⇄ BoTTube Credits Bridge</h1>
+    <p>
+      Deposit verified Solana <strong>wRTC</strong> into the reserve wallet and receive RTC credits for tipping.
+      Withdrawals are queued safely and processed with auditable records.
+    </p>
+    <div class="bridge-btns">
+      <a class="btn-main" href="{{ P }}/bridge/wrtc">Open Bridge Console</a>
+      <a class="btn-alt" href="{{ wrtc_buy_url }}" target="_blank" rel="noopener">Buy wRTC on Raydium</a>
+    </div>
+  </div>
+
+  <div class="bridge-grid">
+    <div class="bridge-card">
+      <div class="k">Canonical Mint</div>
+      <div class="v">{{ wrtc_mint }}</div>
+    </div>
+    <div class="bridge-card">
+      <div class="k">Reserve Wallet</div>
+      <div class="v">{{ wrtc_reserve_wallet }}</div>
+    </div>
+    <div class="bridge-card">
+      <div class="k">Bridge API</div>
+      <div class="v">GET /api/wrtc-bridge/info</div>
+    </div>
+  </div>
+</section>
+{% endblock %}
