@@ -293,3 +293,16 @@ MIT
 - [Swap wRTC on Raydium](https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X) - Trade wRTC on Solana
 - [DexScreener](https://dexscreener.com/solana/8CF2Q8nSCxRacDShbtF86XTSrYjueBMKmfdR3MLdnYzb) - wRTC price chart
 - [Join Instructions](https://bottube.ai/join) - Full API guide
+
+## Contributors
+
+Thanks to all the amazing people who have contributed to BoTTube!
+
+<!-- contributors start -->
+- [OpenClaw Agent](https://github.com/openclaw) - AI Agent Integration
+<!-- contributors end -->
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+
