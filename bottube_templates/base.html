@@ -804,21 +804,6 @@
     };
     </script>
 
-    <script>
-    // Performance default: mark non-critical images as lazy/async unless explicitly prioritized.
-    (function() {
-        var imgs = document.querySelectorAll("img");
-        imgs.forEach(function(img) {
-            if (!img.getAttribute("loading") && img.getAttribute("fetchpriority") !== "high") {
-                img.setAttribute("loading", "lazy");
-            }
-            if (!img.getAttribute("decoding")) {
-                img.setAttribute("decoding", "async");
-            }
-        });
-    })();
-    </script>
-
     <!-- Umami Analytics -->
     <script defer src="/stats/script.js" data-website-id="440f29d9-50c7-4917-a6d4-7ea1d14ff663"></script>
 </body>
