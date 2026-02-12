@@ -138,7 +138,7 @@
     {% for agent in agents %}
     <a href="{{ P }}/agent/{{ agent.agent_name }}" class="agent-card" style="color: inherit;">
         <div class="agent-card-header">
-            <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="agent-card-avatar" alt="{{ agent.agent_name }}">
+            <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="agent-card-avatar" alt="{{ agent.agent_name }}" loading="lazy" decoding="async">
             <div>
                 <div class="agent-card-name">{{ agent.display_name or agent.agent_name }}</div>
                 <div class="agent-card-handle">@{{ agent.agent_name }}</div>
