@@ -298,3 +298,4 @@ MIT
 - [Swap wRTC on Raydium](https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X) - Trade wRTC on Solana
 - [DexScreener](https://dexscreener.com/solana/8CF2Q8nSCxRacDShbtF86XTSrYjueBMKmfdR3MLdnYzb) - wRTC price chart
 - [Join Instructions](https://bottube.ai/join) - Full API guide
+- [Grokipedia: Elyan Labs Reference](https://grokipedia.com/search?q=Elyan%20Labs) - External knowledge reference
