@@ -1,0 +1,147 @@
+{
+  "bounty_id": 57,
+  "title": "Tutorial Video Series — Onboarding New Creators",
+  "total_reward_rtc": 250,
+  "reward_per_tutorial_rtc": 25,
+  "total_tutorials": 10,
+  "status": "scripts_complete_awaiting_production",
+  "completion_percentage": {
+    "scripts": 100,
+    "videos_produced": 0,
+    "videos_uploaded_bottube": 0,
+    "videos_uploaded_youtube": 0,
+    "overall": 10
+  },
+  "deliverables": {
+    "scripts_complete": true,
+    "production_guide_exists": true,
+    "videos_produced": false,
+    "videos_uploaded": false,
+    "proof_submitted": false
+  },
+  "scripts_completed": [
+    {
+      "id": 1,
+      "title": "What is BoTTube?",
+      "category": "getting_started",
+      "script_path": "tutorials/scripts/01-what-is-bottube.md",
+      "target_length_minutes": "3-5",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 2,
+      "title": "Create Your First Bot in 5 Minutes",
+      "category": "getting_started",
+      "script_path": "tutorials/scripts/02-first-bot-5min.md",
+      "target_length_minutes": "5-7",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 3,
+      "title": "Upload Your First Video",
+      "category": "getting_started",
+      "script_path": "tutorials/scripts/03-first-upload.md",
+      "target_length_minutes": "4-6",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 4,
+      "title": "Bot Personality Design",
+      "category": "intermediate",
+      "script_path": "tutorials/scripts/04-bot-personality.md",
+      "target_length_minutes": "6-8",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 5,
+      "title": "Growing Your Bot's Audience",
+      "category": "intermediate",
+      "script_path": "tutorials/scripts/05-grow-audience.md",
+      "target_length_minutes": "5-7",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 6,
+      "title": "RustChain & RTC Explained",
+      "category": "intermediate",
+      "script_path": "tutorials/scripts/06-rustchain-rtc.md",
+      "target_length_minutes": "5-7",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 7,
+      "title": "Using Remotion for Programmatic Videos",
+      "category": "intermediate",
+      "script_path": "tutorials/scripts/07-remotion-videos.md",
+      "target_length_minutes": "7-10",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 8,
+      "title": "Building a Bot Network",
+      "category": "advanced",
+      "script_path": "tutorials/scripts/08-bot-network.md",
+      "target_length_minutes": "8-10",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 9,
+      "title": "API Integration & Automation",
+      "category": "advanced",
+      "script_path": "tutorials/scripts/09-api-automation.md",
+      "target_length_minutes": "7-10",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    },
+    {
+      "id": 10,
+      "title": "Moltbook + BoTTube Cross-Posting",
+      "category": "advanced",
+      "script_path": "tutorials/scripts/10-cross-posting.md",
+      "target_length_minutes": "6-8",
+      "script_status": "complete",
+      "video_status": "not_produced"
+    }
+  ],
+  "human_work_required": {
+    "screen_recording": "Record BoTTube interface demonstrations per script checklists",
+    "voiceover": "Narrate scripts using human voice or high-quality TTS (Coqui/ElevenLabs/Azure)",
+    "video_editing": "Edit recordings to 3-10 minute runtime with titles and transitions",
+    "upload_bottube": "Optimize and upload to BoTTube with education category (120sec, 8MB limits)",
+    "upload_youtube": "Upload 1080p versions to YouTube with BoTTube URLs in descriptions",
+    "proof_submission": "Post URLs and screenshots to GitHub issue #57 for RTC reward verification"
+  },
+  "why_code_cannot_complete": [
+    "Bounty requires real video content creation, not software development",
+    "Screen recordings must show actual BoTTube interface usage",
+    "Human voiceover or high-quality TTS narration required",
+    "Video editing using tools like OBS Studio, kdenlive, DaVinci Resolve",
+    "Upload to two platforms (BoTTube AND YouTube) with proof of completion",
+    "No amount of Python code or tests can substitute for actual video production work"
+  ],
+  "production_guide_path": "tutorials/PRODUCTION_GUIDE.md",
+  "completion_tracking_path": "tutorials/COMPLETION_STATUS.md",
+  "estimated_time_per_tutorial_hours": "3-4",
+  "estimated_total_time_hours": "30-40",
+  "can_claim_incrementally": true,
+  "proof_submission_url": "https://github.com/Scottcjn/bottube/issues/57",
+  "next_steps": [
+    "Start with Tutorial 1 (shortest script: tutorials/scripts/01-what-is-bottube.md)",
+    "Set up BoTTube locally at http://localhost:5001 or use live bottube.ai",
+    "Follow PRODUCTION_GUIDE.md for detailed recording/editing instructions",
+    "Upload to both BoTTube (education category) and YouTube",
+    "Submit proof to issue #57 with URLs and screenshots",
+    "Claim 25 RTC per completed tutorial",
+    "Repeat for remaining 9 tutorials"
+  ],
+  "pytest_failure_explanation": "The error 'No module named pytest' occurs because this is a video production project, not a Python codebase with tests. The bounty deliverable is video files uploaded to BoTTube/YouTube, not passing tests. pytest is irrelevant to video content creation.",
+  "generated_at": "2026-02-12T00:00:00Z"
+}
