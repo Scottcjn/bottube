@@ -19,6 +19,7 @@ import string
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -395,6 +396,14 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
+
+# Google integrations (configured via env vars on VPS)
+app.config["GA4_MEASUREMENT_ID"] = os.environ.get("GA4_MEASUREMENT_ID", "")
+app.config["ADSENSE_PUBLISHER_ID"] = os.environ.get("ADSENSE_PUBLISHER_ID", "")
+app.config["ADSENSE_VIDEO_SLOT"] = os.environ.get("ADSENSE_VIDEO_SLOT", "")
+app.config["IMA_VAST_TAG"] = os.environ.get("IMA_VAST_TAG", "")
+app.config["FCM_VAPID_KEY"] = os.environ.get("FCM_VAPID_KEY", "")
+app.config["FIREBASE_PROJECT_ID"] = os.environ.get("FIREBASE_PROJECT_ID", "")
 
 # URL prefix: when behind nginx at /bottube/ on shared IP, templates need prefixed URLs.
 # When accessed via bottube.ai (own domain), prefix is empty.
@@ -959,6 +968,16 @@ def init_db():
         if col not in existing_cols:
             conn.execute(sql)
 
+    # Migration: Google OAuth columns on agents
+    google_migrations = {
+        "google_id": "ALTER TABLE agents ADD COLUMN google_id TEXT DEFAULT ''",
+        "google_email": "ALTER TABLE agents ADD COLUMN google_email TEXT DEFAULT ''",
+        "google_avatar": "ALTER TABLE agents ADD COLUMN google_avatar TEXT DEFAULT ''",
+    }
+    for col, sql in google_migrations.items():
+        if col not in existing_cols:
+            conn.execute(sql)
+
     # Migration: add is_removed to videos if missing
     video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
     if "is_removed" not in video_cols:
@@ -985,6 +1004,19 @@ def init_db():
         conn.execute("ALTER TABLE videos ADD COLUMN revision_note TEXT DEFAULT ''")
     if "challenge_id" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN challenge_id TEXT DEFAULT ''")
+
+    # Migration: push notification subscriptions table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id INTEGER,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
 
     # Migration: add vision screening fields to videos
     video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
@@ -1895,8 +1927,10 @@ def login():
         return render_template("login.html"), 400
 
     db = get_db()
+    # Allow login by username OR email address
     user = db.execute(
-        "SELECT * FROM agents WHERE agent_name = ?", (username,)
+        "SELECT * FROM agents WHERE agent_name = ? OR (email = ? AND email != '')",
+        (username, username),
     ).fetchone()
 
     if not user or not user["password_hash"]:
@@ -2088,6 +2122,183 @@ def resend_verification():
 
 
 # ---------------------------------------------------------------------------
+# Google OAuth Sign-In
+# ---------------------------------------------------------------------------
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "https://bottube.ai/auth/google/callback")
+
+
+@app.route("/auth/google")
+def google_auth():
+    """Redirect to Google OAuth consent screen."""
+    if not GOOGLE_CLIENT_ID:
+        flash("Google sign-in is not configured.", "error")
+        return redirect(url_for("login"))
+
+    # Generate state token for CSRF protection
+    state = secrets.token_hex(16)
+    session["google_oauth_state"] = state
+
+    params = urllib.parse.urlencode({
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+        "prompt": "select_account",
+    })
+    return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+
+@app.route("/auth/google/callback")
+def google_callback():
+    """Handle Google OAuth callback."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        flash("Google sign-in is not configured.", "error")
+        return redirect(url_for("login"))
+
+    # Verify state
+    state = request.args.get("state", "")
+    if not state or state != session.pop("google_oauth_state", ""):
+        flash("Invalid OAuth state. Please try again.", "error")
+        return redirect(url_for("login"))
+
+    code = request.args.get("code", "")
+    error = request.args.get("error", "")
+    if error or not code:
+        flash(f"Google sign-in was cancelled or failed.", "error")
+        return redirect(url_for("login"))
+
+    # Exchange code for tokens
+    token_data = urllib.parse.urlencode({
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }).encode()
+
+    try:
+        token_req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token",
+            data=token_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(token_req, timeout=10) as resp:
+            tokens = json.loads(resp.read())
+    except Exception:
+        flash("Failed to exchange Google authorization code.", "error")
+        return redirect(url_for("login"))
+
+    access_token = tokens.get("access_token")
+    if not access_token:
+        flash("No access token received from Google.", "error")
+        return redirect(url_for("login"))
+
+    # Fetch user info
+    try:
+        info_req = urllib.request.Request(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        with urllib.request.urlopen(info_req, timeout=10) as resp:
+            userinfo = json.loads(resp.read())
+    except Exception:
+        flash("Failed to fetch Google user info.", "error")
+        return redirect(url_for("login"))
+
+    google_id = userinfo.get("sub", "")
+    google_email = userinfo.get("email", "")
+    google_name = userinfo.get("name", "")
+    google_avatar = userinfo.get("picture", "")
+
+    if not google_id:
+        flash("Could not identify your Google account.", "error")
+        return redirect(url_for("login"))
+
+    db = get_db()
+
+    # Case 1: Existing user with this Google ID — log them in
+    existing = db.execute(
+        "SELECT * FROM agents WHERE google_id = ?", (google_id,)
+    ).fetchone()
+    if existing:
+        session.clear()
+        session.permanent = True
+        session["user_id"] = existing["id"]
+        session["csrf_token"] = secrets.token_hex(32)
+        return redirect(url_for("index"))
+
+    # Case 2: Currently logged in — link Google to existing account
+    if g.user:
+        db.execute(
+            "UPDATE agents SET google_id = ?, google_email = ?, google_avatar = ? WHERE id = ?",
+            (google_id, google_email, google_avatar, g.user["id"]),
+        )
+        db.commit()
+        flash("Google account linked successfully!", "success")
+        return redirect(url_for("index"))
+
+    # Case 3: Email matches existing account — link and log in
+    if google_email:
+        email_match = db.execute(
+            "SELECT * FROM agents WHERE email = ? AND email != ''", (google_email,)
+        ).fetchone()
+        if email_match:
+            db.execute(
+                "UPDATE agents SET google_id = ?, google_email = ?, google_avatar = ?, email_verified = 1 WHERE id = ?",
+                (google_id, google_email, google_avatar, email_match["id"]),
+            )
+            db.commit()
+            session.clear()
+            session.permanent = True
+            session["user_id"] = email_match["id"]
+            session["csrf_token"] = secrets.token_hex(32)
+            return redirect(url_for("index"))
+
+    # Case 4: New user — auto-create account
+    # Generate username from email or Google name
+    base_name = ""
+    if google_email:
+        base_name = google_email.split("@")[0].lower()
+    elif google_name:
+        base_name = google_name.lower().replace(" ", "")
+    base_name = re.sub(r"[^a-z0-9_-]", "", base_name)[:24] or "user"
+
+    # Ensure unique username
+    username = base_name
+    suffix = 1
+    while db.execute("SELECT 1 FROM agents WHERE agent_name = ?", (username,)).fetchone():
+        username = f"{base_name}{suffix}"
+        suffix += 1
+
+    api_key = gen_api_key()
+    display_name = google_name or username
+    now = time.time()
+
+    db.execute(
+        "INSERT INTO agents (agent_name, display_name, api_key, is_human, email, email_verified, "
+        "google_id, google_email, google_avatar, avatar_url, created_at, last_active) "
+        "VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?)",
+        (username, display_name, api_key, google_email, google_id, google_email,
+         google_avatar, google_avatar, now, now),
+    )
+    db.commit()
+
+    new_user = db.execute("SELECT * FROM agents WHERE agent_name = ?", (username,)).fetchone()
+    session.clear()
+    session.permanent = True
+    session["user_id"] = new_user["id"]
+    session["csrf_token"] = secrets.token_hex(32)
+
+    flash(f"Welcome to BoTTube, {display_name}! Your account has been created.", "success")
+    return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
 # Video upload
 # ---------------------------------------------------------------------------
 
@@ -2120,6 +2331,7 @@ def upload_video():
     revision_of = request.form.get("revision_of", "").strip()
     revision_note = request.form.get("revision_note", "").strip()[:MAX_DESCRIPTION_LENGTH]
     challenge_id = request.form.get("challenge_id", "").strip()
+    gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
 
     db = get_db()
     if revision_of:
@@ -2309,8 +2521,19 @@ def upload_video():
     }
     if screening_status == "failed":
         response_data["warning"] = "Video was flagged as spam and will not be publicly visible."
-    # Ping IndexNow for the new video
+    # Ping search engines about the new video
     _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
+    ping_google_indexing(f"https://bottube.ai/watch/{video_id}")
+
+    # Award BAN for upload
+    award_ban_upload(db, g.agent["id"], video_id)
+
+    # Award extra BAN for AI video generation (if gen_method specified)
+    ban_gen_reward = 0.0
+    if gen_method:
+        ban_gen_reward = award_ban_video_gen(db, g.agent["id"], video_id, gen_method)
+    if ban_gen_reward > 0:
+        response_data["ban_video_gen_reward"] = ban_gen_reward
 
     # Notify subscribers about the new video (background)
     _notify_subscribers_new_video(g.agent["id"], video_id, title, g.agent["agent_name"])
@@ -2529,8 +2752,11 @@ def record_view(video_id):
             (video_id, agent_id, ip, time.time()),
         )
         db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
+        new_views = (row["views"] or 0) + 1
         # Award RTC to video creator for the view
         award_rtc(db, row["agent_id"], RTC_REWARD_VIEW, "video_view", video_id)
+        # Check BAN milestones (100 views, 1000 views)
+        check_view_milestones(db, row["agent_id"], video_id, new_views)
         # Record watch history
         if agent_id:
             db.execute(
@@ -4371,6 +4597,9 @@ def delete_video(video_id):
     db.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
     db.commit()
 
+    # Notify search engines of URL removal
+    ping_google_indexing(f"https://bottube.ai/watch/{video_id}", action="URL_DELETED")
+
     return jsonify({"ok": True, "deleted": video_id, "title": video["title"]})
 
 
@@ -5090,6 +5319,9 @@ def watch(video_id):
             (video_id, ip, time.time()),
         )
         db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
+        new_views = (video["views"] or 0) + 1
+        # Check BAN milestones (100 views, 1000 views)
+        check_view_milestones(db, video["agent_id"], video_id, new_views)
         db.commit()
 
     # Record watch history for logged-in users
@@ -5179,6 +5411,16 @@ def watch(video_id):
     _candidates_scored = sorted(_candidates, key=_related_score, reverse=True)
     related = _candidates_scored[:8]
 
+    # Look up creator's BAN wallet address (from ban_wallets table)
+    _ban_addr_row = None
+    try:
+        _ban_addr_row = db.execute(
+            "SELECT ban_address FROM ban_wallets WHERE agent_id = ?", (video["agent_id"],)
+        ).fetchone()
+    except Exception:
+        pass
+    creator_ban_address = _ban_addr_row["ban_address"] if _ban_addr_row else ""
+
     # Subscription data for follow button
     subscriber_count = db.execute(
         "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?",
@@ -5221,6 +5463,7 @@ def watch(video_id):
         revision_of=revision_of,
         revisions=revisions,
         challenge=challenge,
+        creator_ban_address=creator_ban_address,
     )
 
 
@@ -5588,6 +5831,28 @@ def dashboard_page():
     # RTC balance
     rtc_balance = g.user.get("rtc_balance", 0) or 0
 
+    # BAN balance (from ban_transactions if Banano is enabled)
+    ban_balance = 0.0
+    try:
+        ban_credited = db.execute(
+            "SELECT COALESCE(SUM(amount_ban), 0) FROM ban_transactions "
+            "WHERE agent_id = ? AND status = 'credited' AND tx_type IN ('reward', 'tip_received')",
+            (uid,),
+        ).fetchone()[0]
+        ban_withdrawn = db.execute(
+            "SELECT COALESCE(SUM(amount_ban), 0) FROM ban_transactions "
+            "WHERE agent_id = ? AND status IN ('sent', 'pending') AND tx_type = 'withdrawal'",
+            (uid,),
+        ).fetchone()[0]
+        ban_tipped = db.execute(
+            "SELECT COALESCE(SUM(amount_ban), 0) FROM ban_transactions "
+            "WHERE agent_id = ? AND status = 'credited' AND tx_type = 'tip_sent'",
+            (uid,),
+        ).fetchone()[0]
+        ban_balance = ban_credited - ban_withdrawn - ban_tipped
+    except Exception:
+        ban_balance = 0.0
+
     # Recent earnings (last 10)
     earnings = db.execute(
         """SELECT amount, reason, video_id, created_at
@@ -5605,6 +5870,7 @@ def dashboard_page():
         playlists=playlists,
         notifications=notifications,
         rtc_balance=rtc_balance,
+        ban_balance=ban_balance,
         earnings=earnings,
     )
 
@@ -5807,8 +6073,12 @@ def upload_page():
     award_rtc(db, g.user["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     db.commit()
 
-    # Ping IndexNow for the new video
+    # Ping search engines about the new video
     _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
+    ping_google_indexing(f"https://bottube.ai/watch/{video_id}")
+
+    # Award BAN for upload
+    award_ban_upload(db, g.user["id"], video_id)
 
     # Notify subscribers about the new video (background)
     _notify_subscribers_new_video(g.user["id"], video_id, title, g.user["agent_name"])
@@ -6657,6 +6927,85 @@ app.register_blueprint(wrtc_bp)
 # ---------------------------------------------------------------------------
 from x402_payment import x402_bp
 app.register_blueprint(x402_bp)
+
+# ---------------------------------------------------------------------------
+# Google Indexing API (alongside IndexNow)
+# ---------------------------------------------------------------------------
+try:
+    from google_indexing import ping_google_indexing
+    GOOGLE_INDEXING_ENABLED = True
+except ImportError:
+    GOOGLE_INDEXING_ENABLED = False
+    def ping_google_indexing(url, action="URL_UPDATED"):
+        pass
+
+# ---------------------------------------------------------------------------
+# Banano (BAN) Feeless Payments
+# ---------------------------------------------------------------------------
+try:
+    from banano_blueprint import ban_bp, init_ban_tables, award_ban_upload, check_view_milestones, award_ban_video_gen
+    init_ban_tables()
+    app.register_blueprint(ban_bp)
+    BANANO_ENABLED = True
+except ImportError:
+    BANANO_ENABLED = False
+    def award_ban_upload(db, agent_id, video_id):
+        pass
+    def check_view_milestones(db, agent_id, video_id, view_count):
+        pass
+    def award_ban_video_gen(db, agent_id, video_id, gen_method="text"):
+        return 0.0
+
+# ---------------------------------------------------------------------------
+# Captions Blueprint (Google Speech-to-Text auto-captions)
+# ---------------------------------------------------------------------------
+try:
+    from captions_blueprint import captions_bp, init_captions_tables, generate_captions_async
+    init_captions_tables()
+    app.register_blueprint(captions_bp)
+    CAPTIONS_ENABLED = True
+except ImportError:
+    CAPTIONS_ENABLED = False
+    def generate_captions_async(video_id, video_path):
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Push Notification Subscriptions (FCM / Web Push)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def push_subscribe():
+    """Store a push notification subscription."""
+    if not g.get("agent"):
+        return jsonify({"error": "Login required"}), 401
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint", "")
+    keys = data.get("keys", {})
+    p256dh = keys.get("p256dh", "")
+    auth = keys.get("auth", "")
+    if not endpoint or not p256dh or not auth:
+        return jsonify({"error": "Missing subscription data"}), 400
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO push_subscriptions (agent_id, endpoint, p256dh, auth, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (g.agent["id"], endpoint, p256dh, auth, time.time()),
+    )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def push_unsubscribe():
+    """Remove a push notification subscription."""
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint", "")
+    if endpoint:
+        db = get_db()
+        db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+        db.commit()
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

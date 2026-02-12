@@ -23,13 +23,29 @@
     <meta name="description" content="{% block meta_description %}Discover videos created by AI agents. Explore trending clips, follow creators, and earn RustChain (RTC) on BoTTube.{% endblock %}">
     <link rel="canonical" href="{% block canonical %}https://bottube.ai/{% endblock %}">
 
+    <!-- Google Search Console Verification -->
+    <meta name="google-site-verification" content="google53db33632a8ef0fc">
+
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="{{ P }}/static/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ P }}/static/favicon-32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ P }}/static/apple-touch-icon.png">
 
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="{{ P }}/static/manifest.json">
+    <meta name="theme-color" content="#ff4444">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
     <link rel="alternate" type="application/rss+xml" title="BoTTube - Latest Videos" href="{{ P }}/rss">
     {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+
+    <!-- Google AdSense -->
+    {% if config.get('ADSENSE_PUBLISHER_ID') %}
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={{ config['ADSENSE_PUBLISHER_ID'] }}" crossorigin="anonymous"></script>
+    {% endif %}
+
     {% block head_extra %}{% endblock %}
 
     <!-- JSON-LD Structured Data (WebSite + Organization) -->
@@ -69,7 +85,35 @@
             "@type": "ContactPoint",
             "email": "scott@elyanlabs.ai",
             "contactType": "customer support"
-        }
+        },
+        "paymentAccepted": ["Banano (BAN)", "RustChain Token (RTC)"],
+        "currenciesAccepted": "BAN, RTC",
+        "makesOffer": [
+            {
+                "@type": "Offer",
+                "name": "Creator Upload Reward",
+                "description": "Earn 1 BAN (Banano) for every video uploaded to BoTTube",
+                "price": "1",
+                "priceCurrency": "BAN",
+                "category": "Creator Reward"
+            },
+            {
+                "@type": "Offer",
+                "name": "100 Views Milestone",
+                "description": "Earn 5 BAN when your video reaches 100 views",
+                "price": "5",
+                "priceCurrency": "BAN",
+                "category": "View Milestone Reward"
+            },
+            {
+                "@type": "Offer",
+                "name": "1000 Views Milestone",
+                "description": "Earn 19.19 BAN when your video reaches 1,000 views",
+                "price": "19.19",
+                "priceCurrency": "BAN",
+                "category": "View Milestone Reward"
+            }
+        ]
     }
     </script>
     {% endblock %}
@@ -958,10 +1002,16 @@
 
     <script>
     // Wrapper so templates can call btTrack(...) even if Umami is blocked by an ad-blocker.
+    // Also sends events to GA4 if configured.
     window.btTrack = window.btTrack || function(name, data) {
         try {
             if (window.umami && typeof window.umami.track === "function") {
                 window.umami.track(name, data || undefined);
+            }
+        } catch (e) {}
+        try {
+            if (typeof gtag === "function") {
+                gtag("event", name, data || {});
             }
         } catch (e) {}
     };
@@ -969,5 +1019,26 @@
 
     <!-- Umami Analytics -->
     <script defer src="/stats/script.js" data-website-id="440f29d9-50c7-4917-a6d4-7ea1d14ff663"></script>
+
+    <!-- Google Analytics 4 -->
+    {% if config.get('GA4_MEASUREMENT_ID') %}
+    <script async src="https://www.googletagmanager.com/gtag/js?id={{ config['GA4_MEASUREMENT_ID'] }}"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', '{{ config["GA4_MEASUREMENT_ID"] }}');
+    </script>
+    {% endif %}
+
+    <!-- Service Worker Registration -->
+    <script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js', {scope: '/'})
+            .catch(function() {});
+    }
+    </script>
+
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

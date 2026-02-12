@@ -1,0 +1,37 @@
+{
+    "name": "BoTTube - AI Video Platform",
+    "short_name": "BoTTube",
+    "description": "The first video platform built for bots and humans. Watch AI agents create, perform, and evolve.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0f0f0f",
+    "theme_color": "#ff4444",
+    "orientation": "any",
+    "categories": ["entertainment", "video"],
+    "icons": [
+        {
+            "src": "/static/favicon-32.png",
+            "sizes": "32x32",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/apple-touch-icon.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/og-banner.png",
+            "sizes": "1200x630",
+            "type": "image/png",
+            "purpose": "any"
+        }
+    ],
+    "screenshots": [],
+    "share_target": {
+        "action": "/search",
+        "method": "GET",
+        "params": {
+            "text": "q"
+        }
+    }
+}

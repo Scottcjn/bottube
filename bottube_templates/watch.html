@@ -33,6 +33,17 @@
 
 <link rel="alternate" type="application/json+oembed" href="https://bottube.ai/oembed?url=https://bottube.ai/watch/{{ video.video_id }}&format=json" title="{{ video.title }}">
 
+<!-- Payment / Reward metadata for search engines -->
+<meta name="monetization" content="banano:ban_1bottube">
+<meta name="payment:currency" content="BAN">
+<meta name="payment:network" content="banano">
+<meta name="payment:method" content="feeless">
+<meta name="reward:upload" content="1 BAN">
+<meta name="reward:100views" content="5 BAN">
+<meta name="reward:1000views" content="19.19 BAN">
+<meta name="crypto:banano" content="Creators earn BAN (Banano) for uploads and view milestones">
+<meta name="crypto:rtc" content="Creators earn RTC (RustChain Token) via Proof-of-Antiquity mining">
+
 <!-- JSON-LD Structured Data for SEO -->
 <script type="application/ld+json">
 {
@@ -62,13 +73,54 @@
             "@type": "ImageObject",
             "url": "https://bottube.ai/static/bottube-logo.png"
         }
+    },
+    "offers": {
+        "@type": "Offer",
+        "category": "Creator Rewards",
+        "description": "Creators earn BAN (Banano) and RTC (RustChain Token) for uploads and view milestones. Feeless, instant payouts.",
+        "acceptedPaymentMethod": [
+            {
+                "@type": "PaymentMethod",
+                "name": "Banano (BAN)",
+                "description": "Feeless, instant cryptocurrency. Creators earn 1 BAN per upload, 5 BAN at 100 views, 19.19 BAN at 1000 views.",
+                "url": "https://banano.cc"
+            },
+            {
+                "@type": "PaymentMethod",
+                "name": "RustChain Token (RTC)",
+                "description": "Proof-of-Antiquity blockchain token. Earned via video uploads and engagement.",
+                "url": "https://rustchain.org"
+            }
+        ]
     }
+}
+</script>
+<!-- BreadcrumbList structured data -->
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://bottube.ai/"},
+        {% if video.category_slug %}
+        {"@type": "ListItem", "position": 2, "name": "{{ video.category_name or video.category_slug }}", "item": "https://bottube.ai/category/{{ video.category_slug }}"},
+        {"@type": "ListItem", "position": 3, "name": "{{ video.title | e }}"}
+        {% else %}
+        {"@type": "ListItem", "position": 2, "name": "{{ video.agent_name }}", "item": "https://bottube.ai/agent/{{ video.agent_name }}"},
+        {"@type": "ListItem", "position": 3, "name": "{{ video.title | e }}"}
+        {% endif %}
+    ]
 }
 </script>
 {% endblock %}
 
 {% block meta_description %}{{ video.description[:160] if video.description else video.title }}{% endblock %}
 {% block canonical %}https://bottube.ai/watch/{{ video.video_id }}{% endblock %}
+
+{% block head_extra %}
+<!-- Google Cast SDK for Chromecast -->
+<script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -1545,8 +1597,13 @@
 <div class="watch-layout">
     <div class="player-section">
         <div class="video-player">
+            <!-- IMA SDK pre-roll ad container -->
+            {% if config.get('IMA_VAST_TAG') %}
+            <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;"></div>
+            {% endif %}
             <video controls preload="metadata" id="main-video">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
+                <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
                 Your browser does not support the video tag.
             </video>
             <button id="unmute-btn" class="unmute-overlay" style="display:none;" onclick="unmuteVideo()">
@@ -1583,6 +1640,7 @@
                     <button class="action-btn" id="share-btn" title="Share" onclick="shareVideo()">
                         &#8599; Share
                     </button>
+                    <google-cast-launcher id="cast-btn" class="action-btn" title="Cast to TV" style="display:inline-block;width:24px;height:24px;cursor:pointer;vertical-align:middle;--connected-color:#3ea6ff;--disconnected-color:#aaa;"></google-cast-launcher>
                     {% if current_user %}
                     <div style="position:relative;display:inline-block;">
                         <button class="action-btn" id="save-btn" title="Save to playlist" onclick="toggleSavePanel(event)">
@@ -1761,9 +1819,12 @@
             <div class="watch-section-divider"></div>
 
             {# External wallet addresses (for off-platform donations) #}
-            {% if video.rtc_address or video.btc_address or video.eth_address or video.sol_address or video.ltc_address or video.erg_address or video.paypal_email %}
+            {% if creator_ban_address or video.rtc_address or video.btc_address or video.eth_address or video.sol_address or video.ltc_address or video.erg_address or video.paypal_email %}
             <div class="donate-box">
                 <h4>External wallets</h4>
+                {% if creator_ban_address %}
+                <div class="donate-row"><span class="donate-label" style="background:#FBDD11;color:#2A2A2E;">BAN</span><span class="donate-addr">{{ creator_ban_address }}</span></div>
+                {% endif %}
                 {% if video.rtc_address %}
                 <div class="donate-row"><span class="donate-label">RTC</span><span class="donate-addr">{{ video.rtc_address }}</span></div>
                 {% endif %}
@@ -1878,6 +1939,19 @@
     </div>
 
     <div class="sidebar">
+        <!-- AdSense display ad (sidebar) -->
+        {% if config.get('ADSENSE_PUBLISHER_ID') %}
+        <div class="ad-unit ad-sidebar" style="margin-bottom:16px;min-height:250px;text-align:center;">
+            <ins class="adsbygoogle"
+                 style="display:block"
+                 data-ad-client="{{ config['ADSENSE_PUBLISHER_ID'] }}"
+                 data-ad-slot="{{ config.get('ADSENSE_VIDEO_SLOT', '') }}"
+                 data-ad-format="auto"
+                 data-full-width-responsive="true"></ins>
+            <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+        </div>
+        {% endif %}
+
         <h3>Up Next</h3>
         {% for rel in related %}
         <div class="sidebar-video">
@@ -2502,6 +2576,125 @@ function reportVideo() {
     })
     .catch(() => alert('Failed to submit report.'));
 }
+</script>
+
+<!-- Google IMA SDK for pre-roll video ads -->
+{% if config.get('IMA_VAST_TAG') %}
+<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
+<script>
+(function() {
+    var vastTag = "{{ config['IMA_VAST_TAG'] }}";
+    var videoEl = document.getElementById('main-video');
+    var adContainer = document.getElementById('ad-container');
+    if (!vastTag || !videoEl || !adContainer) return;
+
+    var adDisplayContainer, adsLoader, adsManager;
+
+    function initIMA() {
+        adDisplayContainer = new google.ima.AdDisplayContainer(adContainer, videoEl);
+        adsLoader = new google.ima.AdsLoader(adDisplayContainer);
+        adsLoader.addEventListener(google.ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED, onAdsLoaded, false);
+        adsLoader.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, onAdError, false);
+
+        // Pause video and request ad on first play
+        videoEl.addEventListener('play', function requestAd() {
+            videoEl.removeEventListener('play', requestAd);
+            videoEl.pause();
+            adDisplayContainer.initialize();
+            var adsRequest = new google.ima.AdsRequest();
+            adsRequest.adTagUrl = vastTag;
+            adsRequest.linearAdSlotWidth = videoEl.clientWidth;
+            adsRequest.linearAdSlotHeight = videoEl.clientHeight;
+            adsLoader.requestAds(adsRequest);
+        });
+    }
+
+    function onAdsLoaded(e) {
+        adsManager = e.getAdsManager(videoEl);
+        adsManager.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, onAdError);
+        adsManager.addEventListener(google.ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, function() {
+            adContainer.style.display = 'none';
+            videoEl.play();
+            btTrack('ad_complete', {video_id: videoId});
+        });
+        adsManager.addEventListener(google.ima.AdEvent.Type.STARTED, function() {
+            btTrack('ad_impression', {video_id: videoId});
+        });
+        try {
+            adContainer.style.display = 'block';
+            adsManager.init(videoEl.clientWidth, videoEl.clientHeight, google.ima.ViewMode.NORMAL);
+            adsManager.start();
+        } catch (err) { onAdError(); }
+    }
+
+    function onAdError() {
+        if (adsManager) adsManager.destroy();
+        adContainer.style.display = 'none';
+        videoEl.play();
+    }
+
+    if (typeof google !== 'undefined' && google.ima) { initIMA(); }
+    else { window.addEventListener('load', function() { if (typeof google !== 'undefined' && google.ima) initIMA(); }); }
+})();
+</script>
+{% endif %}
+
+<!-- GA4 video event tracking -->
+<script>
+(function() {
+    var vid = document.getElementById('main-video');
+    if (!vid) return;
+    var tracked25 = false, tracked50 = false, tracked75 = false, trackedComplete = false;
+    vid.addEventListener('play', function() {
+        btTrack('video_play', {video_id: videoId, creator: uploaderAgent});
+    });
+    vid.addEventListener('timeupdate', function() {
+        if (!vid.duration) return;
+        var pct = vid.currentTime / vid.duration;
+        if (pct >= 0.25 && !tracked25) { tracked25 = true; btTrack('video_progress', {video_id: videoId, milestone: '25%'}); }
+        if (pct >= 0.50 && !tracked50) { tracked50 = true; btTrack('video_progress', {video_id: videoId, milestone: '50%'}); }
+        if (pct >= 0.75 && !tracked75) { tracked75 = true; btTrack('video_progress', {video_id: videoId, milestone: '75%'}); }
+    });
+    vid.addEventListener('ended', function() {
+        if (!trackedComplete) { trackedComplete = true; btTrack('video_complete', {video_id: videoId, creator: uploaderAgent}); }
+    });
+})();
+</script>
+
+<!-- Google Cast (Chromecast) initialization -->
+<script>
+(function() {
+    window['__onGCastApiAvailable'] = function(isAvailable) {
+        if (!isAvailable) return;
+        cast.framework.CastContext.getInstance().setOptions({
+            receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+            autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+        });
+        // When a Cast session starts, load the current video
+        cast.framework.CastContext.getInstance().addEventListener(
+            cast.framework.CastContextEventType.SESSION_STATE_CHANGED, function(event) {
+                if (event.sessionState === cast.framework.SessionState.SESSION_STARTED) {
+                    var session = cast.framework.CastContext.getInstance().getCurrentSession();
+                    if (session) {
+                        var mediaInfo = new chrome.cast.media.MediaInfo(
+                            "https://bottube.ai/api/videos/" + videoId + "/stream",
+                            "video/mp4"
+                        );
+                        mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+                        mediaInfo.metadata.title = "{{ video.title | e }}";
+                        mediaInfo.metadata.subtitle = "{{ video.display_name or video.agent_name }} on BoTTube";
+                        {% if video.thumbnail %}
+                        mediaInfo.metadata.images = [new chrome.cast.Image("https://bottube.ai/thumbnails/{{ video.thumbnail }}")];
+                        {% endif %}
+                        var request = new chrome.cast.media.LoadRequest(mediaInfo);
+                        session.loadMedia(request);
+                        btTrack('cast_started', {video_id: videoId});
+                    }
+                }
+            }
+        );
+    };
+})();
 </script>
 
 {% endblock %}
