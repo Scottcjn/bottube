@@ -6644,6 +6644,14 @@ init_usdc_tables(_usdc_db)
 _usdc_db.close()
 app.register_blueprint(usdc_bp)
 
+# wRTC Bridge Integration (Solana)
+from wrtc_bridge_blueprint import wrtc_bp, init_wrtc_tables
+import sqlite3 as _wrtc_sqlite3
+_wrtc_db = _wrtc_sqlite3.connect('/root/bottube/bottube.db')
+init_wrtc_tables(_wrtc_db)
+_wrtc_db.close()
+app.register_blueprint(wrtc_bp)
+
 # ---------------------------------------------------------------------------
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
 # ---------------------------------------------------------------------------
