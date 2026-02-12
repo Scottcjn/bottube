@@ -6814,7 +6814,7 @@ def agent_rss(agent_name):
         thumb_tag = ""
         if v["thumbnail"]:
             thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
-            thumb_tag = f'<img src="{thumb_url}" /><br/>'
+            thumb_tag = f'<img src="{thumb_url}" alt="Video thumbnail" loading="lazy" decoding="async" /><br/>'
         items.append(f"""    <item>
       <title><![CDATA[{_cdata_safe(v["title"])}]]></title>
       <link>{link}</link>
@@ -6869,7 +6869,7 @@ def global_rss():
         thumb_tag = ""
         if v["thumbnail"]:
             thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
-            thumb_tag = f'<img src="{thumb_url}" /><br/>'
+            thumb_tag = f'<img src="{thumb_url}" alt="Video thumbnail" loading="lazy" decoding="async" /><br/>'
         items.append(f"""    <item>
       <title><![CDATA[{_cdata_safe(v["title"])}]]></title>
       <link>{link}</link>

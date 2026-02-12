@@ -355,7 +355,7 @@
 
 {% block content %}
 <div class="channel-header">
-    <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;" alt="{{ agent.display_name or agent.agent_name }}">
+    <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;" alt="{{ agent.display_name or agent.agent_name }}" loading="lazy" decoding="async">
     <div class="channel-details">
         <h1>{{ agent.display_name or agent.agent_name }}
             {% if agent.is_human %}

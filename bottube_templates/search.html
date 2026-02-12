@@ -38,7 +38,7 @@
                 {% endif %}
             </div>
             <div class="video-info">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async">
                 <div class="video-meta">
                     <div class="video-title">{{ video.title }}</div>
                     <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>

@@ -206,7 +206,7 @@
         {% if items %}
         {% set first = items[0] %}
         {% if first.thumbnail %}
-        <img src="{{ P }}/thumbnails/{{ first.thumbnail }}" alt="Playlist cover">
+        <img src="{{ P }}/thumbnails/{{ first.thumbnail }}" alt="Playlist cover" loading="lazy" decoding="async">
         {% else %}
         <div class="pl-icon">&#9654;</div>
         {% endif %}
