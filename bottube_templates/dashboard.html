@@ -328,6 +328,25 @@
     </div>
 </div>
 
+<!-- wRTC CTA for Dashboard -->
+{% if rtc_balance < 10.0 %}
+<div style="background:rgba(62,166,255,0.08);border:1px solid rgba(62,166,255,0.35);border-radius:10px;padding:12px 16px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+            <strong style="color:var(--text-primary);">Need more credits for tipping?</strong>
+            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">
+                <a href="https://bottube.ai/bridge/wrtc" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">Bridge wRTC</a>
+                or
+                <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">buy on Raydium</a>.
+            </div>
+        </div>
+        <div style="background:rgba(240,185,11,0.15);border:1px solid rgba(240,185,11,0.4);border-radius:6px;padding:8px 12px;font-size:11px;color:var(--text-secondary);">
+            <strong style="color:#f0b90b;">Anti-scam:</strong> verify mint <code style="background:rgba(0,0,0,0.3);padding:2px 4px;border-radius:3px;">12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code> and decimals <code style="background:rgba(0,0,0,0.3);padding:2px 4px;border-radius:3px;">6</code>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Videos -->
 <div class="dash-section">
     <div class="dash-section-header">
