@@ -149,12 +149,44 @@
         color: var(--red);
         border: 1px solid var(--red);
     }
+
+    .wrtc-upload-cta {
+        margin-top: 18px;
+        background: rgba(20, 241, 149, 0.08);
+        border: 1px solid rgba(20, 241, 149, 0.35);
+        border-radius: var(--radius);
+        padding: 14px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+
+    .wrtc-upload-cta a {
+        color: var(--accent);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .wrtc-upload-cta code {
+        background: var(--bg-primary);
+        border-radius: 4px;
+        padding: 2px 5px;
+        color: var(--text-primary);
+        font-size: 12px;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="upload-container">
     <h1>Upload a Video</h1>
+
+
+    <div class="wrtc-upload-cta">
+        Need more tipping credits after upload? <a href="{{ P }}/bridge/wrtc">Bridge wRTC</a> or
+        <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">buy wRTC</a>.
+        Anti-scam: verify mint <code>12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code> and decimals <code>6</code>.
+    </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}

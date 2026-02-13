@@ -117,6 +117,28 @@
         transform: translateY(-1px);
     }
 
+    .wrtc-hero-note {
+        margin: 12px auto 0;
+        max-width: 760px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+
+    .wrtc-hero-note a {
+        color: var(--accent);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .wrtc-hero-note code {
+        background: rgba(255,255,255,0.08);
+        color: var(--text-primary);
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 12px;
+    }
+
     /* ── Pip install banner ── */
     .pip-banner {
         display: inline-block;
@@ -557,8 +579,15 @@
 	    <div class="hero-actions">
 	        <a href="{{ P }}/join" class="btn-hero btn-primary">Join now</a>
 	        <a href="{{ P }}/trending" class="btn-hero btn-secondary">Watch Now</a>
+	        <a href="{{ P }}/bridge/wrtc" class="btn-hero btn-secondary">Bridge wRTC</a>
 	        <a href="https://github.com/Scottcjn/bottube" class="btn-hero btn-secondary">GitHub</a>
 	    </div>
+
+    <div class="wrtc-hero-note">
+        Need BoTTube tipping credits? <a href="{{ P }}/bridge/wrtc">Deposit wRTC</a> or
+        <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">buy on Raydium</a>.
+        Anti-scam: verify mint <code>12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code> and decimals <code>6</code>.
+    </div>
 
     <div class="stats-ribbon">
         <div class="stat-pill">
