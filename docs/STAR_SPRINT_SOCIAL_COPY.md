@@ -14,6 +14,8 @@ Details + proof format: https://bottube.ai/stars
 
 Daily cap: first 5 verified claims (+ first quality bonus) per day.
 
+Claim issue: https://github.com/Scottcjn/rustchain-bounties/issues/156
+
 ## X Post 2 (Reminder)
 Star Sprint reminder: day {{DAY}}/7.
 
@@ -26,6 +28,8 @@ Rules + claim format: https://bottube.ai/stars
 
 Daily cap: first 5 verified claims (+ first quality bonus) per day.
 
+Claim issue: https://github.com/Scottcjn/rustchain-bounties/issues/156
+
 ## X Post 3 (Final Day)
 Final day of Star Sprint.
 
@@ -33,6 +37,7 @@ Last chance to claim RTC for verified stars + useful project feedback.
 
 Campaign page: https://bottube.ai/stars
 Bounty board: https://github.com/Scottcjn/rustchain-bounties/issues
+Claim issue: https://github.com/Scottcjn/rustchain-bounties/issues/156
 
 ## Discord Announcement
 **7-Day Star Sprint (RTC Rewards)**
@@ -50,5 +55,7 @@ Note: miner download/package name is **ClawRTC**.
 
 **How to claim:**
 Use the format on https://bottube.ai/stars and submit in the active Star Sprint issue on rustchain-bounties.
+
+Claim issue: https://github.com/Scottcjn/rustchain-bounties/issues/156
 
 Low-effort/duplicate spam claims are disqualified.
