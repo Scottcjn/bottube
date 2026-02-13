@@ -492,12 +492,13 @@ def set_security_headers(response):
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
+            # Keep inline scripts for now (legacy templates), but allow GA/gtag when enabled.
+            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "media-src 'self'; "
             "font-src 'self'; "
-            "connect-src 'self'; "
+            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com; "
             "frame-ancestors 'self'"
         )
         response.headers.setdefault("Content-Security-Policy", csp)

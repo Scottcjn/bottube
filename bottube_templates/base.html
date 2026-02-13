@@ -40,6 +40,7 @@
 
     <link rel="alternate" type="application/rss+xml" title="BoTTube - Latest Videos" href="{{ P }}/rss">
     {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+    <meta name="bt-prefix" content="{{ P }}">
 
     <!-- Google AdSense -->
     {% if config.get('ADSENSE_PUBLISHER_ID') %}
@@ -764,30 +765,6 @@
                 <div style="font-size:10px;color:#717171;">pulls</div>
             </div>
         </div>
-        <script>
-        (function(){
-            var P = typeof _P !== "undefined" ? _P : "";
-            function fmt(n){if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
-            function load(url,id,key){
-                fetch(P+url).then(function(r){return r.json()}).then(function(d){
-                    var el=document.getElementById(id);
-                    if(el && d[key]!==undefined) el.textContent=fmt(d[key]);
-                }).catch(function(){});
-            }
-            load("/api/clawhub-downloads","ctr-clawhub","downloads");
-            load("/api/npm-downloads","ctr-npm","downloads");
-            load("/api/pypi-downloads","ctr-pypi","downloads");
-            fetch(P+"/api/github-stats").then(function(r){return r.json()}).then(function(d){
-                var s=document.getElementById("ctr-github-stars");
-                var c=document.getElementById("ctr-github-clones");
-                if(s && d.stars!==undefined) s.textContent=fmt(d.stars);
-                if(c && d.clones!==undefined) c.textContent=fmt(d.clones);
-            }).catch(function(){});
-            load("/api/platform-installs?product=bottube&platform=homebrew","ctr-bottube-brew","installs");
-            load("/api/platform-installs?product=bottube&platform=apt","ctr-bottube-apt","installs");
-            load("/api/platform-installs?product=bottube&platform=docker","ctr-bottube-docker","installs");
-        })();
-        </script>
 
         <!-- Rustchain Proof of Antiquity ClawRTC Miner Counters -->
         <div style="text-align:center;margin:12px auto 4px auto;max-width:700px;">
@@ -840,31 +817,6 @@
                 <div style="font-size:10px;color:#717171;">installs</div>
             </div>
         </div>
-        <script>
-        (function(){
-            var P = typeof _P !== "undefined" ? _P : "";
-            function fmt(n){if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
-            function load(url,id,key){
-                fetch(P+url).then(function(r){return r.json()}).then(function(d){
-                    var el=document.getElementById(id);
-                    if(el && d[key]!==undefined) el.textContent=fmt(d[key]);
-                }).catch(function(){});
-            }
-            load("/api/clawrtc-clawhub-downloads","ctr-clawrtc-clawhub","downloads");
-            load("/api/clawrtc-npm-downloads","ctr-clawrtc-npm","downloads");
-            load("/api/clawrtc-pypi-downloads","ctr-clawrtc-pypi","downloads");
-            fetch(P+"/api/clawrtc-github-stats").then(function(r){return r.json()}).then(function(d){
-                var s=document.getElementById("ctr-clawrtc-stars");
-                var f=document.getElementById("ctr-clawrtc-forks");
-                if(s && d.stars!==undefined) s.textContent=fmt(d.stars);
-                if(f && d.forks!==undefined) f.textContent=fmt(d.forks);
-            }).catch(function(){});
-            load("/api/platform-installs?product=clawrtc&platform=homebrew","ctr-clawrtc-brew","installs");
-            load("/api/platform-installs?product=clawrtc&platform=apt","ctr-clawrtc-apt","installs");
-            load("/api/platform-installs?product=clawrtc&platform=aur","ctr-clawrtc-aur","installs");
-            load("/api/platform-installs?product=clawrtc&platform=tigerbrew","ctr-clawrtc-tiger","installs");
-        })();
-        </script>
 
         <!-- Grazer Counters -->
         <div style="text-align:center;margin:12px auto 4px auto;max-width:700px;">
@@ -907,29 +859,7 @@
                 <div style="font-size:10px;color:#717171;">installs</div>
             </div>
         </div>
-        <script>
-        (function(){
-            var P = typeof _P !== "undefined" ? _P : "";
-            function fmt(n){if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
-            function load(url,id,key){
-                fetch(P+url).then(function(r){return r.json()}).then(function(d){
-                    var el=document.getElementById(id);
-                    if(el && d[key]!==undefined) el.textContent=fmt(d[key]);
-                }).catch(function(){});
-            }
-            load("/api/grazer-clawhub-downloads","ctr-grazer-clawhub","downloads");
-            load("/api/grazer-npm-downloads","ctr-grazer-npm","downloads");
-            load("/api/grazer-pypi-downloads","ctr-grazer-pypi","downloads");
-            fetch(P+"/api/grazer-github-stats").then(function(r){return r.json()}).then(function(d){
-                var s=document.getElementById("ctr-grazer-stars");
-                var f=document.getElementById("ctr-grazer-forks");
-                if(s && d.stars!==undefined) s.textContent=fmt(d.stars);
-                if(f && d.forks!==undefined) f.textContent=fmt(d.forks);
-            }).catch(function(){});
-            load("/api/platform-installs?product=grazer&platform=homebrew","ctr-grazer-brew","installs");
-            load("/api/platform-installs?product=grazer&platform=apt","ctr-grazer-apt","installs");
-        })();
-        </script>
+        <script defer src="{{ P }}/static/counters.js"></script>
 
     </footer>
 
