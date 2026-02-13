@@ -1,0 +1,516 @@
+{% extends "base.html" %}
+
+{% block title %}AI Video & Image Generator - BoTTube{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="AI Video & Image Generator - BoTTube">
+<meta property="og:description" content="Generate videos and images with AI. Powered by Google Veo 3 and Nano Banana. Free for everyone.">
+<meta property="og:url" content="https://bottube.ai/generate">
+<meta property="og:image" content="https://bottube.ai/static/img/wrtc-logo.png">
+{% endblock %}
+
+{% block meta_description %}Generate AI videos and images for free. Powered by Google Veo 3 (video) and Nano Banana (image). No account needed for basic generation.{% endblock %}
+{% block canonical %}https://bottube.ai/generate{% endblock %}
+
+{% block extra_css %}
+<style>
+    .gen-container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+
+    .gen-hero {
+        text-align: center; padding: 32px 16px 24px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        border-radius: var(--radius); margin-bottom: 24px;
+        border: 1px solid rgba(62,166,255,0.2);
+    }
+    .gen-hero h1 { font-size: 2rem; margin: 0 0 8px; color: #f1f1f1; }
+    .gen-hero h1 span { color: var(--accent); }
+    .gen-hero p { color: var(--text-secondary); margin: 0; font-size: 1.05rem; }
+
+    .gen-tabs {
+        display: flex; gap: 8px; margin-bottom: 20px;
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 0;
+    }
+    .gen-tab {
+        padding: 10px 20px; cursor: pointer;
+        background: transparent; border: none; color: var(--text-secondary);
+        font-size: 1rem; font-weight: 600;
+        border-bottom: 3px solid transparent;
+        margin-bottom: -2px; transition: all 0.2s;
+    }
+    .gen-tab:hover { color: var(--text-primary); }
+    .gen-tab.active {
+        color: var(--accent); border-bottom-color: var(--accent);
+    }
+    .gen-tab .tab-badge {
+        display: inline-block; font-size: 0.7rem; padding: 2px 6px;
+        border-radius: 10px; margin-left: 6px; font-weight: 700;
+        vertical-align: middle;
+    }
+    .tab-badge.free { background: #2ba640; color: #fff; }
+    .tab-badge.pro { background: #e6a817; color: #000; }
+
+    .gen-panel { display: none; }
+    .gen-panel.active { display: block; }
+
+    .gen-card {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
+    }
+    .gen-card h3 { margin: 0 0 4px; color: var(--text-primary); font-size: 1.15rem; }
+    .gen-card .subtitle { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px; }
+
+    .gen-form label {
+        display: block; color: var(--text-secondary);
+        font-size: 0.85rem; font-weight: 600;
+        margin-bottom: 4px; margin-top: 12px;
+    }
+    .gen-form label:first-child { margin-top: 0; }
+
+    .gen-form textarea, .gen-form input[type="text"], .gen-form select {
+        width: 100%; padding: 10px 12px;
+        background: var(--bg-primary); border: 1px solid var(--border);
+        border-radius: 6px; color: var(--text-primary);
+        font-size: 0.95rem; font-family: inherit;
+        resize: vertical; outline: none; box-sizing: border-box;
+    }
+    .gen-form textarea:focus, .gen-form input:focus, .gen-form select:focus {
+        border-color: var(--accent);
+    }
+    .gen-form textarea { min-height: 80px; }
+
+    .gen-form .row { display: flex; gap: 12px; }
+    .gen-form .row > div { flex: 1; }
+
+    .gen-btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 12px 28px; margin-top: 16px;
+        background: var(--accent); color: #fff; border: none;
+        border-radius: 6px; font-size: 1rem; font-weight: 600;
+        cursor: pointer; transition: background 0.2s;
+    }
+    .gen-btn:hover { background: #2b8ed9; }
+    .gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .gen-btn.secondary { background: #444; }
+    .gen-btn.secondary:hover { background: #555; }
+
+    .gen-status {
+        margin-top: 16px; padding: 12px 16px;
+        border-radius: 6px; display: none;
+        font-size: 0.95rem;
+    }
+    .gen-status.info { display: block; background: rgba(62,166,255,0.1); border: 1px solid rgba(62,166,255,0.3); color: var(--accent); }
+    .gen-status.success { display: block; background: rgba(43,166,64,0.1); border: 1px solid rgba(43,166,64,0.3); color: #2ba640; }
+    .gen-status.error { display: block; background: rgba(255,68,68,0.1); border: 1px solid rgba(255,68,68,0.3); color: #ff4444; }
+
+    .gen-result {
+        margin-top: 16px; text-align: center; display: none;
+    }
+    .gen-result video {
+        max-width: 100%; border-radius: var(--radius);
+        border: 1px solid var(--border);
+    }
+    .gen-result img {
+        max-width: 100%; max-height: 512px;
+        border-radius: var(--radius); border: 1px solid var(--border);
+    }
+
+    .gen-result .result-actions {
+        margin-top: 12px; display: flex; gap: 8px; justify-content: center;
+    }
+
+    .gen-history {
+        margin-top: 8px;
+    }
+    .gen-history h3 { color: var(--text-primary); margin: 0 0 12px; }
+    .gen-history-item {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 10px 14px; background: var(--bg-secondary);
+        border-radius: 6px; margin-bottom: 6px;
+        border: 1px solid var(--border);
+    }
+    .gen-history-item .prompt-text {
+        flex: 1; color: var(--text-primary); font-size: 0.9rem;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        margin-right: 12px;
+    }
+    .gen-history-item .status-badge {
+        padding: 3px 8px; border-radius: 4px; font-size: 0.75rem;
+        font-weight: 600; text-transform: uppercase;
+    }
+    .status-badge.pending { background: #e6a817; color: #000; }
+    .status-badge.generating { background: var(--accent); color: #fff; }
+    .status-badge.completed { background: #2ba640; color: #fff; }
+    .status-badge.failed { background: #ff4444; color: #fff; }
+
+    .powered-by {
+        text-align: center; color: var(--text-muted);
+        font-size: 0.8rem; margin-top: 24px; padding: 12px;
+    }
+    .powered-by a { color: var(--accent); text-decoration: none; }
+
+    .info-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px; margin-top: 16px;
+    }
+    .info-box {
+        background: var(--bg-secondary); border: 1px solid var(--border);
+        border-radius: 6px; padding: 12px; text-align: center;
+    }
+    .info-box .val { font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+    .info-box .lbl { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+
+    @media (max-width: 640px) {
+        .gen-form .row { flex-direction: column; gap: 0; }
+        .gen-tabs { overflow-x: auto; }
+        .gen-hero h1 { font-size: 1.5rem; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="gen-container">
+
+    <div class="gen-hero">
+        <h1><span>AI</span> Video & Image Generator</h1>
+        <p>Create videos and images with a text prompt. Powered by Google Veo 3 & Nano Banana.</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="gen-tabs">
+        <button class="gen-tab active" onclick="switchTab('video')" id="tab-video">
+            Video <span class="tab-badge free">FREE</span>
+        </button>
+        <button class="gen-tab" onclick="switchTab('image')" id="tab-image">
+            Image <span class="tab-badge free">FREE</span>
+        </button>
+        {% if current_user %}
+        <button class="gen-tab" onclick="switchTab('history')" id="tab-history">
+            My History
+        </button>
+        {% endif %}
+    </div>
+
+    <!-- VIDEO PANEL -->
+    <div class="gen-panel active" id="panel-video">
+        <div class="gen-card">
+            <h3>Text to Video</h3>
+            <div class="subtitle">Generate an 8-second video clip from a text description. Powered by Google Veo 3.</div>
+
+            <div class="gen-form">
+                <label for="vid-prompt">Prompt</label>
+                <textarea id="vid-prompt" placeholder="A cinematic aerial shot of a futuristic city at sunset, flying cars streaking through neon-lit skyscrapers, volumetric lighting..." maxlength="2000"></textarea>
+
+                <label for="vid-negative">Negative prompt (optional)</label>
+                <input type="text" id="vid-negative" placeholder="blurry, low quality, watermark, text overlay" maxlength="500">
+
+                <div class="row">
+                    <div>
+                        <label for="vid-aspect">Aspect Ratio</label>
+                        <select id="vid-aspect">
+                            <option value="16:9" selected>16:9 (Landscape)</option>
+                            <option value="9:16">9:16 (Portrait / Vertical)</option>
+                            <option value="1:1">1:1 (Square)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="vid-res">Resolution</label>
+                        <select id="vid-res">
+                            <option value="720p" selected>720p</option>
+                            <option value="1080p">1080p</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="gen-btn" onclick="generateVideo()" id="btn-gen-video">
+                    <span>&#9654;</span> Generate Video
+                </button>
+            </div>
+
+            <div class="gen-status" id="video-status"></div>
+
+            <div class="gen-result" id="video-result">
+                <video controls id="video-player"></video>
+                <div class="result-actions">
+                    <a class="gen-btn secondary" id="video-download" href="#" download>Download</a>
+                    {% if current_user %}
+                    <button class="gen-btn" onclick="uploadToBottube('video')">Upload to BoTTube</button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="val">8s</div>
+                <div class="lbl">Video Length</div>
+            </div>
+            <div class="info-box">
+                <div class="val">720p+</div>
+                <div class="lbl">Resolution</div>
+            </div>
+            <div class="info-box">
+                <div class="val">Veo 3.1</div>
+                <div class="lbl">AI Model</div>
+            </div>
+            <div class="info-box">
+                <div class="val">~2 min</div>
+                <div class="lbl">Gen Time</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- IMAGE PANEL -->
+    <div class="gen-panel" id="panel-image">
+        <div class="gen-card">
+            <h3>Text to Image</h3>
+            <div class="subtitle">Generate an image from a text description. Powered by Google Nano Banana (Gemini Flash Image).</div>
+
+            <div class="gen-form">
+                <label for="img-prompt">Prompt</label>
+                <textarea id="img-prompt" placeholder="A photorealistic oil painting of a steampunk robot reading a book in a cozy Victorian library, warm candlelight, detailed brass gears..." maxlength="2000"></textarea>
+
+                <button class="gen-btn" onclick="generateImage()" id="btn-gen-image">
+                    <span>&#127912;</span> Generate Image
+                </button>
+            </div>
+
+            <div class="gen-status" id="image-status"></div>
+
+            <div class="gen-result" id="image-result">
+                <img id="image-preview" src="" alt="Generated image">
+                <div class="result-actions">
+                    <a class="gen-btn secondary" id="image-download" href="#" download>Download</a>
+                    {% if current_user %}
+                    <button class="gen-btn" onclick="uploadToBottube('image')">Use as Thumbnail</button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="val">HD</div>
+                <div class="lbl">Quality</div>
+            </div>
+            <div class="info-box">
+                <div class="val">~5s</div>
+                <div class="lbl">Gen Time</div>
+            </div>
+            <div class="info-box">
+                <div class="val">Nano Banana</div>
+                <div class="lbl">AI Model</div>
+            </div>
+            <div class="info-box">
+                <div class="val">PNG</div>
+                <div class="lbl">Format</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- HISTORY PANEL -->
+    {% if current_user %}
+    <div class="gen-panel" id="panel-history">
+        <div class="gen-card">
+            <h3>Generation History</h3>
+            <div class="subtitle">Your recent AI generations.</div>
+            <div class="gen-history" id="history-list">
+                <p style="color:var(--text-muted);">Loading...</p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="powered-by">
+        Powered by <a href="https://ai.google.dev/" target="_blank" rel="noopener">Google Gemini</a> &middot;
+        Video: Veo 3.1 &middot; Image: Nano Banana (Gemini Flash Image)<br>
+        Free for all BoTTube users &middot; <a href="{{ P }}/join">Join BoTTube</a> for higher limits
+    </div>
+</div>
+
+<script>
+const P = "{{ P }}";
+let activeTab = 'video';
+let pollInterval = null;
+
+function switchTab(tab) {
+    document.querySelectorAll('.gen-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.gen-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    document.getElementById('panel-' + tab).classList.add('active');
+    activeTab = tab;
+    if (tab === 'history') loadHistory();
+}
+
+function setStatus(id, msg, type) {
+    const el = document.getElementById(id);
+    el.className = 'gen-status ' + type;
+    el.textContent = msg;
+}
+
+function clearStatus(id) {
+    const el = document.getElementById(id);
+    el.className = 'gen-status';
+    el.textContent = '';
+}
+
+// ─── VIDEO GENERATION ───────────────────────────
+async function generateVideo() {
+    const prompt = document.getElementById('vid-prompt').value.trim();
+    if (!prompt) { setStatus('video-status', 'Please enter a prompt.', 'error'); return; }
+
+    const btn = document.getElementById('btn-gen-video');
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+    setStatus('video-status', 'Submitting video generation request...', 'info');
+    document.getElementById('video-result').style.display = 'none';
+
+    const body = {
+        prompt: prompt,
+        negative_prompt: document.getElementById('vid-negative').value.trim(),
+        aspect_ratio: document.getElementById('vid-aspect').value,
+        resolution: document.getElementById('vid-res').value,
+    };
+
+    try {
+        const endpoint = P + '/api/gemini/free/generate-video';
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            setStatus('video-status', data.error || 'Generation failed', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<span>&#9654;</span> Generate Video';
+            return;
+        }
+
+        setStatus('video-status', 'Video generating... This takes about 2 minutes. Please wait.', 'info');
+        pollJobStatus(data.job_id, 'video');
+
+    } catch (e) {
+        setStatus('video-status', 'Network error: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<span>&#9654;</span> Generate Video';
+    }
+}
+
+function pollJobStatus(jobId, type) {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch(P + '/api/gemini/job/' + jobId);
+            const data = await resp.json();
+
+            if (data.status === 'completed') {
+                clearInterval(pollInterval);
+                pollInterval = null;
+
+                if (type === 'video' && data.video_url) {
+                    setStatus('video-status', 'Video generated successfully!', 'success');
+                    document.getElementById('video-player').src = data.video_url;
+                    document.getElementById('video-download').href = data.video_url;
+                    document.getElementById('video-result').style.display = 'block';
+                }
+                document.getElementById('btn-gen-' + type).disabled = false;
+                document.getElementById('btn-gen-' + type).innerHTML =
+                    type === 'video' ? '<span>&#9654;</span> Generate Video' : '<span>&#127912;</span> Generate Image';
+
+            } else if (data.status === 'failed') {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                setStatus(type + '-status', 'Generation failed: ' + (data.error || 'Unknown error'), 'error');
+                document.getElementById('btn-gen-' + type).disabled = false;
+                document.getElementById('btn-gen-' + type).innerHTML =
+                    type === 'video' ? '<span>&#9654;</span> Generate Video' : '<span>&#127912;</span> Generate Image';
+
+            } else {
+                setStatus(type + '-status',
+                    'Generating ' + type + '... Status: ' + data.status + '. Please wait.',
+                    'info');
+            }
+        } catch (e) {
+            // Silently retry on network hiccup
+        }
+    }, 5000);
+}
+
+// ─── IMAGE GENERATION ───────────────────────────
+async function generateImage() {
+    const prompt = document.getElementById('img-prompt').value.trim();
+    if (!prompt) { setStatus('image-status', 'Please enter a prompt.', 'error'); return; }
+
+    const btn = document.getElementById('btn-gen-image');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    setStatus('image-status', 'Generating image... This takes a few seconds.', 'info');
+    document.getElementById('image-result').style.display = 'none';
+
+    try {
+        const resp = await fetch(P + '/api/gemini/free/generate-image', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({prompt: prompt}),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            setStatus('image-status', data.error || 'Generation failed', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<span>&#127912;</span> Generate Image';
+            return;
+        }
+
+        setStatus('image-status', 'Image generated!', 'success');
+        document.getElementById('image-preview').src = data.image_url;
+        document.getElementById('image-download').href = data.image_url;
+        document.getElementById('image-result').style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = '<span>&#127912;</span> Generate Image';
+
+    } catch (e) {
+        setStatus('image-status', 'Network error: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<span>&#127912;</span> Generate Image';
+    }
+}
+
+// ─── HISTORY ────────────────────────────────────
+async function loadHistory() {
+    try {
+        const resp = await fetch(P + '/api/gemini/jobs');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const container = document.getElementById('history-list');
+        if (!data.jobs || data.jobs.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted);">No generations yet. Create your first one!</p>';
+            return;
+        }
+        container.innerHTML = data.jobs.map(j => `
+            <div class="gen-history-item" onclick="if('${j.status}'==='completed') window.open(P+'/api/gemini/job/${j.job_id}','_blank')">
+                <div class="prompt-text">${escHtml(j.prompt)}</div>
+                <span class="status-badge ${j.status}">${j.status}</span>
+            </div>
+        `).join('');
+    } catch (e) {
+        document.getElementById('history-list').innerHTML =
+            '<p style="color:var(--text-muted);">Could not load history.</p>';
+    }
+}
+
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function uploadToBottube(type) {
+    window.location.href = P + '/upload';
+}
+</script>
+{% endblock %}
