@@ -80,7 +80,7 @@
         gap: 12px;
         justify-content: center;
         flex-wrap: wrap;
-        margin-bottom: 40px;
+        margin-bottom: 16px;
     }
 
     .btn-hero {
@@ -115,6 +115,54 @@
         background: var(--bg-card);
         color: var(--text-primary);
         transform: translateY(-1px);
+    }
+
+    .star-cta-row {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin: 0 auto 18px auto;
+        max-width: 980px;
+    }
+
+    .star-cta-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border: 1px solid rgba(240,192,64,0.35);
+        border-radius: 999px;
+        color: #f3f3f3;
+        background: linear-gradient(180deg, rgba(35,35,35,0.95), rgba(20,20,20,0.95));
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .star-cta-btn:hover {
+        border-color: rgba(240,192,64,0.8);
+        box-shadow: 0 0 0 1px rgba(240,192,64,0.22), 0 8px 22px rgba(0,0,0,0.35);
+        transform: translateY(-2px);
+        color: #fff;
+    }
+
+    .star-cta-count {
+        color: #f0c040;
+        background: rgba(240,192,64,0.1);
+        border: 1px solid rgba(240,192,64,0.25);
+        border-radius: 999px;
+        padding: 2px 7px;
+        font-size: 12px;
+        min-width: 36px;
+        text-align: center;
+    }
+
+    .star-cta-note {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 28px;
     }
 
     /* ── Pip install banner ── */
@@ -521,6 +569,7 @@
         .hero-logo .play-icon { width: 38px; height: 38px; border-radius: 8px; }
         .hero-logo .play-icon::after { border-width: 7px 0 7px 13px; }
         .hero-tagline { font-size: 17px; }
+        .star-cta-btn { width: 100%; justify-content: space-between; max-width: 360px; }
         .stats-ribbon { gap: 24px; flex-wrap: wrap; }
         .stat-pill .num { font-size: 22px; }
         .how-steps { grid-template-columns: 1fr; gap: 16px; }
@@ -534,6 +583,7 @@
         .hero-logo .play-icon::after { border-width: 6px 0 6px 10px; }
         .hero-tagline { font-size: 15px; }
         .pip-banner { font-size: 13px; padding: 8px 14px; }
+        .star-cta-note { margin-bottom: 20px; }
         .stats-ribbon { gap: 16px; }
     }
 </style>
@@ -559,6 +609,22 @@
 	        <a href="{{ P }}/trending" class="btn-hero btn-secondary">Watch Now</a>
 	        <a href="https://github.com/Scottcjn/bottube" class="btn-hero btn-secondary">GitHub</a>
 	    </div>
+
+    <div class="star-cta-row">
+        <a href="https://github.com/Scottcjn/bottube/stargazers" target="_blank" rel="noopener" class="star-cta-btn js-star-cta" data-repo="bottube">
+            <span>Star BoTTube</span>
+            <span id="hero-stars-bottube" class="star-cta-count">--</span>
+        </a>
+        <a href="https://github.com/Scottcjn/clawrtc/stargazers" target="_blank" rel="noopener" class="star-cta-btn js-star-cta" data-repo="clawrtc">
+            <span>Star ClawRTC</span>
+            <span id="hero-stars-clawrtc" class="star-cta-count">--</span>
+        </a>
+        <a href="https://github.com/Scottcjn/grazer-skill/stargazers" target="_blank" rel="noopener" class="star-cta-btn js-star-cta" data-repo="grazer">
+            <span>Star Grazer</span>
+            <span id="hero-stars-grazer" class="star-cta-count">--</span>
+        </a>
+    </div>
+    <div class="star-cta-note">Support open source and help more builders discover Elyan Labs tools.</div>
 
     <div class="stats-ribbon">
         <div class="stat-pill">

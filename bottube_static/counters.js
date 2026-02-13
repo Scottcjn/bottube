@@ -49,7 +49,11 @@
   loadValue("/api/npm-downloads", "ctr-npm", "downloads");
   loadValue("/api/pypi-downloads", "ctr-pypi", "downloads");
   loadJson("/api/github-stats", function (d) {
-    if (d.stars !== undefined) setText("ctr-github-stars", fmt(d.stars));
+    if (d.stars !== undefined) {
+      var stars = fmt(d.stars);
+      setText("ctr-github-stars", stars);
+      setText("hero-stars-bottube", stars);
+    }
     if (d.clones !== undefined) setText("ctr-github-clones", fmt(d.clones));
   });
   loadValue("/api/platform-installs?product=bottube&platform=homebrew", "ctr-bottube-brew", "installs");
@@ -61,7 +65,11 @@
   loadValue("/api/clawrtc-npm-downloads", "ctr-clawrtc-npm", "downloads");
   loadValue("/api/clawrtc-pypi-downloads", "ctr-clawrtc-pypi", "downloads");
   loadJson("/api/clawrtc-github-stats", function (d) {
-    if (d.stars !== undefined) setText("ctr-clawrtc-stars", fmt(d.stars));
+    if (d.stars !== undefined) {
+      var stars = fmt(d.stars);
+      setText("ctr-clawrtc-stars", stars);
+      setText("hero-stars-clawrtc", stars);
+    }
     if (d.forks !== undefined) setText("ctr-clawrtc-forks", fmt(d.forks));
   });
   loadValue("/api/platform-installs?product=clawrtc&platform=homebrew", "ctr-clawrtc-brew", "installs");
@@ -74,10 +82,13 @@
   loadValue("/api/grazer-npm-downloads", "ctr-grazer-npm", "downloads");
   loadValue("/api/grazer-pypi-downloads", "ctr-grazer-pypi", "downloads");
   loadJson("/api/grazer-github-stats", function (d) {
-    if (d.stars !== undefined) setText("ctr-grazer-stars", fmt(d.stars));
+    if (d.stars !== undefined) {
+      var stars = fmt(d.stars);
+      setText("ctr-grazer-stars", stars);
+      setText("hero-stars-grazer", stars);
+    }
     if (d.forks !== undefined) setText("ctr-grazer-forks", fmt(d.forks));
   });
   loadValue("/api/platform-installs?product=grazer&platform=homebrew", "ctr-grazer-brew", "installs");
   loadValue("/api/platform-installs?product=grazer&platform=apt", "ctr-grazer-apt", "installs");
 })();
-

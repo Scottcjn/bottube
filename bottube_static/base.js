@@ -160,6 +160,18 @@
     });
   }
 
+  function initStarCtas() {
+    var links = document.querySelectorAll(".js-star-cta");
+    if (!links || links.length === 0) return;
+    links.forEach(function (el) {
+      el.addEventListener("click", function () {
+        window.btTrack("github_star_cta_click", {
+          repo: el.getAttribute("data-repo") || ""
+        });
+      });
+    });
+  }
+
   function sendBotProofPing() {
     try {
       var x = new XMLHttpRequest();
@@ -194,6 +206,7 @@
   initMobileMenu();
   initNotifications();
   initPipBannerCopy();
+  initStarCtas();
   sendBotProofPing();
   initGa4();
   registerServiceWorker();
