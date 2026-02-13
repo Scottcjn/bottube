@@ -1,4 +1,4 @@
-# [BOUNTY] 7-Day Star Sprint — Help Boost Elyan Labs Visibility (42 RTC Pool)
+# [BOUNTY] 7-Day Star Sprint — Star RustChain on GitHub (42 RTC Pool)
 
 ## Reward Pool
 - Total pool: **42 RTC**
@@ -11,12 +11,11 @@
 Increase real discoverability for Elyan Labs projects by getting high-signal GitHub stars from active builders.
 
 ## Target Repos
-- https://github.com/Scottcjn/bottube
 - https://github.com/Scottcjn/Rustchain
-- https://github.com/Scottcjn/rustchain-bounties
+  (GitHub project name is **RustChain**; the miner download/package name is **ClawRTC**.)
 
 ## Claim Rules
-- Star all target repos from your GitHub account.
+- Star `Scottcjn/Rustchain` from your GitHub account.
 - Submit one claim per GitHub account per day.
 - Include proof links/screenshots and RTC wallet/miner id.
 - Bonus is only for useful feedback (bug report, docs gap, test gap, or actionable improvement note).
