@@ -418,6 +418,18 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
 
+# JSON-aware 403 handler for AJAX requests
+@app.errorhandler(403)
+def handle_403(e):
+    """Return JSON for API/AJAX 403 errors, HTML for browser requests."""
+    if hasattr(e, "response") and e.response is not None:
+        return e.response
+    ct = request.headers.get("Content-Type", "")
+    if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
+        return jsonify({"error": "Forbidden", "csrf_error": True}), 403
+    return "Forbidden", 403
+
+
 # Google integrations (configured via env vars on VPS)
 app.config["GA4_MEASUREMENT_ID"] = os.environ.get("GA4_MEASUREMENT_ID", "")
 app.config["ADSENSE_PUBLISHER_ID"] = os.environ.get("ADSENSE_PUBLISHER_ID", "")
@@ -527,6 +539,16 @@ def _verify_csrf():
         token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
     if not expected or not token or not secrets.compare_digest(token, expected):
+        # Return JSON for AJAX/API requests so JS can handle the error
+        ct = request.headers.get("Content-Type", "")
+        if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
+            from flask import make_response
+
+            resp = make_response(
+                jsonify({"error": "Session expired. Please refresh the page.", "csrf_error": True}),
+                403,
+            )
+            abort(resp)
         abort(403)
 
 
@@ -945,6 +967,7 @@ def get_db():
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA journal_mode=WAL")
         g.db.execute("PRAGMA foreign_keys=ON")
+        g.db.execute("PRAGMA busy_timeout=5000")
     return g.db
 
 
@@ -5496,6 +5519,16 @@ def watch(video_id):
     ).fetchone()
     user_balance = g.user["rtc_balance"] if g.user else 0
 
+    # Load user's existing vote for this video
+    user_vote = 0
+    if g.user:
+        _uv = db.execute(
+            "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
+            (g.user["id"], video_id),
+        ).fetchone()
+        if _uv:
+            user_vote = _uv["vote"]
+
     return render_template(
         "watch.html",
         video=video,
@@ -5503,6 +5536,7 @@ def watch(video_id):
         related=related,
         subscriber_count=subscriber_count,
         is_following=is_following,
+        user_vote=user_vote,
         recent_tips=recent_tips,
         tip_total_amount=round(tip_total[0], 6),
         tip_count=tip_total[1],
@@ -5623,6 +5657,15 @@ def agents_page():
     return render_template("agents.html", agents=agents)
 
 
+def get_agent_beacon(agent_name: str):
+    """Best-effort Beacon metadata for an agent channel page.
+
+    This is optional and should never break the channel route.
+    """
+    # Beacon integration is still evolving; keep this safe by default.
+    return None
+
+
 @app.route("/agent/<agent_name>")
 def channel(agent_name):
     """Agent channel page."""
@@ -5669,6 +5712,8 @@ def channel(agent_name):
         (agent["id"],),
     ).fetchall()
 
+    beacon_data = get_agent_beacon(agent_name)
+
     return render_template(
         "channel.html",
         agent=agent,
@@ -5677,6 +5722,7 @@ def channel(agent_name):
         subscriber_count=subscriber_count,
         is_following=is_following,
         playlists=playlists,
+        beacon=beacon_data,
     )
 
 
@@ -7931,6 +7977,42 @@ def grazer_pypi_downloads():
         return jsonify({"downloads": 0})
 
 
+@app.route("/api/beacon-clawhub-downloads")
+def beacon_clawhub_downloads():
+    """Get Beacon ClawHub download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('beacon_clawhub', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/beacon-npm-downloads")
+def beacon_npm_downloads():
+    """Get Beacon npm download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('beacon_npm', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/beacon-pypi-downloads")
+def beacon_pypi_downloads():
+    """Get Beacon PyPI download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('beacon_pypi', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
 @app.route("/grazer")
 @app.route("/skills/grazer")
 def grazer_page():
@@ -8666,6 +8748,11 @@ def embed_guide_page():
         "SELECT v.video_id, v.title FROM videos v ORDER BY v.created_at DESC LIMIT 5"
     ).fetchall()
     return render_template("embed_guide.html", videos=recent)
+
+
+@app.route("/beacon")
+def beacon_landing_page():
+    return render_template("beacon.html")
 
 
 

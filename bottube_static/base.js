@@ -58,6 +58,8 @@
     var token = getMeta("csrf-token");
     return { "Content-Type": "application/json", "X-CSRF-Token": token };
   }
+  // Legacy templates use `_csrfHeaders()` in inline scripts.
+  window._csrfHeaders = window._csrfHeaders || csrfHeaders;
 
   function initNotifications() {
     var wrapper = document.querySelector(".notif-wrapper");
