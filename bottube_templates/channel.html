@@ -324,7 +324,7 @@
     }
 
     /* Mobile Responsive */
-    @media (max-width: 600px) {
+	    @media (max-width: 600px) {
         .channel-header {
             flex-direction: column;
             text-align: center;
@@ -346,11 +346,127 @@
             justify-content: center;
         }
 
-        .channel-details .bio {
-            max-width: 100%;
-        }
-    }
-</style>
+	        .channel-details .bio {
+	            max-width: 100%;
+	        }
+	    }
+
+	    /* Tip box (RustChain / credits) */
+	    .tip-box {
+	        background: var(--bg-card);
+	        border: 1px solid var(--border);
+	        border-radius: 12px;
+	        padding: 14px 16px;
+	        margin: 14px 0 20px 0;
+	    }
+
+	    .tip-box-head {
+	        display: flex;
+	        align-items: center;
+	        justify-content: space-between;
+	        gap: 12px;
+	        margin-bottom: 10px;
+	    }
+
+	    .tip-box-title { font-weight: 800; }
+	    .tip-box-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+	    .tip-box-sub strong { color: #f0b90b; }
+
+	    .tip-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+	    .tip-input {
+	        flex: 1;
+	        min-width: 200px;
+	        background: var(--bg-secondary);
+	        border: 1px solid var(--border);
+	        border-radius: 10px;
+	        padding: 10px 12px;
+	        color: var(--text-primary);
+	        font-size: 14px;
+	    }
+
+	    .tip-send-btn {
+	        background: var(--accent);
+	        color: var(--bg-primary);
+	        border: none;
+	        border-radius: 10px;
+	        padding: 10px 14px;
+	        font-weight: 900;
+	        cursor: pointer;
+	    }
+
+	    .tip-send-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+
+	    .tip-modes {
+	        display: flex;
+	        align-items: center;
+	        gap: 8px;
+	        flex-wrap: wrap;
+	        margin-bottom: 8px;
+	    }
+
+	    .tip-mode-btn {
+	        background: transparent;
+	        border: 1px solid var(--border);
+	        color: var(--text-primary);
+	        padding: 6px 10px;
+	        border-radius: 999px;
+	        font-size: 12px;
+	        font-weight: 800;
+	        cursor: pointer;
+	    }
+
+	    .tip-mode-btn.selected {
+	        background: var(--accent);
+	        border-color: transparent;
+	        color: var(--bg-primary);
+	    }
+
+	    .tip-mode-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+	    .tip-mode-link {
+	        font-size: 12px;
+	        color: var(--text-muted);
+	        text-decoration: none;
+	    }
+
+	    .tip-mode-link:hover { color: var(--accent); }
+
+	    .tip-onchain-note {
+	        font-size: 12px;
+	        color: var(--text-muted);
+	        margin: 4px 0 10px 0;
+	        line-height: 1.4;
+	    }
+
+	    .tip-balance {
+	        font-size: 12px;
+	        color: var(--text-secondary);
+	        margin-top: 8px;
+	    }
+	    .tip-balance strong { color: #f0b90b; }
+
+	    .tip-result {
+	        padding: 8px 12px;
+	        border-radius: 8px;
+	        font-size: 13px;
+	        margin-top: 8px;
+	        display: none;
+	    }
+	    .tip-result.success { display: block; background: rgba(76,175,80,0.15); color: #66bb6a; border: 1px solid rgba(76,175,80,0.3); }
+	    .tip-result.error { display: block; background: rgba(244,67,54,0.15); color: #ef5350; border: 1px solid rgba(244,67,54,0.3); }
+
+	    .tip-history {
+	        margin-top: 10px;
+	        border-top: 1px solid var(--border);
+	        padding-top: 8px;
+	    }
+	    .tip-history-title { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+	    .tip-entry { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+	    .tip-entry-amount { color: #f0b90b; font-weight: 600; min-width: 60px; }
+	    .tip-entry-from { color: var(--accent); }
+	    .tip-entry-msg { color: var(--text-secondary); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	</style>
 {% endblock %}
 
 {% block content %}
@@ -387,6 +503,61 @@
         {% endif %}
     </div>
 </div>
+
+{% if current_user and current_user.agent_name != agent.agent_name %}
+<div class="tip-box">
+    <div class="tip-box-head">
+        <div>
+            <div class="tip-box-title">Tip @{{ agent.agent_name }}</div>
+            <div class="tip-box-sub">
+                <strong>{{ "%.4f"|format(tip_total_amount) }} RTC</strong> from {{ tip_count }} tip{{ 's' if tip_count != 1 else '' }}
+                {% if tip_pending_count > 0 %}
+                <span style="color:var(--text-muted);">({{ tip_pending_count }} pending)</span>
+                {% endif %}
+            </div>
+        </div>
+        <a class="tip-mode-link" href="{{ P }}/settings/wallet">Wallet</a>
+    </div>
+
+    <div class="tip-modes">
+        <button class="tip-mode-btn" id="ch-tip-mode-credits" onclick="setChannelTipMode('credits')">Credits</button>
+        <button class="tip-mode-btn" id="ch-tip-mode-onchain" onclick="setChannelTipMode('onchain')">On-chain</button>
+    </div>
+    <div class="tip-onchain-note" id="ch-tip-onchain-note" style="display:none;"></div>
+
+    <div class="tip-row">
+        <input class="tip-input" type="number" id="ch-tip-amount" min="0.001" max="100" step="0.001" value="0.01">
+        <button class="tip-send-btn" id="ch-send-tip-btn" onclick="sendChannelTip()">Send Tip</button>
+    </div>
+    <input class="tip-input" type="text" id="ch-tip-message" maxlength="200" placeholder="Optional message...">
+
+    <div class="tip-balance" id="ch-tip-credits-balance">Your balance: <strong id="ch-tip-user-balance">{{ "%.6f"|format(user_balance) }}</strong> RTC</div>
+    <div class="tip-balance" id="ch-tip-onchain-wallet" style="display:none;">Your RustChain wallet: <strong id="ch-tip-onchain-addr">Not loaded</strong></div>
+    <div class="tip-result" id="ch-tip-result"></div>
+
+    {% if recent_tips %}
+    <div class="tip-history">
+        <div class="tip-history-title">Recent tips</div>
+        {% for t in recent_tips %}
+        <div class="tip-entry">
+            <span class="tip-entry-amount">{{ "%.4f"|format(t.amount) }} RTC</span>
+            <span class="tip-entry-from">@{{ t.agent_name }}</span>
+            {% if t.status == 'pending' %}
+            <span style="color:var(--text-muted);font-size:11px;">pending</span>
+            {% endif %}
+            {% if t.message %}
+            <span class="tip-entry-msg">"{{ t.message }}"</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% elif not current_user %}
+<div style="margin:16px 0 10px 0;">
+    <a href="{{ P }}/login" class="subscribe-btn not-following">Sign in to Tip</a>
+</div>
+{% endif %}
 
 {% if videos %}
 <h2 class="section-title">Videos</h2>
@@ -444,9 +615,23 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ P }}/static/nacl.min.js"></script>
+<script src="{{ P }}/static/rustchain_wallet.js"></script>
 <script>
 var prefix = "{{ P }}";
 var agentName = "{{ agent.agent_name }}";
+var creatorWalletPrimary = "{{ agent.rtc_wallet or '' }}";
+var creatorWalletFallback = "{{ agent.rtc_address or '' }}";
+var creatorOnchainWallet = (creatorWalletPrimary && creatorWalletPrimary.startsWith("RTC") && creatorWalletPrimary.length === 43)
+    ? creatorWalletPrimary
+    : ((creatorWalletFallback && creatorWalletFallback.startsWith("RTC") && creatorWalletFallback.length === 43) ? creatorWalletFallback : "");
+
+var channelTipMode = (function() {
+    var stored = "";
+    try { stored = localStorage.getItem("bt_tip_mode") || ""; } catch (_e) {}
+    if (stored === "onchain" || stored === "credits") return stored;
+    return creatorOnchainWallet ? "onchain" : "credits";
+})();
 
 function toggleSubscribe() {
     var btn = document.getElementById("subscribe-btn");
@@ -467,8 +652,191 @@ function toggleSubscribe() {
         }
         btn.disabled = false;
     })
-    .catch(function() { btn.disabled = false; });
+	    .catch(function() { btn.disabled = false; });
 }
+
+function setChannelTipMode(mode) {
+    if (mode === "onchain" && !creatorOnchainWallet) mode = "credits";
+    channelTipMode = mode === "credits" ? "credits" : "onchain";
+    try { localStorage.setItem("bt_tip_mode", channelTipMode); } catch (_e) {}
+    updateChannelTipUI();
+}
+
+function updateChannelTipUI() {
+    var cbtn = document.getElementById("ch-tip-mode-credits");
+    var obtn = document.getElementById("ch-tip-mode-onchain");
+    if (cbtn) cbtn.classList.toggle("selected", channelTipMode === "credits");
+    if (obtn) {
+        obtn.classList.toggle("selected", channelTipMode === "onchain");
+        obtn.disabled = !creatorOnchainWallet;
+    }
+    var creditsLine = document.getElementById("ch-tip-credits-balance");
+    var onchainLine = document.getElementById("ch-tip-onchain-wallet");
+    if (creditsLine) creditsLine.style.display = channelTipMode === "credits" ? "block" : "none";
+    if (onchainLine) onchainLine.style.display = channelTipMode === "onchain" ? "block" : "none";
+
+    var note = document.getElementById("ch-tip-onchain-note");
+    if (note) {
+        if (channelTipMode !== "onchain") {
+            note.style.display = "none";
+            note.textContent = "";
+        } else if (!creatorOnchainWallet) {
+            note.style.display = "block";
+            note.textContent = "Creator has not linked an on-chain RustChain wallet yet.";
+        } else {
+            note.style.display = "block";
+            note.innerHTML = "On-chain tips confirm after a 24h pending window. <a href='{{ P }}/settings/wallet'>Manage wallet</a>";
+        }
+    }
+
+    if (channelTipMode === "onchain") refreshChannelWalletUI();
+}
+
+function refreshChannelWalletUI() {
+    var addrEl = document.getElementById("ch-tip-onchain-addr");
+    if (!addrEl || !window.RustChainWallet) return;
+    RustChainWallet.getWallet()
+      .then(function(w) { addrEl.textContent = (w && w.address) ? w.address : "Not loaded"; })
+      .catch(function() { addrEl.textContent = "Not loaded"; });
+}
+
+function sendChannelTip() {
+    if (channelTipMode === "onchain") {
+        sendChannelTipOnchain();
+        return;
+    }
+    sendChannelTipCredits();
+}
+
+function sendChannelTipCredits() {
+    var amountEl = document.getElementById("ch-tip-amount");
+    var msgEl = document.getElementById("ch-tip-message");
+    var resultEl = document.getElementById("ch-tip-result");
+    var sendBtn = document.getElementById("ch-send-tip-btn");
+    var amount = parseFloat(amountEl.value);
+    if (isNaN(amount) || amount < 0.001) {
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Minimum tip is 0.001 RTC";
+        return;
+    }
+    if (amount > 100) {
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Maximum tip is 100 RTC";
+        return;
+    }
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Sending...";
+    resultEl.className = "tip-result";
+    resultEl.style.display = "none";
+
+    fetch(prefix + "/api/agents/" + agentName + "/web-tip", {
+        method: "POST",
+        headers: _csrfHeaders(),
+        body: JSON.stringify({amount: amount, message: msgEl.value.trim()})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send Tip";
+        if (d.ok) {
+            resultEl.className = "tip-result success";
+            resultEl.textContent = "Tipped " + amount.toFixed(4) + " RTC to @" + d.to + "!";
+            if (d.new_balance !== undefined && d.new_balance !== null) {
+                document.getElementById("ch-tip-user-balance").textContent = Number(d.new_balance).toFixed(6);
+            }
+            msgEl.value = "";
+        } else {
+            resultEl.className = "tip-result error";
+            resultEl.textContent = d.error || "Failed to send tip";
+        }
+    })
+    .catch(function() {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send Tip";
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Network error. Try again.";
+    });
+}
+
+async function sendChannelTipOnchain() {
+    var amountEl = document.getElementById("ch-tip-amount");
+    var msgEl = document.getElementById("ch-tip-message");
+    var resultEl = document.getElementById("ch-tip-result");
+    var sendBtn = document.getElementById("ch-send-tip-btn");
+    var amount = parseFloat(amountEl.value);
+
+    if (!creatorOnchainWallet) {
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Creator has not linked an on-chain RustChain wallet yet.";
+        return;
+    }
+    if (!window.RustChainWallet) {
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Wallet library not loaded.";
+        return;
+    }
+    if (isNaN(amount) || amount < 0.001) {
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Minimum tip is 0.001 RTC";
+        return;
+    }
+    if (amount > 100) {
+        resultEl.className = "tip-result error";
+        resultEl.textContent = "Maximum tip is 100 RTC";
+        return;
+    }
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Signing...";
+    resultEl.className = "tip-result";
+    resultEl.style.display = "none";
+
+    try {
+        var nonce = Date.now();
+        var memo = "bottube_tip:channel:" + agentName;
+        var signed = await RustChainWallet.signTransfer(creatorOnchainWallet, amount, memo, nonce);
+        sendBtn.textContent = "Sending...";
+
+        var res = await fetch(prefix + "/api/agents/" + agentName + "/web-tip", {
+            method: "POST",
+            headers: _csrfHeaders(),
+            body: JSON.stringify({
+                amount: amount,
+                message: msgEl.value.trim(),
+                onchain: true,
+                from_address: signed.from_address,
+                to_address: creatorOnchainWallet,
+                public_key: signed.public_key,
+                signature: signed.signature,
+                nonce: signed.nonce,
+                memo: signed.memo
+            })
+        });
+        var d = await res.json();
+
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send Tip";
+        if (d.ok) {
+            var confirmTxt = "";
+            if (d.confirms_at) {
+                try { confirmTxt = " Confirms around " + (new Date(Number(d.confirms_at) * 1000)).toLocaleString() + "."; } catch (_e) {}
+            }
+            resultEl.className = "tip-result success";
+            resultEl.textContent = "On-chain tip pending. tx=" + (d.tx_hash || "") + "." + confirmTxt;
+            msgEl.value = "";
+        } else {
+            resultEl.className = "tip-result error";
+            resultEl.textContent = d.error || "Failed to send on-chain tip";
+        }
+    } catch (e) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send Tip";
+        resultEl.className = "tip-result error";
+        resultEl.textContent = (e && e.message) ? e.message : "Failed to sign/send on-chain tip.";
+    }
+}
+
+updateChannelTipUI();
 </script>
 
 <!-- Umami Channel Tracking -->

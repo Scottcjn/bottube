@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Wallet Settings{% endblock %}
+
+{% block content %}
+<div style="max-width:860px;margin:0 auto;padding:24px 0;">
+  <h1 style="font-size:26px;margin-bottom:6px;">RustChain Wallet</h1>
+  <p style="color:var(--text-secondary);margin-bottom:18px;">
+    Link an on-chain RTC wallet (address starts with <code>RTC</code>) to receive tips.
+    Your private key never touches the server.
+  </p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
+    <h3 style="margin:0 0 10px 0;">Linked Receiving Wallet</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <input id="linked-rtc-wallet" type="text" value="{{ rtc_wallet }}" placeholder="RTC..." autocomplete="off"
+             style="flex:1;min-width:320px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text-primary);">
+      <button id="save-linked-btn"
+              style="background:var(--accent);color:var(--bg-primary);border:none;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
+              onclick="saveLinkedWallet()">Save</button>
+    </div>
+    <div id="linked-wallet-result" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+  </div>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+    <h3 style="margin:0 0 10px 0;">Local Signing Wallet (Browser)</h3>
+    <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;margin-bottom:12px;">
+      This wallet is stored in your browser storage as a hot wallet seed.
+      Use small amounts and back it up if you plan to keep funds here.
+    </p>
+
+    <div id="local-wallet-status" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+    <pre id="local-wallet-box" style="display:none;white-space:pre-wrap;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:12px;color:var(--text-primary);margin:10px 0;"></pre>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
+              onclick="genLocalWallet()">Generate</button>
+      <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
+              onclick="importLocalWallet()">Import Seed</button>
+      <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
+              onclick="showSeed()">Show Seed</button>
+      <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
+              onclick="clearLocalWallet()">Clear</button>
+      <button style="background:var(--accent);color:var(--bg-primary);border:none;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
+              onclick="setProfileToLocal()">Set Profile To This Address</button>
+    </div>
+
+    <div id="local-wallet-result" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+  </div>
+
+  <div style="margin-top:14px;color:var(--text-muted);font-size:13px;">
+    Tip creators from any video page or channel page.
+    <a href="{{ P }}/settings/notifications">Notification settings</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ P }}/static/nacl.min.js"></script>
+<script src="{{ P }}/static/rustchain_wallet.js"></script>
+<script>
+function setText(id, txt, color) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = txt;
+  el.style.color = color || "var(--text-muted)";
+}
+
+async function refreshLocalWalletUI(showSeedToo) {
+  try {
+    var w = await RustChainWallet.getWallet();
+    if (!w) {
+      setText("local-wallet-status", "No local wallet loaded in this browser.");
+      document.getElementById("local-wallet-box").style.display = "none";
+      return;
+    }
+    setText("local-wallet-status", "Local wallet loaded: " + w.address, "var(--green)");
+    var box = document.getElementById("local-wallet-box");
+    box.style.display = "block";
+    box.textContent = "address: " + w.address + "\\npublic_key: " + w.publicKeyHex + (showSeedToo ? ("\\nseed_hex: " + w.seedHex) : "");
+  } catch (e) {
+    setText("local-wallet-status", "Wallet error: " + (e && e.message ? e.message : String(e)), "var(--red)");
+  }
+}
+
+async function saveLinkedWallet() {
+  var btn = document.getElementById("save-linked-btn");
+  btn.disabled = true;
+  try {
+    var wallet = String(document.getElementById("linked-rtc-wallet").value || "").trim();
+    var res = await fetch("{{ P }}/api/users/me/wallet", {
+      method: "POST",
+      headers: _csrfHeaders(),
+      body: JSON.stringify({rtc_wallet: wallet})
+    });
+    var d = await res.json();
+    if (d.ok) setText("linked-wallet-result", "Saved.", "var(--green)");
+    else setText("linked-wallet-result", d.error || "Failed to save.", "var(--red)");
+  } catch (e) {
+    setText("linked-wallet-result", "Network error.", "var(--red)");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function genLocalWallet() {
+  try {
+    await RustChainWallet.generateWallet();
+    setText("local-wallet-result", "Generated. Back up your seed.", "var(--green)");
+  } catch (e) {
+    setText("local-wallet-result", e && e.message ? e.message : String(e), "var(--red)");
+  }
+  refreshLocalWalletUI(false);
+}
+
+async function importLocalWallet() {
+  var seed = prompt("Paste 32-byte seed hex (64 hex chars).");
+  if (seed === null) return;
+  try {
+    await RustChainWallet.importSeed(seed);
+    setText("local-wallet-result", "Imported.", "var(--green)");
+  } catch (e) {
+    setText("local-wallet-result", e && e.message ? e.message : String(e), "var(--red)");
+  }
+  refreshLocalWalletUI(false);
+}
+
+async function showSeed() {
+  refreshLocalWalletUI(true);
+}
+
+async function clearLocalWallet() {
+  RustChainWallet.clearWallet();
+  setText("local-wallet-result", "Cleared local wallet from this browser.", "var(--text-muted)");
+  refreshLocalWalletUI(false);
+}
+
+async function setProfileToLocal() {
+  try {
+    var w = await RustChainWallet.getWallet();
+    if (!w) {
+      setText("local-wallet-result", "No local wallet loaded.", "var(--red)");
+      return;
+    }
+    document.getElementById("linked-rtc-wallet").value = w.address;
+    await saveLinkedWallet();
+  } catch (e) {
+    setText("local-wallet-result", e && e.message ? e.message : String(e), "var(--red)");
+  }
+}
+
+refreshLocalWalletUI(false);
+</script>
+{% endblock %}
+

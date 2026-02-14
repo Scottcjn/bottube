@@ -19,6 +19,7 @@ import string
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from email.mime.multipart import MIMEMultipart
@@ -360,6 +361,8 @@ RTC_REWARD_COMMENT = 0.001     # Posting a comment (paid to commenter)
 RTC_REWARD_LIKE_RECEIVED = 0.001  # Receiving a like (paid to video creator)
 RTC_TIP_MIN = 0.001              # Minimum tip amount
 RTC_TIP_MAX = 100.0              # Maximum tip per transaction
+
+RUSTCHAIN_BASE_URL = os.environ.get("RUSTCHAIN_BASE_URL", "https://50.28.86.131").rstrip("/")
 
 # ---------------------------------------------------------------------------
 # i18n / Translations
@@ -758,13 +761,15 @@ CREATE TABLE IF NOT EXISTS agents (
     x_handle TEXT DEFAULT '',
     claim_token TEXT DEFAULT '',
     claimed INTEGER DEFAULT 0,
-    -- Wallet addresses for donations
-    rtc_address TEXT DEFAULT '',
-    btc_address TEXT DEFAULT '',
-    eth_address TEXT DEFAULT '',
-    sol_address TEXT DEFAULT '',
-    ltc_address TEXT DEFAULT '',
-    erg_address TEXT DEFAULT '',
+	    -- Wallet addresses for donations
+	    rtc_address TEXT DEFAULT '',
+	    -- RustChain on-chain wallet (RTC... Ed25519-derived address)
+	    rtc_wallet TEXT DEFAULT '',
+	    btc_address TEXT DEFAULT '',
+	    eth_address TEXT DEFAULT '',
+	    sol_address TEXT DEFAULT '',
+	    ltc_address TEXT DEFAULT '',
+	    erg_address TEXT DEFAULT '',
     paypal_email TEXT DEFAULT '',
     -- RTC earnings
     rtc_balance REAL DEFAULT 0.0,
@@ -906,20 +911,29 @@ CREATE INDEX IF NOT EXISTS idx_notif_agent ON notifications(agent_id, is_read, c
 CREATE INDEX IF NOT EXISTS idx_videos_revision ON videos(revision_of);
 CREATE INDEX IF NOT EXISTS idx_videos_challenge ON videos(challenge_id);
 
--- RTC tips between users
-CREATE TABLE IF NOT EXISTS tips (
-    id INTEGER PRIMARY KEY,
-    from_agent_id INTEGER NOT NULL,
-    to_agent_id INTEGER NOT NULL,
-    video_id TEXT DEFAULT '',
-    amount REAL NOT NULL,
-    message TEXT DEFAULT '',
-    created_at REAL NOT NULL,
-    FOREIGN KEY (from_agent_id) REFERENCES agents(id),
-    FOREIGN KEY (to_agent_id) REFERENCES agents(id)
-);
-CREATE INDEX IF NOT EXISTS idx_tips_video ON tips(video_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tips_to ON tips(to_agent_id, created_at DESC);
+	-- RTC tips between users
+	CREATE TABLE IF NOT EXISTS tips (
+	    id INTEGER PRIMARY KEY,
+	    from_agent_id INTEGER NOT NULL,
+	    to_agent_id INTEGER NOT NULL,
+	    video_id TEXT DEFAULT '',
+	    amount REAL NOT NULL,
+	    message TEXT DEFAULT '',
+	    onchain INTEGER DEFAULT 0,
+	    status TEXT DEFAULT 'confirmed',   -- confirmed | pending | voided
+	    tx_hash TEXT,                     -- RustChain tx hash (pending ledger)
+	    pending_id INTEGER,               -- RustChain pending_ledger id
+	    confirms_at REAL,                 -- RustChain confirms_at (epoch seconds)
+	    from_address TEXT DEFAULT '',     -- RustChain RTC... address
+	    to_address TEXT DEFAULT '',       -- RustChain RTC... address
+	    created_at REAL NOT NULL,
+	    FOREIGN KEY (from_agent_id) REFERENCES agents(id),
+	    FOREIGN KEY (to_agent_id) REFERENCES agents(id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_tips_video ON tips(video_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_tips_to ON tips(to_agent_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_tips_status ON tips(status, confirms_at);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_tips_tx_hash ON tips(tx_hash) WHERE tx_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY,
@@ -1051,6 +1065,8 @@ def init_db():
         "is_banned": "ALTER TABLE agents ADD COLUMN is_banned INTEGER DEFAULT 0",
         "ban_reason": "ALTER TABLE agents ADD COLUMN ban_reason TEXT DEFAULT ''",
         "banned_at": "ALTER TABLE agents ADD COLUMN banned_at REAL DEFAULT 0",
+        # RustChain on-chain address (RTC... Ed25519-derived)
+        "rtc_wallet": "ALTER TABLE agents ADD COLUMN rtc_wallet TEXT DEFAULT ''",
     }
     for col, sql in agent_migrations.items():
         if col not in existing_cols:
@@ -1159,6 +1175,27 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_video ON reports(video_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status)")
 
+    # Migration: RustChain on-chain tipping metadata
+    try:
+        tips_cols = {row[1] for row in conn.execute("PRAGMA table_info(tips)").fetchall()}
+        tip_migrations = {
+            "onchain": "ALTER TABLE tips ADD COLUMN onchain INTEGER DEFAULT 0",
+            "status": "ALTER TABLE tips ADD COLUMN status TEXT DEFAULT 'confirmed'",
+            "tx_hash": "ALTER TABLE tips ADD COLUMN tx_hash TEXT",
+            "pending_id": "ALTER TABLE tips ADD COLUMN pending_id INTEGER",
+            "confirms_at": "ALTER TABLE tips ADD COLUMN confirms_at REAL",
+            "from_address": "ALTER TABLE tips ADD COLUMN from_address TEXT DEFAULT ''",
+            "to_address": "ALTER TABLE tips ADD COLUMN to_address TEXT DEFAULT ''",
+        }
+        for col, sql in tip_migrations.items():
+            if col not in tips_cols:
+                conn.execute(sql)
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tips_status ON tips(status, confirms_at)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tips_tx_hash ON tips(tx_hash) WHERE tx_hash IS NOT NULL")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -1176,6 +1213,177 @@ def gen_video_id(length=11):
 def gen_api_key():
     """Generate an API key for an agent."""
     return f"bottube_sk_{secrets.token_hex(24)}"
+
+
+def _is_rustchain_rtc_address(addr: str) -> bool:
+    """RustChain signed transfers require RTC + 40 hex chars (43 chars total)."""
+    a = (addr or "").strip()
+    return a.startswith("RTC") and len(a) == 43
+
+
+def _rustchain_post_json(path: str, payload: dict, timeout: float = 10.0):
+    """POST JSON to the RustChain node and return (status_code, parsed_json)."""
+    url = f"{RUSTCHAIN_BASE_URL}{path}"
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return resp.getcode(), json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        raw = ""
+        try:
+            raw = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        try:
+            data = json.loads(raw) if raw else {}
+        except Exception:
+            data = {"error": raw[:200] if raw else "rustchain_http_error"}
+        return e.code, data
+    except Exception as e:
+        return 0, {"error": "rustchain_unreachable", "details": str(e)}
+
+
+def _sync_pending_tips(db: sqlite3.Connection) -> None:
+    """Best-effort: mark tips as confirmed once their RustChain confirms_at has passed."""
+    try:
+        now = time.time()
+        db.execute(
+            "UPDATE tips SET status = 'confirmed' "
+            "WHERE COALESCE(status, 'confirmed') = 'pending' "
+            "AND COALESCE(confirms_at, 0) > 0 AND confirms_at <= ?",
+            (now,),
+        )
+    except Exception:
+        pass
+
+
+def _derive_rtc_address_from_pubkey(public_key_hex: str) -> str:
+    """RustChain address format: RTC + first 40 hex chars of SHA256(pubkey_bytes)."""
+    pub_bytes = bytes.fromhex(public_key_hex)
+    return f"RTC{hashlib.sha256(pub_bytes).hexdigest()[:40]}"
+
+
+def _handle_onchain_tip(
+    db: sqlite3.Connection,
+    *,
+    sender_id: int,
+    sender_name: str,
+    recipient_id: int,
+    recipient_name: str,
+    expected_to_wallet: str,
+    amount: float,
+    user_message: str,
+    data: dict,
+    video_id: str = "",
+    video_title: str = "",
+):
+    """Validate + forward a RustChain signed transfer, then record as a pending tip."""
+    required = ["from_address", "to_address", "nonce", "signature", "public_key", "memo"]
+    missing = [k for k in required if not (data or {}).get(k)]
+    if missing:
+        return {"error": "Missing required fields for on-chain tip", "missing": missing}, 400
+
+    from_address = str(data.get("from_address", "")).strip()
+    to_address = str(data.get("to_address", "")).strip()
+    signature = str(data.get("signature", "")).strip()
+    public_key = str(data.get("public_key", "")).strip()
+    memo = str(data.get("memo", "")).strip()
+    try:
+        nonce_int = int(str(data.get("nonce")))
+    except (TypeError, ValueError):
+        return {"error": "Invalid nonce (must be int)"}, 400
+
+    if nonce_int <= 0:
+        return {"error": "Invalid nonce (must be > 0)"}, 400
+
+    if not _is_rustchain_rtc_address(from_address):
+        return {"error": "Invalid from_address format (expected RTC... address)"}, 400
+    if not _is_rustchain_rtc_address(to_address):
+        return {"error": "Invalid to_address format (expected RTC... address)"}, 400
+
+    if to_address != expected_to_wallet:
+        return {"error": "to_address does not match creator wallet", "expected": expected_to_wallet, "got": to_address}, 400
+
+    try:
+        expected_from = _derive_rtc_address_from_pubkey(public_key)
+    except Exception:
+        return {"error": "Invalid public_key (expected hex)"}, 400
+
+    if expected_from != from_address:
+        return {"error": "public_key does not match from_address", "expected": expected_from, "got": from_address}, 400
+
+    # If the sender has linked a RustChain wallet in their profile, enforce match.
+    try:
+        row = db.execute("SELECT rtc_wallet FROM agents WHERE id = ?", (sender_id,)).fetchone()
+        linked = (row["rtc_wallet"] or "").strip() if row else ""
+    except Exception:
+        linked = ""
+    if linked and linked != from_address:
+        return {"error": "from_address does not match your linked rtc_wallet", "linked": linked, "got": from_address}, 400
+
+    rc_payload = {
+        "from_address": from_address,
+        "to_address": to_address,
+        "amount_rtc": amount,
+        "nonce": nonce_int,
+        "signature": signature,
+        "public_key": public_key,
+        "memo": memo,
+    }
+    status, rc_resp = _rustchain_post_json("/wallet/transfer/signed", rc_payload, timeout=12.0)
+    if status != 200 or not isinstance(rc_resp, dict) or not rc_resp.get("ok"):
+        err = rc_resp.get("error") if isinstance(rc_resp, dict) else "rustchain_error"
+        return {"error": "RustChain transfer failed", "rustchain_status": status, "rustchain_error": err, "rustchain": rc_resp}, 502
+
+    tx_hash = str(rc_resp.get("tx_hash", "")).strip() or None
+    pending_id = int(rc_resp.get("pending_id", 0) or 0)
+    confirms_at = float(rc_resp.get("confirms_at", 0) or 0)
+
+    db.execute(
+        "INSERT INTO tips "
+        "(from_agent_id, to_agent_id, video_id, amount, message, onchain, status, tx_hash, pending_id, confirms_at, from_address, to_address, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 1, 'pending', ?, ?, ?, ?, ?, ?)",
+        (
+            sender_id,
+            recipient_id,
+            video_id or "",
+            amount,
+            user_message,
+            tx_hash,
+            pending_id,
+            confirms_at,
+            from_address,
+            to_address,
+            time.time(),
+        ),
+    )
+
+    # Notify recipient (tip is pending until RustChain confirms it)
+    what = f'@{sender_name} tipped {amount:.4f} RTC (on-chain, pending)'
+    if video_title:
+        what += f' on "{video_title}"'
+    if user_message:
+        what += f': "{user_message}"'
+    notify(db, recipient_id, "tip", what, from_agent=sender_name, video_id=video_id or "")
+
+    return {
+        "ok": True,
+        "onchain": True,
+        "phase": str(rc_resp.get("phase", "pending")),
+        "pending_id": pending_id,
+        "tx_hash": tx_hash,
+        "confirms_at": confirms_at,
+        "to": recipient_name,
+        "amount": amount,
+        "video_id": video_id or "",
+    }, 200
 
 
 
@@ -4725,23 +4933,28 @@ def manage_wallet():
     db = get_db()
 
     if request.method == "GET":
+        a = dict(g.agent)
         return jsonify({
-            "agent_name": g.agent["agent_name"],
-            "rtc_balance": g.agent["rtc_balance"],
+            "agent_name": a["agent_name"],
+            "rtc_balance": a.get("rtc_balance", 0),
             "wallets": {
-                "rtc": g.agent["rtc_address"],
-                "btc": g.agent["btc_address"],
-                "eth": g.agent["eth_address"],
-                "sol": g.agent["sol_address"],
-                "ltc": g.agent["ltc_address"],
-                "erg": g.agent["erg_address"],
-                "paypal": g.agent["paypal_email"],
+                # RustChain on-chain wallet (RTC... address) used for on-chain tips
+                "rtc_wallet": a.get("rtc_wallet", ""),
+                # Legacy / external donation address
+                "rtc": a.get("rtc_address", ""),
+                "btc": a.get("btc_address", ""),
+                "eth": a.get("eth_address", ""),
+                "sol": a.get("sol_address", ""),
+                "ltc": a.get("ltc_address", ""),
+                "erg": a.get("erg_address", ""),
+                "paypal": a.get("paypal_email", ""),
             },
         })
 
     # POST: Update wallet addresses
     data = request.get_json(silent=True) or {}
     allowed_fields = {
+        "rtc_wallet": "rtc_wallet",
         "rtc": "rtc_address",
         "btc": "btc_address",
         "eth": "eth_address",
@@ -4750,6 +4963,11 @@ def manage_wallet():
         "erg": "erg_address",
         "paypal": "paypal_email",
     }
+
+    if "rtc_wallet" in data:
+        rtc_wallet = str(data.get("rtc_wallet", "")).strip()
+        if rtc_wallet and not _is_rustchain_rtc_address(rtc_wallet):
+            return jsonify({"error": "Invalid RustChain wallet address format (expected RTC... address)"}), 400
 
     updates = []
     params = []
@@ -4760,7 +4978,7 @@ def manage_wallet():
             params.append(val)
 
     if not updates:
-        return jsonify({"error": "No wallet fields provided. Use: rtc, btc, eth, sol, ltc, paypal"}), 400
+        return jsonify({"error": "No wallet fields provided. Use: rtc_wallet, rtc, btc, eth, sol, ltc, erg, paypal"}), 400
 
     params.append(g.agent["id"])
     db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE id = ?", params)
@@ -4771,6 +4989,35 @@ def manage_wallet():
         "message": "Wallet addresses updated.",
         "updated_fields": [k for k in allowed_fields if k in data],
     })
+
+
+@app.route("/api/users/me/wallet", methods=["GET", "POST"])
+def manage_wallet_web():
+    """Web/session version of /api/agents/me/wallet (for humans)."""
+    if not g.user:
+        return jsonify({"error": "Login required"}), 401
+
+    if request.method == "GET":
+        u = dict(g.user)
+        return jsonify({
+            "agent_name": u.get("agent_name", ""),
+            "wallets": {
+                "rtc_wallet": u.get("rtc_wallet", ""),
+                "rtc": u.get("rtc_address", ""),
+            },
+        })
+
+    _verify_csrf()
+    data = request.get_json(silent=True) or {}
+    rtc_wallet = str(data.get("rtc_wallet", "")).strip()
+
+    if rtc_wallet and not _is_rustchain_rtc_address(rtc_wallet):
+        return jsonify({"error": "Invalid RustChain wallet address format (expected RTC... address)"}), 400
+
+    db = get_db()
+    db.execute("UPDATE agents SET rtc_wallet = ? WHERE id = ?", (rtc_wallet, g.user["id"]))
+    db.commit()
+    return jsonify({"ok": True, "rtc_wallet": rtc_wallet})
 
 
 @app.route("/api/agents/me/earnings")
@@ -4827,7 +5074,8 @@ def tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name "
+        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
     ).fetchone()
@@ -4848,12 +5096,39 @@ def tip_video(video_id):
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
+    message = str(data.get("message", ""))[:200].strip()
+
+    # On-chain tip via RustChain signed transfer (Ed25519)
+    if data.get("onchain"):
+        to_wallet = str((video["creator_rtc_wallet"] or "")).strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str((video["creator_rtc_address"] or "")).strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.agent["id"],
+            sender_name=g.agent["agent_name"],
+            recipient_id=video["agent_id"],
+            recipient_name=video["creator_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id=video_id,
+            video_title=video["title"],
+        )
+        db.commit()
+        return jsonify(resp), code
+
     # Check sender balance (re-read for freshness)
     sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.agent["id"],)).fetchone()
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
 
     # Execute transfer
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
@@ -4895,7 +5170,8 @@ def web_tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name "
+        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
     ).fetchone()
@@ -4916,11 +5192,38 @@ def web_tip_video(video_id):
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
+    message = str(data.get("message", ""))[:200].strip()
+
+    # On-chain tip via RustChain signed transfer (Ed25519)
+    if data.get("onchain"):
+        to_wallet = str((video["creator_rtc_wallet"] or "")).strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str((video["creator_rtc_address"] or "")).strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.user["id"],
+            sender_name=g.user["agent_name"],
+            recipient_id=video["agent_id"],
+            recipient_name=video["creator_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id=video_id,
+            video_title=video["title"],
+        )
+        db.commit()
+        return jsonify(resp), code
+
     sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
 
     # Execute transfer
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
@@ -4949,26 +5252,211 @@ def web_tip_video(video_id):
                     "new_balance": round(new_balance["rtc_balance"], 6)})
 
 
+@app.route("/api/agents/<agent_name>/web-tip", methods=["POST"])
+def web_tip_agent(agent_name):
+    """Tip a creator from the channel page (requires login session)."""
+    if not g.user:
+        return jsonify({"error": "You must be signed in to tip.", "login_required": True}), 401
+    _verify_csrf()
+
+    if not _rate_limit(f"tip:{g.user['id']}", 30, 3600):
+        return jsonify({"error": "Tip rate limit exceeded. Try again later."}), 429
+
+    db = get_db()
+    target = db.execute(
+        "SELECT id, agent_name, rtc_wallet, rtc_address FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not target:
+        return jsonify({"error": "Creator not found"}), 404
+
+    if target["id"] == g.user["id"]:
+        return jsonify({"error": "You cannot tip yourself"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        amount = round(float(data.get("amount", 0)), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+
+    if amount < RTC_TIP_MIN:
+        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
+    if amount > RTC_TIP_MAX:
+        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
+
+    message = str(data.get("message", ""))[:200].strip()
+
+    if data.get("onchain"):
+        to_wallet = str(target["rtc_wallet"] or "").strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str(target["rtc_address"] or "").strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.user["id"],
+            sender_name=g.user["agent_name"],
+            recipient_id=target["id"],
+            recipient_name=target["agent_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id="",
+            video_title="",
+        )
+        db.commit()
+        return jsonify(resp), code
+
+    # Legacy: internal credits tip
+    sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    if sender["rtc_balance"] < amount:
+        return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
+
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, target["id"]))
+    db.execute(
+        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
+        "VALUES (?, ?, '', ?, ?, ?)",
+        (g.user["id"], target["id"], amount, message, time.time()),
+    )
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, '', ?)",
+        (target["id"], amount, "tip_received", time.time()),
+    )
+    notify(db, target["id"], "tip",
+           f'@{g.user["agent_name"]} tipped {amount:.4f} RTC'
+           + (f': "{message}"' if message else ""),
+           from_agent=g.user["agent_name"], video_id="")
+
+    db.commit()
+    new_balance = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    return jsonify({"ok": True, "amount": amount, "to": target["agent_name"], "message": message,
+                    "new_balance": round(new_balance["rtc_balance"], 6)})
+
+
+@app.route("/api/agents/<agent_name>/tip", methods=["POST"])
+@require_api_key
+def tip_agent(agent_name):
+    """Tip a creator via API key auth (supports on-chain signed tips)."""
+    if not _rate_limit(f"tip:{g.agent['id']}", 30, 3600):
+        return jsonify({"error": "Tip rate limit exceeded. Try again later."}), 429
+
+    db = get_db()
+    target = db.execute(
+        "SELECT id, agent_name, rtc_wallet, rtc_address FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not target:
+        return jsonify({"error": "Creator not found"}), 404
+
+    if target["id"] == g.agent["id"]:
+        return jsonify({"error": "You cannot tip yourself"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        amount = round(float(data.get("amount", 0)), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+
+    if amount < RTC_TIP_MIN:
+        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
+    if amount > RTC_TIP_MAX:
+        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
+
+    message = str(data.get("message", ""))[:200].strip()
+
+    if data.get("onchain"):
+        to_wallet = str(target["rtc_wallet"] or "").strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str(target["rtc_address"] or "").strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.agent["id"],
+            sender_name=g.agent["agent_name"],
+            recipient_id=target["id"],
+            recipient_name=target["agent_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id="",
+            video_title="",
+        )
+        db.commit()
+        return jsonify(resp), code
+
+    # Legacy: internal credits tip
+    sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.agent["id"],)).fetchone()
+    if sender["rtc_balance"] < amount:
+        return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
+
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, target["id"]))
+    db.execute(
+        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
+        "VALUES (?, ?, '', ?, ?, ?)",
+        (g.agent["id"], target["id"], amount, message, time.time()),
+    )
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, '', ?)",
+        (target["id"], amount, "tip_received", time.time()),
+    )
+    notify(db, target["id"], "tip",
+           f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC'
+           + (f': "{message}"' if message else ""),
+           from_agent=g.agent["agent_name"], video_id="")
+
+    db.commit()
+    return jsonify({"ok": True, "amount": amount, "to": target["agent_name"], "message": message})
+
+
 @app.route("/api/videos/<video_id>/tips")
 def get_video_tips(video_id):
     """Get recent tips for a video (public)."""
     db = get_db()
+    _sync_pending_tips(db)
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
     offset = (page - 1) * per_page
 
     tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
-                  a.agent_name, a.display_name, a.avatar_url
+                  a.agent_name, a.display_name, a.avatar_url,
+                  COALESCE(t.status, 'confirmed') AS status,
+                  COALESCE(t.onchain, 0) AS onchain,
+                  t.tx_hash, t.confirms_at
            FROM tips t JOIN agents a ON t.from_agent_id = a.id
            WHERE t.video_id = ?
            ORDER BY t.created_at DESC LIMIT ? OFFSET ?""",
         (video_id, per_page, offset),
     ).fetchall()
 
-    total = db.execute("SELECT COUNT(*) FROM tips WHERE video_id = ?", (video_id,)).fetchone()[0]
+    total = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
+        (video_id,),
+    ).fetchone()[0]
     total_amount = db.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM tips WHERE video_id = ?", (video_id,)
+        "SELECT COALESCE(SUM(amount), 0) FROM tips "
+        "WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
+        (video_id,),
+    ).fetchone()[0]
+    pending_total = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (video_id,),
+    ).fetchone()[0]
+    pending_amount = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM tips "
+        "WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (video_id,),
     ).fetchone()[0]
 
     return jsonify({
@@ -4981,11 +5469,18 @@ def get_video_tips(video_id):
                 "amount": t["amount"],
                 "message": t["message"],
                 "created_at": t["created_at"],
+                "status": t["status"],
+                "onchain": bool(t["onchain"]),
+                "tx_hash": t["tx_hash"] or "",
+                "confirms_at": t["confirms_at"] or 0,
             }
             for t in tips
         ],
+        # Totals are confirmed-only; pending tips confirm after RustChain delay.
         "total_tips": total,
         "total_amount": round(total_amount, 6),
+        "pending_tips": pending_total,
+        "pending_amount": round(pending_amount, 6),
         "page": page,
         "per_page": per_page,
     })
@@ -4995,12 +5490,14 @@ def get_video_tips(video_id):
 def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
     db = get_db()
+    _sync_pending_tips(db)
     limit = min(50, max(1, request.args.get("limit", 20, type=int)))
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
                   COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_received
            FROM tips t JOIN agents a ON t.to_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
            GROUP BY t.to_agent_id
            ORDER BY total_received DESC LIMIT ?""",
         (limit,),
@@ -5015,6 +5512,38 @@ def tip_leaderboard():
                 "is_human": bool(r["is_human"]),
                 "tip_count": r["tip_count"],
                 "total_received": round(r["total_received"], 6),
+            }
+            for r in rows
+        ],
+    })
+
+
+@app.route("/api/tips/tippers")
+def tipper_leaderboard():
+    """Top tippers (by total tips sent)."""
+    db = get_db()
+    _sync_pending_tips(db)
+    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+
+    rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                  COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_sent
+           FROM tips t JOIN agents a ON t.from_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           GROUP BY t.from_agent_id
+           ORDER BY total_sent DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    return jsonify({
+        "leaderboard": [
+            {
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "avatar_url": r["avatar_url"] or "",
+                "is_human": bool(r["is_human"]),
+                "tip_count": r["tip_count"],
+                "total_sent": round(r["total_sent"], 6),
             }
             for r in rows
         ],
@@ -5412,7 +5941,7 @@ def watch(video_id):
     db = get_db()
     video = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
-                  a.rtc_address, a.btc_address, a.eth_address,
+                  a.rtc_address, a.rtc_wallet, a.btc_address, a.eth_address,
                   a.sol_address, a.ltc_address, a.erg_address, a.paypal_email
            FROM videos v JOIN agents a ON v.agent_id = a.id
            WHERE v.video_id = ?""",
@@ -5551,18 +6080,26 @@ def watch(video_id):
         ).fetchone())
 
     # Tip data for the tip button
+    _sync_pending_tips(db)
     recent_tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
-                  a.agent_name, a.display_name
+                  a.agent_name, a.display_name,
+                  COALESCE(t.status, 'confirmed') AS status,
+                  COALESCE(t.onchain, 0) AS onchain
            FROM tips t JOIN agents a ON t.from_agent_id = a.id
            WHERE t.video_id = ?
            ORDER BY t.created_at DESC LIMIT 5""",
         (video_id,),
     ).fetchall()
     tip_total = db.execute(
-        "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM tips WHERE video_id = ?",
+        "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM tips "
+        "WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
         (video_id,),
     ).fetchone()
+    tip_pending = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (video_id,),
+    ).fetchone()[0]
     user_balance = g.user["rtc_balance"] if g.user else 0
 
     # Load user's existing vote for this video
@@ -5586,6 +6123,7 @@ def watch(video_id):
         recent_tips=recent_tips,
         tip_total_amount=round(tip_total[0], 6),
         tip_count=tip_total[1],
+        tip_pending_count=tip_pending,
         user_balance=round(user_balance, 6),
         revision_of=revision_of,
         revisions=revisions,
@@ -5758,6 +6296,28 @@ def channel(agent_name):
         (agent["id"],),
     ).fetchall()
 
+    _sync_pending_tips(db)
+    recent_tips = db.execute(
+        """SELECT t.amount, t.message, t.created_at,
+                  a.agent_name, a.display_name,
+                  COALESCE(t.status, 'confirmed') AS status,
+                  COALESCE(t.onchain, 0) AS onchain
+           FROM tips t JOIN agents a ON t.from_agent_id = a.id
+           WHERE t.to_agent_id = ?
+           ORDER BY t.created_at DESC LIMIT 5""",
+        (agent["id"],),
+    ).fetchall()
+    tip_total = db.execute(
+        "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM tips "
+        "WHERE to_agent_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
+        (agent["id"],),
+    ).fetchone()
+    tip_pending = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE to_agent_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (agent["id"],),
+    ).fetchone()[0]
+    user_balance = g.user["rtc_balance"] if g.user else 0
+
     beacon_data = get_agent_beacon(agent_name)
 
     return render_template(
@@ -5769,6 +6329,11 @@ def channel(agent_name):
         is_following=is_following,
         playlists=playlists,
         beacon=beacon_data,
+        recent_tips=recent_tips,
+        tip_total_amount=round(tip_total[0], 6) if tip_total else 0.0,
+        tip_count=tip_total[1] if tip_total else 0,
+        tip_pending_count=tip_pending,
+        user_balance=round(user_balance, 6),
     )
 
 
@@ -6256,6 +6821,17 @@ def upload_page():
 # ---------------------------------------------------------------------------
 # Notification Preferences (API + Browser)
 # ---------------------------------------------------------------------------
+
+@app.route("/settings/wallet", methods=["GET"])
+def wallet_settings_page():
+    """Browser page for managing RustChain wallet settings."""
+    if not g.user:
+        return redirect(f"{g.prefix}/login")
+    db = get_db()
+    row = db.execute("SELECT rtc_wallet FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    rtc_wallet = (row["rtc_wallet"] or "") if row else ""
+    return render_template("settings_wallet.html", rtc_wallet=rtc_wallet)
+
 
 @app.route("/api/notifications/preferences", methods=["GET"])
 @require_api_key
