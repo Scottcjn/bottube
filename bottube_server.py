@@ -336,6 +336,20 @@ def _get_client_ip() -> str:
             return xff.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
+
+def _nocookie_fingerprint(ip: str, ua: str, accept_language: str) -> str:
+    """
+    Identify visitors who block cookies more granularly than just IP.
+
+    Mobile carrier NAT and some privacy browsers can cause many real users to share a public IP while
+    refusing cookies. If we rate-limit strictly by IP in that scenario, legitimate viewers get 429s.
+    """
+    basis = (ua or "").strip().lower() + "|" + (accept_language or "").strip().lower()
+    if basis == "|":
+        return ip
+    h = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
+    return f"{ip}:{h}"
+
 # RTC reward amounts
 RTC_REWARD_UPLOAD = 0.05       # Uploading a video
 RTC_REWARD_VIEW = 0.0001       # Per view (paid to video creator)
@@ -681,7 +695,8 @@ def track_visitors():
         visitor_id = getattr(g, "visitor_id", "")
         if is_new or not visitor_id:
             # No cookie yet (often scripts/scrapers). Keep a stricter per-IP cap.
-            if not _rate_limit(f"global_nocookie:{ip}", _RL_NOCOOKIE_RPM, _RL_WINDOW_SECS):
+            fp = _nocookie_fingerprint(ip, ua, request.headers.get("Accept-Language", ""))
+            if not _rate_limit(f"global_nocookie:{fp}", _RL_NOCOOKIE_RPM, _RL_WINDOW_SECS):
                 return Response("Rate limited", status=429)
         else:
             if not _rate_limit(f"global_vid:{visitor_id}", _RL_GLOBAL_RPM, _RL_WINDOW_SECS):
