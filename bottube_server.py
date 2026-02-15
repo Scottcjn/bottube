@@ -341,6 +341,90 @@ def _get_client_ip() -> str:
     return request.remote_addr or "unknown"
 
 
+def _normalize_ref_code(raw: str) -> str:
+    """Normalize and validate referral codes. Returns '' if invalid."""
+    code = (raw or "").strip()
+    if not code:
+        return ""
+    code = code.lower()
+    if not re.fullmatch(r"[a-z0-9_-]{2,32}", code):
+        return ""
+    return code
+
+
+def _referral_touch_hit(db, code: str):
+    """Increment referral hit counters (best-effort)."""
+    if not code:
+        return
+    try:
+        now = time.time()
+        db.execute(
+            "UPDATE referral_codes SET hits = hits + 1, last_hit_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        # Do not break request flow on referral tracking failures.
+        pass
+
+
+def _referral_apply_signup(db, new_agent_id: int, code: str):
+    """Attach referral to new agent and increment referral signup counters (best-effort)."""
+    if not code:
+        return
+    try:
+        ref = db.execute(
+            "SELECT agent_id FROM referral_codes WHERE code = ?",
+            (code,),
+        ).fetchone()
+        if not ref:
+            return
+        if int(ref["agent_id"]) == int(new_agent_id):
+            return  # no self-referrals
+        now = time.time()
+        db.execute(
+            "UPDATE agents SET referred_by_code = ?, referred_at = ? WHERE id = ? AND COALESCE(referred_by_code, '') = ''",
+            (code, now, new_agent_id),
+        )
+        # Count signup once even if client retries.
+        db.execute(
+            "UPDATE referral_codes SET signups = signups + 1, last_signup_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+def _referral_mark_first_upload(db, agent_id: int):
+    """If agent was referred, count their first upload exactly once (best-effort)."""
+    try:
+        row = db.execute(
+            "SELECT referred_by_code, referral_first_upload_counted FROM agents WHERE id = ?",
+            (agent_id,),
+        ).fetchone()
+        if not row:
+            return
+        code = _normalize_ref_code(row["referred_by_code"] or "")
+        if not code:
+            return
+        if int(row["referral_first_upload_counted"] or 0) != 0:
+            return
+        now = time.time()
+        db.execute(
+            "UPDATE agents SET referral_first_upload_counted = 1 WHERE id = ?",
+            (agent_id,),
+        )
+        db.execute(
+            "UPDATE referral_codes SET first_uploads = first_uploads + 1, last_first_upload_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+
 def _nocookie_fingerprint(ip: str, ua: str, accept_language: str) -> str:
     """
     Identify visitors who block cookies more granularly than just IP.
@@ -1067,10 +1151,33 @@ def init_db():
         "banned_at": "ALTER TABLE agents ADD COLUMN banned_at REAL DEFAULT 0",
         # RustChain on-chain address (RTC... Ed25519-derived)
         "rtc_wallet": "ALTER TABLE agents ADD COLUMN rtc_wallet TEXT DEFAULT ''",
+        # Referrals (best-effort growth tracking)
+        "referred_by_code": "ALTER TABLE agents ADD COLUMN referred_by_code TEXT DEFAULT ''",
+        "referred_at": "ALTER TABLE agents ADD COLUMN referred_at REAL DEFAULT 0",
+        "referral_first_upload_counted": "ALTER TABLE agents ADD COLUMN referral_first_upload_counted INTEGER DEFAULT 0",
     }
     for col, sql in agent_migrations.items():
         if col not in existing_cols:
             conn.execute(sql)
+
+    # Referral program table
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS referral_codes (
+            code TEXT PRIMARY KEY,
+            agent_id INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            hits INTEGER DEFAULT 0,
+            signups INTEGER DEFAULT 0,
+            first_uploads INTEGER DEFAULT 0,
+            last_hit_at REAL DEFAULT 0,
+            last_signup_at REAL DEFAULT 0,
+            last_first_upload_at REAL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_referral_codes_agent ON referral_codes(agent_id)")
 
     # Migration: Google OAuth columns on agents
     google_migrations = {
@@ -2090,6 +2197,9 @@ def register_agent():
 
     data = request.get_json(silent=True) or {}
     agent_name = data.get("agent_name", "").strip().lower()
+    ref_code = _normalize_ref_code(
+        data.get("ref_code", "") or data.get("ref", "") or request.args.get("ref", "")
+    )
 
     if not agent_name:
         return jsonify({"error": "agent_name is required"}), 400
@@ -2115,7 +2225,7 @@ def register_agent():
 
     db = get_db()
     try:
-        db.execute(
+        cur = db.execute(
             """INSERT INTO agents
                (agent_name, display_name, api_key, bio, avatar_url, x_handle,
                 claim_token, claimed, is_human, detected_type, created_at, last_active)
@@ -2123,6 +2233,9 @@ def register_agent():
             (agent_name, display_name, api_key, bio, avatar_url, x_handle,
              claim_token, time.time(), time.time()),
         )
+        new_agent_id = int(cur.lastrowid)
+        if ref_code:
+            _referral_apply_signup(db, new_agent_id, ref_code)
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": f"Agent '{agent_name}' already exists"}), 409
@@ -2249,6 +2362,9 @@ def login():
 def signup():
     """Signup page for human users."""
     if request.method == "GET":
+        ref_code = _normalize_ref_code(request.args.get("ref", ""))
+        if ref_code:
+            session["ref_code"] = ref_code
         return render_template("login.html", signup=True, form_ts=time.time())
 
     _verify_csrf()
@@ -2310,7 +2426,7 @@ def signup():
 
     db = get_db()
     try:
-        db.execute(
+        cur = db.execute(
             """INSERT INTO agents
                (agent_name, display_name, api_key, password_hash, is_human, detected_type,
                 bio, avatar_url, claim_token, claimed,
@@ -2324,6 +2440,10 @@ def signup():
              email, email_token, now if email else 0,
              now, now),
         )
+        new_user_id = int(cur.lastrowid)
+        ref_code = _normalize_ref_code(session.pop("ref_code", ""))
+        if ref_code:
+            _referral_apply_signup(db, new_user_id, ref_code)
         db.commit()
     except sqlite3.IntegrityError:
         flash(f"Username '{username}' is already taken.", "error")
@@ -2353,6 +2473,75 @@ def logout():
             return redirect(url_for("index"))
     session.pop("user_id", None)
     return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# Referrals
+# ---------------------------------------------------------------------------
+
+@app.route("/r/<code>", methods=["GET"])
+def referral_redirect(code):
+    """Referral short-link: /r/<code> -> /signup?ref=<code> (records hit)."""
+    ref_code = _normalize_ref_code(code)
+    if not ref_code:
+        return redirect(url_for("index"))
+    db = get_db()
+    _referral_touch_hit(db, ref_code)
+    return redirect(url_for("signup", ref=ref_code))
+
+
+@app.route("/api/agents/me/referral", methods=["GET", "POST"])
+@require_api_key
+def referral_me_agent():
+    """Create/get referral code for the authenticated agent (API key)."""
+    db = get_db()
+    agent_id = int(g.agent["id"])
+    # Prefer an existing code for this agent.
+    row = db.execute(
+        "SELECT code, hits, signups, first_uploads, created_at FROM referral_codes WHERE agent_id = ? ORDER BY created_at ASC LIMIT 1",
+        (agent_id,),
+    ).fetchone()
+    if row:
+        code = row["code"]
+    else:
+        # Default code: agent name (validated) or random token.
+        base = _normalize_ref_code(g.agent["agent_name"])
+        code = base or (secrets.token_hex(4))
+        # Ensure uniqueness.
+        while db.execute("SELECT 1 FROM referral_codes WHERE code = ?", (code,)).fetchone():
+            code = secrets.token_hex(4)
+        db.execute(
+            "INSERT INTO referral_codes (code, agent_id, created_at) VALUES (?, ?, ?)",
+            (code, agent_id, time.time()),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT code, hits, signups, first_uploads, created_at FROM referral_codes WHERE code = ?",
+            (code,),
+        ).fetchone()
+
+    return jsonify({
+        "ok": True,
+        "code": row["code"],
+        "ref_url": f"https://bottube.ai/r/{row['code']}",
+        "signup_url": f"https://bottube.ai/signup?ref={row['code']}",
+        "stats": {
+            "hits": int(row["hits"] or 0),
+            "signups": int(row["signups"] or 0),
+            "first_uploads": int(row["first_uploads"] or 0),
+            "created_at": row["created_at"],
+        },
+    })
+
+
+@app.route("/api/users/me/referral", methods=["GET", "POST"])
+def referral_me_user():
+    """Web/session version of referral endpoint (for humans)."""
+    if not g.user:
+        return jsonify({"error": "Not logged in"}), 401
+    # Reuse same logic as agent endpoint by binding g.agent temporarily.
+    g.agent = g.user
+    return referral_me_agent()
 
 
 @app.route("/verify-email/<token>")
@@ -2800,6 +2989,9 @@ def upload_video():
     # Award RTC for upload
     award_rtc(db, g.agent["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     db.commit()
+
+    # Referral program: count the referred agent's first upload.
+    _referral_mark_first_upload(db, g.agent["id"])
 
     response_data = {
         "ok": True,
@@ -9402,3 +9594,87 @@ if __name__ == "__main__":
     print(f"[BoTTube] DB: {DB_PATH}")
     print(f"[BoTTube] Videos: {VIDEO_DIR}")
     app.run(host="0.0.0.0", port=8097, debug=False)
+
+@app.route("/tips/dashboard")
+def tips_dashboard():
+    db = get_db()
+    _sync_pending_tips(db)
+
+    leaderboard_rows = db.execute(
+        """SELECT a.agent_name, a.display_name, COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_received
+           FROM tips t
+           JOIN agents a ON t.to_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           GROUP BY t.to_agent_id
+           ORDER BY total_received DESC
+           LIMIT 10""",
+    ).fetchall()
+
+    tipper_rows = db.execute(
+        """SELECT a.agent_name, a.display_name, COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_sent
+           FROM tips t
+           JOIN agents a ON t.from_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           GROUP BY t.from_agent_id
+           ORDER BY total_sent DESC
+           LIMIT 10""",
+    ).fetchall()
+
+    totals = db.execute(
+        """
+        SELECT
+          COALESCE(SUM(CASE WHEN COALESCE(status, 'confirmed') = 'confirmed' THEN amount END), 0) AS confirmed_total,
+          COALESCE(SUM(CASE WHEN COALESCE(status, 'confirmed') = 'pending' THEN amount END), 0) AS pending_total,
+          COUNT(CASE WHEN COALESCE(status, 'confirmed') = 'pending' THEN 1 END) AS pending_count,
+          COUNT(*) AS tip_count
+        FROM tips
+        """
+    ).fetchone()
+
+    recent_tips = db.execute(
+        """SELECT t.amount, t.message, t.created_at, fa.agent_name AS from_agent,
+                  ta.agent_name AS to_agent
+           FROM tips t
+           LEFT JOIN agents fa ON t.from_agent_id = fa.id
+           LEFT JOIN agents ta ON t.to_agent_id = ta.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           ORDER BY t.created_at DESC LIMIT 6""",
+    ).fetchall()
+
+    return render_template(
+        "tips_dashboard.html",
+        leaderboard=[
+            {
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"] or row["agent_name"],
+                "tip_count": row["tip_count"],
+                "total_received": round(row["total_received"], 6),
+            }
+            for row in leaderboard_rows
+        ],
+        tippers=[
+            {
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"] or row["agent_name"],
+                "tip_count": row["tip_count"],
+                "total_sent": round(row["total_sent"], 6),
+            }
+            for row in tipper_rows
+        ],
+        totals={
+            "confirmed_total": round(totals["confirmed_total"], 6),
+            "pending_total": round(totals["pending_total"], 6),
+            "pending_count": totals["pending_count"],
+            "tip_count": totals["tip_count"],
+        },
+        recent=[
+            {
+                "amount": round(row["amount"], 6),
+                "message": row["message"] or "",
+                "created_at": datetime.fromtimestamp(row["created_at"], timezone.utc).isoformat() if row["created_at"] else "",
+                "from_agent": row["from_agent"] or "anonymous",
+                "to_agent": row["to_agent"] or "unknown",
+            }
+            for row in recent_tips
+        ],
+    )
