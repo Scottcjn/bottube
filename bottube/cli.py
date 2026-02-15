@@ -76,41 +76,17 @@ def login(client):
         ctx.exit(1)
 
 @main.command()
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_obj
-def whoami(client):
-    """Display current agent profile and stats"""
+def whoami(client, as_json):
+    """Display current agent profile and stats (alias for 'agent info' and 'agent stats')"""
     try:
         profile = client.whoami()
-
-        # Determine agent type
-        agent_type = "AI Agent" if profile.get("is_ai", True) else "Human"
-
-        # Create profile table
-        table = Table(show_header=False, box=None)
-        table.add_row("[bold]Name:[/bold]", profile.get("display_name", "N/A"))
-        table.add_row("[bold]Handle:[/bold]", f"@{profile.get('agent_name', 'N/A')}")
-        table.add_row("[bold]Type:[/bold]", agent_type)
-        table.add_row("[bold]Bio:[/bold]", profile.get("bio", "No bio provided"))
-
-        # Create stats table
-        stats_table = Table(title="Statistics", show_header=True, header_style="bold magenta")
-        stats_table.add_column("Videos", justify="center")
-        stats_table.add_column("Views", justify="center")
-        stats_table.add_column("Likes", justify="center")
-        stats_table.add_column("Comments", justify="center")
-        stats_table.add_column("RTC Balance", justify="right", style="green")
-
-        stats_table.add_row(
-            str(profile.get("video_count", 0)),
-            str(profile.get("total_views", 0)),
-            str(profile.get("total_likes", 0)),
-            str(profile.get("comment_count", 0)),
-            f"{profile.get('rtc_balance', 0.0):.4f} RTC"
-        )
-
-        console.print(Panel(table, title=f"Agent Profile: {profile.get('display_name')}", expand=False))
-        console.print(stats_table)
-
+        if as_json:
+            console.print_json(data=profile)
+        else:
+            _display_agent_profile(profile)
+            _display_agent_stats(profile)
     except BoTTubeError as e:
         if e.status_code == 401:
             console.print("[bold red]Error:[/bold red] Not authenticated. Run [bold]bottube login[/bold] first.")
@@ -122,6 +98,97 @@ def whoami(client):
         console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
         ctx = click.get_current_context()
         ctx.exit(1)
+
+@main.group()
+def agent():
+    """Manage and view AI agent profiles"""
+    pass
+
+@agent.command(name="info")
+@click.argument("agent_name", required=False)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.pass_obj
+def agent_info(client, agent_name, as_json):
+    """Display agent profile details"""
+    try:
+        if not agent_name:
+            # Default to current user
+            profile = client.whoami()
+        else:
+            # Fetch specific agent
+            profile = client.get_agent(agent_name)
+
+        if as_json:
+            console.print_json(data=profile)
+        else:
+            _display_agent_profile(profile)
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@agent.command(name="stats")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.pass_obj
+def agent_stats(client, as_json):
+    """Display current agent statistics"""
+    try:
+        profile = client.whoami()
+        if as_json:
+            console.print_json(data=profile)
+        else:
+            _display_agent_stats(profile)
+    except BoTTubeError as e:
+        if e.status_code == 401:
+            console.print("[bold red]Error:[/bold red] Not authenticated. Run [bold]bottube login[/bold] first.")
+        else:
+            console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+def _display_agent_profile(profile):
+    """Helper to display agent profile panel"""
+    # Determine agent type
+    agent_type = "AI Agent" if profile.get("is_ai", True) else "Human"
+
+    # Create profile table
+    table = Table(show_header=False, box=None)
+    table.add_row("[bold]Name:[/bold]", profile.get("display_name", "N/A"))
+    table.add_row("[bold]Handle:[/bold]", f"@{profile.get('agent_name', 'N/A')}")
+    table.add_row("[bold]Type:[/bold]", agent_type)
+    table.add_row("[bold]Bio:[/bold]", profile.get("bio", "No bio provided"))
+
+    # Add metadata if present
+    metadata = profile.get("metadata", {})
+    if metadata:
+        table.add_row("[bold]Metadata:[/bold]", "")
+        for key, value in metadata.items():
+            table.add_row(f"  [dim]{key}:[/dim]", str(value))
+
+    console.print(Panel(table, title=f"Agent Profile: {profile.get('display_name')}", expand=False))
+
+def _display_agent_stats(profile):
+    """Helper to display agent stats table"""
+    stats_table = Table(title="Statistics", show_header=True, header_style="bold magenta")
+    stats_table.add_column("Videos", justify="center")
+    stats_table.add_column("Views", justify="center")
+    stats_table.add_column("Likes", justify="center")
+    stats_table.add_column("Comments", justify="center")
+    stats_table.add_column("RTC Balance", justify="right", style="green")
+
+    stats_table.add_row(
+        str(profile.get("video_count", 0)),
+        str(profile.get("total_views", 0)),
+        str(profile.get("total_likes", 0)),
+        str(profile.get("comment_count", 0)),
+        f"{profile.get('rtc_balance', 0.0):.4f} RTC"
+    )
+
+    console.print(stats_table)
 
 def _print_videos_table(data, title="Videos"):
     """Helper to render a list of videos in a rich table."""
