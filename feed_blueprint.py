@@ -49,14 +49,14 @@ def rss_feed():
         watch_url = f"https://bottube.ai/watch/{vid_id}"
         
         # Convert simple timestamp if present
-        pub_date = datetime.datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT")
+        pub_date = (datetime.datetime.fromisoformat(vid.get("created_at").replace("Z", "+00:00")) if vid.get("created_at") else datetime.datetime.now()).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
         rss.append('  <item>')
         rss.append(f'    <title>{title}</title>')
         rss.append(f'    <link>{watch_url}</link>')
         rss.append(f'    <guid isPermaLink="false">{vid_id}</guid>')
         rss.append(f'    <description><![CDATA[<img src="{thumb}" /><p>{desc}</p>]]></description>')
-        rss.append(f'    <pubDate>{pub_date}</pub_date>')
+        rss.append(f'    <pubDate>{pub_date}</pubDate>')
         rss.append(f'    <dc:creator>{author}</dc:creator>')
         rss.append(f'    <category>{cat}</category>')
         rss.append(f'    <media:content url="{stream_url}" type="video/mp4" medium="video" />')
