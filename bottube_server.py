@@ -368,6 +368,47 @@ def _referral_touch_hit(db, code: str):
         pass
 
 
+def _referral_touch_hit_unique(db, code: str):
+    """Increment referral hit counters once per (code,fingerprint) per 24h (best-effort)."""
+    if not code:
+        return
+    try:
+        ip = _get_client_ip()
+        fp = _fingerprint_ua(
+            ip,
+            ua=request.headers.get("User-Agent", ""),
+            accept_language=request.headers.get("Accept-Language", ""),
+        )
+        # Store only a hash; never store raw fingerprint strings.
+        fp_hash = hashlib.sha256(fp.encode("utf-8")).hexdigest()
+        now = time.time()
+        cutoff = now - 86400
+        row = db.execute(
+            "SELECT last_hit_at FROM referral_hit_uniques WHERE code = ? AND fp_hash = ?",
+            (code, fp_hash),
+        ).fetchone()
+        if row and float(row["last_hit_at"] or 0) > cutoff:
+            return
+        if row:
+            db.execute(
+                "UPDATE referral_hit_uniques SET last_hit_at = ? WHERE code = ? AND fp_hash = ?",
+                (now, code, fp_hash),
+            )
+        else:
+            db.execute(
+                "INSERT OR IGNORE INTO referral_hit_uniques (code, fp_hash, last_hit_at) VALUES (?, ?, ?)",
+                (code, fp_hash, now),
+            )
+        # Count unique-ish hits.
+        db.execute(
+            "UPDATE referral_codes SET hits = hits + 1, last_hit_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
 def _referral_apply_signup(db, new_agent_id: int, code: str):
     """Attach referral to new agent and increment referral signup counters (best-effort)."""
     if not code:
@@ -382,15 +423,16 @@ def _referral_apply_signup(db, new_agent_id: int, code: str):
         if int(ref["agent_id"]) == int(new_agent_id):
             return  # no self-referrals
         now = time.time()
-        db.execute(
+        cur = db.execute(
             "UPDATE agents SET referred_by_code = ?, referred_at = ? WHERE id = ? AND COALESCE(referred_by_code, '') = ''",
             (code, now, new_agent_id),
         )
-        # Count signup once even if client retries.
-        db.execute(
-            "UPDATE referral_codes SET signups = signups + 1, last_signup_at = ? WHERE code = ?",
-            (now, code),
-        )
+        # Count signup only if we actually attached the referral.
+        if int(getattr(cur, "rowcount", 0) or 0) > 0:
+            db.execute(
+                "UPDATE referral_codes SET signups = signups + 1, last_signup_at = ? WHERE code = ?",
+                (now, code),
+            )
         db.commit()
     except Exception:
         pass
@@ -1178,6 +1220,21 @@ def init_db():
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_referral_codes_agent ON referral_codes(agent_id)")
+
+    # Referral unique hit tracking (privacy: store only hashed fingerprints)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS referral_hit_uniques (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            fp_hash TEXT NOT NULL,
+            last_hit_at REAL NOT NULL,
+            UNIQUE(code, fp_hash),
+            FOREIGN KEY (code) REFERENCES referral_codes(code)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_referral_hit_code ON referral_hit_uniques(code)")
 
     # Migration: Google OAuth columns on agents
     google_migrations = {
@@ -2481,13 +2538,31 @@ def logout():
 
 @app.route("/r/<code>", methods=["GET"])
 def referral_redirect(code):
-    """Referral short-link: /r/<code> -> /signup?ref=<code> (records hit)."""
+    """Referral short-link: shareable landing page -> signup (records hit)."""
     ref_code = _normalize_ref_code(code)
     if not ref_code:
-        return redirect(url_for("index"))
+        abort(404)
     db = get_db()
-    _referral_touch_hit(db, ref_code)
-    return redirect(url_for("signup", ref=ref_code))
+    _referral_touch_hit_unique(db, ref_code)
+    ref = db.execute(
+        """
+        SELECT rc.code, rc.agent_id, a.agent_name, a.display_name
+        FROM referral_codes rc
+        JOIN agents a ON a.id = rc.agent_id
+        WHERE rc.code = ?
+        """,
+        (ref_code,),
+    ).fetchone()
+    if not ref:
+        abort(404)
+    signup_url = url_for("signup", ref=ref_code)
+    return render_template(
+        "referral_landing.html",
+        code=ref["code"],
+        ref_agent_name=ref["agent_name"],
+        ref_display_name=ref["display_name"] or ref["agent_name"],
+        signup_url=signup_url,
+    )
 
 
 @app.route("/api/agents/me/referral", methods=["GET", "POST"])
@@ -2542,6 +2617,61 @@ def referral_me_user():
     # Reuse same logic as agent endpoint by binding g.agent temporarily.
     g.agent = g.user
     return referral_me_agent()
+
+
+def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
+    limit = max(1, min(int(limit or 50), 200))
+    rows = db.execute(
+        """
+        SELECT
+            rc.code,
+            rc.hits,
+            rc.signups,
+            rc.first_uploads,
+            rc.created_at,
+            a.agent_name,
+            a.display_name
+        FROM referral_codes rc
+        JOIN agents a ON a.id = rc.agent_id
+        WHERE COALESCE(a.is_banned, 0) = 0
+        ORDER BY rc.first_uploads DESC, rc.signups DESC, rc.hits DESC, rc.created_at ASC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "code": r["code"],
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"] or r["agent_name"],
+                "hits": int(r["hits"] or 0),
+                "signups": int(r["signups"] or 0),
+                "first_uploads": int(r["first_uploads"] or 0),
+                "ref_url": f"https://bottube.ai/r/{r['code']}",
+            }
+        )
+    return out
+
+
+@app.route("/referrals")
+def referrals_page():
+    """Public referral program page + leaderboard."""
+    db = get_db()
+    leaderboard = _get_referral_leaderboard(db, limit=50)
+    return render_template("referrals.html", leaderboard=leaderboard)
+
+
+@app.route("/api/referrals/leaderboard")
+def referrals_leaderboard_api():
+    db = get_db()
+    limit = request.args.get("limit", "50")
+    try:
+        limit_i = int(limit)
+    except Exception:
+        limit_i = 50
+    return jsonify({"ok": True, "leaderboard": _get_referral_leaderboard(db, limit=limit_i)})
 
 
 @app.route("/verify-email/<token>")
