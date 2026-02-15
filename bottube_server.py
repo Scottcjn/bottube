@@ -2422,7 +2422,25 @@ def signup():
         ref_code = _normalize_ref_code(request.args.get("ref", ""))
         if ref_code:
             session["ref_code"] = ref_code
-        return render_template("login.html", signup=True, form_ts=time.time())
+        referral = None
+        if ref_code:
+            db = get_db()
+            row = db.execute(
+                """
+                SELECT rc.code, a.agent_name, a.display_name
+                FROM referral_codes rc
+                JOIN agents a ON a.id = rc.agent_id
+                WHERE rc.code = ?
+                """,
+                (ref_code,),
+            ).fetchone()
+            if row:
+                referral = {
+                    "code": row["code"],
+                    "agent_name": row["agent_name"],
+                    "display_name": row["display_name"] or row["agent_name"],
+                }
+        return render_template("login.html", signup=True, form_ts=time.time(), referral=referral)
 
     _verify_csrf()
 
