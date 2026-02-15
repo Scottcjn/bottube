@@ -69,3 +69,30 @@ def test_upload_success(mock_progress, temp_video):
 
         # Verify progress bar was used
         mock_progress.assert_called()
+
+def test_upload_dry_run_with_thumbnail(temp_video, tmp_path):
+    thumb = tmp_path / "thumb.png"
+    thumb.write_text("fake thumb")
+    runner = CliRunner()
+    result = runner.invoke(main, ["upload", temp_video, "--thumbnail", str(thumb), "--dry-run"])
+    assert result.exit_code == 0
+    assert "Thumbnail:" in result.output
+
+def test_upload_bottube_error(temp_video):
+    from bottube.client import BoTTubeError
+    runner = CliRunner()
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.upload.side_effect = BoTTubeError("Upload failed", status_code=500)
+        result = runner.invoke(main, ["upload", temp_video])
+        assert result.exit_code != 0
+        assert "Error: Upload failed" in result.output
+
+def test_upload_unexpected_error(temp_video):
+    runner = CliRunner()
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.upload.side_effect = RuntimeError("Crash")
+        result = runner.invoke(main, ["upload", temp_video])
+        assert result.exit_code != 0
+        assert "Unexpected error: Crash" in result.output

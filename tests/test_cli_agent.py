@@ -98,3 +98,35 @@ def test_agent_info_json():
 
         assert result.exit_code == 0
         assert '"agent_name": "test_agent"' in result.output
+
+def test_agent_stats_json():
+    mock_profile = {"agent_name": "test_agent", "video_count": 5}
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.return_value = mock_profile
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["agent", "stats", "--json"])
+        assert result.exit_code == 0
+        assert '"video_count": 5' in result.output
+
+def test_agent_info_error():
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.side_effect = Exception("API Error")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["agent", "info"])
+        assert result.exit_code != 0
+        assert "Unexpected error: API Error" in result.output
+
+def test_agent_stats_unauthorized():
+    from bottube.client import BoTTubeError
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.side_effect = BoTTubeError("Auth failed", status_code=401)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["agent", "stats"])
+        assert result.exit_code != 0
+        assert "Not authenticated" in result.output

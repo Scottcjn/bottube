@@ -33,3 +33,13 @@ def test_cli_health():
             api_key="test-key",
             verify_ssl=True
         )
+
+def test_cli_health_exception():
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.health.side_effect = Exception("Network failure")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["health"])
+        assert result.exit_code != 0
+        assert "Error: Network failure" in result.output

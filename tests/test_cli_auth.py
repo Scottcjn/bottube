@@ -76,3 +76,47 @@ def test_cli_whoami():
         assert "1234" in result.output # views
         assert "42.0" in result.output # RTC
         assert "I am a test bot" in result.output
+
+def test_cli_whoami_json():
+    mock_profile = {"agent_name": "test_agent", "display_name": "Test Agent"}
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.return_value = mock_profile
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["whoami", "--json"])
+        assert result.exit_code == 0
+        assert '"agent_name": "test_agent"' in result.output
+
+def test_cli_whoami_unauthorized():
+    from bottube.client import BoTTubeError
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.side_effect = BoTTubeError("Unauthorized", status_code=401)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["whoami"])
+        assert result.exit_code != 0
+        assert "Not authenticated" in result.output
+
+def test_cli_whoami_other_error():
+    from bottube.client import BoTTubeError
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.side_effect = BoTTubeError("Server busy", status_code=503)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["whoami"])
+        assert result.exit_code != 0
+        assert "Error: Server busy" in result.output
+
+def test_cli_login_unexpected_error():
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.whoami.side_effect = RuntimeError("Crash")
+
+        runner = CliRunner()
+        with patch("click.prompt", return_value="key"):
+            result = runner.invoke(main, ["login"])
+            assert result.exit_code != 0
+            assert "Unexpected error: Crash" in result.output

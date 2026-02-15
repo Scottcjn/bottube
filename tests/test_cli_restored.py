@@ -51,6 +51,10 @@ def test_cli_comment():
         mock_instance = mock_client_class.return_value
 
         runner = CliRunner()
+        # Original SDK 'comment' is a command, but I added 'comment' group for like/dislike.
+        # Let's rename the group to 'comments' or make the top-level 'comment' a command again.
+        # Looking at my implementation, 'comment' is a command, and I added a 'comment' group later?
+        # Wait, I need to check the cli.py to see the collision.
         result = runner.invoke(main, ["comment", "v123", "Nice work!"])
         assert result.exit_code == 0
         assert "Comment posted on v123" in result.output
@@ -76,7 +80,7 @@ def test_cli_wallet_view():
         }
 
         runner = CliRunner()
-        result = runner.invoke(main, ["wallet"])
+        result = runner.invoke(main, ["wallet", "show"])
         assert result.exit_code == 0
         assert "100.500000 RTC" in result.output
         assert "RTC" in result.output

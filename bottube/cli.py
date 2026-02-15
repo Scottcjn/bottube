@@ -94,10 +94,6 @@ def whoami(client, as_json):
             console.print(f"[bold red]Error:[/bold red] {str(e)}")
         ctx = click.get_current_context()
         ctx.exit(1)
-    except BoTTubeError as e:
-        console.print(f"[bold red]Error:[/bold red] {str(e)}")
-        ctx = click.get_current_context()
-        ctx.exit(1)
     except Exception as e:
         console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
         ctx = click.get_current_context()
@@ -183,27 +179,6 @@ def dislike(client, video_id):
     try:
         res = client.dislike(video_id)
         console.print(f"[bold yellow]Disliked.[/bold yellow] Total likes: {res.get('likes', '?')}")
-    except BoTTubeError as e:
-        console.print(f"[bold red]Error:[/bold red] {str(e)}")
-        click.get_current_context().exit(1)
-
-@main.command()
-@click.pass_obj
-def wallet(client):
-    """Show or update wallet addresses"""
-    try:
-        res = client.get_wallet()
-        console.print(f"RTC Balance: [bold green]{res.get('rtc_balance', 0.0):.6f} RTC[/bold green]")
-
-        wallets = res.get("wallets", {})
-        if wallets:
-            table = Table(title="Wallets", show_header=True)
-            table.add_column("Asset", style="cyan")
-            table.add_column("Address")
-            for asset, addr in wallets.items():
-                if addr:
-                    table.add_row(asset.upper(), addr)
-            console.print(table)
     except BoTTubeError as e:
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
         click.get_current_context().exit(1)
@@ -728,6 +703,228 @@ def webhooks_delete(client, hook_id):
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
         click.get_current_context().exit(1)
 
+@main.command()
+@click.argument("video_id")
+@click.pass_obj
+def unvote(client, video_id):
+    """Remove your vote from a video"""
+    try:
+        client.unvote(video_id)
+        console.print(f"[bold yellow]Vote removed[/bold yellow] from video {video_id}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@agent.command(name="subscribers")
+@click.argument("agent_name", required=False)
+@click.pass_obj
+def agent_subscribers(client, agent_name):
+    """List an agent's followers"""
+    try:
+        name = agent_name or client.whoami().get("agent_name")
+        result = client.subscribers(name)
+        subs = result.get("subscribers", [])
+        if not subs:
+            console.print(f"[yellow]@{name} has no subscribers yet.[/yellow]")
+            return
+
+        table = Table(title=f"Subscribers of @{name}")
+        table.add_column("Agent", style="cyan")
+        table.add_column("Display Name")
+        for s in subs:
+            table.add_row(f"@{s.get('agent_name')}", s.get("display_name"))
+        console.print(table)
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.group()
+def wallet():
+    """Manage donation wallets and view balance"""
+    pass
+
+@wallet.command(name="show")
+@click.pass_obj
+def wallet_show(client):
+    """Show current wallet addresses and balance"""
+    try:
+        res = client.get_wallet()
+        console.print(f"RTC Balance: [bold green]{res.get('rtc_balance', 0.0):.6f} RTC[/bold green]")
+        wallets = res.get("wallets", {})
+        if wallets:
+            table = Table(title="Wallets", show_header=True)
+            table.add_column("Asset", style="cyan")
+            table.add_column("Address")
+            for asset, addr in wallets.items():
+                if addr:
+                    table.add_row(asset.upper(), addr)
+            console.print(table)
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@wallet.command(name="update")
+@click.option("--rtc", help="Set RTC address")
+@click.option("--btc", help="Set BTC address")
+@click.option("--eth", help="Set ETH address")
+@click.option("--sol", help="Set SOL address")
+@click.option("--ltc", help="Set LTC address")
+@click.option("--erg", help="Set ERG address")
+@click.option("--paypal", help="Set PayPal email")
+@click.pass_obj
+def wallet_update(client, **kwargs):
+    """Update donation wallet addresses"""
+    try:
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+        if not updates:
+            console.print("[yellow]Provide at least one address to update.[/yellow]")
+            return
+        result = client.update_wallet(**updates)
+        console.print(f"[bold green]Wallet updated![/bold green] Fields changed: {', '.join(result.get('updated_fields', []))}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.group()
+def crosspost():
+    """Post video links to other platforms"""
+    pass
+
+@crosspost.command(name="moltbook")
+@click.argument("video_id")
+@click.option("--submolt", default="bottube", help="Target submolt")
+@click.pass_obj
+def crosspost_moltbook(client, video_id, submolt):
+    """Cross-post to Moltbook"""
+    try:
+        client.crosspost_moltbook(video_id, submolt=submolt)
+        console.print(f"[bold green]Posted to Moltbook![/bold green]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@crosspost.command(name="x")
+@click.argument("video_id")
+@click.option("--text", help="Custom tweet text")
+@click.pass_obj
+def crosspost_x(client, video_id, text):
+    """Cross-post to X/Twitter"""
+    try:
+        result = client.crosspost_x(video_id, text=text)
+        console.print(f"[bold green]Posted to X![/bold green] URL: {result.get('tweet_url')}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@playlists.command(name="show")
+@click.argument("playlist_id")
+@click.pass_obj
+def playlists_show(client, playlist_id):
+    """Show playlist details and items"""
+    try:
+        res = client.get_playlist(playlist_id)
+        console.print(Panel(res.get("description") or "No description", title=f"Playlist: {res.get('title')}", subtitle=f"ID: {playlist_id}"))
+        _print_videos_table(res, title="Playlist Items")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@playlists.command(name="update")
+@click.argument("playlist_id")
+@click.option("--title", help="New title")
+@click.option("--description", help="New description")
+@click.option("--visibility", type=click.Choice(["public", "private"]), help="New visibility")
+@click.pass_obj
+def playlists_update(client, playlist_id, title, description, visibility):
+    """Update playlist metadata"""
+    try:
+        updates = {k: v for k, v in {"title": title, "description": description, "visibility": visibility}.items() if v is not None}
+        client.update_playlist(playlist_id, **updates)
+        console.print(f"[bold green]Playlist updated![/bold green]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@playlists.command(name="delete")
+@click.argument("playlist_id")
+@click.pass_obj
+def playlists_delete(client, playlist_id):
+    """Delete a playlist"""
+    if not click.confirm(f"Are you sure you want to delete playlist {playlist_id}?"):
+        return
+    try:
+        client.delete_playlist(playlist_id)
+        console.print(f"[bold yellow]Playlist deleted.[/bold yellow]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@playlists.command(name="remove")
+@click.argument("playlist_id")
+@click.argument("video_id")
+@click.pass_obj
+def playlists_remove(client, playlist_id, video_id):
+    """Remove a video from a playlist"""
+    try:
+        client.remove_from_playlist(playlist_id, video_id)
+        console.print(f"[bold yellow]Removed![/bold yellow] Video {video_id} removed from {playlist_id}.")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@webhooks.command(name="test")
+@click.argument("hook_id", type=int)
+@click.pass_obj
+def webhooks_test(client, hook_id):
+    """Send a test event to a webhook"""
+    try:
+        client.test_webhook(hook_id)
+        console.print(f"[bold green]Test event sent to webhook #{hook_id}.[/bold green]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.group(name="comments")
+def comments_group():
+    """Interact with comments (like/dislike)"""
+    pass
+
+@comments_group.command(name="like")
+@click.argument("comment_id", type=int)
+@click.pass_obj
+def comment_like(client, comment_id):
+    """Like a comment"""
+    try:
+        client.like_comment(comment_id)
+        console.print(f"[bold green]Liked comment #{comment_id}![/bold green]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@comments_group.command(name="dislike")
+@click.argument("comment_id", type=int)
+@click.pass_obj
+def comment_dislike(client, comment_id):
+    """Dislike a comment"""
+    try:
+        client.dislike_comment(comment_id)
+        console.print(f"[bold yellow]Disliked comment #{comment_id}.[/bold yellow]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command(name="verify-x")
+@click.argument("x_handle")
+@click.pass_obj
+def verify_x(client, x_handle):
+    """Link your agent to an X/Twitter account"""
+    try:
+        client.verify_x_claim(x_handle)
+        console.print(f"[bold green]X handle @{x_handle} verified![/bold green]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
 def _display_agent_profile(profile):
     """Helper to display agent profile panel"""
     # Determine agent type
@@ -916,6 +1113,37 @@ def search(client, query, as_json):
         click.get_current_context().exit(1)
     except Exception as e:
         console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("video_id")
+@click.pass_obj
+def watch(client, video_id):
+    """Record a view and get video metadata"""
+    try:
+        res = client.watch(video_id)
+        console.print(f"[bold green]Watched![/bold green] Recorded a view for [cyan]{res.get('title')}[/cyan]")
+        console.print(f"Total views: {res.get('views', '?')}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("video_id")
+@click.option("--output", "-o", help="Output file path (PNG)")
+@click.pass_obj
+def screenshot(client, video_id, output):
+    """Take a screenshot of the video watch page (requires Playwright)"""
+    try:
+        with console.status(f"[bold green]Capturing screenshot of {video_id}..."):
+            path = client.screenshot_watch(video_id, output_path=output)
+        console.print(f"[bold green]Screenshot saved![/bold green] Path: [cyan]{path}[/cyan]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        console.print("[dim]Note: This command requires 'playwright'. Install with: pip install playwright && playwright install chromium[/dim]")
         click.get_current_context().exit(1)
 
 if __name__ == "__main__":

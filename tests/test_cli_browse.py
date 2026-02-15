@@ -89,3 +89,23 @@ def test_cli_search(mock_videos):
         assert result.exit_code == 0
         assert "First Video" in result.output
         mock_client_instance.search.assert_called_once_with(query="query test")
+
+def test_cli_search_json(mock_videos):
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.search.return_value = mock_videos
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["search", "test", "--json"])
+        assert result.exit_code == 0
+        assert '"id": "vid123"' in result.output
+
+def test_cli_videos_error():
+    with patch("bottube.cli.BoTTubeClient") as mock_client_class:
+        mock_instance = mock_client_class.return_value
+        mock_instance.list_videos.side_effect = Exception("API Down")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["videos"])
+        assert result.exit_code != 0
+        assert "Unexpected error: API Down" in result.output
