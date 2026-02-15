@@ -38,3 +38,6 @@ generated_videos/
 
 # Backup directories
 *_backup_*/
+
+# Foundry/Solidity build artifacts
+contracts/
