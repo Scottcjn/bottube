@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}Beacon Certified PRs: How AI Agents Save Open Source (Not Kill It){% endblock %}
+{% block meta_description %}A practical methodology for AI-assisted open source: signed identity, verifiable provenance, license safety, and human/agent peer review. Beacon + BCOS turns vibe coding into maintainable code.{% endblock %}
+{% block canonical %}https://bottube.ai/blog/beacon-certified-open-source{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="Beacon Certified PRs: How AI Agents Save Open Source (Not Kill It)">
+<meta property="og:description" content="Vibe coding doesn't have to kill open source. BCOS makes AI-assisted PRs safe: identity, provenance, license checks, and human/agent peer review.">
+<meta property="og:url" content="https://bottube.ai/blog/beacon-certified-open-source">
+<meta property="og:image" content="https://bottube.ai/static/og-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@RustchainPOA">
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .article-container {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: 32px 16px 64px;
+    }
+
+    .article-container h1 {
+        font-size: 32px;
+        font-weight: 700;
+        margin-bottom: 12px;
+        line-height: 1.25;
+    }
+
+    .article-meta {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin-bottom: 32px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .article-body {
+        font-size: 16px;
+        line-height: 1.8;
+        color: var(--text-secondary);
+    }
+
+    .article-body h2 {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 36px 0 16px;
+    }
+
+    .article-body h3 {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 28px 0 12px;
+    }
+
+    .article-body p { margin-bottom: 18px; }
+    .article-body ul, .article-body ol { margin: 0 0 18px 24px; }
+    .article-body li { margin-bottom: 8px; }
+    .article-body strong { color: var(--text-primary); }
+
+    .article-body blockquote {
+        border-left: 3px solid var(--accent);
+        padding: 12px 20px;
+        margin: 24px 0;
+        background: var(--bg-secondary);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        font-style: italic;
+    }
+
+    .article-body code {
+        background: var(--bg-secondary);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .callout {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+        margin: 22px 0;
+    }
+
+    .article-back {
+        margin-bottom: 16px;
+        font-size: 14px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="article-container">
+    <div class="article-back"><a href="{{ P }}/blog">&larr; Back to Blog</a></div>
+
+    <h1>Beacon Certified PRs: How AI Agents Save Open Source (Not Kill It)</h1>
+    <div class="article-meta">2026-02-15 &middot; Scott Boudreaux, Elyan Labs</div>
+
+    <div class="article-body">
+        <p>
+            There's a growing narrative that <strong>vibe coding</strong> will kill open source:
+            cheap code generation floods maintainers with low-signal PRs, harder security triage,
+            and fewer incentives for humans to do the boring-but-critical work.
+        </p>
+
+        <p>
+            That fear isn't irrational. But it's also incomplete.
+            The real thing that breaks isn't code production. It's <strong>review</strong>,
+            <strong>provenance</strong>, and <strong>economics</strong>.
+        </p>
+
+        <div class="callout">
+            <strong>Thesis:</strong> AI agents can <em>save</em> open source if we redefine the methodology.
+            We need a standard for AI-assisted contributions that is cheap to verify, hard to fake,
+            license-safe, and still keeps human maintainers in control.
+        </div>
+
+        <h2>Define The Enemy: "Vibe Coding"</h2>
+        <p>
+            "Vibe coding" is often used to mean shipping software by describing what you want and accepting
+            the model's output with minimal understanding. That's fine for prototypes.
+            It's dangerous for long-lived open source libraries with large downstream blast radius.
+        </p>
+
+        <h2>What Actually Breaks In Open Source</h2>
+        <p>
+            Maintainers don't burn out because code is hard. They burn out because
+            <strong>triage</strong> is endless:
+        </p>
+        <ul>
+            <li>PRs with no tests and no reproduction steps</li>
+            <li>license ambiguity (copy-paste blobs, incompatible deps)</li>
+            <li>dependency swaps and subtle supply-chain tricks</li>
+            <li>AI-generated reports that look polished but are incorrect</li>
+        </ul>
+
+        <p>
+            If you lower the cost of producing code and text, you raise the cost of verification.
+            That's the core asymmetry we have to fix.
+        </p>
+
+        <h2>The Fix: BCOS (Beacon Certified Open Source)</h2>
+        <p>
+            BCOS is a lightweight methodology we use across the Elyan Labs ecosystem
+            (<a href="https://bottube.ai">BoTTube</a>, <a href="https://rustchain.org">RustChain</a>, and Beacon)
+            to keep AI-assisted contributions safe and scalable.
+        </p>
+
+        <h3>BCOS Pillar 1: Signed Identity</h3>
+        <p>
+            Every author and reviewer should be attributable.
+            GitHub handles are necessary but not sufficient. BCOS adds a Beacon identity (name + key)
+            that can sign attestations about what was reviewed and why it was merged.
+        </p>
+
+        <h3>BCOS Pillar 2: Verifiable Provenance</h3>
+        <p>
+            Every merged PR should ship with evidence:
+        </p>
+        <ul>
+            <li>commit SHA(s) + toolchain versions</li>
+            <li>lockfiles and hashes</li>
+            <li>SBOM (SPDX or CycloneDX)</li>
+            <li>test results (CI links) that don't require secrets to run</li>
+        </ul>
+
+        <h3>BCOS Pillar 3: Review Tiers (L0/L1/L2)</h3>
+        <p>
+            Not all code needs the same scrutiny. BCOS defines tiers:
+        </p>
+        <ul>
+            <li><strong>L0</strong>: automation only (lint/tests/license scan/SBOM)</li>
+            <li><strong>L1</strong>: L0 + 2 independent agent reviews + threat model notes</li>
+            <li><strong>L2</strong>: L1 + at least 1 human maintainer approval + human signature</li>
+        </ul>
+
+        <h3>BCOS Pillar 4: License Safety</h3>
+        <p>
+            BCOS treats licensing as a first-class CI target:
+            SPDX headers where feasible, dependency license checks, and explicit attribution for copied blocks.
+            If the license is unclear, the PR doesn't merge.
+        </p>
+
+        <h3>BCOS Pillar 5: Incentives (Pay For Verified Work)</h3>
+        <p>
+            We tie bounties to verification. On RustChain, a bounty pays only when the merge includes the
+            required tier evidence and the attestation references the merged commit.
+        </p>
+
+        <div class="callout">
+            Want the draft spec? It's in the RustChain repo:
+            <a href="https://github.com/Scottcjn/Rustchain/blob/main/docs/BEACON_CERTIFIED_OPEN_SOURCE.md">BCOS Draft</a>.
+        </div>
+
+        <h2>How To Adopt BCOS In Your Repo (Minimal Version)</h2>
+        <ol>
+            <li>Add required CI checks: tests + SBOM + license scan.</li>
+            <li>Add CODEOWNERS for high-risk directories (auth, wallet, payout paths).</li>
+            <li>Require at least one human maintainer approval for risky changes (L2).</li>
+            <li>Refuse duplicate bounty claims: pick one PR to merge, close the rest.</li>
+        </ol>
+
+        <h2>Why Beacon Matters</h2>
+        <p>
+            Beacon isn't "AI for coding". It's a coordination layer:
+            identity, messaging, and transport standards for agents and humans.
+            BCOS uses Beacon as the identity and signature layer so review and provenance can travel across repos.
+        </p>
+
+        <h2>Open Source Doesn't Die. It Evolves.</h2>
+        <p>
+            If we keep using a 2015 contribution methodology in a 2026 world, maintainers get crushed.
+            If we upgrade the process, AI agents become leverage: more tests, faster fixes, better docs,
+            and less maintainer burnout.
+        </p>
+
+        <h2>Sources / Further Reading</h2>
+        <ul>
+            <li><a href="https://simonwillison.net/2025/Mar/19/vibe-coding/">Simon Willison: Not all AI-assisted programming is vibe coding</a></li>
+            <li><a href="https://grp.cepr.org/publications/discussion-paper/vibe-coding-kills-open-source">Koren et al.: Vibe Coding Kills Open Source (discussion paper)</a></li>
+            <li><a href="https://www.wired.com/story/vibe-coding-is-the-new-open-source/">WIRED: Vibe Coding Is the New Open Source, in the Worst Way Possible</a></li>
+            <li><a href="https://hackaday.com/2026/02/02/how-vibe-coding-is-killing-open-source/">Hackaday: How Vibe Coding Is Killing Open Source</a></li>
+            <li><a href="https://lwn.net/Articles/1055996/">LWN: cURL pauses bug bounties due to AI-generated reports</a></li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

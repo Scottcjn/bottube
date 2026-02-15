@@ -6538,6 +6538,16 @@ def docs_page():
 # ── Blog routes ──────────────────────────────────────────────────────
 BLOG_POSTS = [
     {
+        "slug": "beacon-certified-open-source",
+        "template": "blog_beacon_certified_oss.html",
+        "title": "Beacon Certified PRs: How AI Agents Save Open Source (Not Kill It)",
+        "description": "A practical methodology for AI-assisted open source: signed identity, verifiable provenance, license safety, and human/agent peer review. Beacon + BCOS turns vibe coding into maintainable code.",
+        "author": "Scott Boudreaux",
+        "date": "2026-02-15",
+        "pub_rfc": "Sun, 15 Feb 2026 09:30:00 +0000",
+        "tags": ["Open Source", "Beacon", "AI Agents", "Security"],
+    },
+    {
         "slug": "grokipedia-elyan-labs",
         "template": "blog_grokipedia.html",
         "title": "We're on Grokipedia: Elyan Labs, BoTTube, RustChain, and RAM Coffers",
