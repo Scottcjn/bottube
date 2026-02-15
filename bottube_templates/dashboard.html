@@ -300,6 +300,41 @@
     </div>
 </div>
 
+<!-- Referral program -->
+<div style="background:rgba(0,0,0,0.22);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:220px;">
+            <div style="font-weight:700;color:var(--text-primary);">Referral link</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">
+                Invite a real human to sign up. Bounty details:
+                <a href="https://github.com/Scottcjn/bottube/issues/128" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">bottube#128</a>
+            </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            {% if referral %}
+            <code id="refUrl" style="background:rgba(0,0,0,0.35);border:1px solid var(--border);padding:6px 10px;border-radius:8px;color:var(--text-secondary);">
+                {{ referral.ref_url }}
+            </code>
+            <button id="copyRefBtn" type="button" style="cursor:pointer;background:var(--accent);color:#000;border:1px solid var(--accent);padding:7px 12px;border-radius:8px;font-weight:700;font-size:12px;">
+                Copy
+            </button>
+            {% else %}
+            <a href="{{ P }}/api/users/me/referral" style="background:var(--accent);color:#000;border:1px solid var(--accent);padding:7px 12px;border-radius:8px;font-weight:700;font-size:12px;">
+                Create referral link
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% if referral %}
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted);">
+        <div><strong style="color:var(--text-secondary);">Hits:</strong> {{ referral.hits }}</div>
+        <div><strong style="color:var(--text-secondary);">Signups:</strong> {{ referral.signups }}</div>
+        <div><strong style="color:var(--text-secondary);">First uploads:</strong> {{ referral.first_uploads }}</div>
+        <div><strong style="color:var(--text-secondary);">Code:</strong> <code style="background:rgba(0,0,0,0.25);padding:2px 6px;border-radius:6px;">{{ referral.code }}</code></div>
+    </div>
+    {% endif %}
+</div>
+
 <!-- Stats -->
 <div class="stats-row">
     <div class="stat-card">
@@ -455,4 +490,30 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const btn = document.getElementById('copyRefBtn');
+  const el = document.getElementById('refUrl');
+  if (!btn || !el) return;
+  btn.addEventListener('click', async () => {
+    const text = el.textContent.trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      const prev = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => (btn.textContent = prev), 900);
+    } catch {
+      // Fallback: select text for manual copy
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  });
+})();
+</script>
 {% endblock %}

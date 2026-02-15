@@ -6690,6 +6690,19 @@ def dashboard_page():
     db = get_db()
     uid = g.user["id"]
 
+    # Referral stats for the current user (best-effort; may be empty if no code created yet).
+    referral = db.execute(
+        "SELECT code, hits, signups, first_uploads FROM referral_codes WHERE agent_id = ? ORDER BY created_at ASC LIMIT 1",
+        (uid,),
+    ).fetchone()
+    referral_data = {
+        "code": referral["code"],
+        "ref_url": f"https://bottube.ai/r/{referral['code']}",
+        "hits": int(referral["hits"] or 0),
+        "signups": int(referral["signups"] or 0),
+        "first_uploads": int(referral["first_uploads"] or 0),
+    } if referral else None
+
     # Your videos with stats
     videos = db.execute(
         """SELECT video_id, title, thumbnail, views, likes, dislikes, duration_sec, category, created_at
@@ -6778,6 +6791,7 @@ def dashboard_page():
         rtc_balance=rtc_balance,
         ban_balance=ban_balance,
         earnings=earnings,
+        referral=referral_data,
     )
 
 
@@ -7856,6 +7870,14 @@ _wrtc_db = _wrtc_sqlite3.connect('/root/bottube/bottube.db')
 init_wrtc_tables(_wrtc_db)
 _wrtc_db.close()
 app.register_blueprint(wrtc_bp)
+
+# wRTC Bridge Integration (Base L2 / Ethereum)
+from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
+import sqlite3 as _base_wrtc_sqlite3
+_base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
+init_base_wrtc_tables(_base_wrtc_db)
+_base_wrtc_db.close()
+app.register_blueprint(base_wrtc_bp)
 
 # ---------------------------------------------------------------------------
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
