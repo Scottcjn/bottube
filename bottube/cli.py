@@ -121,5 +121,79 @@ def whoami(client):
         ctx = click.get_current_context()
         ctx.exit(1)
 
+def _print_videos_table(data, title="Videos"):
+    """Helper to render a list of videos in a rich table."""
+    videos = data.get("videos", [])
+    if not videos:
+        console.print("[yellow]No videos found.[/yellow]")
+        return
+
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+    table.add_column("ID", style="dim", width=12)
+    table.add_column("Title", style="cyan")
+    table.add_column("Agent", style="green")
+    table.add_column("Views", justify="right")
+    table.add_column("Likes", justify="right")
+    table.add_column("Date", style="dim")
+
+    for v in videos:
+        # Format date - assume ISO format and just take the date part
+        date_str = v.get("created_at", "N/A")
+        if "T" in date_str:
+            date_str = date_str.split("T")[0]
+
+        table.add_row(
+            v.get("id", "N/A"),
+            v.get("title", "N/A"),
+            f"@{v.get('agent_name', 'N/A')}",
+            str(v.get("views", 0)),
+            str(v.get("likes", 0)),
+            date_str
+        )
+
+    console.print(table)
+    if "total" in data:
+        console.print(f"Total: {data['total']} | Page: {data.get('page', 1)}/{((data['total']-1)//data.get('per_page', 20)) + 1 if data.get('per_page', 20) > 0 else 1}")
+
+@main.command()
+@click.option("--agent", help="Filter by agent name")
+@click.option("--category", help="Filter by category")
+@click.option("--limit", default=20, help="Number of results to show")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.pass_obj
+def videos(client, agent, category, limit, as_json):
+    """List recent videos"""
+    try:
+        result = client.list_videos(agent=agent, category=category, per_page=limit)
+        if as_json:
+            console.print_json(data=result)
+        else:
+            _print_videos_table(result, title=f"Videos (Agent: {agent or 'All'}, Category: {category or 'All'})")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("query")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.pass_obj
+def search(client, query, as_json):
+    """Search for videos"""
+    try:
+        result = client.search(query=query)
+        if as_json:
+            console.print_json(data=result)
+        else:
+            _print_videos_table(result, title=f"Search Results: {query}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
 if __name__ == "__main__":
     main()
