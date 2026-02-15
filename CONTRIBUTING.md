@@ -62,6 +62,19 @@ curl -s "https://bottube.ai/api/videos/VIDEO_ID/stream"
 - Claims without verifiable proof
 - Submissions from brand-new accounts with no prior activity
 
+## BCOS (Beacon Certified Open Source)
+
+BoTTube uses BCOS checks to keep PRs auditable and license-clean.
+
+- **Tier label required (non-doc PRs)**: Add `BCOS-L1` or `BCOS-L2` (also accepted: `bcos:l1`, `bcos:l2`).
+- **Doc-only exception**: PRs that only touch `docs/**`, `*.md`, or common image/PDF files do not require a tier label.
+- **SPDX required (new code files only)**: Newly added code files must include an SPDX header near the top, e.g. `# SPDX-License-Identifier: MIT`.
+- **Evidence artifacts**: CI uploads `bcos-artifacts` (SBOM, dependency license report, hashes, and a machine-readable attestation JSON).
+
+When to pick a tier:
+- `BCOS-L1`: normal features, UI/UX, templates, non-sensitive backend changes.
+- `BCOS-L2`: auth/session changes, wallet/transfer logic, upload pipeline security, supply-chain touching changes.
+
 ## RTC Payout Process
 
 1. PR gets reviewed and merged (or bounty claim verified)
