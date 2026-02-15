@@ -1,0 +1,15 @@
+# BoTTube Wallet Integration
+# RustChain wallet integration for bot tipping
+
+flask>=2.3.0
+requests>=2.28.0
+python-dotenv>=1.0.0
+gunicorn>=21.0.0
+
+# For production
+psycopg2-binary>=2.9.0
+redis>=4.5.0
+
+# For testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
