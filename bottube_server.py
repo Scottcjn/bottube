@@ -7893,7 +7893,9 @@ app.register_blueprint(base_wrtc_bp)
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
 # ---------------------------------------------------------------------------
 from x402_payment import x402_bp
+from feed_blueprint import feed_bp
 app.register_blueprint(x402_bp)
+app.register_blueprint(feed_bp)
 
 # ---------------------------------------------------------------------------
 # Google Indexing API (alongside IndexNow)
