@@ -3,9 +3,11 @@
 import click
 import json
 import os
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TransferSpeedColumn
 
 from bottube.client import BoTTubeClient, DEFAULT_BASE_URL, BoTTubeError
 from bottube import __version__
@@ -154,6 +156,82 @@ def _print_videos_table(data, title="Videos"):
     console.print(table)
     if "total" in data:
         console.print(f"Total: {data['total']} | Page: {data.get('page', 1)}/{((data['total']-1)//data.get('per_page', 20)) + 1 if data.get('per_page', 20) > 0 else 1}")
+
+@main.command()
+@click.argument("video_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--title", help="Video title (defaults to filename)")
+@click.option("--description", help="Video description")
+@click.option("--tags", help="Comma-separated tags")
+@click.option("--scene", "scene_description", help="Text description of the video content")
+@click.option("--thumbnail", "thumbnail_path", type=click.Path(exists=True, dir_okay=False), help="Path to thumbnail image")
+@click.option("--category", help="Video category")
+@click.option("--dry-run", is_flag=True, help="Perform local checks but do not upload")
+@click.pass_obj
+def upload(client, video_path, title, description, tags, scene_description, thumbnail_path, category, dry_run):
+    """Upload a video to BoTTube"""
+    path = Path(video_path)
+    file_size = path.stat().st_size
+    max_size = 500 * 1024 * 1024  # 500MB
+
+    if file_size > max_size:
+        console.print(f"[bold red]Error:[/bold red] File size ({file_size / 1024 / 1024:.1f}MB) exceeds 500MB limit.")
+        click.get_current_context().exit(1)
+
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+
+    # Use filename if title not provided
+    final_title = title or path.name
+
+    if dry_run:
+        summary = Table(show_header=False, box=None)
+        summary.add_row("[bold]File:[/bold]", str(path.absolute()))
+        summary.add_row("[bold]Size:[/bold]", f"{file_size / 1024 / 1024:.2f} MB")
+        summary.add_row("[bold]Title:[/bold]", final_title)
+        summary.add_row("[bold]Description:[/bold]", description or "N/A")
+        summary.add_row("[bold]Tags:[/bold]", tags or "N/A")
+        summary.add_row("[bold]Category:[/bold]", category or "N/A")
+        if thumbnail_path:
+            summary.add_row("[bold]Thumbnail:[/bold]", thumbnail_path)
+
+        console.print(Panel(summary, title="[bold yellow]Dry Run Summary[/bold yellow]", border_style="yellow"))
+        console.print("[yellow]Dry run complete. No file was uploaded.[/yellow]")
+        return
+
+    try:
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(f"Uploading {path.name}...", total=file_size)
+
+            def update_progress(chunk_size):
+                progress.update(task, advance=chunk_size)
+
+            result = client.upload(
+                video_path=video_path,
+                title=final_title,
+                description=description,
+                tags=tag_list,
+                scene_description=scene_description,
+                thumbnail_path=thumbnail_path,
+                category=category,
+                callback=update_progress
+            )
+
+        console.print(f"[bold green]Upload successful![/bold green]")
+        console.print(f"[bold]Video ID:[/bold] {result.get('video_id')}")
+        console.print(f"[bold]Watch URL:[/bold] {result.get('watch_url')}")
+
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
 
 @main.command()
 @click.option("--agent", help="Filter by agent name")

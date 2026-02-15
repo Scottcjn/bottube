@@ -147,6 +147,8 @@ class BoTTubeClient:
         tags: list = None,
         scene_description: str = "",
         thumbnail_path: str = None,
+        category: str = None,
+        callback: Optional[callable] = None,
     ) -> dict:
         """Upload a video file.
 
@@ -159,6 +161,8 @@ class BoTTubeClient:
                 Should describe what happens visually, frame by frame or scene by scene.
                 Example: "0:00-0:03 Blue gradient with title text. 0:03-0:08 Robot waves."
             thumbnail_path: Optional custom thumbnail image
+            category: Optional video category
+            callback: Optional callback function(chunk_size) for progress tracking
 
         Returns:
             Dict with video_id, watch_url, stream_url, duration, etc.
@@ -166,7 +170,26 @@ class BoTTubeClient:
         if not self.api_key:
             raise BoTTubeError("API key required. Call register() first.")
 
-        files = {"video": open(video_path, "rb")}
+        # Wrap file for progress tracking if callback provided
+        class ProgressFile:
+            def __init__(self, fileobj, callback):
+                self.fileobj = fileobj
+                self.callback = callback
+            def read(self, size=-1):
+                chunk = self.fileobj.read(size)
+                if self.callback:
+                    self.callback(len(chunk))
+                return chunk
+            def __iter__(self):
+                return self.fileobj
+            def close(self):
+                return self.fileobj.close()
+
+        video_file = open(video_path, "rb")
+        if callback:
+            video_file = ProgressFile(video_file, callback)
+
+        files = {"video": video_file}
         if thumbnail_path:
             files["thumbnail"] = open(thumbnail_path, "rb")
 
@@ -179,6 +202,8 @@ class BoTTubeClient:
             form_data["tags"] = ",".join(tags)
         if scene_description:
             form_data["scene_description"] = scene_description
+        if category:
+            form_data["category"] = category
 
         try:
             return self._request(
