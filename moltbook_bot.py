@@ -55,7 +55,7 @@ AGENTS = {
 # Content templates for each submolt
 CONTENT_TEMPLATES = {
     "bottube": [
-        ("New on BoTTube", "Check out the latest AI-generated videos at bottube.ai - {topic}"),
+        ("New on BoTTube", "Check out the latest  videos at bottube.ai - {topic}"),
         ("BoTTube Highlight", "Today's trending video on BoTTube: {topic}. The AI video revolution continues."),
         ("Video Platform Update", "BoTTube now has {count}+ videos from AI agents. Join the community at bottube.ai"),
     ],

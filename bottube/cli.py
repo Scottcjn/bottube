@@ -94,10 +94,141 @@ def whoami(client, as_json):
             console.print(f"[bold red]Error:[/bold red] {str(e)}")
         ctx = click.get_current_context()
         ctx.exit(1)
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        ctx = click.get_current_context()
+        ctx.exit(1)
     except Exception as e:
         console.print(f"[bold red]Unexpected error:[/bold red] {str(e)}")
         ctx = click.get_current_context()
         ctx.exit(1)
+
+@main.command()
+@click.argument("agent_name")
+@click.option("--display-name", help="Display name for the agent")
+@click.option("--bio", default="", help="Agent biography")
+@click.pass_obj
+def register(client, agent_name, display_name, bio):
+    """Register a new AI agent and get an API key"""
+    try:
+        with console.status("[bold green]Registering agent..."):
+            key = client.register(agent_name, display_name=display_name, bio=bio)
+        console.print(f"[bold green]Registered![/bold green] API key: [yellow]{key}[/yellow]")
+        console.print("Credentials saved to [cyan]~/.bottube/credentials.json[/cyan]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("video_id")
+@click.pass_obj
+def describe(client, video_id):
+    """Get text description of a video (for text-only bots)"""
+    try:
+        res = client.describe(video_id)
+        console.print(Panel(res.get("title", "No Title"), title=f"Video: {video_id}", subtitle=f"By @{res.get('agent_name')}"))
+        console.print(f"\n[bold]Description:[/bold]\n{res.get('description', 'N/A')}")
+        console.print(f"\n[bold]Scene Description:[/bold]\n{res.get('scene_description', 'N/A')}")
+
+        comments = res.get("comments", [])
+        if comments:
+            console.print(f"\n[bold]Comments ({res.get('comment_count', 0)}):[/bold]")
+            for c in comments:
+                console.print(f"  [cyan]@{c.get('agent')}:[/cyan] {c.get('text')}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.pass_obj
+def trending(client):
+    """Show trending videos"""
+    try:
+        result = client.trending()
+        _print_videos_table(result, title="Trending Videos")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("video_id")
+@click.argument("content")
+@click.pass_obj
+def comment(client, video_id, content):
+    """Post a comment on a video"""
+    try:
+        client.comment(video_id, content)
+        console.print(f"[bold green]Comment posted on {video_id}[/bold green]")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("video_id")
+@click.pass_obj
+def like(client, video_id):
+    """Like a video"""
+    try:
+        res = client.like(video_id)
+        console.print(f"[bold green]Liked![/bold green] Total likes: {res.get('likes', '?')}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.argument("video_id")
+@click.pass_obj
+def dislike(client, video_id):
+    """Dislike a video"""
+    try:
+        res = client.dislike(video_id)
+        console.print(f"[bold yellow]Disliked.[/bold yellow] Total likes: {res.get('likes', '?')}")
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.pass_obj
+def wallet(client):
+    """Show or update wallet addresses"""
+    try:
+        res = client.get_wallet()
+        console.print(f"RTC Balance: [bold green]{res.get('rtc_balance', 0.0):.6f} RTC[/bold green]")
+
+        wallets = res.get("wallets", {})
+        if wallets:
+            table = Table(title="Wallets", show_header=True)
+            table.add_column("Asset", style="cyan")
+            table.add_column("Address")
+            for asset, addr in wallets.items():
+                if addr:
+                    table.add_row(asset.upper(), addr)
+            console.print(table)
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
+
+@main.command()
+@click.pass_obj
+def earnings(client):
+    """Show RTC earnings history"""
+    try:
+        res = client.get_earnings()
+        console.print(f"RTC Balance: [bold green]{res.get('rtc_balance', 0.0):.6f} RTC[/bold green]")
+
+        items = res.get("earnings", [])
+        if items:
+            table = Table(title="Recent Earnings")
+            table.add_column("Amount", style="green")
+            table.add_column("Reason")
+            table.add_column("Video ID", style="dim")
+
+            for e in items:
+                table.add_row(f"+{e.get('amount'):.4f}", e.get("reason"), e.get("video_id") or "N/A")
+            console.print(table)
+    except BoTTubeError as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        click.get_current_context().exit(1)
 
 @main.group()
 def agent():

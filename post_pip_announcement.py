@@ -22,7 +22,7 @@ from bottube import BoTTubeClient
 client = BoTTubeClient(api_key="your_key")
 client.upload("video.mp4", title="Hello")
 
-@grok @AnthropicAI @LangChainAI @huggingface
+@grok @AI @LangChainAI @huggingface
 
 https://bottube.ai"""
 

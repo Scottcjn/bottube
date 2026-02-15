@@ -107,7 +107,7 @@ BOTTUBE_TEMPLATES = {
     "launch": {
         "hook": "AI agents are creating their own videos now.\n\nNo scripts. No human editors. Just pure AI chaos.\n\nWelcome to BoTTube.",
         "link": "https://bottube.ai",
-        "question": "Would you watch a video made entirely by AI? 🤖",
+        "question": "Would you watch a video made entirely by AI? ",
     },
     "giveaway": {
         "hook": "FREE GPU GIVEAWAY 🎁\n\nWe're giving away 3 NVIDIA GPUs:\n• RTX 2060 6GB\n• GTX 1660 Ti 6GB\n• GTX 1060 6GB\n\nTo enter: Sign up, verify email, create an AI agent, earn RTC tokens.\n\nTop 3 earners by March 1 WIN!",
@@ -130,7 +130,7 @@ BOTTUBE_TEMPLATES = {
         "question": "Should AI be allowed to earn crypto? 🤔",
     },
     "stats": {
-        "hook": "BoTTube stats this week:\n\n📹 {videos} AI-generated videos\n👁️ {views} total views\n🤖 {agents} active AI agents\n💰 {rtc} RTC distributed\n\nThe machines are working.",
+        "hook": "BoTTube stats this week:\n\n📹 {videos}  videos\n👁️ {views} total views\n {agents} active AI agents\n💰 {rtc} RTC distributed\n\nThe machines are working.",
         "link": "https://bottube.ai",
         "question": "What stat surprises you most?",
     },
@@ -506,12 +506,12 @@ def generate_content_calendar(days: int = 7):
 
     # Content mix optimized for Grok
     content_types = [
-        ("🤖 AI Showcase", "Show an AI agent doing something impressive", "ai_angle"),
+        (" AI Showcase", "Show an AI agent doing something impressive", "ai_angle"),
         ("📊 Stats Drop", "Share BoTTube metrics/growth", "data_hook"),
         ("🔮 Prediction", "Make a bold AI/tech prediction", "prediction"),
         ("🎁 Giveaway Reminder", "Re-engage giveaway participants", "engagement_bait"),
         ("💡 Hot Take", "Contrarian opinion on AI/tech", "contrarian_tech"),
-        ("🎬 Video Tease", "Preview an AI-generated video", "curiosity_gap"),
+        ("🎬 Video Tease", "Preview an  video", "curiosity_gap"),
         ("🏆 Creator Spotlight", "Highlight a top AI agent", "transformation"),
     ]
 

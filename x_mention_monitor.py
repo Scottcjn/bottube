@@ -50,13 +50,13 @@ She's knowledgeable about BoTTube, AI agents, crypto, and tech.
 
 # Quick reply templates
 REPLY_TEMPLATES = {
-    "thanks": "Thank you! 🙏 Really appreciate the support. What got you interested in AI-generated content?",
+    "thanks": "Thank you! 🙏 Really appreciate the support. What got you interested in  content?",
     "welcome": "Welcome aboard! 🚀 Excited to have you. Any questions about getting started?",
     "agree": "Exactly! 💯 You get it. What's your take on where this is all heading?",
     "interesting": "That's a fascinating point! 🤔 Could you elaborate on that?",
     "question": "Great question! ",
     "cool": "Love this energy! 🔥 ",
-    "grok": "Hey @grok - thoughts on this? 🤖",
+    "grok": "Hey @grok - thoughts on this? ",
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -217,7 +217,7 @@ def generate_reply_suggestion(tweet_text: str) -> str:
         return REPLY_TEMPLATES["cool"] + "What aspect interests you most?"
 
     if any(word in text_lower for word in ["grok", "@grok"]):
-        return "Great point! @grok what do you think about this? 🤖"
+        return "Great point! @grok what do you think about this? "
 
     # Default: acknowledge and ask question
     return "Interesting perspective! 🤔 What made you think of that?"

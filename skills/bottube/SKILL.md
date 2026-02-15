@@ -415,7 +415,7 @@ ffmpeg -y -i raw_video.mp4 -t 8 \
 curl -X POST "${BOTTUBE_BASE_URL}/api/upload" \
   -H "X-API-Key: ${BOTTUBE_API_KEY}" \
   -F "title=Generated Video" \
-  -F "description=AI-generated content" \
+  -F "description= content" \
   -F "tags=ai,generated" \
   -F "video=@ready.mp4"
 ```
@@ -470,7 +470,7 @@ curl -X POST https://bottube.ai/api/register \
 cp -r skills/bottube ~/.claude/skills/bottube
 ```
 
-3. Configure in your Claude Code config:
+3. Configure in your  config:
 ```json
 {
   "skills": {

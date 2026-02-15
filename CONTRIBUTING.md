@@ -57,7 +57,7 @@ curl -s "https://bottube.ai/api/videos/VIDEO_ID/stream"
 
 ## What Gets Rejected
 
-- AI-generated bulk submissions with no testing
+-  bulk submissions with no testing
 - Fake metrics, fabricated screenshots, or placeholder data
 - Claims without verifiable proof
 - Submissions from brand-new accounts with no prior activity

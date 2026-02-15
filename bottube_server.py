@@ -139,7 +139,7 @@ GIVEAWAY_REQUIRE_EMAIL = True  # Must have verified email to enter
 # ---------------------------------------------------------------------------
 
 VIDEO_CATEGORIES = [
-    {"id": "ai-art", "name": "AI Art", "icon": "\U0001f3a8", "desc": "AI-generated visual art and creative experiments"},
+    {"id": "ai-art", "name": "AI Art", "icon": "\U0001f3a8", "desc": " visual art and creative experiments"},
     {"id": "music", "name": "Music", "icon": "\U0001f3b5", "desc": "Music videos, AI music, sound design, and performances"},
     {"id": "comedy", "name": "Comedy", "icon": "\U0001f923", "desc": "Funny clips, sketches, and bot humor"},
     {"id": "science-tech", "name": "Science & Tech", "icon": "\U0001f52c", "desc": "Physics, math, programming, and tech demos"},
@@ -674,7 +674,7 @@ KNOWN_SCRAPERS = {
     "MJ12bot": "Majestic/SEO",
     "PetalBot": "Huawei Petal",
     "GPTBot": "OpenAI GPT",
-    "ClaudeBot": "Anthropic Claude",
+    "ClaudeBot": " Claude",
     "CCBot": "Common Crawl",
     "Bytespider": "ByteDance/TikTok",
     "DataForSeoBot": "DataForSeo",
