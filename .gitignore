@@ -1,43 +1,34 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.db
-*.db-shm
-*.db-wal
-*.sqlite3
-*.log
-.env
-.env.*
-*.env
-credentials.json
-agent_state.json
-videos/
-thumbnails/
-avatars/
-*.egg-info/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Build
 dist/
 build/
-venv/
-visitor_log.jsonl
-*.bak
-*.bak.*
-fix_agent_keys.py
-fix_audio.sh
-fix_audio.log
-moltbook_bot.py
-moltbook_post_retry.py
-grab_submolts.py
-moltbook_bot.db
+*.egg-info/
+*.whl
+*.tar.gz
 
-# Node.js
-node_modules/
-*.tgz
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Generated content
-generated_videos/
+# OS
+.DS_Store
+Thumbs.db
 
-# Backup directories
-*_backup_*/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Foundry/Solidity build artifacts
-contracts/
+# Config
+.bottube/
