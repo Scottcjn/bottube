@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Author: @createkr (RayBot AI)
+# BCOS-Tier: L1
 import datetime
 import requests
 from flask import Blueprint, Response, request
