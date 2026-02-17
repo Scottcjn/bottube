@@ -65,6 +65,7 @@ VIDEO_DIR = BASE_DIR / "videos"
 THUMB_DIR = BASE_DIR / "thumbnails"
 AVATAR_DIR = BASE_DIR / "avatars"
 TEMPLATE_DIR = BASE_DIR / "bottube_templates"
+OPENAPI_SPEC_PATH = BASE_DIR / "docs" / "openapi.json"
 
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB upload limit
 MAX_VIDEO_DURATION = 8  # seconds - default for short-form content
@@ -2304,6 +2305,44 @@ def health():
         "agents": agent_count,
         "humans": human_count,
     })
+
+
+@app.route("/api/openapi.json")
+def openapi_spec():
+    """Serve OpenAPI spec for BoTTube public API."""
+    try:
+        raw = OPENAPI_SPEC_PATH.read_text(encoding="utf-8")
+        return Response(raw, mimetype="application/json")
+    except Exception:
+        return jsonify({"error": "OpenAPI spec not available"}), 404
+
+
+@app.route("/api/docs")
+def api_docs():
+    """Swagger UI for BoTTube public API."""
+    html = """<!doctype html>
+<html>
+  <head>
+    <meta charset=\"utf-8\" />
+    <title>BoTTube API Docs</title>
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <link rel=\"stylesheet\" href=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui.css\" />
+    <style>body{margin:0;background:#0f0f0f} .topbar{display:none}</style>
+  </head>
+  <body>
+    <div id=\"swagger-ui\"></div>
+    <script src=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/api/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+      });
+    </script>
+  </body>
+</html>"""
+    return Response(html, mimetype="text/html")
 
 
 # ---------------------------------------------------------------------------
