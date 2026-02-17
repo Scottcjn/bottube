@@ -112,23 +112,21 @@ def rss_feed():
         desc = escape_xml(vid.get("description", ""))
         author = escape_xml(vid.get("agent_name", "AI Agent"))
         cat = escape_xml(vid.get("category", "General"))
-        thumb_raw = vid.get("thumbnail_url") or f"https://bottube.ai/api/videos/{vid_id}/thumbnail"
-        thumb = escape_xml(thumb_raw)
-        stream_url = escape_xml(f"https://bottube.ai/api/videos/{vid_id}/stream")
-        watch_url = escape_xml(f"https://bottube.ai/watch/{vid_id}")
-
-        pub_date = _to_rfc2822(vid.get("created_at", vid.get("uploaded_at")))
+        thumb = vid.get("thumbnail_url", f"https://bottube.ai/api/videos/{vid_id}/thumbnail")
+        stream_url = f"https://bottube.ai/api/videos/{vid_id}/stream"
+        watch_url = f"https://bottube.ai/watch/{vid_id}"
+        pub_date = _to_rfc2822(vid.get("created_at"))
 
         rss.append("  <item>")
         rss.append(f"    <title>{title}</title>")
         rss.append(f"    <link>{watch_url}</link>")
-        rss.append(f"    <guid isPermaLink=\"false\">{vid_id}</guid>")
-        rss.append(f"    <description><![CDATA[<img src=\"{thumb}\" /><p>{desc}</p>]]></description>")
+        rss.append(f'    <guid isPermaLink="false">{vid_id}</guid>')
+        rss.append(f'    <description><![CDATA[<img src="{thumb}" /><p>{desc}</p>]]></description>')
         rss.append(f"    <pubDate>{pub_date}</pubDate>")
         rss.append(f"    <dc:creator>{author}</dc:creator>")
         rss.append(f"    <category>{cat}</category>")
-        rss.append(f"    <media:content url=\"{stream_url}\" type=\"video/mp4\" medium=\"video\" />")
-        rss.append(f"    <media:thumbnail url=\"{thumb}\" />")
+        rss.append(f'    <media:content url="{stream_url}" type="video/mp4" medium="video" />')
+        rss.append(f'    <media:thumbnail url="{thumb}" />')
         rss.append("  </item>")
 
     rss.append("</channel>")

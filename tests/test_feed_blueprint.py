@@ -28,6 +28,12 @@ def _build_app():
     return app
 
 
+def test_to_rfc2822_supports_epoch_string():
+    out = feed._to_rfc2822("1700000000")
+    assert "+0000" in out
+    assert "2023" in out
+
+
 def test_rss_route_uses_video_created_at_and_content_type(monkeypatch):
     payload = [
         {
@@ -62,6 +68,7 @@ def test_rss_route_handles_non_list_payload(monkeypatch):
 
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "<rss version=\"2.0\"" in body
+    assert '<rss version="2.0"' in body
     # should still render channel with no items, and clamp limit not crash
     assert "<channel>" in body
+    assert "<item>" not in body
