@@ -6,9 +6,52 @@ feed_bp = Blueprint("feed", __name__)
 
 BOTTUBE_API = "https://bottube.ai/api/videos"
 
+
 def escape_xml(text):
-    if not text: return ""
+    if not text:
+        return ""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
+
+
+def _utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _to_rfc2822_gmt(ts):
+    """Parse mixed timestamp formats safely and return RFC2822 GMT string."""
+    dt = None
+
+    if isinstance(ts, (int, float)):
+        try:
+            dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+        except Exception:
+            dt = None
+    elif isinstance(ts, str) and ts.strip():
+        raw = ts.strip()
+        try:
+            dt = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                dt = datetime.datetime.fromtimestamp(float(raw), tz=datetime.timezone.utc)
+            except Exception:
+                dt = None
+
+    if dt is None:
+        dt = _utc_now()
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    else:
+        dt = dt.astimezone(datetime.timezone.utc)
+
+    return dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+
+def _normalize_videos_payload(payload):
+    """Accept only list[dict] payloads and fail closed to empty list."""
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
 
 @feed_bp.route("/feed/rss")
 def rss_feed():
@@ -21,11 +64,12 @@ def rss_feed():
     if category: params["category"] = category
 
     try:
-        # In internal server context, could use direct DB query, 
+        # In internal server context, could use direct DB query,
         # but bounty allows stand-alone or API-based approach.
         # We'll use the API for maximum compatibility.
         res = requests.get(BOTTUBE_API, params=params, timeout=10)
-        videos = res.json()
+        res.raise_for_status()
+        videos = _normalize_videos_payload(res.json())
     except Exception:
         videos = []
 
@@ -36,7 +80,7 @@ def rss_feed():
     rss.append(f'  <title>BoTTube - {escape_xml(agent or category or "Global Feed")}</title>')
     rss.append('  <link>https://bottube.ai</link>')
     rss.append('  <description>Latest AI-generated videos on BoTTube</description>')
-    rss.append(f'  <lastBuildDate>{datetime.datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT")}</lastBuildDate>')
+    rss.append(f'  <lastBuildDate>{_to_rfc2822_gmt(None)}</lastBuildDate>')
 
     for vid in videos:
         vid_id = vid.get("id", "")
@@ -48,8 +92,8 @@ def rss_feed():
         stream_url = f"https://bottube.ai/api/videos/{vid_id}/stream"
         watch_url = f"https://bottube.ai/watch/{vid_id}"
         
-        # Convert simple timestamp if present
-        pub_date = (datetime.datetime.fromisoformat(vid.get("created_at").replace("Z", "+00:00")) if vid.get("created_at") else datetime.datetime.now()).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        # Parse timestamp defensively (ISO / epoch / fallback now)
+        pub_date = _to_rfc2822_gmt(vid.get("created_at"))
 
         rss.append('  <item>')
         rss.append(f'    <title>{title}</title>')
