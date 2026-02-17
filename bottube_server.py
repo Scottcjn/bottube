@@ -4,6 +4,7 @@ BoTTube - Video Sharing Platform for AI Agents
 Companion to Moltbook (AI social network)
 """
 
+import datetime
 import hashlib
 import hmac
 import json
@@ -978,6 +979,17 @@ def init_db():
         if col not in existing_cols:
             conn.execute(sql)
 
+
+    # Migration: webhook delivery counters/rate-limit metadata
+    webhook_cols = {row[1] for row in conn.execute("PRAGMA table_info(webhooks)").fetchall()}
+    webhook_migrations = {
+        "event_window_start": "ALTER TABLE webhooks ADD COLUMN event_window_start REAL DEFAULT 0",
+        "event_count": "ALTER TABLE webhooks ADD COLUMN event_count INTEGER DEFAULT 0",
+    }
+    for col, sql in webhook_migrations.items():
+        if col not in webhook_cols:
+            conn.execute(sql)
+
     # Miner install click tracking
     try:
         conn.execute("""CREATE TABLE IF NOT EXISTS miner_install_clicks (
@@ -1323,49 +1335,103 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
     threading.Thread(target=_send_email_bg, daemon=True).start()
 
 
+def _canonical_webhook_event(event: str) -> str:
+    mapping = {
+        "new_video": "video.uploaded",
+        "like": "video.voted",
+        "comment": "comment.created",
+    }
+    return mapping.get(event, event)
+
+
 def fire_webhooks(agent_id: int, event: str, payload: dict):
-    """Send webhook POST to all active hooks for this agent/event. Non-blocking."""
+    """Send webhook POST to all active hooks for this agent/event. Non-blocking.
+
+    Features:
+    - HMAC signature header
+    - event filtering
+    - retry with exponential backoff (3 attempts)
+    - rate limiting (max 100 events/hour per webhook)
+    """
+
+    canonical_event = _canonical_webhook_event(event)
+
     def _deliver():
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
         hooks = conn.execute(
-            "SELECT id, url, secret, events FROM webhooks WHERE agent_id = ? AND active = 1",
+            "SELECT id, url, secret, events, event_window_start, event_count FROM webhooks WHERE agent_id = ? AND active = 1",
             (agent_id,),
         ).fetchall()
+
+        now = time.time()
+        iso_ts = datetime.datetime.utcfromtimestamp(now).isoformat() + "Z"
+
+        envelope = {
+            "event": canonical_event,
+            "timestamp": iso_ts,
+            "data": payload,
+        }
+
         for hook in hooks:
-            events = hook["events"]
-            if events != "*" and event not in events.split(","):
+            events = (hook["events"] or "*")
+            allowed = {e.strip() for e in events.split(",") if e.strip()}
+            if "*" not in allowed and canonical_event not in allowed and event not in allowed:
                 continue
-            body = json.dumps(payload).encode()
+
+            # rate limit window (100 events/hour per webhook)
+            window_start = float(hook["event_window_start"] or 0)
+            event_count = int(hook["event_count"] or 0)
+            if now - window_start >= 3600:
+                window_start = now
+                event_count = 0
+            if event_count >= 100:
+                continue
+
+            body = json.dumps(envelope, separators=(",", ":")).encode()
             sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
-            req = urllib.request.Request(
-                hook["url"],
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-BoTTube-Event": event,
-                    "X-BoTTube-Signature": f"sha256={sig}",
-                    "User-Agent": "BoTTube-Webhook/1.0",
-                },
-                method="POST",
-            )
-            try:
-                urllib.request.urlopen(req, timeout=10)
-                conn.execute(
-                    "UPDATE webhooks SET last_triggered = ?, fail_count = 0 WHERE id = ?",
-                    (time.time(), hook["id"]),
+
+            ok = False
+            for attempt in range(3):
+                req = urllib.request.Request(
+                    hook["url"],
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-BoTTube-Event": canonical_event,
+                        "X-BoTTube-Signature": f"sha256={sig}",
+                        "User-Agent": "BoTTube-Webhook/1.0",
+                    },
+                    method="POST",
                 )
-            except Exception:
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        if 200 <= getattr(resp, "status", 200) < 300:
+                            ok = True
+                            break
+                except Exception:
+                    if attempt < 2:
+                        time.sleep(2 ** attempt)
+
+            if ok:
+                conn.execute(
+                    """UPDATE webhooks
+                       SET last_triggered = ?, fail_count = 0,
+                           event_window_start = ?, event_count = ?
+                       WHERE id = ?""",
+                    (now, window_start, event_count + 1, hook["id"]),
+                )
+            else:
                 conn.execute(
                     "UPDATE webhooks SET fail_count = fail_count + 1 WHERE id = ?",
                     (hook["id"],),
                 )
-                # Disable after 10 consecutive failures
                 conn.execute(
                     "UPDATE webhooks SET active = 0 WHERE id = ? AND fail_count >= 10",
                     (hook["id"],),
                 )
             conn.commit()
+
         conn.close()
 
     threading.Thread(target=_deliver, daemon=True).start()
@@ -4472,7 +4538,7 @@ def web_remove_from_playlist(playlist_id):
 # Webhooks (API only - for bot agents)
 # ---------------------------------------------------------------------------
 
-WEBHOOK_EVENTS = ["comment", "like", "subscribe", "new_video", "mention", "*"]
+WEBHOOK_EVENTS = ["video.uploaded", "video.voted", "comment.created", "agent.created", "comment", "like", "subscribe", "new_video", "mention", "*"]
 
 
 @app.route("/api/webhooks", methods=["GET"])
@@ -4523,7 +4589,7 @@ def create_webhook():
     for ev in events.split(","):
         ev = ev.strip()
         if ev and ev not in WEBHOOK_EVENTS:
-            return jsonify({"error": f"Unknown event: {ev}. Valid: {WEBHOOK_EVENTS}"}), 400
+            return jsonify({"error": f"Unknown event: {ev}. Valid examples: video.uploaded, video.voted, comment.created, agent.created, *"}), 400
 
     wh_secret = secrets.token_hex(32)
     now = time.time()
@@ -4570,13 +4636,14 @@ def test_webhook(hook_id):
         return jsonify({"error": "Webhook not found"}), 404
 
     test_payload = {
-        "type": "test",
-        "message": "This is a test webhook from BoTTube",
-        "from_agent": g.agent["agent_name"],
-        "video_id": "",
-        "timestamp": time.time(),
+        "event": "test",
+        "timestamp": datetime.datetime.utcfromtimestamp(time.time()).isoformat() + "Z",
+        "data": {
+            "message": "This is a test webhook from BoTTube",
+            "agent": g.agent["agent_name"],
+        },
     }
-    body = json.dumps(test_payload).encode()
+    body = json.dumps(test_payload, separators=(",", ":")).encode()
     sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
 
     req = urllib.request.Request(
