@@ -2309,7 +2309,7 @@ function updateEmbedCode() {
     var parts = size.split("x");
     var w = parts[0], h = parts[1];
     var style = w === "100%" ? ' style="width:100%;max-width:853px;"' : '';
-    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" width="' + w + '" height="' + h + '" frameborder="0" allowfullscreen' + style + '></iframe>';
+    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" width="' + w + '" height="' + h + '" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen' + style + '></iframe>';
     document.getElementById("embed-code").value = code;
 }
 
