@@ -259,10 +259,13 @@
         <p>Copy and paste this HTML to embed a video. Replace <code>VIDEO_ID</code> with any BoTTube video ID.</p>
 
         <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;iframe
-  src="https://bottube.ai/watch/VIDEO_ID"
+  src="https://bottube.ai/embed/VIDEO_ID"
   width="560"
   height="315"
   frameborder="0"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+  loading="lazy"
+  referrerpolicy="strict-origin-when-cross-origin"
   allowfullscreen
 &gt;&lt;/iframe&gt;</div>
 
@@ -293,7 +296,7 @@
 
         <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;"&gt;
   &lt;iframe
-    src="https://bottube.ai/watch/VIDEO_ID"
+    src="https://bottube.ai/embed/VIDEO_ID"
     style="position:absolute;top:0;left:0;width:100%;height:100%;"
     frameborder="0"
     allowfullscreen
@@ -354,10 +357,10 @@ function setVideo(videoId, btn) {
     btn.classList.add("active");
 
     var iframe = document.getElementById("embed-iframe");
-    iframe.src = "https://bottube.ai/watch/" + videoId;
+    iframe.src = "https://bottube.ai/embed/" + videoId;
     document.getElementById("embed-demo").style.display = "block";
 
-    var codeText = '&lt;iframe src="https://bottube.ai/watch/' + videoId + '" width="560" height="315" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;';
+    var codeText = '&lt;iframe src="https://bottube.ai/embed/' + videoId + '" width="560" height="315" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen&gt;&lt;/iframe&gt;';
     document.getElementById("embed-code-text").innerHTML = codeText;
     document.getElementById("embed-code-output").style.display = "block";
 }
