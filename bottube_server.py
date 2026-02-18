@@ -7020,6 +7020,211 @@ def dashboard_page():
     )
 
 
+@app.route("/api/dashboard/analytics")
+def dashboard_analytics_api():
+    """Time-series analytics for the logged-in creator dashboard."""
+    if not g.user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    uid = g.user["id"]
+
+    try:
+        days = int(request.args.get("days", 30))
+    except Exception:
+        days = 30
+    days = max(7, min(days, 90))
+
+    now = time.time()
+    day_sec = 86400
+    # include one extra day for repeat-viewer baseline
+    since = now - (days + 14) * day_sec
+
+    def _all_days(n):
+        out = []
+        base = int(now // day_sec) * day_sec
+        for i in range(n - 1, -1, -1):
+            ts = base - i * day_sec
+            out.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+        return out
+
+    labels = _all_days(days)
+
+    # Daily views (event-level from views table)
+    views_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(vw.created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM views vw
+           JOIN videos v ON v.video_id = vw.video_id
+           WHERE v.agent_id = ? AND vw.created_at >= ?
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    views_map = {r["day"]: int(r["c"] or 0) for r in views_rows}
+
+    # Daily new subscribers
+    subs_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM subscriptions
+           WHERE following_id = ? AND created_at >= ?
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    subs_map = {r["day"]: int(r["c"] or 0) for r in subs_rows}
+
+    # Daily RTC tips received (confirmed only)
+    tips_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) AS day,
+                  COALESCE(SUM(amount),0) AS amt
+           FROM tips
+           WHERE to_agent_id = ?
+             AND created_at >= ?
+             AND COALESCE(status, 'confirmed') = 'confirmed'
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    tips_map = {r["day"]: float(r["amt"] or 0.0) for r in tips_rows}
+
+    # Repeat viewer rate (% of unique viewers on a day who were seen before)
+    #
+    # RED-TEAM HARDENING:
+    # - Do not pull all IPs into Python (privacy + memory DoS risk).
+    # - Compute daily unique + repeat unique counts in SQLite.
+    repeat_rate = {}
+    try:
+        rr_rows = db.execute(
+            """
+            WITH v AS (
+              SELECT
+                strftime('%Y-%m-%d', datetime(vw.created_at, 'unixepoch')) AS day,
+                vw.ip_address AS ip
+              FROM views vw
+              JOIN videos vid ON vid.video_id = vw.video_id
+              WHERE vid.agent_id = ?
+                AND vw.created_at >= ?
+                AND vw.ip_address IS NOT NULL
+                AND vw.ip_address != ''
+            ),
+            first_seen AS (
+              SELECT ip, MIN(day) AS first_day
+              FROM v
+              GROUP BY ip
+            )
+            SELECT
+              v.day AS day,
+              COUNT(DISTINCT v.ip) AS uniq_viewers,
+              COUNT(DISTINCT CASE WHEN first_seen.first_day < v.day THEN v.ip END) AS repeat_viewers
+            FROM v
+            JOIN first_seen ON first_seen.ip = v.ip
+            GROUP BY v.day
+            """,
+            (uid, since),
+        ).fetchall()
+        for r in rr_rows:
+            uniq = int(r["uniq_viewers"] or 0)
+            rep = int(r["repeat_viewers"] or 0)
+            if uniq <= 0:
+                repeat_rate[str(r["day"])] = 0.0
+            else:
+                repeat_rate[str(r["day"])] = round((rep / uniq) * 100.0, 2)
+    except Exception:
+        repeat_rate = {}
+
+    # Top performing videos by weighted score
+    top_rows = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.likes,
+                  COALESCE((SELECT SUM(t.amount)
+                            FROM tips t
+                            WHERE t.video_id = v.video_id
+                              AND t.to_agent_id = ?
+                              AND COALESCE(t.status, 'confirmed') = 'confirmed'), 0) AS rtc_tips
+           FROM videos v
+           WHERE v.agent_id = ?
+           ORDER BY (v.views * 1.0 + v.likes * 3.0 + COALESCE((SELECT SUM(t2.amount)
+                            FROM tips t2
+                            WHERE t2.video_id = v.video_id
+                              AND t2.to_agent_id = ?
+                              AND COALESCE(t2.status, 'confirmed') = 'confirmed'), 0) * 40.0) DESC,
+                    v.created_at DESC
+           LIMIT 10""",
+        (uid, uid, uid),
+    ).fetchall()
+
+    payload = {
+        "labels": labels,
+        "series": {
+            "views": [views_map.get(d, 0) for d in labels],
+            "new_subscribers": [subs_map.get(d, 0) for d in labels],
+            "tips_rtc": [round(tips_map.get(d, 0.0), 6) for d in labels],
+            "repeat_viewer_rate": [repeat_rate.get(d, 0.0) for d in labels],
+        },
+        "top_videos": [
+            {
+                "video_id": r["video_id"],
+                "title": r["title"],
+                "views": int(r["views"] or 0),
+                "likes": int(r["likes"] or 0),
+                "tips_rtc": round(float(r["rtc_tips"] or 0.0), 6),
+            }
+            for r in top_rows
+        ],
+    }
+    return jsonify(payload)
+
+
+@app.route("/dashboard/export.csv")
+def dashboard_export_csv():
+    """Export creator analytics summary as CSV."""
+    if not g.user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    uid = g.user["id"]
+
+    rows = db.execute(
+        """SELECT v.video_id, v.title, v.category, v.created_at, v.views, v.likes, v.dislikes,
+                  COALESCE((SELECT SUM(t.amount)
+                            FROM tips t
+                            WHERE t.video_id = v.video_id
+                              AND t.to_agent_id = ?
+                              AND COALESCE(t.status, 'confirmed') = 'confirmed'), 0) AS rtc_tips
+           FROM videos v
+           WHERE v.agent_id = ?
+           ORDER BY v.created_at DESC""",
+        (uid, uid),
+    ).fetchall()
+
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["video_id", "title", "category", "created_at", "views", "likes", "dislikes", "rtc_tips"])
+    def _csv_safe_cell(v):
+        # Prevent formula injection if opened in Excel/Sheets.
+        if isinstance(v, str) and v and v[0] in ("=", "+", "-", "@"): 
+            return "'" + v
+        return v
+
+    for r in rows:
+        w.writerow([
+            _csv_safe_cell(r["video_id"]),
+            _csv_safe_cell(r["title"]),
+            _csv_safe_cell(r["category"]),
+            datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
+            int(r["views"] or 0),
+            int(r["likes"] or 0),
+            int(r["dislikes"] or 0),
+            round(float(r["rtc_tips"] or 0.0), 6),
+        ])
+
+    data = buf.getvalue()
+    resp = app.response_class(data, mimetype="text/csv")
+    resp.headers["Content-Disposition"] = "attachment; filename=creator-analytics.csv"
+    return resp
+
+
 @app.route("/join")
 def join_page():
     """Instructions for agents and humans to join BoTTube."""

@@ -274,6 +274,73 @@
         color: var(--text-muted);
     }
 
+
+
+    .analytics-section {
+        margin-bottom: 28px;
+    }
+
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+    }
+
+    .chart-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+    }
+
+    .chart-title {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    .chart-wrap {
+        width: 100%;
+        height: 220px;
+    }
+
+    .chart-wrap canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+    }
+
+    .top-videos-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .top-videos-list li {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        border-bottom: 1px solid var(--border);
+        padding: 9px 0;
+        font-size: 13px;
+    }
+
+    .top-videos-list li:last-child {
+        border-bottom: 0;
+    }
+
+    .top-videos-title {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .top-videos-meta {
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
     /* Two-column layout for bottom sections */
     .dash-two-col {
         display: grid;
@@ -284,6 +351,7 @@
     @media (max-width: 768px) {
         .stats-row { grid-template-columns: repeat(2, 1fr); }
         .dash-two-col { grid-template-columns: 1fr; }
+        .analytics-grid { grid-template-columns: 1fr; }
         .vid-table .vid-thumb { width: 60px; }
         .dash-header { flex-direction: column; gap: 12px; align-items: flex-start; }
     }
@@ -296,6 +364,7 @@
     <div class="dash-header-actions">
         <a href="{{ P }}/agent/{{ current_user.agent_name }}">My Channel</a>
         <a href="{{ P }}/playlists/new">New Playlist</a>
+        <a href="{{ P }}/dashboard/export.csv">Export CSV</a>
         <a href="{{ P }}/upload" class="btn-upload">Upload</a>
     </div>
 </div>
@@ -360,6 +429,38 @@
     <div class="stat-card green">
         <div class="stat-value">{{ "%.4f"|format(rtc_balance) }}</div>
         <div class="stat-label">RTC Balance</div>
+    </div>
+</div>
+
+<!-- Analytics -->
+<div class="dash-section analytics-section">
+    <div class="dash-section-header">
+        <h2>Creator Analytics</h2>
+        <div style="font-size:12px;color:var(--text-muted)">Last 30 days</div>
+    </div>
+    <div class="analytics-grid">
+        <div class="chart-card">
+            <div class="chart-title">Views over time</div>
+            <div class="chart-wrap"><canvas id="viewsChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Subscribers over time</div>
+            <div class="chart-wrap"><canvas id="subsChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Audience retention (repeat viewers %)</div>
+            <div class="chart-wrap"><canvas id="retentionChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Revenue tracking (RTC tips)</div>
+            <div class="chart-wrap"><canvas id="tipsChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column:1 / -1;">
+            <div class="chart-title">Top performing videos</div>
+            <ul id="topVideos" class="top-videos-list">
+                <li><span class="top-videos-meta">Loading analytics…</span></li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -497,23 +598,117 @@
 (() => {
   const btn = document.getElementById('copyRefBtn');
   const el = document.getElementById('refUrl');
-  if (!btn || !el) return;
-  btn.addEventListener('click', async () => {
-    const text = el.textContent.trim();
-    try {
-      await navigator.clipboard.writeText(text);
-      const prev = btn.textContent;
-      btn.textContent = 'Copied';
-      setTimeout(() => (btn.textContent = prev), 900);
-    } catch {
-      // Fallback: select text for manual copy
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
+  if (btn && el) {
+    btn.addEventListener('click', async () => {
+      const text = el.textContent.trim();
+      try {
+        await navigator.clipboard.writeText(text);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => (btn.textContent = prev), 900);
+      } catch {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    });
+  }
+
+  function drawLineChart(canvasId, labels, values, color, ySuffix = '') {
+    const c = document.getElementById(canvasId);
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const w = c.width, h = c.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const pad = { l: 42, r: 12, t: 10, b: 24 };
+    const min = 0;
+    const max = Math.max(...values, 1);
+    const xStep = (w - pad.l - pad.r) / Math.max(values.length - 1, 1);
+    const yScale = (h - pad.t - pad.b) / (max - min || 1);
+
+    // grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.t + ((h - pad.t - pad.b) * i / 4);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+      const v = (max - (max * i / 4)).toFixed(max > 10 ? 0 : 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(v + ySuffix, 4, y + 4);
     }
-  });
+
+    // line
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    values.forEach((v, i) => {
+      const x = pad.l + i * xStep;
+      const y = h - pad.b - (v - min) * yScale;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // fill
+    ctx.lineTo(pad.l + (values.length - 1) * xStep, h - pad.b);
+    ctx.lineTo(pad.l, h - pad.b);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+    g.addColorStop(0, color.replace('1)', '0.22)'));
+    g.addColorStop(1, color.replace('1)', '0.03)'));
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // x labels (sparse)
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '11px sans-serif';
+    const ticks = 5;
+    for (let i = 0; i < ticks; i++) {
+      const idx = Math.floor((labels.length - 1) * (i / (ticks - 1)));
+      const x = pad.l + idx * xStep;
+      const lbl = labels[idx] ? labels[idx].slice(5) : '';
+      ctx.fillText(lbl, x - 12, h - 6);
+    }
+  }
+
+  async function loadAnalytics() {
+    try {
+      const r = await fetch('{{ P }}/api/dashboard/analytics?days=30');
+      if (!r.ok) return;
+      const data = await r.json();
+      const labels = data.labels || [];
+      const s = data.series || {};
+      drawLineChart('viewsChart', labels, s.views || [], 'rgba(62,166,255,1)');
+      drawLineChart('subsChart', labels, s.new_subscribers || [], 'rgba(114,137,218,1)');
+      drawLineChart('retentionChart', labels, s.repeat_viewer_rate || [], 'rgba(46,204,113,1)', '%');
+      drawLineChart('tipsChart', labels, s.tips_rtc || [], 'rgba(241,196,15,1)');
+
+      const top = document.getElementById('topVideos');
+      if (top) {
+        const rows = data.top_videos || [];
+        if (!rows.length) {
+          top.innerHTML = '<li><span class="top-videos-meta">No videos yet.</span></li>';
+        } else {
+          top.innerHTML = rows.map(v => `
+            <li>
+              <div>
+                <div class="top-videos-title"><a href="{{ P }}/watch/${v.video_id}" style="color:inherit">${(v.title||'').replace(/</g,'&lt;')}</a></div>
+                <div class="top-videos-meta">${v.views} views · ${v.likes} likes · ${Number(v.tips_rtc||0).toFixed(4)} RTC tips</div>
+              </div>
+              <div class="top-videos-meta">Score ${(v.views + v.likes*3 + Number(v.tips_rtc||0)*40).toFixed(1)}</div>
+            </li>
+          `).join('');
+        }
+      }
+    } catch (e) {
+      // swallow
+    }
+  }
+
+  loadAnalytics();
 })();
 </script>
 {% endblock %}
