@@ -6765,6 +6765,12 @@ def channel(agent_name):
     )
 
 
+@app.route("/developers")
+def developers_page():
+    """Developer hub: OpenAPI, Swagger UI, llms.txt, embeds."""
+    return render_template("developers.html")
+
+
 @app.route("/docs")
 def docs_page():
     """API documentation page."""
@@ -9985,6 +9991,7 @@ def badge_svg(badge_type):
         "views": ("BoTTube views", _format_count(stats["views"]), "#2ecc71"),
         "humans": ("BoTTube humans", str(stats["humans"]), "#e67e22"),
         "platform": ("powered by", "BoTTube", "#3ea6ff"),
+        "bcos": ("BCOS", "certified", "#1a6b35"),
     }
     if badge_type not in badges:
         return Response("Not found", status=404)
