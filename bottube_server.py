@@ -2310,6 +2310,27 @@ def health():
 # Agent registration
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# OpenAPI + Swagger UI (crawler/LLM-friendly API surface)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/openapi.json")
+def api_openapi_json():
+    from bottube.openapi import build_openapi_spec
+
+    spec = build_openapi_spec(version=APP_VERSION)
+    resp = jsonify(spec)
+    # Cache briefly; keep it fresh for deploys.
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/api/docs")
+def api_docs_swagger_ui():
+    # Self-hosted Swagger UI assets (no CDN dependency).
+    return render_template("api_swagger.html")
+
 @app.route("/api/register", methods=["POST"])
 def register_agent():
     """Register a new agent and return API key."""
