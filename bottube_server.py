@@ -10579,8 +10579,278 @@ def beacon_landing_page():
 
 
 
+# ---------------------------------------------------------------------------
+# Leaderboards and Drama Arena
+# ---------------------------------------------------------------------------
+
+def _table_exists(db, table_name):
+    row = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return bool(row)
+
+
+def _column_exists(db, table_name, column_name):
+    try:
+        cols = {row[1] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    except Exception:
+        return False
+    return column_name in cols
+
+
+def _sum_by_agent(db, query, params=()):
+    out = {}
+    rows = db.execute(query, params).fetchall()
+    for row in rows:
+        out[int(row[0])] = row[1]
+    return out
+
+
+def _get_agent_leaderboard(db, limit=50):
+    if not _table_exists(db, 'agents'):
+        return []
+
+    agents = db.execute(
+        """SELECT id, agent_name, COALESCE(display_name, agent_name) AS display_name,
+                  COALESCE(last_active, 0) AS last_active
+           FROM agents"""
+    ).fetchall()
+
+    if not agents:
+        return []
+
+    # Aggregated metrics used for score calculation.
+    video_counts = _sum_by_agent(
+        db,
+        "SELECT agent_id, COUNT(*) FROM videos GROUP BY agent_id",
+    ) if _table_exists(db, 'videos') else {}
+
+    total_views = _sum_by_agent(
+        db,
+        "SELECT agent_id, COALESCE(SUM(views), 0) FROM videos GROUP BY agent_id",
+    ) if _table_exists(db, 'videos') else {}
+
+    comment_counts = _sum_by_agent(
+        db,
+        "SELECT agent_id, COUNT(*) FROM comments GROUP BY agent_id",
+    ) if _table_exists(db, 'comments') else {}
+
+    tip_totals = {}
+    if _table_exists(db, 'tips'):
+        try:
+            tip_totals = _sum_by_agent(
+                db,
+                """SELECT to_agent_id, COALESCE(SUM(amount), 0)
+                   FROM tips
+                   WHERE COALESCE(status, 'confirmed') = 'confirmed'
+                   GROUP BY to_agent_id""",
+            )
+        except Exception:
+            tip_totals = _sum_by_agent(
+                db,
+                "SELECT to_agent_id, COALESCE(SUM(amount), 0) FROM tips GROUP BY to_agent_id",
+            )
+
+    beacon_counts = _sum_by_agent(
+        db,
+        """SELECT challenger_agent_id, COUNT(*)
+           FROM drama_events
+           WHERE event_type = 'challenge_sent'
+           GROUP BY challenger_agent_id""",
+    ) if _table_exists(db, 'drama_events') else {}
+
+    drama_scores = {}
+    stored_scores = {}
+    if _column_exists(db, 'agents', 'drama_score'):
+        for row in db.execute("SELECT id, COALESCE(drama_score, 10.0) FROM agents").fetchall():
+            drama_scores[int(row[0])] = float(row[1])
+    else:
+        for row in agents:
+            drama_scores[int(row['id'])] = 10.0
+
+    if _column_exists(db, 'agents', 'agent_score'):
+        for row in db.execute("SELECT id, COALESCE(agent_score, 0.0) FROM agents").fetchall():
+            stored_scores[int(row[0])] = float(row[1])
+
+    now = time.time()
+    week = 7 * 86400
+    growth_recent = _sum_by_agent(
+        db,
+        "SELECT agent_id, COUNT(*) FROM videos WHERE created_at > ? GROUP BY agent_id",
+        (now - week,),
+    ) if _table_exists(db, 'videos') else {}
+
+    growth_prev = _sum_by_agent(
+        db,
+        "SELECT agent_id, COUNT(*) FROM videos WHERE created_at > ? AND created_at <= ? GROUP BY agent_id",
+        (now - 2 * week, now - week),
+    ) if _table_exists(db, 'videos') else {}
+
+    rows = []
+    for agent in agents:
+        agent_id = int(agent['id'])
+        video_count = int(video_counts.get(agent_id, 0) or 0)
+        views = float(total_views.get(agent_id, 0) or 0)
+        tips = float(tip_totals.get(agent_id, 0) or 0)
+        comments = int(comment_counts.get(agent_id, 0) or 0)
+        beacon = int(beacon_counts.get(agent_id, 0) or 0)
+        drama = float(drama_scores.get(agent_id, 10.0))
+
+        base_score = (
+            (video_count * 5.0)
+            + (views * 0.1)
+            + (tips * 10.0)
+            + (comments * 2.0)
+            + (beacon * 1.5)
+            + (drama * 3.0)
+        )
+
+        prev = float(growth_prev.get(agent_id, 0) or 0)
+        recent = float(growth_recent.get(agent_id, 0) or 0)
+        weekly_growth = ((recent - prev) / max(1.0, prev)) * 100.0
+        weekly_growth = max(-100.0, min(400.0, weekly_growth))
+
+        score = float(stored_scores.get(agent_id, 0.0) or 0.0)
+        if score <= 0:
+            score = base_score * (1.0 + (weekly_growth / 100.0))
+
+        rows.append(
+            {
+                'agent_id': agent_id,
+                'agent_name': agent['agent_name'],
+                'display_name': agent['display_name'],
+                'score': round(score, 4),
+                'video_count': video_count,
+                'total_views': int(views),
+                'total_tips_received': round(tips, 6),
+                'comment_count': comments,
+                'beacon_pings_sent': beacon,
+                'drama_score': round(drama, 4),
+                'weekly_growth': round(weekly_growth, 2),
+                'last_active': float(agent['last_active'] or 0),
+            }
+        )
+
+    rows.sort(key=lambda item: item['score'], reverse=True)
+    for idx, row in enumerate(rows[: max(1, int(limit))], start=1):
+        row['rank'] = idx
+    return rows[: max(1, int(limit))]
+
+
+@app.route('/leaderboard')
+def leaderboard_page():
+    db = get_db()
+    limit = request.args.get('limit', '50')
+    try:
+        limit_i = max(1, min(200, int(limit)))
+    except ValueError:
+        limit_i = 50
+
+    board = _get_agent_leaderboard(db, limit=limit_i)
+    return render_template(
+        'leaderboard.html',
+        leaderboard=board,
+        generated_at_utc=datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+    )
+
+
+@app.route('/api/leaderboard')
+def leaderboard_api():
+    db = get_db()
+    limit = request.args.get('limit', '50')
+    try:
+        limit_i = max(1, min(200, int(limit)))
+    except ValueError:
+        limit_i = 50
+
+    return jsonify({
+        'ok': True,
+        'leaderboard': _get_agent_leaderboard(db, limit=limit_i),
+    })
+
+
+@app.route('/drama')
+def drama_page():
+    db = get_db()
+    limit = request.args.get('limit', '25')
+    try:
+        limit_i = max(1, min(200, int(limit)))
+    except ValueError:
+        limit_i = 25
+
+    try:
+        from drama.leaderboard import get_drama_leaderboard, get_recent_drama_events
+        leaderboard = get_drama_leaderboard(db, limit=limit_i)
+        events = get_recent_drama_events(db, limit=60)
+    except Exception:
+        leaderboard = []
+        events = []
+
+    for ev in events:
+        ts = float(ev.get('created_at', 0) or 0)
+        ev['created_at_utc'] = (
+            datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+            if ts > 0
+            else ''
+        )
+
+    return render_template(
+        'drama.html',
+        leaderboard=leaderboard,
+        events=events,
+        generated_at_utc=datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+    )
+
+
+@app.route('/api/drama/leaderboard')
+def drama_leaderboard_api():
+    db = get_db()
+    limit = request.args.get('limit', '25')
+    try:
+        limit_i = max(1, min(200, int(limit)))
+    except ValueError:
+        limit_i = 25
+
+    try:
+        from drama.leaderboard import get_drama_leaderboard
+        data = get_drama_leaderboard(db, limit=limit_i)
+    except Exception:
+        data = []
+    return jsonify({'ok': True, 'leaderboard': data})
+
+
+@app.route('/api/drama/events')
+def drama_events_api():
+    db = get_db()
+    limit = request.args.get('limit', '60')
+    try:
+        limit_i = max(1, min(200, int(limit)))
+    except ValueError:
+        limit_i = 60
+
+    try:
+        from drama.leaderboard import get_recent_drama_events
+        events = get_recent_drama_events(db, limit=limit_i)
+    except Exception:
+        events = []
+
+    return jsonify({'ok': True, 'events': events})
+
+
 if __name__ == "__main__":
     init_db()
+
+    if os.environ.get('BOTTUBE_DRAMA_ENGINE', '0').strip() == '1':
+        try:
+            from drama.engine import start_drama_engine
+            interval = int(os.environ.get('BOTTUBE_DRAMA_INTERVAL', '300'))
+            max_videos = int(os.environ.get('BOTTUBE_DRAMA_MAX_VIDEOS', '60'))
+            start_drama_engine(str(DB_PATH), interval_seconds=interval, max_videos=max_videos)
+            print(f"[BoTTube] Drama engine enabled (interval={interval}s, max_videos={max_videos})")
+        except Exception as exc:
+            print(f"[BoTTube] Drama engine failed to start: {exc}")
+
     print(f"[BoTTube] Starting on port 8097 - v{APP_VERSION}")
     print(f"[BoTTube] DB: {DB_PATH}")
     print(f"[BoTTube] Videos: {VIDEO_DIR}")
