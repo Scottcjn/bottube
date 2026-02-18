@@ -7087,34 +7087,49 @@ def dashboard_analytics_api():
     tips_map = {r["day"]: float(r["amt"] or 0.0) for r in tips_rows}
 
     # Repeat viewer rate (% of unique viewers on a day who were seen before)
-    rv_rows = db.execute(
-        """SELECT vw.created_at, vw.ip_address
-           FROM views vw
-           JOIN videos v ON v.video_id = vw.video_id
-           WHERE v.agent_id = ?
-             AND vw.created_at >= ?
-             AND vw.ip_address IS NOT NULL
-             AND vw.ip_address != ''
-           ORDER BY vw.created_at ASC""",
-        (uid, since),
-    ).fetchall()
-
-    seen_before = set()
-    day_ips = {}
-    for r in rv_rows:
-        day = datetime.utcfromtimestamp(float(r["created_at"])) .strftime("%Y-%m-%d")
-        ip = r["ip_address"]
-        day_ips.setdefault(day, set()).add(ip)
-
+    #
+    # RED-TEAM HARDENING:
+    # - Do not pull all IPs into Python (privacy + memory DoS risk).
+    # - Compute daily unique + repeat unique counts in SQLite.
     repeat_rate = {}
-    for day in sorted(day_ips.keys()):
-        ips = day_ips[day]
-        if not ips:
-            repeat_rate[day] = 0.0
-        else:
-            repeat = len(ips & seen_before)
-            repeat_rate[day] = round((repeat / len(ips)) * 100.0, 2)
-        seen_before.update(ips)
+    try:
+        rr_rows = db.execute(
+            """
+            WITH v AS (
+              SELECT
+                strftime('%Y-%m-%d', datetime(vw.created_at, 'unixepoch')) AS day,
+                vw.ip_address AS ip
+              FROM views vw
+              JOIN videos vid ON vid.video_id = vw.video_id
+              WHERE vid.agent_id = ?
+                AND vw.created_at >= ?
+                AND vw.ip_address IS NOT NULL
+                AND vw.ip_address != ''
+            ),
+            first_seen AS (
+              SELECT ip, MIN(day) AS first_day
+              FROM v
+              GROUP BY ip
+            )
+            SELECT
+              v.day AS day,
+              COUNT(DISTINCT v.ip) AS uniq_viewers,
+              COUNT(DISTINCT CASE WHEN first_seen.first_day < v.day THEN v.ip END) AS repeat_viewers
+            FROM v
+            JOIN first_seen ON first_seen.ip = v.ip
+            GROUP BY v.day
+            """,
+            (uid, since),
+        ).fetchall()
+        for r in rr_rows:
+            uniq = int(r["uniq_viewers"] or 0)
+            rep = int(r["repeat_viewers"] or 0)
+            if uniq <= 0:
+                repeat_rate[str(r["day"])] = 0.0
+            else:
+                repeat_rate[str(r["day"])] = round((rep / uniq) * 100.0, 2)
+    except Exception:
+        repeat_rate = {}
 
     # Top performing videos by weighted score
     top_rows = db.execute(
@@ -7186,11 +7201,17 @@ def dashboard_export_csv():
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["video_id", "title", "category", "created_at", "views", "likes", "dislikes", "rtc_tips"])
+    def _csv_safe_cell(v):
+        # Prevent formula injection if opened in Excel/Sheets.
+        if isinstance(v, str) and v and v[0] in ("=", "+", "-", "@"): 
+            return "'" + v
+        return v
+
     for r in rows:
         w.writerow([
-            r["video_id"],
-            r["title"],
-            r["category"],
+            _csv_safe_cell(r["video_id"]),
+            _csv_safe_cell(r["title"]),
+            _csv_safe_cell(r["category"]),
             datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
             int(r["views"] or 0),
             int(r["likes"] or 0),
