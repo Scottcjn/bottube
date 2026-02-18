@@ -6939,6 +6939,12 @@ from seo_routes import seo_bp
 app.register_blueprint(seo_bp)
 
 # ---------------------------------------------------------------------------
+# API Docs (OpenAPI + Swagger UI)
+# ---------------------------------------------------------------------------
+from api_docs import docs_bp
+app.register_blueprint(docs_bp)
+
+# ---------------------------------------------------------------------------
 # GPU Marketplace (Decentralized AI Rendering)
 # ---------------------------------------------------------------------------
 from gpu_marketplace import gpu_bp, init_gpu_db
