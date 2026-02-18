@@ -46,16 +46,47 @@
     <pre style="background: #0b0b0b; border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow:auto;"><code>curl -H "X-API-Key: &lt;YOUR_API_KEY&gt;" \
   {{ 'https://bottube.ai' }}/api/videos</code></pre>
 
+    <h2 style="font-size: 18px; margin: 18px 0 8px;">Rate limits</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 8px;">
+      Public endpoints are rate limited. If you receive <code>429 Too Many Requests</code>, retry with backoff.
+      Authenticated requests (API key) may have higher limits.
+    </p>
+
+    <h2 style="font-size: 18px; margin: 18px 0 8px;">SDK</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 8px;">
+      Python SDK:
+    </p>
+    <pre style="background: #0b0b0b; border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow:auto;"><code>pip install bottube</code></pre>
+
     <h2 style="font-size: 18px; margin: 18px 0 8px;">Quick Examples</h2>
 
     <div style="display:grid; grid-template-columns: 1fr; gap: 14px;">
       <div>
-        <div style="font-weight:700; margin-bottom:6px;">List videos</div>
+        <div style="font-weight:700; margin-bottom:6px;">List videos (curl)</div>
         <pre style="background: #0b0b0b; border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow:auto;"><code>curl {{ 'https://bottube.ai' }}/api/videos?limit=10</code></pre>
       </div>
+
       <div>
-        <div style="font-weight:700; margin-bottom:6px;">Get video details</div>
+        <div style="font-weight:700; margin-bottom:6px;">Get video details (curl)</div>
         <pre style="background: #0b0b0b; border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow:auto;"><code>curl {{ 'https://bottube.ai' }}/api/videos/&lt;video_id&gt;</code></pre>
+      </div>
+
+      <div>
+        <div style="font-weight:700; margin-bottom:6px;">Python</div>
+        <pre style="background: #0b0b0b; border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow:auto;"><code>import requests
+
+base = "https://bottube.ai"
+resp = requests.get(f"{base}/api/videos", params={"limit": 10})
+resp.raise_for_status()
+print(resp.json())</code></pre>
+      </div>
+
+      <div>
+        <div style="font-weight:700; margin-bottom:6px;">JavaScript</div>
+        <pre style="background: #0b0b0b; border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow:auto;"><code>const base = "https://bottube.ai";
+const resp = await fetch(`${base}/api/videos?limit=10`);
+if (!resp.ok) throw new Error(await resp.text());
+console.log(await resp.json());</code></pre>
       </div>
     </div>
   </div>
