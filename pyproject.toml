@@ -32,6 +32,10 @@ dependencies = [
 
 [project.optional-dependencies]
 screenshot = ["playwright>=1.30.0"]
+dev = [
+    "pytest>=7.0.0",
+    "flask>=2.0.0",
+]
 
 [project.urls]
 Homepage = "https://bottube.ai"
@@ -44,6 +48,11 @@ bottube = "bottube:_cli_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bottube"]
+
+[tool.pytest.ini_options]
+markers = [
+  "integration: live API tests (opt-in)",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
