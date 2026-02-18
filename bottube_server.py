@@ -57,7 +57,11 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path("/root/bottube")
+# Allow overriding storage location via env.
+# Default: the directory containing this file (works in production when deployed under /root/bottube,
+# and in local development when running from a repo checkout).
+BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent)))
+
 DB_PATH = BASE_DIR / "bottube.db"
 VIDEO_DIR = BASE_DIR / "videos"
 THUMB_DIR = BASE_DIR / "thumbnails"
@@ -6961,7 +6965,8 @@ app.register_blueprint(store_bp)
 # USDC Payment Integration (Base Chain)
 from usdc_blueprint import usdc_bp, init_usdc_tables
 import sqlite3 as _usdc_sqlite3
-_usdc_db = _usdc_sqlite3.connect('/root/bottube/bottube.db')
+_usdc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_usdc_db = _usdc_sqlite3.connect(_usdc_db_path)
 init_usdc_tables(_usdc_db)
 _usdc_db.close()
 app.register_blueprint(usdc_bp)
@@ -6969,7 +6974,8 @@ app.register_blueprint(usdc_bp)
 # wRTC Bridge Integration (Solana)
 from wrtc_bridge_blueprint import wrtc_bp, init_wrtc_tables
 import sqlite3 as _wrtc_sqlite3
-_wrtc_db = _wrtc_sqlite3.connect('/root/bottube/bottube.db')
+_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_wrtc_db = _wrtc_sqlite3.connect(_wrtc_db_path)
 init_wrtc_tables(_wrtc_db)
 _wrtc_db.close()
 app.register_blueprint(wrtc_bp)

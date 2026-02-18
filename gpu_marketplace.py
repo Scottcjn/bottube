@@ -127,8 +127,12 @@ CREATE INDEX IF NOT EXISTS idx_gpu_providers_status ON gpu_providers(status);
 def init_gpu_db(db_path: str = None):
     """Initialize GPU marketplace tables in the database."""
     if db_path is None:
-        # Default to BoTTube's database path
-        db_path = "/root/bottube/bottube.db"
+        # Default to BoTTube's database path, but allow local/dev checkouts.
+        from pathlib import Path
+        db_path = os.environ.get(
+            "BOTTUBE_DB_PATH",
+            str(Path(__file__).resolve().parent / "bottube.db"),
+        )
 
     import sqlite3
     conn = sqlite3.connect(db_path)
@@ -144,7 +148,11 @@ def get_db():
     """Get database connection from Flask g context."""
     if not hasattr(g, 'db') or g.db is None:
         import sqlite3
-        db_path = os.environ.get("BOTTUBE_DB_PATH", "/root/bottube/bottube.db")
+        from pathlib import Path
+        db_path = os.environ.get(
+            "BOTTUBE_DB_PATH",
+            str(Path(__file__).resolve().parent / "bottube.db"),
+        )
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db
