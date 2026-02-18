@@ -5,11 +5,48 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from bottube.client import BoTTubeClient, DEFAULT_BASE_URL
 
 
+CONFIG_DIR = Path.home() / ".bottube"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+
+
+def _load_config() -> Dict[str, Any]:
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_config(cfg: Dict[str, Any]) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _resolve_api_key(cli_key: str, cfg: Dict[str, Any]) -> str:
+    if cli_key:
+        return cli_key
+    env_key = os.environ.get("BOTTUBE_API_KEY", "")
+    if env_key:
+        return env_key
+    return str(cfg.get("api_key") or "")
+
+
+def _resolve_base_url(cli_url: str, cfg: Dict[str, Any]) -> str:
+    if cli_url and cli_url != DEFAULT_BASE_URL:
+        return cli_url
+    return str(cfg.get("base_url") or cli_url or DEFAULT_BASE_URL)
+
+
 def main():
+    cfg = _load_config()
+
     parser = argparse.ArgumentParser(
         prog="bottube",
         description="BoTTube — the video platform for AI agents",
@@ -17,9 +54,10 @@ def main():
     parser.add_argument("--url", default=DEFAULT_BASE_URL, help="BoTTube base URL")
     parser.add_argument(
         "--key",
-        default=os.environ.get("BOTTUBE_API_KEY", ""),
-        help="API key (or set BOTTUBE_API_KEY env var)",
+        default="",
+        help="API key (or set BOTTUBE_API_KEY env var, or run `bottube login`) ",
     )
+    parser.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     parser.add_argument("--no-verify", action="store_true", help="Skip SSL verification")
     parser.add_argument(
         "--version", action="store_true", help="Show version and exit"
@@ -27,8 +65,19 @@ def main():
 
     sub = parser.add_subparsers(dest="command")
 
+    # Auth
+    sub.add_parser("login", help="Save API key to ~/.bottube/config.json")
+
     # Health
     sub.add_parser("health", help="Check server health")
+
+    # Videos
+    vids = sub.add_parser("videos", help="List recent videos")
+    vids.add_argument("--agent", default="", help="Filter by agent")
+    vids.add_argument("--category", default="", help="Filter by category")
+    vids.add_argument("--page", type=int, default=1, help="Page number")
+    vids.add_argument("--per-page", type=int, default=20, help="Page size")
+    vids.add_argument("--json", action="store_true", help="Machine-readable JSON output")
 
     # Register
     reg = sub.add_parser("register", help="Register a new agent")
@@ -39,10 +88,13 @@ def main():
     # Upload
     up = sub.add_parser("upload", help="Upload a video")
     up.add_argument("file", help="Video file path")
+    up.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     up.add_argument("--title", default="")
     up.add_argument("--description", default="")
     up.add_argument("--tags", default="")
     up.add_argument("--scene", default="", help="Scene description for text-only bots")
+    up.add_argument("--category", default="", help="Category slug")
+    up.add_argument("--dry-run", action="store_true", help="Preview without uploading")
 
     # Describe (text-only watch)
     desc = sub.add_parser("describe", help="Get text description of a video")
@@ -154,6 +206,21 @@ def main():
 
     args = parser.parse_args()
 
+    # Allow --json to be specified after the subcommand too (e.g. `bottube upload ... --json`).
+    # Subcommands that define --json will set args.json; global --json also sets args.json.
+
+    base_url = _resolve_base_url(args.url, cfg)
+    api_key = _resolve_api_key(args.key, cfg)
+
+    def out(obj: Any) -> None:
+        if args.json:
+            print(json.dumps(obj, indent=2, ensure_ascii=False))
+        else:
+            if isinstance(obj, (dict, list)):
+                print(json.dumps(obj, indent=2, ensure_ascii=False))
+            else:
+                print(obj)
+
     if args.version:
         from bottube import __version__
         print(f"bottube {__version__}")
@@ -163,14 +230,45 @@ def main():
         parser.print_help()
         return
 
+    if args.command == "login":
+        # prompt for key if not provided
+        key = api_key
+        if not key:
+            key = input("BoTTube API key: ").strip()
+        if not key:
+            print("No API key provided.", file=sys.stderr)
+            sys.exit(2)
+        cfg["api_key"] = key
+        cfg["base_url"] = base_url
+        _save_config(cfg)
+        print(f"Saved credentials to {CONFIG_PATH}")
+        return
+
     client = BoTTubeClient(
-        base_url=args.url,
-        api_key=args.key,
+        base_url=base_url,
+        api_key=api_key,
         verify_ssl=not args.no_verify,
     )
 
     if args.command == "health":
-        print(json.dumps(client.health(), indent=2))
+        out(client.health())
+
+    elif args.command == "videos":
+        result = client.list_videos(
+            page=args.page,
+            per_page=args.per_page,
+            agent=args.agent,
+            category=args.category,
+        )
+        if args.json:
+            out(result)
+        else:
+            videos = result.get("videos") or []
+            for v in videos:
+                out(
+                    f"[{v.get('video_id')}] {v.get('title','')} "
+                    f"by @{v.get('agent_name','')} ({v.get('views',0)} views, {v.get('likes',0)} likes)"
+                )
 
     elif args.command == "register":
         key = client.register(
@@ -181,6 +279,23 @@ def main():
 
     elif args.command == "upload":
         tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+        if args.dry_run:
+            preview = {
+                "file": args.file,
+                "title": args.title,
+                "description": args.description,
+                "tags": tags,
+                "scene_description": args.scene,
+                "category": args.category,
+                "url": base_url,
+            }
+            out({"dry_run": True, "upload": preview})
+            return
+
+        # NOTE: server-side category support is still evolving; pass via tags/description for now.
+        if args.category and args.category not in tags:
+            tags = tags + [args.category]
+
         result = client.upload(
             args.file,
             title=args.title,
@@ -188,7 +303,7 @@ def main():
             tags=tags,
             scene_description=args.scene,
         )
-        print(json.dumps(result, indent=2))
+        out(result)
 
     elif args.command == "describe":
         result = client.describe(args.video_id)

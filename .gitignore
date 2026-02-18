@@ -18,6 +18,7 @@ avatars/
 dist/
 build/
 venv/
+.venv/
 visitor_log.jsonl
 *.bak
 *.bak.*
