@@ -52,6 +52,11 @@ try:
 except ImportError:
     BoTTubeClient = None
 
+try:
+    from providers.router import generate_video as generate_video_routed
+except Exception:
+    generate_video_routed = None
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -62,6 +67,12 @@ LOG_LEVEL = os.environ.get("BOTTUBE_LOG_LEVEL", "INFO")
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "9200"))
 STATE_DB_PATH = os.environ.get("BOTTUBE_STATE_DB",
     str(Path.home() / "bottube-agent" / "state.db"))
+VIDEO_PROVIDER = os.environ.get("BOTTUBE_VIDEO_PROVIDER", "comfyui").strip().lower()
+VIDEO_PROVIDER_FALLBACK = os.environ.get("BOTTUBE_VIDEO_PROVIDER_FALLBACK", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 # LLM backends — tried in order, deduplicated by (url, model)
 _LLM_BACKENDS_RAW = [
@@ -1724,6 +1735,49 @@ def run_smart_cycle(bot_name, client, personality):
 # ComfyUI Video Generation
 # ---------------------------------------------------------------------------
 
+def generate_video_provider(prompt_text, bot_name):
+    """Generate a video via provider router when configured."""
+    if VIDEO_PROVIDER in {"", "comfyui", "ltx", "ltx2", "ltx-2"}:
+        return None
+
+    if generate_video_routed is None:
+        log.warning("[%s] Provider router unavailable; falling back to ComfyUI", bot_name)
+        return None
+
+    duration = int(os.environ.get("BOTTUBE_PROVIDER_DURATION", "5"))
+    output_path = f"/tmp/bottube_{bot_name}_{VIDEO_PROVIDER}_{int(time.time())}.mp4"
+
+    try:
+        generation = generate_video_routed(
+            prompt=prompt_text,
+            prefer=VIDEO_PROVIDER,
+            fallback=VIDEO_PROVIDER_FALLBACK,
+            duration=duration,
+            output_path=output_path,
+            # Grok settings
+            grok_model=os.environ.get("GROK_MODEL", "grok-imagine-video"),
+            aspect_ratio=os.environ.get("GROK_ASPECT_RATIO", "1:1"),
+            resolution=os.environ.get("GROK_RESOLUTION", "720p"),
+            # Runway settings
+            runway_model=os.environ.get("RUNWAY_MODEL", "gen4.5"),
+            ratio=os.environ.get("RUNWAY_RATIO", "1280:720"),
+            audio=os.environ.get("RUNWAY_AUDIO", "0").strip().lower() in {"1", "true", "yes"},
+            prompt_image=os.environ.get("RUNWAY_IMAGE", "") or None,
+        )
+
+        local_path = str(generation.output_path)
+        log.info(
+            "[%s] Provider generation succeeded via %s (%s)",
+            bot_name,
+            generation.provider,
+            local_path,
+        )
+        return local_path
+    except Exception as e:
+        log.warning("[%s] Provider generation failed (%s): %s", bot_name, VIDEO_PROVIDER, e)
+        return None
+
+
 def _comfyui_available():
     """Quick health check on ComfyUI."""
     try:
@@ -2929,8 +2983,10 @@ class BoTTubeAgent:
             prompt = random.choice(brain.video_prompts)
             log.info("[%s] Generating video: %s", bot_name, prompt[:60])
 
-            # Try ComfyUI first, fall back to ffmpeg text video
-            video_path = generate_video_comfyui(prompt, bot_name)
+            # Try provider router first (if enabled), then ComfyUI, then ffmpeg text fallback.
+            video_path = generate_video_provider(prompt, bot_name)
+            if not video_path:
+                video_path = generate_video_comfyui(prompt, bot_name)
             if not video_path:
                 # Fallback: generate a text-based video using ffmpeg
                 titles = VIDEO_TITLES.get(bot_name, VIDEO_TITLES.get("sophia-elya", [("Video #{n}", "A video.")]))
@@ -2942,7 +2998,7 @@ class BoTTubeAgent:
                 text_lines = [title, prompt[:80], f"by {brain.display}"]
                 video_path = generate_text_video(text_lines)
                 if not video_path:
-                    log.warning("[%s] Both ComfyUI and ffmpeg failed", bot_name)
+                    log.warning("[%s] Provider, ComfyUI, and ffmpeg fallbacks all failed", bot_name)
                     return False
 
             # Upload
