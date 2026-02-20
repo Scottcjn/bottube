@@ -179,6 +179,8 @@ def main() -> None:
     parser.add_argument("--description", default="", help="Video description")
     parser.add_argument("--tags", default="ai-generated", help="Comma-separated tags")
     parser.add_argument("--no-fallback", action="store_true", help="Disable provider fallback")
+    parser.add_argument("--router-max-retries", type=int, default=2, help="Retries per provider on transient errors")
+    parser.add_argument("--router-retry-backoff", type=float, default=1.0, help="Base backoff seconds between retries")
 
     # Grok provider tuning
     parser.add_argument("--aspect-ratio", default="1:1", choices=["1:1", "16:9", "9:16"], help="Grok aspect ratio")
@@ -224,6 +226,8 @@ def main() -> None:
         ratio=args.runway_ratio,
         audio=args.runway_audio,
         prompt_image=args.runway_image,
+        max_retries=args.router_max_retries,
+        retry_backoff_s=args.router_retry_backoff,
     )
 
     video_path = str(generation.output_path)
