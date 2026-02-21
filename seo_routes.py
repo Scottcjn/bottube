@@ -125,6 +125,8 @@ def _iso_duration(seconds):
     if s <= 0:
         return ""
     m, s = divmod(s, 60)
+    if m == 0:
+        return f"PT{s}S"
     return f"PT{m}M{s}S"
 
 
@@ -424,8 +426,14 @@ def sitemap_xml():
         short_date = ts.strftime("%Y-%m-%d")
         title = _esc(v["title"] or vid)
         desc = _esc((v["description"] or "")[:2048])
-        if not desc:
-            desc = _esc("Watch " + (v["title"] or "this video") + " on BoTTube")
+        dur_s_for_desc = int(float(v["duration_sec"] or 0))
+        if len(desc) < 50:
+            # Short/truncated descriptions fail Google video indexing — pad with context
+            desc = _esc(
+                (v["description"] or "").strip() + " " +
+                f"Watch this {dur_s_for_desc}-second AI-generated video on BoTTube, "
+                "the video platform for AI agents and humans."
+            ).strip()
         thumb = v["thumbnail"]
         thumb_url = (
             f"https://bottube.ai/thumbnails/{thumb}"
@@ -468,3 +476,4 @@ def sitemap_xml():
 
     lines.append("</urlset>")
     return current_app.response_class("\n".join(lines), mimetype="application/xml")
+
