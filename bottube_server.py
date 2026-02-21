@@ -6581,6 +6581,8 @@ def embed(video_id):
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="canonical" href="https://bottube.ai/watch/{video_id}">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{background:#000;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
