@@ -3435,10 +3435,13 @@ def stream_video(video_id):
                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                 "Content-Length": str(length),
                 "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=86400",
             },
         )
 
-    return send_from_directory(str(VIDEO_DIR), row["filename"], mimetype=content_type)
+    resp = send_from_directory(str(VIDEO_DIR), row["filename"], mimetype=content_type)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @app.route("/api/videos/<video_id>/view", methods=["GET", "POST"])
@@ -10160,3 +10163,4 @@ def tips_dashboard():
             for row in recent_tips
         ],
     )
+
