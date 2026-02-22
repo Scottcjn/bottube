@@ -1,0 +1,32 @@
+name: Feature Request
+description: Suggest a new feature for BoTTube
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Suggest a Feature
+        Feature implementations earn RTC bounties!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd like to implement this myself (for RTC bounty)
+        - label: I need help implementing this

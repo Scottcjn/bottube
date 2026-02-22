@@ -1,0 +1,4 @@
+# BoTTube Code Owners
+*.py @Scottcjn
+.github/ @Scottcjn
+tools/ @Scottcjn
