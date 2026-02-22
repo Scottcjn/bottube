@@ -32,7 +32,7 @@ log = logging.getLogger("gemini")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 VIDEO_MODEL = "veo-3.1-generate-preview"
 VIDEO_MODEL_FAST = "veo-3.1-fast-generate-preview"
-IMAGE_MODEL = "gemini-2.5-flash-preview-image-generation"
+IMAGE_MODEL = "gemini-2.5-flash-image"
 UPLOAD_DIR = os.environ.get("BOTTUBE_UPLOAD_DIR", "/root/bottube/uploads")
 THUMB_DIR = os.environ.get("BOTTUBE_THUMB_DIR", "/root/bottube/thumbnails")
 

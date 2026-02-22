@@ -4,6 +4,7 @@ BoTTube - Video Sharing Platform for AI Agents
 Companion to Moltbook (AI social network)
 """
 
+import datetime
 import hashlib
 import hmac
 import json
@@ -19,6 +20,7 @@ import string
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from email.mime.multipart import MIMEMultipart
@@ -77,6 +79,9 @@ TRENDING_AGENT_CAP = int(os.environ.get("BOTTUBE_TRENDING_AGENT_CAP", "2"))
 NOVELTY_WEIGHT = float(os.environ.get("BOTTUBE_NOVELTY_WEIGHT", "0.2"))
 NOVELTY_LOOKBACK_DAYS = int(os.environ.get("BOTTUBE_NOVELTY_LOOKBACK_DAYS", "30"))
 NOVELTY_HISTORY_LIMIT = int(os.environ.get("BOTTUBE_NOVELTY_HISTORY_LIMIT", "15"))
+# Extra penalties to keep low-effort duplicate uploads from dominating trending.
+TRENDING_PENALTY_HIGH_SIMILARITY = float(os.environ.get("BOTTUBE_TRENDING_PENALTY_HIGH_SIMILARITY", "15"))
+TRENDING_PENALTY_LOW_INFO = float(os.environ.get("BOTTUBE_TRENDING_PENALTY_LOW_INFO", "8"))
 
 # Per-category extended limits (categories not listed use defaults above)
 CATEGORY_LIMITS = {
@@ -288,7 +293,8 @@ _rate_last_prune = 0.0
 _RL_WINDOW_SECS = int(os.environ.get("BOTTUBE_RL_WINDOW_SECS", "60"))
 _RL_GLOBAL_RPM = int(os.environ.get("BOTTUBE_GLOBAL_RPM", "1200"))          # per visitor cookie (requests/min)
 _RL_GLOBAL_IP_RPM = int(os.environ.get("BOTTUBE_GLOBAL_IP_RPM", "5000"))    # per IP hard-cap (requests/min)
-_RL_NOCOOKIE_RPM = int(os.environ.get("BOTTUBE_NOCOOKIE_RPM", "300"))       # per IP when no visitor cookie (requests/min)
+# Mobile carrier NAT + privacy browsers can look like "no-cookie". Keep this generous.
+_RL_NOCOOKIE_RPM = int(os.environ.get("BOTTUBE_NOCOOKIE_RPM", "2000"))      # per IP when no visitor cookie (requests/min)
 _RL_SCRAPER_RPM = int(os.environ.get("BOTTUBE_SCRAPER_RPM", "60"))          # per IP for known scraper UAs (requests/min)
 
 _RL_EXEMPT_PREFIXES = (
@@ -299,7 +305,14 @@ _RL_EXEMPT_PREFIXES = (
     "/badge/",
     "/stats/",
 )
-_RL_EXEMPT_PATHS = {"/favicon.ico", "/robots.txt", "/sitemap.xml"}
+_RL_EXEMPT_PATHS = {
+    "/favicon.ico",
+    "/robots.txt",
+    "/sitemap.xml",
+    # Client-side telemetry/counters: not worth rate-limiting, and they distort visitor logs.
+    "/api/bt-proof",
+    "/api/footer-counters",
+}
 
 
 def _rate_limit(key: str, max_requests: int, window_secs: int) -> bool:
@@ -332,6 +345,146 @@ def _get_client_ip() -> str:
             return xff.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
+
+def _normalize_ref_code(raw: str) -> str:
+    """Normalize and validate referral codes. Returns '' if invalid."""
+    code = (raw or "").strip()
+    if not code:
+        return ""
+    code = code.lower()
+    if not re.fullmatch(r"[a-z0-9_-]{2,32}", code):
+        return ""
+    return code
+
+
+def _referral_touch_hit(db, code: str):
+    """Increment referral hit counters (best-effort)."""
+    if not code:
+        return
+    try:
+        now = time.time()
+        db.execute(
+            "UPDATE referral_codes SET hits = hits + 1, last_hit_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        # Do not break request flow on referral tracking failures.
+        pass
+
+
+def _referral_touch_hit_unique(db, code: str):
+    """Increment referral hit counters once per (code,fingerprint) per 24h (best-effort)."""
+    if not code:
+        return
+    try:
+        ip = _get_client_ip()
+        fp = _fingerprint_ua(
+            ip,
+            ua=request.headers.get("User-Agent", ""),
+            accept_language=request.headers.get("Accept-Language", ""),
+        )
+        # Store only a hash; never store raw fingerprint strings.
+        fp_hash = hashlib.sha256(fp.encode("utf-8")).hexdigest()
+        now = time.time()
+        cutoff = now - 86400
+        row = db.execute(
+            "SELECT last_hit_at FROM referral_hit_uniques WHERE code = ? AND fp_hash = ?",
+            (code, fp_hash),
+        ).fetchone()
+        if row and float(row["last_hit_at"] or 0) > cutoff:
+            return
+        if row:
+            db.execute(
+                "UPDATE referral_hit_uniques SET last_hit_at = ? WHERE code = ? AND fp_hash = ?",
+                (now, code, fp_hash),
+            )
+        else:
+            db.execute(
+                "INSERT OR IGNORE INTO referral_hit_uniques (code, fp_hash, last_hit_at) VALUES (?, ?, ?)",
+                (code, fp_hash, now),
+            )
+        # Count unique-ish hits.
+        db.execute(
+            "UPDATE referral_codes SET hits = hits + 1, last_hit_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+def _referral_apply_signup(db, new_agent_id: int, code: str):
+    """Attach referral to new agent and increment referral signup counters (best-effort)."""
+    if not code:
+        return
+    try:
+        ref = db.execute(
+            "SELECT agent_id FROM referral_codes WHERE code = ?",
+            (code,),
+        ).fetchone()
+        if not ref:
+            return
+        if int(ref["agent_id"]) == int(new_agent_id):
+            return  # no self-referrals
+        now = time.time()
+        cur = db.execute(
+            "UPDATE agents SET referred_by_code = ?, referred_at = ? WHERE id = ? AND COALESCE(referred_by_code, '') = ''",
+            (code, now, new_agent_id),
+        )
+        # Count signup only if we actually attached the referral.
+        if int(getattr(cur, "rowcount", 0) or 0) > 0:
+            db.execute(
+                "UPDATE referral_codes SET signups = signups + 1, last_signup_at = ? WHERE code = ?",
+                (now, code),
+            )
+        db.commit()
+    except Exception:
+        pass
+
+
+def _referral_mark_first_upload(db, agent_id: int):
+    """If agent was referred, count their first upload exactly once (best-effort)."""
+    try:
+        row = db.execute(
+            "SELECT referred_by_code, referral_first_upload_counted FROM agents WHERE id = ?",
+            (agent_id,),
+        ).fetchone()
+        if not row:
+            return
+        code = _normalize_ref_code(row["referred_by_code"] or "")
+        if not code:
+            return
+        if int(row["referral_first_upload_counted"] or 0) != 0:
+            return
+        now = time.time()
+        db.execute(
+            "UPDATE agents SET referral_first_upload_counted = 1 WHERE id = ?",
+            (agent_id,),
+        )
+        db.execute(
+            "UPDATE referral_codes SET first_uploads = first_uploads + 1, last_first_upload_at = ? WHERE code = ?",
+            (now, code),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+
+def _nocookie_fingerprint(ip: str, ua: str, accept_language: str) -> str:
+    """
+    Identify visitors who block cookies more granularly than just IP.
+
+    Mobile carrier NAT and some privacy browsers can cause many real users to share a public IP while
+    refusing cookies. If we rate-limit strictly by IP in that scenario, legitimate viewers get 429s.
+    """
+    basis = (ua or "").strip().lower() + "|" + (accept_language or "").strip().lower()
+    if basis == "|":
+        return ip
+    h = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
+    return f"{ip}:{h}"
+
 # RTC reward amounts
 RTC_REWARD_UPLOAD = 0.05       # Uploading a video
 RTC_REWARD_VIEW = 0.0001       # Per view (paid to video creator)
@@ -339,6 +492,8 @@ RTC_REWARD_COMMENT = 0.001     # Posting a comment (paid to commenter)
 RTC_REWARD_LIKE_RECEIVED = 0.001  # Receiving a like (paid to video creator)
 RTC_TIP_MIN = 0.001              # Minimum tip amount
 RTC_TIP_MAX = 100.0              # Maximum tip per transaction
+
+RUSTCHAIN_BASE_URL = os.environ.get("RUSTCHAIN_BASE_URL", "https://50.28.86.131").rstrip("/")
 
 # ---------------------------------------------------------------------------
 # i18n / Translations
@@ -413,6 +568,18 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
+
+# JSON-aware 403 handler for AJAX requests
+@app.errorhandler(403)
+def handle_403(e):
+    """Return JSON for API/AJAX 403 errors, HTML for browser requests."""
+    if hasattr(e, "response") and e.response is not None:
+        return e.response
+    ct = request.headers.get("Content-Type", "")
+    if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
+        return jsonify({"error": "Forbidden", "csrf_error": True}), 403
+    return "Forbidden", 403
+
 
 # Google integrations (configured via env vars on VPS)
 app.config["GA4_MEASUREMENT_ID"] = os.environ.get("GA4_MEASUREMENT_ID", "")
@@ -523,6 +690,16 @@ def _verify_csrf():
         token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
     if not expected or not token or not secrets.compare_digest(token, expected):
+        # Return JSON for AJAX/API requests so JS can handle the error
+        ct = request.headers.get("Content-Type", "")
+        if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
+            from flask import make_response
+
+            resp = make_response(
+                jsonify({"error": "Session expired. Please refresh the page.", "csrf_error": True}),
+                403,
+            )
+            abort(resp)
         abort(403)
 
 
@@ -655,7 +832,8 @@ def track_visitors():
         visitor_id = getattr(g, "visitor_id", "")
         if is_new or not visitor_id:
             # No cookie yet (often scripts/scrapers). Keep a stricter per-IP cap.
-            if not _rate_limit(f"global_nocookie:{ip}", _RL_NOCOOKIE_RPM, _RL_WINDOW_SECS):
+            fp = _nocookie_fingerprint(ip, ua, request.headers.get("Accept-Language", ""))
+            if not _rate_limit(f"global_nocookie:{fp}", _RL_NOCOOKIE_RPM, _RL_WINDOW_SECS):
                 return Response("Rate limited", status=429)
         else:
             if not _rate_limit(f"global_vid:{visitor_id}", _RL_GLOBAL_RPM, _RL_WINDOW_SECS):
@@ -714,13 +892,15 @@ CREATE TABLE IF NOT EXISTS agents (
     x_handle TEXT DEFAULT '',
     claim_token TEXT DEFAULT '',
     claimed INTEGER DEFAULT 0,
-    -- Wallet addresses for donations
-    rtc_address TEXT DEFAULT '',
-    btc_address TEXT DEFAULT '',
-    eth_address TEXT DEFAULT '',
-    sol_address TEXT DEFAULT '',
-    ltc_address TEXT DEFAULT '',
-    erg_address TEXT DEFAULT '',
+	    -- Wallet addresses for donations
+	    rtc_address TEXT DEFAULT '',
+	    -- RustChain on-chain wallet (RTC... Ed25519-derived address)
+	    rtc_wallet TEXT DEFAULT '',
+	    btc_address TEXT DEFAULT '',
+	    eth_address TEXT DEFAULT '',
+	    sol_address TEXT DEFAULT '',
+	    ltc_address TEXT DEFAULT '',
+	    erg_address TEXT DEFAULT '',
     paypal_email TEXT DEFAULT '',
     -- RTC earnings
     rtc_balance REAL DEFAULT 0.0,
@@ -862,20 +1042,29 @@ CREATE INDEX IF NOT EXISTS idx_notif_agent ON notifications(agent_id, is_read, c
 CREATE INDEX IF NOT EXISTS idx_videos_revision ON videos(revision_of);
 CREATE INDEX IF NOT EXISTS idx_videos_challenge ON videos(challenge_id);
 
--- RTC tips between users
-CREATE TABLE IF NOT EXISTS tips (
-    id INTEGER PRIMARY KEY,
-    from_agent_id INTEGER NOT NULL,
-    to_agent_id INTEGER NOT NULL,
-    video_id TEXT DEFAULT '',
-    amount REAL NOT NULL,
-    message TEXT DEFAULT '',
-    created_at REAL NOT NULL,
-    FOREIGN KEY (from_agent_id) REFERENCES agents(id),
-    FOREIGN KEY (to_agent_id) REFERENCES agents(id)
-);
-CREATE INDEX IF NOT EXISTS idx_tips_video ON tips(video_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tips_to ON tips(to_agent_id, created_at DESC);
+	-- RTC tips between users
+	CREATE TABLE IF NOT EXISTS tips (
+	    id INTEGER PRIMARY KEY,
+	    from_agent_id INTEGER NOT NULL,
+	    to_agent_id INTEGER NOT NULL,
+	    video_id TEXT DEFAULT '',
+	    amount REAL NOT NULL,
+	    message TEXT DEFAULT '',
+	    onchain INTEGER DEFAULT 0,
+	    status TEXT DEFAULT 'confirmed',   -- confirmed | pending | voided
+	    tx_hash TEXT,                     -- RustChain tx hash (pending ledger)
+	    pending_id INTEGER,               -- RustChain pending_ledger id
+	    confirms_at REAL,                 -- RustChain confirms_at (epoch seconds)
+	    from_address TEXT DEFAULT '',     -- RustChain RTC... address
+	    to_address TEXT DEFAULT '',       -- RustChain RTC... address
+	    created_at REAL NOT NULL,
+	    FOREIGN KEY (from_agent_id) REFERENCES agents(id),
+	    FOREIGN KEY (to_agent_id) REFERENCES agents(id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_tips_video ON tips(video_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_tips_to ON tips(to_agent_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_tips_status ON tips(status, confirms_at);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_tips_tx_hash ON tips(tx_hash) WHERE tx_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY,
@@ -941,6 +1130,7 @@ def get_db():
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA journal_mode=WAL")
         g.db.execute("PRAGMA foreign_keys=ON")
+        g.db.execute("PRAGMA busy_timeout=5000")
     return g.db
 
 
@@ -982,6 +1172,17 @@ def init_db():
         if col not in existing_cols:
             conn.execute(sql)
 
+
+    # Migration: webhook delivery counters/rate-limit metadata
+    webhook_cols = {row[1] for row in conn.execute("PRAGMA table_info(webhooks)").fetchall()}
+    webhook_migrations = {
+        "event_window_start": "ALTER TABLE webhooks ADD COLUMN event_window_start REAL DEFAULT 0",
+        "event_count": "ALTER TABLE webhooks ADD COLUMN event_count INTEGER DEFAULT 0",
+    }
+    for col, sql in webhook_migrations.items():
+        if col not in webhook_cols:
+            conn.execute(sql)
+
     # Miner install click tracking
     try:
         conn.execute("""CREATE TABLE IF NOT EXISTS miner_install_clicks (
@@ -1006,10 +1207,50 @@ def init_db():
         "is_banned": "ALTER TABLE agents ADD COLUMN is_banned INTEGER DEFAULT 0",
         "ban_reason": "ALTER TABLE agents ADD COLUMN ban_reason TEXT DEFAULT ''",
         "banned_at": "ALTER TABLE agents ADD COLUMN banned_at REAL DEFAULT 0",
+        # RustChain on-chain address (RTC... Ed25519-derived)
+        "rtc_wallet": "ALTER TABLE agents ADD COLUMN rtc_wallet TEXT DEFAULT ''",
+        # Referrals (best-effort growth tracking)
+        "referred_by_code": "ALTER TABLE agents ADD COLUMN referred_by_code TEXT DEFAULT ''",
+        "referred_at": "ALTER TABLE agents ADD COLUMN referred_at REAL DEFAULT 0",
+        "referral_first_upload_counted": "ALTER TABLE agents ADD COLUMN referral_first_upload_counted INTEGER DEFAULT 0",
     }
     for col, sql in agent_migrations.items():
         if col not in existing_cols:
             conn.execute(sql)
+
+    # Referral program table
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS referral_codes (
+            code TEXT PRIMARY KEY,
+            agent_id INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            hits INTEGER DEFAULT 0,
+            signups INTEGER DEFAULT 0,
+            first_uploads INTEGER DEFAULT 0,
+            last_hit_at REAL DEFAULT 0,
+            last_signup_at REAL DEFAULT 0,
+            last_first_upload_at REAL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_referral_codes_agent ON referral_codes(agent_id)")
+
+    # Referral unique hit tracking (privacy: store only hashed fingerprints)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS referral_hit_uniques (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            fp_hash TEXT NOT NULL,
+            last_hit_at REAL NOT NULL,
+            UNIQUE(code, fp_hash),
+            FOREIGN KEY (code) REFERENCES referral_codes(code)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_referral_hit_code ON referral_hit_uniques(code)")
 
     # Migration: Google OAuth columns on agents
     google_migrations = {
@@ -1114,6 +1355,27 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_video ON reports(video_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status)")
 
+    # Migration: RustChain on-chain tipping metadata
+    try:
+        tips_cols = {row[1] for row in conn.execute("PRAGMA table_info(tips)").fetchall()}
+        tip_migrations = {
+            "onchain": "ALTER TABLE tips ADD COLUMN onchain INTEGER DEFAULT 0",
+            "status": "ALTER TABLE tips ADD COLUMN status TEXT DEFAULT 'confirmed'",
+            "tx_hash": "ALTER TABLE tips ADD COLUMN tx_hash TEXT",
+            "pending_id": "ALTER TABLE tips ADD COLUMN pending_id INTEGER",
+            "confirms_at": "ALTER TABLE tips ADD COLUMN confirms_at REAL",
+            "from_address": "ALTER TABLE tips ADD COLUMN from_address TEXT DEFAULT ''",
+            "to_address": "ALTER TABLE tips ADD COLUMN to_address TEXT DEFAULT ''",
+        }
+        for col, sql in tip_migrations.items():
+            if col not in tips_cols:
+                conn.execute(sql)
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tips_status ON tips(status, confirms_at)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tips_tx_hash ON tips(tx_hash) WHERE tx_hash IS NOT NULL")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -1131,6 +1393,177 @@ def gen_video_id(length=11):
 def gen_api_key():
     """Generate an API key for an agent."""
     return f"bottube_sk_{secrets.token_hex(24)}"
+
+
+def _is_rustchain_rtc_address(addr: str) -> bool:
+    """RustChain signed transfers require RTC + 40 hex chars (43 chars total)."""
+    a = (addr or "").strip()
+    return a.startswith("RTC") and len(a) == 43
+
+
+def _rustchain_post_json(path: str, payload: dict, timeout: float = 10.0):
+    """POST JSON to the RustChain node and return (status_code, parsed_json)."""
+    url = f"{RUSTCHAIN_BASE_URL}{path}"
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return resp.getcode(), json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        raw = ""
+        try:
+            raw = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        try:
+            data = json.loads(raw) if raw else {}
+        except Exception:
+            data = {"error": raw[:200] if raw else "rustchain_http_error"}
+        return e.code, data
+    except Exception as e:
+        return 0, {"error": "rustchain_unreachable", "details": str(e)}
+
+
+def _sync_pending_tips(db: sqlite3.Connection) -> None:
+    """Best-effort: mark tips as confirmed once their RustChain confirms_at has passed."""
+    try:
+        now = time.time()
+        db.execute(
+            "UPDATE tips SET status = 'confirmed' "
+            "WHERE COALESCE(status, 'confirmed') = 'pending' "
+            "AND COALESCE(confirms_at, 0) > 0 AND confirms_at <= ?",
+            (now,),
+        )
+    except Exception:
+        pass
+
+
+def _derive_rtc_address_from_pubkey(public_key_hex: str) -> str:
+    """RustChain address format: RTC + first 40 hex chars of SHA256(pubkey_bytes)."""
+    pub_bytes = bytes.fromhex(public_key_hex)
+    return f"RTC{hashlib.sha256(pub_bytes).hexdigest()[:40]}"
+
+
+def _handle_onchain_tip(
+    db: sqlite3.Connection,
+    *,
+    sender_id: int,
+    sender_name: str,
+    recipient_id: int,
+    recipient_name: str,
+    expected_to_wallet: str,
+    amount: float,
+    user_message: str,
+    data: dict,
+    video_id: str = "",
+    video_title: str = "",
+):
+    """Validate + forward a RustChain signed transfer, then record as a pending tip."""
+    required = ["from_address", "to_address", "nonce", "signature", "public_key", "memo"]
+    missing = [k for k in required if not (data or {}).get(k)]
+    if missing:
+        return {"error": "Missing required fields for on-chain tip", "missing": missing}, 400
+
+    from_address = str(data.get("from_address", "")).strip()
+    to_address = str(data.get("to_address", "")).strip()
+    signature = str(data.get("signature", "")).strip()
+    public_key = str(data.get("public_key", "")).strip()
+    memo = str(data.get("memo", "")).strip()
+    try:
+        nonce_int = int(str(data.get("nonce")))
+    except (TypeError, ValueError):
+        return {"error": "Invalid nonce (must be int)"}, 400
+
+    if nonce_int <= 0:
+        return {"error": "Invalid nonce (must be > 0)"}, 400
+
+    if not _is_rustchain_rtc_address(from_address):
+        return {"error": "Invalid from_address format (expected RTC... address)"}, 400
+    if not _is_rustchain_rtc_address(to_address):
+        return {"error": "Invalid to_address format (expected RTC... address)"}, 400
+
+    if to_address != expected_to_wallet:
+        return {"error": "to_address does not match creator wallet", "expected": expected_to_wallet, "got": to_address}, 400
+
+    try:
+        expected_from = _derive_rtc_address_from_pubkey(public_key)
+    except Exception:
+        return {"error": "Invalid public_key (expected hex)"}, 400
+
+    if expected_from != from_address:
+        return {"error": "public_key does not match from_address", "expected": expected_from, "got": from_address}, 400
+
+    # If the sender has linked a RustChain wallet in their profile, enforce match.
+    try:
+        row = db.execute("SELECT rtc_wallet FROM agents WHERE id = ?", (sender_id,)).fetchone()
+        linked = (row["rtc_wallet"] or "").strip() if row else ""
+    except Exception:
+        linked = ""
+    if linked and linked != from_address:
+        return {"error": "from_address does not match your linked rtc_wallet", "linked": linked, "got": from_address}, 400
+
+    rc_payload = {
+        "from_address": from_address,
+        "to_address": to_address,
+        "amount_rtc": amount,
+        "nonce": nonce_int,
+        "signature": signature,
+        "public_key": public_key,
+        "memo": memo,
+    }
+    status, rc_resp = _rustchain_post_json("/wallet/transfer/signed", rc_payload, timeout=12.0)
+    if status != 200 or not isinstance(rc_resp, dict) or not rc_resp.get("ok"):
+        err = rc_resp.get("error") if isinstance(rc_resp, dict) else "rustchain_error"
+        return {"error": "RustChain transfer failed", "rustchain_status": status, "rustchain_error": err, "rustchain": rc_resp}, 502
+
+    tx_hash = str(rc_resp.get("tx_hash", "")).strip() or None
+    pending_id = int(rc_resp.get("pending_id", 0) or 0)
+    confirms_at = float(rc_resp.get("confirms_at", 0) or 0)
+
+    db.execute(
+        "INSERT INTO tips "
+        "(from_agent_id, to_agent_id, video_id, amount, message, onchain, status, tx_hash, pending_id, confirms_at, from_address, to_address, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 1, 'pending', ?, ?, ?, ?, ?, ?)",
+        (
+            sender_id,
+            recipient_id,
+            video_id or "",
+            amount,
+            user_message,
+            tx_hash,
+            pending_id,
+            confirms_at,
+            from_address,
+            to_address,
+            time.time(),
+        ),
+    )
+
+    # Notify recipient (tip is pending until RustChain confirms it)
+    what = f'@{sender_name} tipped {amount:.4f} RTC (on-chain, pending)'
+    if video_title:
+        what += f' on "{video_title}"'
+    if user_message:
+        what += f': "{user_message}"'
+    notify(db, recipient_id, "tip", what, from_agent=sender_name, video_id=video_id or "")
+
+    return {
+        "ok": True,
+        "onchain": True,
+        "phase": str(rc_resp.get("phase", "pending")),
+        "pending_id": pending_id,
+        "tx_hash": tx_hash,
+        "confirms_at": confirms_at,
+        "to": recipient_name,
+        "amount": amount,
+        "video_id": video_id or "",
+    }, 200
 
 
 
@@ -1327,49 +1760,103 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
     threading.Thread(target=_send_email_bg, daemon=True).start()
 
 
+def _canonical_webhook_event(event: str) -> str:
+    mapping = {
+        "new_video": "video.uploaded",
+        "like": "video.voted",
+        "comment": "comment.created",
+    }
+    return mapping.get(event, event)
+
+
 def fire_webhooks(agent_id: int, event: str, payload: dict):
-    """Send webhook POST to all active hooks for this agent/event. Non-blocking."""
+    """Send webhook POST to all active hooks for this agent/event. Non-blocking.
+
+    Features:
+    - HMAC signature header
+    - event filtering
+    - retry with exponential backoff (3 attempts)
+    - rate limiting (max 100 events/hour per webhook)
+    """
+
+    canonical_event = _canonical_webhook_event(event)
+
     def _deliver():
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
         hooks = conn.execute(
-            "SELECT id, url, secret, events FROM webhooks WHERE agent_id = ? AND active = 1",
+            "SELECT id, url, secret, events, event_window_start, event_count FROM webhooks WHERE agent_id = ? AND active = 1",
             (agent_id,),
         ).fetchall()
+
+        now = time.time()
+        iso_ts = datetime.datetime.utcfromtimestamp(now).isoformat() + "Z"
+
+        envelope = {
+            "event": canonical_event,
+            "timestamp": iso_ts,
+            "data": payload,
+        }
+
         for hook in hooks:
-            events = hook["events"]
-            if events != "*" and event not in events.split(","):
+            events = (hook["events"] or "*")
+            allowed = {e.strip() for e in events.split(",") if e.strip()}
+            if "*" not in allowed and canonical_event not in allowed and event not in allowed:
                 continue
-            body = json.dumps(payload).encode()
+
+            # rate limit window (100 events/hour per webhook)
+            window_start = float(hook["event_window_start"] or 0)
+            event_count = int(hook["event_count"] or 0)
+            if now - window_start >= 3600:
+                window_start = now
+                event_count = 0
+            if event_count >= 100:
+                continue
+
+            body = json.dumps(envelope, separators=(",", ":")).encode()
             sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
-            req = urllib.request.Request(
-                hook["url"],
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-BoTTube-Event": event,
-                    "X-BoTTube-Signature": f"sha256={sig}",
-                    "User-Agent": "BoTTube-Webhook/1.0",
-                },
-                method="POST",
-            )
-            try:
-                urllib.request.urlopen(req, timeout=10)
-                conn.execute(
-                    "UPDATE webhooks SET last_triggered = ?, fail_count = 0 WHERE id = ?",
-                    (time.time(), hook["id"]),
+
+            ok = False
+            for attempt in range(3):
+                req = urllib.request.Request(
+                    hook["url"],
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-BoTTube-Event": canonical_event,
+                        "X-BoTTube-Signature": f"sha256={sig}",
+                        "User-Agent": "BoTTube-Webhook/1.0",
+                    },
+                    method="POST",
                 )
-            except Exception:
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        if 200 <= getattr(resp, "status", 200) < 300:
+                            ok = True
+                            break
+                except Exception:
+                    if attempt < 2:
+                        time.sleep(2 ** attempt)
+
+            if ok:
+                conn.execute(
+                    """UPDATE webhooks
+                       SET last_triggered = ?, fail_count = 0,
+                           event_window_start = ?, event_count = ?
+                       WHERE id = ?""",
+                    (now, window_start, event_count + 1, hook["id"]),
+                )
+            else:
                 conn.execute(
                     "UPDATE webhooks SET fail_count = fail_count + 1 WHERE id = ?",
                     (hook["id"],),
                 )
-                # Disable after 10 consecutive failures
                 conn.execute(
                     "UPDATE webhooks SET active = 0 WHERE id = ? AND fail_count >= 10",
                     (hook["id"],),
                 )
             conn.commit()
+
         conn.close()
 
     threading.Thread(target=_deliver, daemon=True).start()
@@ -1827,6 +2314,27 @@ def health():
 # Agent registration
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# OpenAPI + Swagger UI (crawler/LLM-friendly API surface)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/openapi.json")
+def api_openapi_json():
+    from bottube.openapi import build_openapi_spec
+
+    spec = build_openapi_spec(version=APP_VERSION)
+    resp = jsonify(spec)
+    # Cache briefly; keep it fresh for deploys.
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/api/docs")
+def api_docs_swagger_ui():
+    # Self-hosted Swagger UI assets (no CDN dependency).
+    return render_template("api_swagger.html")
+
 @app.route("/api/register", methods=["POST"])
 def register_agent():
     """Register a new agent and return API key."""
@@ -1837,6 +2345,9 @@ def register_agent():
 
     data = request.get_json(silent=True) or {}
     agent_name = data.get("agent_name", "").strip().lower()
+    ref_code = _normalize_ref_code(
+        data.get("ref_code", "") or data.get("ref", "") or request.args.get("ref", "")
+    )
 
     if not agent_name:
         return jsonify({"error": "agent_name is required"}), 400
@@ -1862,7 +2373,7 @@ def register_agent():
 
     db = get_db()
     try:
-        db.execute(
+        cur = db.execute(
             """INSERT INTO agents
                (agent_name, display_name, api_key, bio, avatar_url, x_handle,
                 claim_token, claimed, is_human, detected_type, created_at, last_active)
@@ -1870,6 +2381,9 @@ def register_agent():
             (agent_name, display_name, api_key, bio, avatar_url, x_handle,
              claim_token, time.time(), time.time()),
         )
+        new_agent_id = int(cur.lastrowid)
+        if ref_code:
+            _referral_apply_signup(db, new_agent_id, ref_code)
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": f"Agent '{agent_name}' already exists"}), 409
@@ -1996,7 +2510,28 @@ def login():
 def signup():
     """Signup page for human users."""
     if request.method == "GET":
-        return render_template("login.html", signup=True, form_ts=time.time())
+        ref_code = _normalize_ref_code(request.args.get("ref", ""))
+        if ref_code:
+            session["ref_code"] = ref_code
+        referral = None
+        if ref_code:
+            db = get_db()
+            row = db.execute(
+                """
+                SELECT rc.code, a.agent_name, a.display_name
+                FROM referral_codes rc
+                JOIN agents a ON a.id = rc.agent_id
+                WHERE rc.code = ?
+                """,
+                (ref_code,),
+            ).fetchone()
+            if row:
+                referral = {
+                    "code": row["code"],
+                    "agent_name": row["agent_name"],
+                    "display_name": row["display_name"] or row["agent_name"],
+                }
+        return render_template("login.html", signup=True, form_ts=time.time(), referral=referral)
 
     _verify_csrf()
 
@@ -2057,7 +2592,7 @@ def signup():
 
     db = get_db()
     try:
-        db.execute(
+        cur = db.execute(
             """INSERT INTO agents
                (agent_name, display_name, api_key, password_hash, is_human, detected_type,
                 bio, avatar_url, claim_token, claimed,
@@ -2071,6 +2606,10 @@ def signup():
              email, email_token, now if email else 0,
              now, now),
         )
+        new_user_id = int(cur.lastrowid)
+        ref_code = _normalize_ref_code(session.pop("ref_code", ""))
+        if ref_code:
+            _referral_apply_signup(db, new_user_id, ref_code)
         db.commit()
     except sqlite3.IntegrityError:
         flash(f"Username '{username}' is already taken.", "error")
@@ -2100,6 +2639,148 @@ def logout():
             return redirect(url_for("index"))
     session.pop("user_id", None)
     return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# Referrals
+# ---------------------------------------------------------------------------
+
+@app.route("/r/<code>", methods=["GET"])
+def referral_redirect(code):
+    """Referral short-link: shareable landing page -> signup (records hit)."""
+    ref_code = _normalize_ref_code(code)
+    if not ref_code:
+        abort(404)
+    db = get_db()
+    _referral_touch_hit_unique(db, ref_code)
+    ref = db.execute(
+        """
+        SELECT rc.code, rc.agent_id, a.agent_name, a.display_name
+        FROM referral_codes rc
+        JOIN agents a ON a.id = rc.agent_id
+        WHERE rc.code = ?
+        """,
+        (ref_code,),
+    ).fetchone()
+    if not ref:
+        abort(404)
+    signup_url = url_for("signup", ref=ref_code)
+    return render_template(
+        "referral_landing.html",
+        code=ref["code"],
+        ref_agent_name=ref["agent_name"],
+        ref_display_name=ref["display_name"] or ref["agent_name"],
+        signup_url=signup_url,
+    )
+
+
+@app.route("/api/agents/me/referral", methods=["GET", "POST"])
+@require_api_key
+def referral_me_agent():
+    """Create/get referral code for the authenticated agent (API key)."""
+    db = get_db()
+    agent_id = int(g.agent["id"])
+    # Prefer an existing code for this agent.
+    row = db.execute(
+        "SELECT code, hits, signups, first_uploads, created_at FROM referral_codes WHERE agent_id = ? ORDER BY created_at ASC LIMIT 1",
+        (agent_id,),
+    ).fetchone()
+    if row:
+        code = row["code"]
+    else:
+        # Default code: agent name (validated) or random token.
+        base = _normalize_ref_code(g.agent["agent_name"])
+        code = base or (secrets.token_hex(4))
+        # Ensure uniqueness.
+        while db.execute("SELECT 1 FROM referral_codes WHERE code = ?", (code,)).fetchone():
+            code = secrets.token_hex(4)
+        db.execute(
+            "INSERT INTO referral_codes (code, agent_id, created_at) VALUES (?, ?, ?)",
+            (code, agent_id, time.time()),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT code, hits, signups, first_uploads, created_at FROM referral_codes WHERE code = ?",
+            (code,),
+        ).fetchone()
+
+    return jsonify({
+        "ok": True,
+        "code": row["code"],
+        "ref_url": f"https://bottube.ai/r/{row['code']}",
+        "signup_url": f"https://bottube.ai/signup?ref={row['code']}",
+        "stats": {
+            "hits": int(row["hits"] or 0),
+            "signups": int(row["signups"] or 0),
+            "first_uploads": int(row["first_uploads"] or 0),
+            "created_at": row["created_at"],
+        },
+    })
+
+
+@app.route("/api/users/me/referral", methods=["GET", "POST"])
+def referral_me_user():
+    """Web/session version of referral endpoint (for humans)."""
+    if not g.user:
+        return jsonify({"error": "Not logged in"}), 401
+    # Reuse same logic as agent endpoint by binding g.agent temporarily.
+    g.agent = g.user
+    return referral_me_agent()
+
+
+def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
+    limit = max(1, min(int(limit or 50), 200))
+    rows = db.execute(
+        """
+        SELECT
+            rc.code,
+            rc.hits,
+            rc.signups,
+            rc.first_uploads,
+            rc.created_at,
+            a.agent_name,
+            a.display_name
+        FROM referral_codes rc
+        JOIN agents a ON a.id = rc.agent_id
+        WHERE COALESCE(a.is_banned, 0) = 0
+        ORDER BY rc.first_uploads DESC, rc.signups DESC, rc.hits DESC, rc.created_at ASC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "code": r["code"],
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"] or r["agent_name"],
+                "hits": int(r["hits"] or 0),
+                "signups": int(r["signups"] or 0),
+                "first_uploads": int(r["first_uploads"] or 0),
+                "ref_url": f"https://bottube.ai/r/{r['code']}",
+            }
+        )
+    return out
+
+
+@app.route("/referrals")
+def referrals_page():
+    """Public referral program page + leaderboard."""
+    db = get_db()
+    leaderboard = _get_referral_leaderboard(db, limit=50)
+    return render_template("referrals.html", leaderboard=leaderboard)
+
+
+@app.route("/api/referrals/leaderboard")
+def referrals_leaderboard_api():
+    db = get_db()
+    limit = request.args.get("limit", "50")
+    try:
+        limit_i = int(limit)
+    except Exception:
+        limit_i = 50
+    return jsonify({"ok": True, "leaderboard": _get_referral_leaderboard(db, limit=limit_i)})
 
 
 @app.route("/verify-email/<token>")
@@ -2548,6 +3229,9 @@ def upload_video():
     award_rtc(db, g.agent["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     db.commit()
 
+    # Referral program: count the referred agent's first upload.
+    _referral_mark_first_upload(db, g.agent["id"])
+
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -2755,10 +3439,13 @@ def stream_video(video_id):
                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                 "Content-Length": str(length),
                 "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=86400",
             },
         )
 
-    return send_from_directory(str(VIDEO_DIR), row["filename"], mimetype=content_type)
+    resp = send_from_directory(str(VIDEO_DIR), row["filename"], mimetype=content_type)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @app.route("/api/videos/<video_id>/view", methods=["GET", "POST"])
@@ -3569,6 +4256,7 @@ def _get_trending_videos(db, limit=20):
 
     Score = (recent_views_24h * 2) + (likes * 3) + (recent_comments_24h * 4)
             + recency_bonus + (novelty_score * NOVELTY_WEIGHT)
+            + penalties (duplicate/low-info)
     recency_bonus: +10 if uploaded < 6h ago, +5 if < 24h ago
     """
     now = time.time()
@@ -3597,7 +4285,7 @@ def _get_trending_videos(db, limit=20):
                FROM comments WHERE created_at > ?
                GROUP BY video_id
            ) rc ON rc.video_id = v.video_id
-           WHERE COALESCE(a.is_banned, 0) = 0
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
            ORDER BY (
                COALESCE(rv.recent_views, 0) * 2
                + v.likes * 3
@@ -3608,10 +4296,28 @@ def _get_trending_videos(db, limit=20):
                    ELSE 0
                END
                + (v.novelty_score * ?)
+               + CASE
+                   WHEN v.novelty_flags LIKE '%high_similarity%' THEN -?
+                   ELSE 0
+               END
+               + CASE
+                   WHEN v.novelty_flags LIKE '%low_info%' THEN -?
+                   ELSE 0
+               END
            ) DESC, v.created_at DESC
            LIMIT ?""",
-        (cutoff_6h, cutoff_24h, cutoff_24h, cutoff_24h, cutoff_6h, cutoff_24h,
-         NOVELTY_WEIGHT, query_limit),
+        (
+            cutoff_6h,
+            cutoff_24h,
+            cutoff_24h,
+            cutoff_24h,
+            cutoff_6h,
+            cutoff_24h,
+            NOVELTY_WEIGHT,
+            TRENDING_PENALTY_HIGH_SIMILARITY,
+            TRENDING_PENALTY_LOW_INFO,
+            query_limit,
+        ),
     ).fetchall()
     if TRENDING_AGENT_CAP <= 0:
         return rows[:limit]
@@ -3659,7 +4365,7 @@ def feed():
     rows = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE COALESCE(a.is_banned, 0) = 0
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
            ORDER BY v.created_at DESC
            LIMIT ? OFFSET ?""",
         (per_page, offset),
@@ -4476,7 +5182,7 @@ def web_remove_from_playlist(playlist_id):
 # Webhooks (API only - for bot agents)
 # ---------------------------------------------------------------------------
 
-WEBHOOK_EVENTS = ["comment", "like", "subscribe", "new_video", "mention", "*"]
+WEBHOOK_EVENTS = ["video.uploaded", "video.voted", "comment.created", "agent.created", "comment", "like", "subscribe", "new_video", "mention", "*"]
 
 
 @app.route("/api/webhooks", methods=["GET"])
@@ -4527,7 +5233,7 @@ def create_webhook():
     for ev in events.split(","):
         ev = ev.strip()
         if ev and ev not in WEBHOOK_EVENTS:
-            return jsonify({"error": f"Unknown event: {ev}. Valid: {WEBHOOK_EVENTS}"}), 400
+            return jsonify({"error": f"Unknown event: {ev}. Valid examples: video.uploaded, video.voted, comment.created, agent.created, *"}), 400
 
     wh_secret = secrets.token_hex(32)
     now = time.time()
@@ -4574,13 +5280,14 @@ def test_webhook(hook_id):
         return jsonify({"error": "Webhook not found"}), 404
 
     test_payload = {
-        "type": "test",
-        "message": "This is a test webhook from BoTTube",
-        "from_agent": g.agent["agent_name"],
-        "video_id": "",
-        "timestamp": time.time(),
+        "event": "test",
+        "timestamp": datetime.datetime.utcfromtimestamp(time.time()).isoformat() + "Z",
+        "data": {
+            "message": "This is a test webhook from BoTTube",
+            "agent": g.agent["agent_name"],
+        },
     }
-    body = json.dumps(test_payload).encode()
+    body = json.dumps(test_payload, separators=(",", ":")).encode()
     sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
 
     req = urllib.request.Request(
@@ -4661,23 +5368,28 @@ def manage_wallet():
     db = get_db()
 
     if request.method == "GET":
+        a = dict(g.agent)
         return jsonify({
-            "agent_name": g.agent["agent_name"],
-            "rtc_balance": g.agent["rtc_balance"],
+            "agent_name": a["agent_name"],
+            "rtc_balance": a.get("rtc_balance", 0),
             "wallets": {
-                "rtc": g.agent["rtc_address"],
-                "btc": g.agent["btc_address"],
-                "eth": g.agent["eth_address"],
-                "sol": g.agent["sol_address"],
-                "ltc": g.agent["ltc_address"],
-                "erg": g.agent["erg_address"],
-                "paypal": g.agent["paypal_email"],
+                # RustChain on-chain wallet (RTC... address) used for on-chain tips
+                "rtc_wallet": a.get("rtc_wallet", ""),
+                # Legacy / external donation address
+                "rtc": a.get("rtc_address", ""),
+                "btc": a.get("btc_address", ""),
+                "eth": a.get("eth_address", ""),
+                "sol": a.get("sol_address", ""),
+                "ltc": a.get("ltc_address", ""),
+                "erg": a.get("erg_address", ""),
+                "paypal": a.get("paypal_email", ""),
             },
         })
 
     # POST: Update wallet addresses
     data = request.get_json(silent=True) or {}
     allowed_fields = {
+        "rtc_wallet": "rtc_wallet",
         "rtc": "rtc_address",
         "btc": "btc_address",
         "eth": "eth_address",
@@ -4686,6 +5398,11 @@ def manage_wallet():
         "erg": "erg_address",
         "paypal": "paypal_email",
     }
+
+    if "rtc_wallet" in data:
+        rtc_wallet = str(data.get("rtc_wallet", "")).strip()
+        if rtc_wallet and not _is_rustchain_rtc_address(rtc_wallet):
+            return jsonify({"error": "Invalid RustChain wallet address format (expected RTC... address)"}), 400
 
     updates = []
     params = []
@@ -4696,7 +5413,7 @@ def manage_wallet():
             params.append(val)
 
     if not updates:
-        return jsonify({"error": "No wallet fields provided. Use: rtc, btc, eth, sol, ltc, paypal"}), 400
+        return jsonify({"error": "No wallet fields provided. Use: rtc_wallet, rtc, btc, eth, sol, ltc, erg, paypal"}), 400
 
     params.append(g.agent["id"])
     db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE id = ?", params)
@@ -4707,6 +5424,35 @@ def manage_wallet():
         "message": "Wallet addresses updated.",
         "updated_fields": [k for k in allowed_fields if k in data],
     })
+
+
+@app.route("/api/users/me/wallet", methods=["GET", "POST"])
+def manage_wallet_web():
+    """Web/session version of /api/agents/me/wallet (for humans)."""
+    if not g.user:
+        return jsonify({"error": "Login required"}), 401
+
+    if request.method == "GET":
+        u = dict(g.user)
+        return jsonify({
+            "agent_name": u.get("agent_name", ""),
+            "wallets": {
+                "rtc_wallet": u.get("rtc_wallet", ""),
+                "rtc": u.get("rtc_address", ""),
+            },
+        })
+
+    _verify_csrf()
+    data = request.get_json(silent=True) or {}
+    rtc_wallet = str(data.get("rtc_wallet", "")).strip()
+
+    if rtc_wallet and not _is_rustchain_rtc_address(rtc_wallet):
+        return jsonify({"error": "Invalid RustChain wallet address format (expected RTC... address)"}), 400
+
+    db = get_db()
+    db.execute("UPDATE agents SET rtc_wallet = ? WHERE id = ?", (rtc_wallet, g.user["id"]))
+    db.commit()
+    return jsonify({"ok": True, "rtc_wallet": rtc_wallet})
 
 
 @app.route("/api/agents/me/earnings")
@@ -4763,7 +5509,8 @@ def tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name "
+        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
     ).fetchone()
@@ -4784,12 +5531,39 @@ def tip_video(video_id):
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
+    message = str(data.get("message", ""))[:200].strip()
+
+    # On-chain tip via RustChain signed transfer (Ed25519)
+    if data.get("onchain"):
+        to_wallet = str((video["creator_rtc_wallet"] or "")).strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str((video["creator_rtc_address"] or "")).strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.agent["id"],
+            sender_name=g.agent["agent_name"],
+            recipient_id=video["agent_id"],
+            recipient_name=video["creator_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id=video_id,
+            video_title=video["title"],
+        )
+        db.commit()
+        return jsonify(resp), code
+
     # Check sender balance (re-read for freshness)
     sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.agent["id"],)).fetchone()
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
 
     # Execute transfer
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
@@ -4831,7 +5605,8 @@ def web_tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name "
+        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
     ).fetchone()
@@ -4852,11 +5627,38 @@ def web_tip_video(video_id):
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
+    message = str(data.get("message", ""))[:200].strip()
+
+    # On-chain tip via RustChain signed transfer (Ed25519)
+    if data.get("onchain"):
+        to_wallet = str((video["creator_rtc_wallet"] or "")).strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str((video["creator_rtc_address"] or "")).strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.user["id"],
+            sender_name=g.user["agent_name"],
+            recipient_id=video["agent_id"],
+            recipient_name=video["creator_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id=video_id,
+            video_title=video["title"],
+        )
+        db.commit()
+        return jsonify(resp), code
+
     sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
 
     # Execute transfer
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
@@ -4885,26 +5687,211 @@ def web_tip_video(video_id):
                     "new_balance": round(new_balance["rtc_balance"], 6)})
 
 
+@app.route("/api/agents/<agent_name>/web-tip", methods=["POST"])
+def web_tip_agent(agent_name):
+    """Tip a creator from the channel page (requires login session)."""
+    if not g.user:
+        return jsonify({"error": "You must be signed in to tip.", "login_required": True}), 401
+    _verify_csrf()
+
+    if not _rate_limit(f"tip:{g.user['id']}", 30, 3600):
+        return jsonify({"error": "Tip rate limit exceeded. Try again later."}), 429
+
+    db = get_db()
+    target = db.execute(
+        "SELECT id, agent_name, rtc_wallet, rtc_address FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not target:
+        return jsonify({"error": "Creator not found"}), 404
+
+    if target["id"] == g.user["id"]:
+        return jsonify({"error": "You cannot tip yourself"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        amount = round(float(data.get("amount", 0)), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+
+    if amount < RTC_TIP_MIN:
+        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
+    if amount > RTC_TIP_MAX:
+        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
+
+    message = str(data.get("message", ""))[:200].strip()
+
+    if data.get("onchain"):
+        to_wallet = str(target["rtc_wallet"] or "").strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str(target["rtc_address"] or "").strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.user["id"],
+            sender_name=g.user["agent_name"],
+            recipient_id=target["id"],
+            recipient_name=target["agent_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id="",
+            video_title="",
+        )
+        db.commit()
+        return jsonify(resp), code
+
+    # Legacy: internal credits tip
+    sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    if sender["rtc_balance"] < amount:
+        return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
+
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, target["id"]))
+    db.execute(
+        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
+        "VALUES (?, ?, '', ?, ?, ?)",
+        (g.user["id"], target["id"], amount, message, time.time()),
+    )
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, '', ?)",
+        (target["id"], amount, "tip_received", time.time()),
+    )
+    notify(db, target["id"], "tip",
+           f'@{g.user["agent_name"]} tipped {amount:.4f} RTC'
+           + (f': "{message}"' if message else ""),
+           from_agent=g.user["agent_name"], video_id="")
+
+    db.commit()
+    new_balance = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    return jsonify({"ok": True, "amount": amount, "to": target["agent_name"], "message": message,
+                    "new_balance": round(new_balance["rtc_balance"], 6)})
+
+
+@app.route("/api/agents/<agent_name>/tip", methods=["POST"])
+@require_api_key
+def tip_agent(agent_name):
+    """Tip a creator via API key auth (supports on-chain signed tips)."""
+    if not _rate_limit(f"tip:{g.agent['id']}", 30, 3600):
+        return jsonify({"error": "Tip rate limit exceeded. Try again later."}), 429
+
+    db = get_db()
+    target = db.execute(
+        "SELECT id, agent_name, rtc_wallet, rtc_address FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not target:
+        return jsonify({"error": "Creator not found"}), 404
+
+    if target["id"] == g.agent["id"]:
+        return jsonify({"error": "You cannot tip yourself"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        amount = round(float(data.get("amount", 0)), 6)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+
+    if amount < RTC_TIP_MIN:
+        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
+    if amount > RTC_TIP_MAX:
+        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
+
+    message = str(data.get("message", ""))[:200].strip()
+
+    if data.get("onchain"):
+        to_wallet = str(target["rtc_wallet"] or "").strip()
+        if not _is_rustchain_rtc_address(to_wallet):
+            alt = str(target["rtc_address"] or "").strip()
+            if _is_rustchain_rtc_address(alt):
+                to_wallet = alt
+        if not _is_rustchain_rtc_address(to_wallet):
+            return jsonify({"error": "Creator has not linked a RustChain rtc_wallet (RTC... address)"}), 400
+
+        resp, code = _handle_onchain_tip(
+            db,
+            sender_id=g.agent["id"],
+            sender_name=g.agent["agent_name"],
+            recipient_id=target["id"],
+            recipient_name=target["agent_name"],
+            expected_to_wallet=to_wallet,
+            amount=amount,
+            user_message=message,
+            data=data,
+            video_id="",
+            video_title="",
+        )
+        db.commit()
+        return jsonify(resp), code
+
+    # Legacy: internal credits tip
+    sender = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (g.agent["id"],)).fetchone()
+    if sender["rtc_balance"] < amount:
+        return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
+
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, target["id"]))
+    db.execute(
+        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
+        "VALUES (?, ?, '', ?, ?, ?)",
+        (g.agent["id"], target["id"], amount, message, time.time()),
+    )
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, '', ?)",
+        (target["id"], amount, "tip_received", time.time()),
+    )
+    notify(db, target["id"], "tip",
+           f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC'
+           + (f': "{message}"' if message else ""),
+           from_agent=g.agent["agent_name"], video_id="")
+
+    db.commit()
+    return jsonify({"ok": True, "amount": amount, "to": target["agent_name"], "message": message})
+
+
 @app.route("/api/videos/<video_id>/tips")
 def get_video_tips(video_id):
     """Get recent tips for a video (public)."""
     db = get_db()
+    _sync_pending_tips(db)
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
     offset = (page - 1) * per_page
 
     tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
-                  a.agent_name, a.display_name, a.avatar_url
+                  a.agent_name, a.display_name, a.avatar_url,
+                  COALESCE(t.status, 'confirmed') AS status,
+                  COALESCE(t.onchain, 0) AS onchain,
+                  t.tx_hash, t.confirms_at
            FROM tips t JOIN agents a ON t.from_agent_id = a.id
            WHERE t.video_id = ?
            ORDER BY t.created_at DESC LIMIT ? OFFSET ?""",
         (video_id, per_page, offset),
     ).fetchall()
 
-    total = db.execute("SELECT COUNT(*) FROM tips WHERE video_id = ?", (video_id,)).fetchone()[0]
+    total = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
+        (video_id,),
+    ).fetchone()[0]
     total_amount = db.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM tips WHERE video_id = ?", (video_id,)
+        "SELECT COALESCE(SUM(amount), 0) FROM tips "
+        "WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
+        (video_id,),
+    ).fetchone()[0]
+    pending_total = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (video_id,),
+    ).fetchone()[0]
+    pending_amount = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM tips "
+        "WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (video_id,),
     ).fetchone()[0]
 
     return jsonify({
@@ -4917,11 +5904,18 @@ def get_video_tips(video_id):
                 "amount": t["amount"],
                 "message": t["message"],
                 "created_at": t["created_at"],
+                "status": t["status"],
+                "onchain": bool(t["onchain"]),
+                "tx_hash": t["tx_hash"] or "",
+                "confirms_at": t["confirms_at"] or 0,
             }
             for t in tips
         ],
+        # Totals are confirmed-only; pending tips confirm after RustChain delay.
         "total_tips": total,
         "total_amount": round(total_amount, 6),
+        "pending_tips": pending_total,
+        "pending_amount": round(pending_amount, 6),
         "page": page,
         "per_page": per_page,
     })
@@ -4931,12 +5925,14 @@ def get_video_tips(video_id):
 def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
     db = get_db()
+    _sync_pending_tips(db)
     limit = min(50, max(1, request.args.get("limit", 20, type=int)))
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
                   COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_received
            FROM tips t JOIN agents a ON t.to_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
            GROUP BY t.to_agent_id
            ORDER BY total_received DESC LIMIT ?""",
         (limit,),
@@ -4951,6 +5947,38 @@ def tip_leaderboard():
                 "is_human": bool(r["is_human"]),
                 "tip_count": r["tip_count"],
                 "total_received": round(r["total_received"], 6),
+            }
+            for r in rows
+        ],
+    })
+
+
+@app.route("/api/tips/tippers")
+def tipper_leaderboard():
+    """Top tippers (by total tips sent)."""
+    db = get_db()
+    _sync_pending_tips(db)
+    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+
+    rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                  COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_sent
+           FROM tips t JOIN agents a ON t.from_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           GROUP BY t.from_agent_id
+           ORDER BY total_sent DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    return jsonify({
+        "leaderboard": [
+            {
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "avatar_url": r["avatar_url"] or "",
+                "is_human": bool(r["is_human"]),
+                "tip_count": r["tip_count"],
+                "total_sent": round(r["total_sent"], 6),
             }
             for r in rows
         ],
@@ -5281,15 +6309,24 @@ def index():
     recent_rows = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
            ORDER BY v.created_at DESC LIMIT 12""",
     ).fetchall()
 
     # Stats
     stats = {
-        "videos": db.execute("SELECT COUNT(*) FROM videos").fetchone()[0],
-        "agents": db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0],
-        "humans": db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 1").fetchone()[0],
-        "views": db.execute("SELECT COALESCE(SUM(views), 0) FROM videos").fetchone()[0],
+        "videos": db.execute(
+            """SELECT COUNT(*) FROM videos v
+               JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
+        ).fetchone()[0],
+        "agents": db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0 AND COALESCE(is_banned, 0) = 0").fetchone()[0],
+        "humans": db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 1 AND COALESCE(is_banned, 0) = 0").fetchone()[0],
+        "views": db.execute(
+            """SELECT COALESCE(SUM(v.views), 0) FROM videos v
+               JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
+        ).fetchone()[0],
     }
 
     return render_template(
@@ -5339,7 +6376,7 @@ def watch(video_id):
     db = get_db()
     video = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
-                  a.rtc_address, a.btc_address, a.eth_address,
+                  a.rtc_address, a.rtc_wallet, a.btc_address, a.eth_address,
                   a.sol_address, a.ltc_address, a.erg_address, a.paypal_email
            FROM videos v JOIN agents a ON v.agent_id = a.id
            WHERE v.video_id = ?""",
@@ -5478,19 +6515,37 @@ def watch(video_id):
         ).fetchone())
 
     # Tip data for the tip button
+    _sync_pending_tips(db)
     recent_tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
-                  a.agent_name, a.display_name
+                  a.agent_name, a.display_name,
+                  COALESCE(t.status, 'confirmed') AS status,
+                  COALESCE(t.onchain, 0) AS onchain
            FROM tips t JOIN agents a ON t.from_agent_id = a.id
            WHERE t.video_id = ?
            ORDER BY t.created_at DESC LIMIT 5""",
         (video_id,),
     ).fetchall()
     tip_total = db.execute(
-        "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM tips WHERE video_id = ?",
+        "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM tips "
+        "WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
         (video_id,),
     ).fetchone()
+    tip_pending = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE video_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (video_id,),
+    ).fetchone()[0]
     user_balance = g.user["rtc_balance"] if g.user else 0
+
+    # Load user's existing vote for this video
+    user_vote = 0
+    if g.user:
+        _uv = db.execute(
+            "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
+            (g.user["id"], video_id),
+        ).fetchone()
+        if _uv:
+            user_vote = _uv["vote"]
 
     return render_template(
         "watch.html",
@@ -5499,9 +6554,11 @@ def watch(video_id):
         related=related,
         subscriber_count=subscriber_count,
         is_following=is_following,
+        user_vote=user_vote,
         recent_tips=recent_tips,
         tip_total_amount=round(tip_total[0], 6),
         tip_count=tip_total[1],
+        tip_pending_count=tip_pending,
         user_balance=round(user_balance, 6),
         revision_of=revision_of,
         revisions=revisions,
@@ -5528,6 +6585,8 @@ def embed(video_id):
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="canonical" href="https://bottube.ai/watch/{video_id}">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{background:#000;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
@@ -5619,6 +6678,15 @@ def agents_page():
     return render_template("agents.html", agents=agents)
 
 
+def get_agent_beacon(agent_name: str):
+    """Best-effort Beacon metadata for an agent channel page.
+
+    This is optional and should never break the channel route.
+    """
+    # Beacon integration is still evolving; keep this safe by default.
+    return None
+
+
 @app.route("/agent/<agent_name>")
 def channel(agent_name):
     """Agent channel page."""
@@ -5665,6 +6733,30 @@ def channel(agent_name):
         (agent["id"],),
     ).fetchall()
 
+    _sync_pending_tips(db)
+    recent_tips = db.execute(
+        """SELECT t.amount, t.message, t.created_at,
+                  a.agent_name, a.display_name,
+                  COALESCE(t.status, 'confirmed') AS status,
+                  COALESCE(t.onchain, 0) AS onchain
+           FROM tips t JOIN agents a ON t.from_agent_id = a.id
+           WHERE t.to_agent_id = ?
+           ORDER BY t.created_at DESC LIMIT 5""",
+        (agent["id"],),
+    ).fetchall()
+    tip_total = db.execute(
+        "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM tips "
+        "WHERE to_agent_id = ? AND COALESCE(status, 'confirmed') = 'confirmed'",
+        (agent["id"],),
+    ).fetchone()
+    tip_pending = db.execute(
+        "SELECT COUNT(*) FROM tips WHERE to_agent_id = ? AND COALESCE(status, 'confirmed') = 'pending'",
+        (agent["id"],),
+    ).fetchone()[0]
+    user_balance = g.user["rtc_balance"] if g.user else 0
+
+    beacon_data = get_agent_beacon(agent_name)
+
     return render_template(
         "channel.html",
         agent=agent,
@@ -5673,7 +6765,19 @@ def channel(agent_name):
         subscriber_count=subscriber_count,
         is_following=is_following,
         playlists=playlists,
+        beacon=beacon_data,
+        recent_tips=recent_tips,
+        tip_total_amount=round(tip_total[0], 6) if tip_total else 0.0,
+        tip_count=tip_total[1] if tip_total else 0,
+        tip_pending_count=tip_pending,
+        user_balance=round(user_balance, 6),
     )
+
+
+@app.route("/developers")
+def developers_page():
+    """Developer hub: OpenAPI, Swagger UI, llms.txt, embeds."""
+    return render_template("developers.html")
 
 
 @app.route("/docs")
@@ -5684,6 +6788,26 @@ def docs_page():
 
 # ── Blog routes ──────────────────────────────────────────────────────
 BLOG_POSTS = [
+    {
+        "slug": "beacon-certified-open-source",
+        "template": "blog_beacon_certified_oss.html",
+        "title": "Beacon Certified PRs: How AI Agents Save Open Source (Not Kill It)",
+        "description": "A practical methodology for AI-assisted open source: signed identity, verifiable provenance, license safety, and human/agent peer review. Beacon + BCOS turns vibe coding into maintainable code.",
+        "author": "Scott Boudreaux",
+        "date": "2026-02-15",
+        "pub_rfc": "Sun, 15 Feb 2026 09:30:00 +0000",
+        "tags": ["Open Source", "Beacon", "AI Agents", "Security"],
+    },
+    {
+        "slug": "grokipedia-elyan-labs",
+        "template": "blog_grokipedia.html",
+        "title": "We're on Grokipedia: Elyan Labs, BoTTube, RustChain, and RAM Coffers",
+        "description": "Grokipedia now lists Elyan Labs, BoTTube, RustChain, and RAM Coffers. Links, context, and how to get involved (and earn RTC).",
+        "author": "Scott Boudreaux",
+        "date": "2026-02-14",
+        "pub_rfc": "Sat, 14 Feb 2026 03:35:00 +0000",
+        "tags": ["Elyan Labs", "Press", "SEO"],
+    },
     {
         "slug": "badges-embeds-everywhere",
         "template": "blog_badges_embeds.html",
@@ -5827,6 +6951,19 @@ def dashboard_page():
     db = get_db()
     uid = g.user["id"]
 
+    # Referral stats for the current user (best-effort; may be empty if no code created yet).
+    referral = db.execute(
+        "SELECT code, hits, signups, first_uploads FROM referral_codes WHERE agent_id = ? ORDER BY created_at ASC LIMIT 1",
+        (uid,),
+    ).fetchone()
+    referral_data = {
+        "code": referral["code"],
+        "ref_url": f"https://bottube.ai/r/{referral['code']}",
+        "hits": int(referral["hits"] or 0),
+        "signups": int(referral["signups"] or 0),
+        "first_uploads": int(referral["first_uploads"] or 0),
+    } if referral else None
+
     # Your videos with stats
     videos = db.execute(
         """SELECT video_id, title, thumbnail, views, likes, dislikes, duration_sec, category, created_at
@@ -5915,7 +7052,213 @@ def dashboard_page():
         rtc_balance=rtc_balance,
         ban_balance=ban_balance,
         earnings=earnings,
+        referral=referral_data,
     )
+
+
+@app.route("/api/dashboard/analytics")
+def dashboard_analytics_api():
+    """Time-series analytics for the logged-in creator dashboard."""
+    if not g.user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    uid = g.user["id"]
+
+    try:
+        days = int(request.args.get("days", 30))
+    except Exception:
+        days = 30
+    days = max(7, min(days, 90))
+
+    now = time.time()
+    day_sec = 86400
+    # include one extra day for repeat-viewer baseline
+    since = now - (days + 14) * day_sec
+
+    def _all_days(n):
+        out = []
+        base = int(now // day_sec) * day_sec
+        for i in range(n - 1, -1, -1):
+            ts = base - i * day_sec
+            out.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+        return out
+
+    labels = _all_days(days)
+
+    # Daily views (event-level from views table)
+    views_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(vw.created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM views vw
+           JOIN videos v ON v.video_id = vw.video_id
+           WHERE v.agent_id = ? AND vw.created_at >= ?
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    views_map = {r["day"]: int(r["c"] or 0) for r in views_rows}
+
+    # Daily new subscribers
+    subs_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM subscriptions
+           WHERE following_id = ? AND created_at >= ?
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    subs_map = {r["day"]: int(r["c"] or 0) for r in subs_rows}
+
+    # Daily RTC tips received (confirmed only)
+    tips_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) AS day,
+                  COALESCE(SUM(amount),0) AS amt
+           FROM tips
+           WHERE to_agent_id = ?
+             AND created_at >= ?
+             AND COALESCE(status, 'confirmed') = 'confirmed'
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    tips_map = {r["day"]: float(r["amt"] or 0.0) for r in tips_rows}
+
+    # Repeat viewer rate (% of unique viewers on a day who were seen before)
+    #
+    # RED-TEAM HARDENING:
+    # - Do not pull all IPs into Python (privacy + memory DoS risk).
+    # - Compute daily unique + repeat unique counts in SQLite.
+    repeat_rate = {}
+    try:
+        rr_rows = db.execute(
+            """
+            WITH v AS (
+              SELECT
+                strftime('%Y-%m-%d', datetime(vw.created_at, 'unixepoch')) AS day,
+                vw.ip_address AS ip
+              FROM views vw
+              JOIN videos vid ON vid.video_id = vw.video_id
+              WHERE vid.agent_id = ?
+                AND vw.created_at >= ?
+                AND vw.ip_address IS NOT NULL
+                AND vw.ip_address != ''
+            ),
+            first_seen AS (
+              SELECT ip, MIN(day) AS first_day
+              FROM v
+              GROUP BY ip
+            )
+            SELECT
+              v.day AS day,
+              COUNT(DISTINCT v.ip) AS uniq_viewers,
+              COUNT(DISTINCT CASE WHEN first_seen.first_day < v.day THEN v.ip END) AS repeat_viewers
+            FROM v
+            JOIN first_seen ON first_seen.ip = v.ip
+            GROUP BY v.day
+            """,
+            (uid, since),
+        ).fetchall()
+        for r in rr_rows:
+            uniq = int(r["uniq_viewers"] or 0)
+            rep = int(r["repeat_viewers"] or 0)
+            if uniq <= 0:
+                repeat_rate[str(r["day"])] = 0.0
+            else:
+                repeat_rate[str(r["day"])] = round((rep / uniq) * 100.0, 2)
+    except Exception:
+        repeat_rate = {}
+
+    # Top performing videos by weighted score
+    top_rows = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.likes,
+                  COALESCE((SELECT SUM(t.amount)
+                            FROM tips t
+                            WHERE t.video_id = v.video_id
+                              AND t.to_agent_id = ?
+                              AND COALESCE(t.status, 'confirmed') = 'confirmed'), 0) AS rtc_tips
+           FROM videos v
+           WHERE v.agent_id = ?
+           ORDER BY (v.views * 1.0 + v.likes * 3.0 + COALESCE((SELECT SUM(t2.amount)
+                            FROM tips t2
+                            WHERE t2.video_id = v.video_id
+                              AND t2.to_agent_id = ?
+                              AND COALESCE(t2.status, 'confirmed') = 'confirmed'), 0) * 40.0) DESC,
+                    v.created_at DESC
+           LIMIT 10""",
+        (uid, uid, uid),
+    ).fetchall()
+
+    payload = {
+        "labels": labels,
+        "series": {
+            "views": [views_map.get(d, 0) for d in labels],
+            "new_subscribers": [subs_map.get(d, 0) for d in labels],
+            "tips_rtc": [round(tips_map.get(d, 0.0), 6) for d in labels],
+            "repeat_viewer_rate": [repeat_rate.get(d, 0.0) for d in labels],
+        },
+        "top_videos": [
+            {
+                "video_id": r["video_id"],
+                "title": r["title"],
+                "views": int(r["views"] or 0),
+                "likes": int(r["likes"] or 0),
+                "tips_rtc": round(float(r["rtc_tips"] or 0.0), 6),
+            }
+            for r in top_rows
+        ],
+    }
+    return jsonify(payload)
+
+
+@app.route("/dashboard/export.csv")
+def dashboard_export_csv():
+    """Export creator analytics summary as CSV."""
+    if not g.user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    uid = g.user["id"]
+
+    rows = db.execute(
+        """SELECT v.video_id, v.title, v.category, v.created_at, v.views, v.likes, v.dislikes,
+                  COALESCE((SELECT SUM(t.amount)
+                            FROM tips t
+                            WHERE t.video_id = v.video_id
+                              AND t.to_agent_id = ?
+                              AND COALESCE(t.status, 'confirmed') = 'confirmed'), 0) AS rtc_tips
+           FROM videos v
+           WHERE v.agent_id = ?
+           ORDER BY v.created_at DESC""",
+        (uid, uid),
+    ).fetchall()
+
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["video_id", "title", "category", "created_at", "views", "likes", "dislikes", "rtc_tips"])
+    def _csv_safe_cell(v):
+        # Prevent formula injection if opened in Excel/Sheets.
+        if isinstance(v, str) and v and v[0] in ("=", "+", "-", "@"): 
+            return "'" + v
+        return v
+
+    for r in rows:
+        w.writerow([
+            _csv_safe_cell(r["video_id"]),
+            _csv_safe_cell(r["title"]),
+            _csv_safe_cell(r["category"]),
+            datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
+            int(r["views"] or 0),
+            int(r["likes"] or 0),
+            int(r["dislikes"] or 0),
+            round(float(r["rtc_tips"] or 0.0), 6),
+        ])
+
+    data = buf.getvalue()
+    resp = app.response_class(data, mimetype="text/csv")
+    resp.headers["Content-Disposition"] = "attachment; filename=creator-analytics.csv"
+    return resp
 
 
 @app.route("/join")
@@ -5936,7 +7279,8 @@ def search_page():
         videos = db.execute(
             """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+               AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
                ORDER BY v.views DESC, v.created_at DESC
                LIMIT 50""",
             (like_q, like_q, like_q, like_q),
@@ -5959,7 +7303,10 @@ def categories_page():
     db = get_db()
     # Count videos per category in one query
     rows = db.execute(
-        "SELECT category, COUNT(*) as cnt FROM videos GROUP BY category"
+        """SELECT v.category, COUNT(*) as cnt
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+           GROUP BY v.category"""
     ).fetchall()
     counts = {r["category"]: r["cnt"] for r in rows}
     total = sum(counts.values())
@@ -5975,8 +7322,12 @@ def categories_page():
 def about_page():
     """About page for BoTTube / Elyan Labs."""
     db = get_db()
-    total_videos = db.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
-    total_agents = db.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
+    total_videos = db.execute(
+        """SELECT COUNT(*) FROM videos v
+           JOIN agents a ON v.agent_id = a.id
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
+    ).fetchone()[0]
+    total_agents = db.execute("SELECT COUNT(*) FROM agents WHERE COALESCE(is_banned, 0) = 0").fetchone()[0]
     return render_template(
         "about.html",
         total_videos=total_videos,
@@ -5993,8 +7344,11 @@ def community_page():
 
 @app.route("/stars")
 def stars_page():
-    """7-day star sprint landing page with proof-based claim instructions."""
-    return render_template("stars.html")
+    """Legacy star sprint landing page.
+
+    Kept as a redirect so old links don't 404, but the campaign lives on GitHub.
+    """
+    return redirect("https://github.com/Scottcjn/Rustchain/issues/47", code=302)
 
 
 @app.route("/upload", methods=["GET", "POST"])
@@ -6139,6 +7493,17 @@ def upload_page():
 # ---------------------------------------------------------------------------
 # Notification Preferences (API + Browser)
 # ---------------------------------------------------------------------------
+
+@app.route("/settings/wallet", methods=["GET"])
+def wallet_settings_page():
+    """Browser page for managing RustChain wallet settings."""
+    if not g.user:
+        return redirect(f"{g.prefix}/login")
+    db = get_db()
+    row = db.execute("SELECT rtc_wallet FROM agents WHERE id = ?", (g.user["id"],)).fetchone()
+    rtc_wallet = (row["rtc_wallet"] or "") if row else ""
+    return render_template("settings_wallet.html", rtc_wallet=rtc_wallet)
+
 
 @app.route("/api/notifications/preferences", methods=["GET"])
 @require_api_key
@@ -6980,9 +8345,20 @@ init_wrtc_tables(_wrtc_db)
 _wrtc_db.close()
 app.register_blueprint(wrtc_bp)
 
+# wRTC Bridge Integration (Base L2 / Ethereum)
+from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
+import sqlite3 as _base_wrtc_sqlite3
+_base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
+init_base_wrtc_tables(_base_wrtc_db)
+_base_wrtc_db.close()
+app.register_blueprint(base_wrtc_bp)
+
 # ---------------------------------------------------------------------------
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
 # ---------------------------------------------------------------------------
+from feed_blueprint import feed_bp
+app.register_blueprint(feed_bp)
+
 try:
     from x402_payment import x402_bp
     app.register_blueprint(x402_bp)
@@ -7628,6 +9004,119 @@ def github_stats():
         pass
     return jsonify(_github_cache)
 
+@app.route("/api/bt-proof", methods=["POST"])
+def bt_proof():
+    """Lightweight client telemetry ping used by base.js.
+
+    This endpoint is intentionally a no-op; it must stay fast and safe.
+    """
+    try:
+        request.get_json(silent=True)  # consume body (if any)
+    except Exception:
+        pass
+    return ("", 204)
+
+
+_footer_counters_cache = {"ts": 0.0, "data": None}
+
+def _read_download_cache() -> dict:
+    """Best-effort read of download_cache.json (written by a cron/script)."""
+    try:
+        with open(str(BASE_DIR / "download_cache.json"), "r") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+def _refresh_github_repo_cache(cache: dict, repo_full_name: str) -> dict:
+    """Refresh a GitHub repo stats cache (public API, no auth) with a 5 min TTL."""
+    now = time.time()
+    if now - float(cache.get("ts", 0) or 0) < 300:
+        return cache
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{repo_full_name}")
+        req.add_header("User-Agent", "BoTTube/1.0")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read() or b"{}")
+        cache["stars"] = data.get("stargazers_count", cache.get("stars", 0))
+        cache["forks"] = data.get("forks_count", cache.get("forks", 0))
+        cache["ts"] = now
+    except Exception:
+        pass
+    return cache
+
+
+@app.route("/api/footer-counters")
+def footer_counters():
+    """Aggregated footer counters (single call) to avoid 20+ requests per page."""
+    now = time.time()
+    cached = _footer_counters_cache.get("data")
+    if cached and (now - float(_footer_counters_cache.get("ts", 0) or 0) < 60):
+        return jsonify(cached)
+
+    cache = _read_download_cache()
+
+    # Refresh GitHub caches (5 min TTL).
+    _refresh_github_repo_cache(_github_cache, "Scottcjn/bottube")
+    _refresh_github_repo_cache(_clawrtc_github_cache, "Scottcjn/Rustchain")
+    _refresh_github_repo_cache(_grazer_github_cache, "Scottcjn/grazer-skill")
+
+    data = {
+        "ts": int(now),
+        "bottube": {
+            "downloads": {
+                "clawhub": int(cache.get("clawhub", 0) or 0),
+                "npm": int(cache.get("npm", 0) or 0),
+                "pypi": int(cache.get("pypi", 0) or 0),
+            },
+            "github": {
+                "stars": int(_github_cache.get("stars", 0) or 0),
+                "forks": int(_github_cache.get("forks", 0) or 0),
+                "clones": int(_github_cache.get("clones", 0) or 0),
+            },
+            "installs": {
+                "homebrew": int(cache.get("bottube_homebrew", 0) or 0),
+                "apt": int(cache.get("bottube_apt", 0) or 0),
+                "docker": int(cache.get("bottube_docker", 0) or 0),
+            },
+        },
+        "clawrtc": {
+            "downloads": {
+                "clawhub": int(cache.get("clawrtc_clawhub", 0) or 0),
+                "npm": int(cache.get("clawrtc_npm", 0) or 0),
+                "pypi": int(cache.get("clawrtc_pypi", 0) or 0),
+            },
+            "github": {
+                "stars": int(_clawrtc_github_cache.get("stars", 0) or 0),
+                "forks": int(_clawrtc_github_cache.get("forks", 0) or 0),
+            },
+            "installs": {
+                "homebrew": int(cache.get("clawrtc_homebrew", 0) or 0),
+                "apt": int(cache.get("clawrtc_apt", 0) or 0),
+                "aur": int(cache.get("clawrtc_aur", 0) or 0),
+                "tigerbrew": int(cache.get("clawrtc_tigerbrew", 0) or 0),
+            },
+        },
+        "grazer": {
+            "downloads": {
+                "clawhub": int(cache.get("grazer_clawhub", 0) or 0),
+                "npm": int(cache.get("grazer_npm", 0) or 0),
+                "pypi": int(cache.get("grazer_pypi", 0) or 0),
+            },
+            "github": {
+                "stars": int(_grazer_github_cache.get("stars", 0) or 0),
+                "forks": int(_grazer_github_cache.get("forks", 0) or 0),
+            },
+            "installs": {
+                "homebrew": int(cache.get("grazer_homebrew", 0) or 0),
+                "apt": int(cache.get("grazer_apt", 0) or 0),
+            },
+        },
+    }
+
+    _footer_counters_cache["ts"] = now
+    _footer_counters_cache["data"] = data
+    return jsonify(data)
+
 
 
 _clawhub_cache = {"count": 232, "ts": 0}
@@ -7820,6 +9309,42 @@ def grazer_pypi_downloads():
         with open('/root/bottube/download_cache.json') as f:
             cache = json.load(f)
         return jsonify({"downloads": cache.get('grazer_pypi', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/beacon-clawhub-downloads")
+def beacon_clawhub_downloads():
+    """Get Beacon ClawHub download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('beacon_clawhub', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/beacon-npm-downloads")
+def beacon_npm_downloads():
+    """Get Beacon npm download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('beacon_npm', 0)})
+    except Exception:
+        return jsonify({"downloads": 0})
+
+
+@app.route("/api/beacon-pypi-downloads")
+def beacon_pypi_downloads():
+    """Get Beacon PyPI download count"""
+    try:
+        import json
+        with open('/root/bottube/download_cache.json') as f:
+            cache = json.load(f)
+        return jsonify({"downloads": cache.get('beacon_pypi', 0)})
     except Exception:
         return jsonify({"downloads": 0})
 
@@ -8489,6 +10014,7 @@ def badge_svg(badge_type):
         "views": ("BoTTube views", _format_count(stats["views"]), "#2ecc71"),
         "humans": ("BoTTube humans", str(stats["humans"]), "#e67e22"),
         "platform": ("powered by", "BoTTube", "#3ea6ff"),
+        "bcos": ("BCOS", "certified", "#1a6b35"),
     }
     if badge_type not in badges:
         return Response("Not found", status=404)
@@ -8561,6 +10087,11 @@ def embed_guide_page():
     return render_template("embed_guide.html", videos=recent)
 
 
+@app.route("/beacon")
+def beacon_landing_page():
+    return render_template("beacon.html")
+
+
 
 if __name__ == "__main__":
     init_db()
@@ -8568,3 +10099,88 @@ if __name__ == "__main__":
     print(f"[BoTTube] DB: {DB_PATH}")
     print(f"[BoTTube] Videos: {VIDEO_DIR}")
     app.run(host="0.0.0.0", port=8097, debug=False)
+
+@app.route("/tips/dashboard")
+def tips_dashboard():
+    db = get_db()
+    _sync_pending_tips(db)
+
+    leaderboard_rows = db.execute(
+        """SELECT a.agent_name, a.display_name, COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_received
+           FROM tips t
+           JOIN agents a ON t.to_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           GROUP BY t.to_agent_id
+           ORDER BY total_received DESC
+           LIMIT 10""",
+    ).fetchall()
+
+    tipper_rows = db.execute(
+        """SELECT a.agent_name, a.display_name, COUNT(t.id) AS tip_count, COALESCE(SUM(t.amount), 0) AS total_sent
+           FROM tips t
+           JOIN agents a ON t.from_agent_id = a.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           GROUP BY t.from_agent_id
+           ORDER BY total_sent DESC
+           LIMIT 10""",
+    ).fetchall()
+
+    totals = db.execute(
+        """
+        SELECT
+          COALESCE(SUM(CASE WHEN COALESCE(status, 'confirmed') = 'confirmed' THEN amount END), 0) AS confirmed_total,
+          COALESCE(SUM(CASE WHEN COALESCE(status, 'confirmed') = 'pending' THEN amount END), 0) AS pending_total,
+          COUNT(CASE WHEN COALESCE(status, 'confirmed') = 'pending' THEN 1 END) AS pending_count,
+          COUNT(*) AS tip_count
+        FROM tips
+        """
+    ).fetchone()
+
+    recent_tips = db.execute(
+        """SELECT t.amount, t.message, t.created_at, fa.agent_name AS from_agent,
+                  ta.agent_name AS to_agent
+           FROM tips t
+           LEFT JOIN agents fa ON t.from_agent_id = fa.id
+           LEFT JOIN agents ta ON t.to_agent_id = ta.id
+           WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
+           ORDER BY t.created_at DESC LIMIT 6""",
+    ).fetchall()
+
+    return render_template(
+        "tips_dashboard.html",
+        leaderboard=[
+            {
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"] or row["agent_name"],
+                "tip_count": row["tip_count"],
+                "total_received": round(row["total_received"], 6),
+            }
+            for row in leaderboard_rows
+        ],
+        tippers=[
+            {
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"] or row["agent_name"],
+                "tip_count": row["tip_count"],
+                "total_sent": round(row["total_sent"], 6),
+            }
+            for row in tipper_rows
+        ],
+        totals={
+            "confirmed_total": round(totals["confirmed_total"], 6),
+            "pending_total": round(totals["pending_total"], 6),
+            "pending_count": totals["pending_count"],
+            "tip_count": totals["tip_count"],
+        },
+        recent=[
+            {
+                "amount": round(row["amount"], 6),
+                "message": row["message"] or "",
+                "created_at": datetime.fromtimestamp(row["created_at"], timezone.utc).isoformat() if row["created_at"] else "",
+                "from_agent": row["from_agent"] or "anonymous",
+                "to_agent": row["to_agent"] or "unknown",
+            }
+            for row in recent_tips
+        ],
+    )
+

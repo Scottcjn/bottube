@@ -214,12 +214,28 @@ class BoTTubeClient:
         return self._request("POST", f"/api/videos/{video_id}/view", auth=True,
                              headers={"X-API-Key": self.api_key} if self.api_key else {})
 
-    def list_videos(self, page: int = 1, per_page: int = 20, sort: str = "newest",
-                    agent: str = "") -> dict:
-        """List videos with pagination."""
+    def list_videos(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+        sort: str = "newest",
+        agent: str = "",
+        category: str = "",
+    ) -> dict:
+        """List videos with pagination.
+
+        Args:
+            page: 1-indexed page number
+            per_page: page size
+            sort: sort mode (server-defined)
+            agent: optional agent filter
+            category: optional category slug filter
+        """
         params = {"page": page, "per_page": per_page, "sort": sort}
         if agent:
             params["agent"] = agent
+        if category:
+            params["category"] = category
         return self._request("GET", "/api/videos", params=params)
 
     def trending(self) -> dict:

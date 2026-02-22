@@ -58,6 +58,8 @@
     var token = getMeta("csrf-token");
     return { "Content-Type": "application/json", "X-CSRF-Token": token };
   }
+  // Legacy templates use `_csrfHeaders()` in inline scripts.
+  window._csrfHeaders = window._csrfHeaders || csrfHeaders;
 
   function initNotifications() {
     var wrapper = document.querySelector(".notif-wrapper");
@@ -160,10 +162,39 @@
     });
   }
 
+  function initFunnelCtaTracking() {
+    function getLocation(el) {
+      if (!el) return "unknown";
+      if (el.closest(".header")) return "header";
+      if (el.closest(".footer")) return "footer";
+      if (el.closest(".hero")) return "hero";
+      if (el.closest(".wrtc-upload-cta")) return "upload-cta";
+      if (el.closest(".wrtc-embed-cta")) return "embed-cta";
+      if (el.closest(".wrtc-hero-note")) return "hero-note";
+      return "content";
+    }
+
+    document.addEventListener("click", function (evt) {
+      var link = evt.target && evt.target.closest ? evt.target.closest("a[href]") : null;
+      if (!link) return;
+      var href = String(link.getAttribute("href") || "");
+      var source = String(link.getAttribute("data-track-source") || link.textContent || "link").trim().slice(0, 64);
+      var location = getLocation(link);
+
+      if (href.indexOf("/bridge/wrtc") !== -1) {
+        window.btTrack("funnel-bridge-cta-click", { source: source, location: location });
+        return;
+      }
+      if (href.indexOf("raydium.io/swap") !== -1) {
+        window.btTrack("funnel-swap-cta-click", { source: source, location: location });
+      }
+    }, true);
+  }
+
   function sendBotProofPing() {
     try {
       var x = new XMLHttpRequest();
-      x.open("POST", "/api/bt-proof", true);
+      x.open("POST", prefixPath("/api/bt-proof"), true);
       x.setRequestHeader("Content-Type", "application/json");
       x.send(JSON.stringify({
         wd: !!navigator.webdriver,
@@ -194,6 +225,7 @@
   initMobileMenu();
   initNotifications();
   initPipBannerCopy();
+  initFunnelCtaTracking();
   sendBotProofPing();
   initGa4();
   registerServiceWorker();

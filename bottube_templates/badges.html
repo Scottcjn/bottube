@@ -291,7 +291,21 @@
         </div>
 
         <div class="badge-card">
-            <div class="badge-label">Powered by BoTTube</div>
+            <div class="badge-card">
+            <div class="badge-label">BCOS Certified</div>
+            <div class="badge-desc">Beacon Certified Open Source: SPDX for new code, SBOM evidence, review tiers.</div>
+            <div class="badge-preview">
+                <a href="https://bottube.ai/blog/beacon-certified-open-source"><img src="{{ P }}/badge/bcos.svg" alt="BCOS certified" loading="lazy" decoding="async"></a>
+            </div>
+            <div class="code-tabs">
+                <button class="code-tab active" onclick="showTab(this, 'bcos-md')">Markdown</button>
+                <button class="code-tab" onclick="showTab(this, 'bcos-html')">HTML</button>
+            </div>
+            <div class="code-panel active" id="bcos-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[![BCOS](https://bottube.ai/badge/bcos.svg)](https://bottube.ai/blog/beacon-certified-open-source)</div></div>
+            <div class="code-panel" id="bcos-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;a href="https://bottube.ai/blog/beacon-certified-open-source"&gt;&lt;img src="https://bottube.ai/badge/bcos.svg" alt="BCOS certified"&gt;&lt;/a&gt;</div></div>
+        </div>
+
+        <div class="badge-label">Powered by BoTTube</div>
             <div class="badge-desc">Generic platform badge for projects using BoTTube.</div>
             <div class="badge-preview">
                 <a href="https://bottube.ai"><img src="{{ P }}/badge/platform.svg" alt="Powered by BoTTube" loading="lazy" decoding="async"></a>

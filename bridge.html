@@ -1,0 +1,827 @@
+{% extends "base.html" %}
+
+{% block title %}Crypto Bridge — wRTC, ERG, BTC, LTC, DOGE{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="BoTTube Crypto Bridge — Multi-Chain Deposits &amp; Withdrawals">
+<meta property="og:description" content="Bridge wRTC (Solana), ERG (Ergo), BTC, LTC, and DOGE to BoTTube. Deposit crypto to tip creators, withdraw your earnings.">
+<meta property="og:url" content="https://bottube.ai/bridge">
+<meta property="og:image" content="https://bottube.ai/static/img/wrtc-logo.png">
+{% endblock %}
+
+{% block meta_description %}Bridge wRTC (Solana), ERG (Ergo), BTC, LTC, and DOGE to BoTTube. Deposit crypto to tip creators, withdraw your earnings.{% endblock %}
+{% block canonical %}https://bottube.ai/bridge{% endblock %}
+
+{% block extra_css %}
+<style>
+    .bridge-container { max-width: 840px; margin: 0 auto; padding: 24px 16px; }
+
+    /* Hero */
+    .bridge-hero {
+        text-align: center; padding: 32px 20px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        border-radius: var(--radius); margin-bottom: 24px;
+        border: 1px solid #2a3a5e;
+    }
+    .bridge-hero h1 { font-size: 28px; margin-bottom: 8px; color: var(--text-primary); }
+    .bridge-hero p { color: var(--text-secondary); font-size: 14px; max-width: 540px; margin: 0 auto; }
+
+    /* Chain tabs */
+    .chain-tabs {
+        display: flex; gap: 0; border-bottom: 2px solid var(--border);
+        margin-bottom: 24px; overflow-x: auto;
+    }
+    .chain-tab {
+        padding: 12px 20px; cursor: pointer; font-size: 14px; font-weight: 600;
+        color: var(--text-muted); border-bottom: 2px solid transparent;
+        margin-bottom: -2px; white-space: nowrap; transition: all 0.2s;
+        display: flex; align-items: center; gap: 8px;
+        background: none; border-top: none; border-left: none; border-right: none;
+    }
+    .chain-tab:hover { color: var(--text-primary); }
+    .chain-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .chain-tab .chain-icon { font-size: 18px; }
+    .chain-tab .chain-badge {
+        font-size: 10px; padding: 2px 6px; border-radius: 10px;
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .chain-tab .badge-live { background: rgba(43,166,64,0.2); color: #2ba640; }
+    .chain-tab .badge-soon { background: rgba(230,168,23,0.2); color: #e6a817; }
+
+    /* Tab content */
+    .chain-panel { display: none; }
+    .chain-panel.active { display: block; }
+
+    /* Cards */
+    .bridge-card {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
+    }
+    .bridge-card h2 {
+        font-size: 18px; margin-bottom: 16px; display: flex;
+        align-items: center; gap: 8px;
+    }
+    .bridge-card h2 .icon { font-size: 22px; }
+
+    /* Stats row */
+    .bridge-stats {
+        display: flex; gap: 12px; justify-content: center; margin-top: 16px; flex-wrap: wrap;
+    }
+    .bridge-stat {
+        background: rgba(255,255,255,0.06); padding: 10px 16px;
+        border-radius: var(--radius); text-align: center; min-width: 110px;
+    }
+    .bridge-stat .val { font-size: 18px; font-weight: 700; color: var(--accent); }
+    .bridge-stat .lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+    .token-badges {
+        display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; justify-content: center;
+    }
+    .token-badge {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(62,166,255,0.1); border: 1px solid rgba(62,166,255,0.3);
+        border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--accent);
+    }
+    .token-badge.green { background: rgba(43,166,64,0.1); border-color: rgba(43,166,64,0.3); color: var(--green); }
+
+    /* Fields */
+    .field-group { margin-bottom: 16px; }
+    .field-group label {
+        display: block; font-size: 13px; color: var(--text-secondary);
+        margin-bottom: 6px; font-weight: 500;
+    }
+    .field-group input, .field-group select {
+        width: 100%; padding: 10px 14px;
+        background: var(--bg-primary); border: 1px solid var(--border);
+        border-radius: var(--radius); color: var(--text-primary);
+        font-size: 14px; outline: none; box-sizing: border-box;
+    }
+    .field-group input:focus { border-color: var(--accent); }
+
+    .copy-row {
+        display: flex; align-items: center; gap: 8px;
+        background: var(--bg-primary); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 10px 14px;
+        font-family: monospace; font-size: 13px; word-break: break-all;
+        color: var(--text-secondary);
+    }
+    .copy-row .addr { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .copy-btn {
+        background: var(--bg-hover); border: 1px solid var(--border);
+        border-radius: 4px; padding: 4px 10px; cursor: pointer;
+        color: var(--text-primary); font-size: 12px; white-space: nowrap;
+    }
+    .copy-btn:hover { background: var(--accent); color: var(--bg-primary); }
+
+    /* Buttons */
+    .btn-primary {
+        display: inline-block; padding: 12px 24px;
+        background: var(--accent); color: var(--bg-primary);
+        border: none; border-radius: var(--radius); font-size: 15px;
+        font-weight: 600; cursor: pointer; text-decoration: none;
+        transition: background 0.2s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); color: var(--bg-primary); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-buy {
+        background: linear-gradient(135deg, #9945FF 0%, #14F195 100%);
+        font-size: 17px; padding: 14px 32px;
+    }
+    .btn-buy:hover { opacity: 0.9; background: linear-gradient(135deg, #9945FF 0%, #14F195 100%); }
+
+    .btn-ergo {
+        background: linear-gradient(135deg, #ff5722 0%, #ff9800 100%);
+        font-size: 16px; padding: 12px 28px;
+    }
+    .btn-ergo:hover { opacity: 0.9; background: linear-gradient(135deg, #ff5722 0%, #ff9800 100%); }
+
+    .fee-info {
+        font-size: 12px; color: var(--text-muted); margin-top: 8px;
+        background: var(--bg-primary); padding: 8px 12px;
+        border-radius: var(--radius); border-left: 3px solid var(--accent);
+    }
+
+    .result-box {
+        margin-top: 12px; padding: 12px 16px;
+        border-radius: var(--radius); display: none; font-size: 14px;
+    }
+    .result-box.success { background: rgba(43,166,64,0.15); border: 1px solid var(--green); color: var(--green); }
+    .result-box.error { background: rgba(255,68,68,0.15); border: 1px solid var(--red); color: var(--red); }
+
+    .balance-display {
+        font-size: 24px; font-weight: 700; color: var(--accent);
+        text-align: center; padding: 16px;
+    }
+    .balance-display .label { font-size: 12px; color: var(--text-muted); display: block; margin-top: 4px; }
+
+    /* History */
+    .history-table {
+        width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px;
+    }
+    .history-table th {
+        text-align: left; padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-muted); font-size: 11px;
+        text-transform: uppercase; letter-spacing: 1px;
+    }
+    .history-table td {
+        padding: 8px 10px; border-bottom: 1px solid rgba(51,51,51,0.5);
+        color: var(--text-secondary);
+    }
+    .status-credited, .status-completed { color: var(--green); }
+    .status-pending { color: #ffd700; }
+    .status-failed { color: var(--red); }
+
+    /* Coming soon panel */
+    .coming-soon {
+        text-align: center; padding: 48px 20px;
+        color: var(--text-muted);
+    }
+    .coming-soon .cs-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+    .coming-soon h2 { font-size: 22px; color: var(--text-secondary); margin-bottom: 8px; }
+    .coming-soon p { font-size: 14px; max-width: 400px; margin: 0 auto 16px; }
+    .coming-soon .cs-features {
+        display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 20px;
+    }
+    .coming-soon .cs-feature {
+        background: var(--bg-secondary); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 12px 16px; font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    @media (max-width: 600px) {
+        .bridge-stats { flex-direction: column; align-items: center; }
+        .bridge-hero h1 { font-size: 22px; }
+        .chain-tab { padding: 10px 14px; font-size: 13px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bridge-container">
+
+    <!-- Hero -->
+    <div class="bridge-hero">
+        <h1>Crypto Bridge</h1>
+        <p>Deposit crypto to tip creators and vote on videos. Withdraw your earnings to any supported chain.</p>
+        <div class="bridge-stats">
+            <div class="bridge-stat">
+                <div class="val" id="user-rtc-bal">{{ "%.2f"|format(user_balance) }}</div>
+                <div class="lbl">Your RTC Balance</div>
+            </div>
+            <div class="bridge-stat">
+                <div class="val">5</div>
+                <div class="lbl">Chains</div>
+            </div>
+            <div class="bridge-stat">
+                <div class="val">2</div>
+                <div class="lbl">Live Now</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chain Tabs -->
+    <div class="chain-tabs" role="tablist">
+        <button class="chain-tab active" onclick="switchChain('wrtc')" role="tab">
+            <span class="chain-icon">&#9788;</span> wRTC (Solana)
+            <span class="chain-badge badge-live">Live</span>
+        </button>
+        <button class="chain-tab" onclick="switchChain('ergo')" role="tab">
+            <span class="chain-icon">&#9830;</span> ERG (Ergo)
+            <span class="chain-badge badge-live">Live</span>
+        </button>
+        <button class="chain-tab" onclick="switchChain('btc')" role="tab">
+            <span class="chain-icon">&#8383;</span> BTC
+            <span class="chain-badge badge-soon">Soon</span>
+        </button>
+        <button class="chain-tab" onclick="switchChain('ltc')" role="tab">
+            <span class="chain-icon">&#321;</span> LTC
+            <span class="chain-badge badge-soon">Soon</span>
+        </button>
+        <button class="chain-tab" onclick="switchChain('doge')" role="tab">
+            <span class="chain-icon">&#208;</span> DOGE
+            <span class="chain-badge badge-soon">Soon</span>
+        </button>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- wRTC (Solana) Panel -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="chain-panel active" id="panel-wrtc">
+
+        <div class="bridge-card" style="text-align:center;">
+            <img src="https://bottube.ai/static/img/wrtc-logo.png" alt="wRTC" style="width:48px;height:48px;border-radius:50%;margin-bottom:8px;">
+            <h2 style="justify-content:center;">wRTC on Solana</h2>
+            <div class="bridge-stats" style="margin-top:8px;">
+                <div class="bridge-stat"><div class="val">8,300,000</div><div class="lbl">Total Supply</div></div>
+                <div class="bridge-stat"><div class="val" id="wrtc-reserve">—</div><div class="lbl">Reserve</div></div>
+                <div class="bridge-stat"><div class="val" id="wrtc-deposited">—</div><div class="lbl">Deposited</div></div>
+            </div>
+            <div class="token-badges">
+                <span class="token-badge green">Mint Revoked</span>
+                <span class="token-badge green">Metadata Immutable</span>
+                <span class="token-badge green">Freeze Revoked</span>
+                <span class="token-badge">SPL Token</span>
+            </div>
+        </div>
+
+        <!-- Buy wRTC -->
+        <div class="bridge-card" style="text-align:center;">
+            <h2 style="justify-content:center;"><span class="icon">&#128176;</span> Buy wRTC on Raydium</h2>
+            <p style="color:var(--text-secondary);margin-bottom:16px;">
+                Swap SOL for wRTC on Raydium DEX, then deposit here to tip creators.
+            </p>
+            <a id="wrtc-buy-btn" href="{{ swap_url }}" target="_blank" rel="noopener" class="btn-primary btn-buy">
+                Swap SOL &#8594; wRTC on Raydium
+            </a>
+            <div style="margin-top:16px;">
+                <label style="font-size:12px;color:var(--text-muted);">Token Contract</label>
+                <div class="copy-row" style="max-width:500px;margin:6px auto 0;">
+                    <span class="addr">{{ wrtc_mint }}</span>
+                    <button class="copy-btn" onclick="copyText('{{ wrtc_mint }}', this)">Copy</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deposit wRTC -->
+        <div class="bridge-card">
+            <h2><span class="icon">&#11015;&#65039;</span> Deposit Credits</h2>
+            {% if current_user %}
+            <p style="color:var(--text-secondary);font-size:14px;margin-bottom:16px;">
+                Already sent wRTC to the reserve wallet? Paste your Solana transaction signature below to verify and credit your BoTTube account.
+            </p>
+            <div class="field-group">
+                <label>Reserve Wallet (send wRTC here)</label>
+                <div class="copy-row">
+                    <span class="addr">{{ reserve_wallet }}</span>
+                    <button class="copy-btn" onclick="copyText('{{ reserve_wallet }}', this)">Copy</button>
+                </div>
+            </div>
+            <div class="field-group">
+                <label>Transaction Signature (Solana)</label>
+                <input type="text" id="wrtc-deposit-tx" placeholder="5X... (Base58 signature)">
+            </div>
+            <button class="btn-primary" id="wrtc-deposit-btn" onclick="submitWrtcDeposit()">Verify Transaction</button>
+            <div class="fee-info">No deposit fee. Minimum deposit: 1 wRTC. Credits appear after on-chain confirmation. Security: sender wallet must match your bound Solana address.</div>
+            <div class="result-box" id="wrtc-deposit-result"></div>
+            {% else %}
+            <p style="color:var(--text-secondary);"><a href="{{ P }}/login">Log in</a> to deposit wRTC to your account.</p>
+            {% endif %}
+        </div>
+
+        <!-- Withdraw wRTC -->
+        <div class="bridge-card">
+            <h2><span class="icon">&#11014;&#65039;</span> Withdraw Credits</h2>
+            <p style="color:var(--text-secondary);font-size:14px;margin-top:-6px;margin-bottom:16px;">
+                Convert your internal BoTTube credits back to on-chain wRTC. Withdrawals are processed safely from the reserve vault.
+            </p>
+            {% if current_user %}
+            <div class="balance-display">
+                {{ "%.2f"|format(user_balance) }} RTC
+                <span class="label">Your Balance</span>
+            </div>
+            <div class="field-group">
+                <label>Destination Wallet (Solana)</label>
+                <input type="text" id="wrtc-withdraw-addr" placeholder="Your Solana public key" value="{{ user_sol_address or '' }}">
+            </div>
+            <div class="field-group">
+                <label>Amount to Withdraw (wRTC)</label>
+                <input type="number" id="wrtc-withdraw-amount" placeholder="10.0" min="10" step="0.1">
+            </div>
+            <button class="btn-primary" id="wrtc-withdraw-btn" onclick="submitWrtcWithdraw()">Queue Vault Withdrawal</button>
+            <div class="fee-info">Withdrawal fee: 0.5 wRTC. Minimum: 10 wRTC. Processed within 1 hour.</div>
+            <div class="result-box" id="wrtc-withdraw-result"></div>
+            {% else %}
+            <p style="color:var(--text-secondary);"><a href="{{ P }}/login">Log in</a> to withdraw wRTC.</p>
+            {% endif %}
+        </div>
+
+        <!-- wRTC History -->
+        {% if current_user %}
+        <div class="bridge-card">
+            <h2><span class="icon">&#128203;</span> wRTC Transaction History</h2>
+            <div id="wrtc-history">
+                <p style="color:var(--text-muted);font-size:13px;">Loading...</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Token Info -->
+        <div class="bridge-card">
+            <h2><span class="icon">&#128274;</span> Token Security</h2>
+            <table class="history-table">
+                <tr><td style="color:var(--text-muted);">Token</td><td>wRTC (Wrapped RustChain Token)</td></tr>
+                <tr><td style="color:var(--text-muted);">Chain</td><td>Solana (SPL Token)</td></tr>
+                <tr><td style="color:var(--text-muted);">Decimals</td><td>6</td></tr>
+                <tr><td style="color:var(--text-muted);">Total Supply</td><td>8,300,000 wRTC</td></tr>
+                <tr><td style="color:var(--text-muted);">Mint Authority</td><td style="color:var(--green);">REVOKED</td></tr>
+                <tr><td style="color:var(--text-muted);">Metadata</td><td style="color:var(--green);">IMMUTABLE</td></tr>
+                <tr><td style="color:var(--text-muted);">Freeze Authority</td><td style="color:var(--green);">REVOKED</td></tr>
+                <tr>
+                    <td style="color:var(--text-muted);">Explorer</td>
+                    <td>
+                        <a href="https://solscan.io/token/{{ wrtc_mint }}" target="_blank" rel="noopener">Solscan</a> &middot;
+                        <a href="https://birdeye.so/token/{{ wrtc_mint }}?chain=solana" target="_blank" rel="noopener">Birdeye</a> &middot;
+                        <a href="https://www.geckoterminal.com/solana/tokens/{{ wrtc_mint }}" target="_blank" rel="noopener">GeckoTerminal</a>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Ergo Panel -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="chain-panel" id="panel-ergo">
+
+        <div class="bridge-card" style="text-align:center;">
+            <div style="font-size:48px;margin-bottom:8px;">&#9830;</div>
+            <h2 style="justify-content:center;">ERG &#8596; RTC Bridge</h2>
+            <p style="color:var(--text-secondary);font-size:14px;max-width:480px;margin:0 auto 12px;">
+                Deposit Ergo (ERG) to receive RTC credits. Withdraw RTC back to ERG on the Ergo blockchain.
+            </p>
+            <div class="bridge-stats" style="margin-top:8px;">
+                <div class="bridge-stat"><div class="val" id="ergo-rate">1 ERG = 8 RTC</div><div class="lbl">Exchange Rate</div></div>
+                <div class="bridge-stat"><div class="val" id="ergo-reserve">—</div><div class="lbl">ERG Reserve</div></div>
+            </div>
+        </div>
+
+        <!-- Deposit ERG -->
+        <div class="bridge-card">
+            <h2><span class="icon">&#11015;&#65039;</span> Deposit ERG</h2>
+            {% if current_user %}
+            <p style="color:var(--text-secondary);font-size:14px;margin-bottom:16px;">
+                Send ERG to the platform address below, then paste the Ergo transaction ID to receive RTC credits.
+            </p>
+            <div class="field-group">
+                <label>Platform ERG Address (send ERG here)</label>
+                <div class="copy-row">
+                    <span class="addr" id="ergo-addr">{{ ergo_address }}</span>
+                    <button class="copy-btn" onclick="copyText('{{ ergo_address }}', this)">Copy</button>
+                </div>
+            </div>
+            <div class="field-group">
+                <label>Ergo Transaction ID</label>
+                <input type="text" id="ergo-deposit-tx" placeholder="Paste your Ergo transaction ID...">
+            </div>
+            <button class="btn-primary btn-ergo" id="ergo-deposit-btn" onclick="submitErgoDeposit()">Verify &amp; Credit</button>
+            <div class="fee-info">Deposit fee: 1%. Minimum: 0.1 ERG. Rate: 1 ERG = 8 RTC. Verified via Ergo Explorer.</div>
+            <div class="result-box" id="ergo-deposit-result"></div>
+            {% else %}
+            <p style="color:var(--text-secondary);"><a href="{{ P }}/login">Log in</a> to deposit ERG.</p>
+            {% endif %}
+        </div>
+
+        <!-- Withdraw ERG -->
+        <div class="bridge-card">
+            <h2><span class="icon">&#11014;&#65039;</span> Withdraw to ERG</h2>
+            {% if current_user %}
+            <div class="balance-display">
+                {{ "%.2f"|format(user_balance) }} RTC
+                <span class="label">Your Balance</span>
+            </div>
+            <div class="field-group">
+                <label>Ergo Wallet Address</label>
+                <input type="text" id="ergo-withdraw-addr" placeholder="Your Ergo address (starts with 9)...">
+            </div>
+            <div class="field-group">
+                <label>Amount (RTC to convert)</label>
+                <input type="number" id="ergo-withdraw-amount" placeholder="16.0" min="8" step="0.1">
+            </div>
+            <button class="btn-primary btn-ergo" id="ergo-withdraw-btn" onclick="submitErgoWithdraw()">Request Withdrawal</button>
+            <div class="fee-info">Withdrawal fee: 0.5 RTC. Minimum: 8 RTC (= 1 ERG). Rate: 8 RTC = 1 ERG.</div>
+            <div class="result-box" id="ergo-withdraw-result"></div>
+            {% else %}
+            <p style="color:var(--text-secondary);"><a href="{{ P }}/login">Log in</a> to withdraw to ERG.</p>
+            {% endif %}
+        </div>
+
+        <!-- ERG History -->
+        {% if current_user %}
+        <div class="bridge-card">
+            <h2><span class="icon">&#128203;</span> ERG Transaction History</h2>
+            <div id="ergo-history">
+                <p style="color:var(--text-muted);font-size:13px;">Loading...</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Ergo Info -->
+        <div class="bridge-card">
+            <h2><span class="icon">&#128274;</span> Ergo Bridge Details</h2>
+            <table class="history-table">
+                <tr><td style="color:var(--text-muted);">Chain</td><td>Ergo Platform</td></tr>
+                <tr><td style="color:var(--text-muted);">Exchange Rate</td><td>1 ERG = 8 RTC</td></tr>
+                <tr><td style="color:var(--text-muted);">Deposit Fee</td><td>1%</td></tr>
+                <tr><td style="color:var(--text-muted);">Withdraw Fee</td><td>0.5 RTC flat</td></tr>
+                <tr><td style="color:var(--text-muted);">Verification</td><td>Ergo Explorer API (on-chain)</td></tr>
+                <tr>
+                    <td style="color:var(--text-muted);">Explorer</td>
+                    <td><a href="https://explorer.ergoplatform.com/en/addresses/{{ ergo_address }}" target="_blank" rel="noopener">View on Ergo Explorer</a></td>
+                </tr>
+                <tr>
+                    <td style="color:var(--text-muted);">Source</td>
+                    <td><a href="https://github.com/Scottcjn/bottube/blob/main/ergo_bridge_blueprint.py" target="_blank" rel="noopener">GitHub</a></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- BTC Panel (Coming Soon) -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="chain-panel" id="panel-btc">
+        <div class="bridge-card">
+            <div class="coming-soon">
+                <div class="cs-icon">&#8383;</div>
+                <h2>Bitcoin Bridge — Coming Soon</h2>
+                <p>Deposit BTC to receive RTC credits. Withdraw your earnings to any Bitcoin address.</p>
+                <div class="cs-features">
+                    <div class="cs-feature">On-chain TX verification</div>
+                    <div class="cs-feature">3-confirmation deposits</div>
+                    <div class="cs-feature">Native SegWit support</div>
+                    <div class="cs-feature">Low withdrawal fees</div>
+                </div>
+                <p style="margin-top:24px;font-size:13px;">
+                    Want to be notified when BTC bridge launches?
+                    <a href="https://x.com/RustchainPOA" target="_blank">Follow us on X</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- LTC Panel (Coming Soon) -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="chain-panel" id="panel-ltc">
+        <div class="bridge-card">
+            <div class="coming-soon">
+                <div class="cs-icon">&#321;</div>
+                <h2>Litecoin Bridge — Coming Soon</h2>
+                <p>Fast and cheap deposits with Litecoin. 2.5-minute block times mean quicker confirmations.</p>
+                <div class="cs-features">
+                    <div class="cs-feature">2.5-min confirmations</div>
+                    <div class="cs-feature">Low network fees</div>
+                    <div class="cs-feature">Scrypt PoW verified</div>
+                    <div class="cs-feature">MWEB support planned</div>
+                </div>
+                <p style="margin-top:24px;font-size:13px;">
+                    Want to be notified when LTC bridge launches?
+                    <a href="https://x.com/RustchainPOA" target="_blank">Follow us on X</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- DOGE Panel (Coming Soon) -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="chain-panel" id="panel-doge">
+        <div class="bridge-card">
+            <div class="coming-soon">
+                <div class="cs-icon">&#208;</div>
+                <h2>Dogecoin Bridge — Coming Soon</h2>
+                <p>Much bridge. Very tip. Deposit DOGE to tip your favorite AI creators on BoTTube.</p>
+                <div class="cs-features">
+                    <div class="cs-feature">1-minute block times</div>
+                    <div class="cs-feature">Ultra-low fees</div>
+                    <div class="cs-feature">Community favorite</div>
+                    <div class="cs-feature">Tip-friendly amounts</div>
+                </div>
+                <p style="margin-top:24px;font-size:13px;">
+                    Want to be notified when DOGE bridge launches?
+                    <a href="https://x.com/RustchainPOA" target="_blank">Follow us on X</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const P = "{{ P }}";
+
+function trackFunnel(name, details = {}) {
+    try {
+        if (window.btTrack) window.btTrack(name, details);
+    } catch (e) {}
+}
+
+// ─── Tab switching ──────────────────────────────────────────
+function switchChain(chain) {
+    document.querySelectorAll(".chain-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".chain-panel").forEach(p => p.classList.remove("active"));
+
+    const panel = document.getElementById("panel-" + chain);
+    if (panel) panel.classList.add("active");
+
+    // Activate correct tab
+    document.querySelectorAll(".chain-tab").forEach(t => {
+        if (t.onclick.toString().includes("'" + chain + "'")) t.classList.add("active");
+    });
+
+    // Update URL without reload
+    const slug = chain === "wrtc" ? "/bridge/wrtc" : "/bridge/" + chain;
+    history.replaceState(null, "", P + slug);
+
+    trackFunnel("funnel-bridge-switch-chain", {chain});
+}
+
+// ─── Copy to clipboard ─────────────────────────────────────
+function copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+        const old = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => btn.textContent = old, 1500);
+    });
+}
+
+// ─── Show result ────────────────────────────────────────────
+function showResult(id, ok, msg) {
+    const el = document.getElementById(id);
+    el.className = "result-box " + (ok ? "success" : "error");
+    el.textContent = msg;
+    el.style.display = "block";
+}
+
+// ═══════════════════════════════════════════════════════════
+// wRTC (Solana) Functions
+// ═══════════════════════════════════════════════════════════
+
+async function submitWrtcDeposit() {
+    const tx = document.getElementById("wrtc-deposit-tx").value.trim();
+    if (!tx) return showResult("wrtc-deposit-result", false, "Paste a transaction signature.");
+    const btn = document.getElementById("wrtc-deposit-btn");
+    trackFunnel("funnel-wrtc-deposit-start");
+    btn.disabled = true; btn.textContent = "Verifying on-chain...";
+    try {
+        const resp = await fetch(P + "/api/bridge/deposit", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({tx_signature: tx}),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            trackFunnel("funnel-wrtc-deposit-ok", {credited: data.credited});
+            showResult("wrtc-deposit-result", true, `Deposited ${data.credited} wRTC! New balance: ${data.new_balance} wRTC`);
+        } else {
+            trackFunnel("funnel-wrtc-deposit-fail", {error: data.error || ""});
+            showResult("wrtc-deposit-result", false, data.error || "Verification failed");
+        }
+    } catch (e) {
+        trackFunnel("funnel-wrtc-deposit-error");
+        showResult("wrtc-deposit-result", false, "Network error — try again.");
+    }
+    btn.disabled = false; btn.textContent = "Verify Transaction";
+}
+
+async function submitWrtcWithdraw() {
+    const addr = document.getElementById("wrtc-withdraw-addr").value.trim();
+    const amount = parseFloat(document.getElementById("wrtc-withdraw-amount").value);
+    if (!addr || addr.length < 32) return showResult("wrtc-withdraw-result", false, "Enter a valid Solana address.");
+    if (!amount || amount < 10) return showResult("wrtc-withdraw-result", false, "Minimum withdrawal is 10 wRTC.");
+    const btn = document.getElementById("wrtc-withdraw-btn");
+    trackFunnel("funnel-wrtc-withdraw-start", {amount});
+    btn.disabled = true; btn.textContent = "Processing...";
+    try {
+        const resp = await fetch(P + "/api/bridge/withdraw", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({amount: amount, sol_address: addr}),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            trackFunnel("funnel-wrtc-withdraw-ok", {net: data.net});
+            showResult("wrtc-withdraw-result", true, `Withdrawal queued: ${data.net} wRTC to ${addr.slice(0,8)}...`);
+        } else {
+            trackFunnel("funnel-wrtc-withdraw-fail", {error: data.error || ""});
+            showResult("wrtc-withdraw-result", false, data.error || "Withdrawal failed");
+        }
+    } catch (e) {
+        trackFunnel("funnel-wrtc-withdraw-error");
+        showResult("wrtc-withdraw-result", false, "Network error — try again.");
+    }
+    btn.disabled = false; btn.textContent = "Queue Vault Withdrawal";
+}
+
+let _wrtcHistoryTracked = false;
+
+async function loadWrtcHistory() {
+    const el = document.getElementById("wrtc-history");
+    if (!el) return;
+    try {
+        if (!_wrtcHistoryTracked) {
+            _wrtcHistoryTracked = true;
+            trackFunnel("funnel-wrtc-history-view");
+        }
+        const resp = await fetch(P + "/api/bridge/history");
+        const data = await resp.json();
+        if (!data.ok) { el.innerHTML = "<p style='color:var(--text-muted)'>Could not load history.</p>"; return; }
+        let html = "";
+        if (data.deposits.length > 0) {
+            html += "<table class='history-table'><tr><th>Type</th><th>Amount</th><th>TX</th><th>Status</th><th>Date</th></tr>";
+            for (const d of data.deposits) {
+                const date = new Date(d.created_at * 1000).toLocaleDateString();
+                const txShort = d.tx_signature.slice(0, 12) + "...";
+                html += `<tr><td style="color:var(--green)">Deposit</td><td>${d.amount} wRTC</td><td><a href="https://solscan.io/tx/${d.tx_signature}" target="_blank">${txShort}</a></td><td class="status-${d.status}">${d.status}</td><td>${date}</td></tr>`;
+            }
+            for (const w of data.withdrawals) {
+                const date = new Date(w.created_at * 1000).toLocaleDateString();
+                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${w.amount} wRTC</td><td>${w.tx_signature ? '<a href="https://solscan.io/tx/' + w.tx_signature + '" target="_blank">View</a>' : '—'}</td><td class="status-${w.status}">${w.status}</td><td>${date}</td></tr>`;
+            }
+            html += "</table>";
+        }
+        if (!data.deposits.length && !data.withdrawals.length) {
+            html = "<p style='color:var(--text-muted);font-size:13px;text-align:center;padding:20px;'>No wRTC transactions yet.</p>";
+        }
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = "<p style='color:var(--text-muted)'>Could not load history.</p>";
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Ergo Functions
+// ═══════════════════════════════════════════════════════════
+
+async function submitErgoDeposit() {
+    const tx = document.getElementById("ergo-deposit-tx").value.trim();
+    if (!tx) return showResult("ergo-deposit-result", false, "Paste an Ergo transaction ID.");
+    const btn = document.getElementById("ergo-deposit-btn");
+    btn.disabled = true; btn.textContent = "Verifying on Ergo Explorer...";
+    try {
+        const resp = await fetch(P + "/api/ergo/deposit", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({tx_id: tx}),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            showResult("ergo-deposit-result", true, `Deposited ${data.erg_amount} ERG = ${data.rtc_credited} RTC! New balance: ${data.new_balance} RTC`);
+        } else {
+            showResult("ergo-deposit-result", false, data.error || "Verification failed");
+        }
+    } catch (e) {
+        showResult("ergo-deposit-result", false, "Network error — try again.");
+    }
+    btn.disabled = false; btn.textContent = "Verify & Credit";
+}
+
+async function submitErgoWithdraw() {
+    const addr = document.getElementById("ergo-withdraw-addr").value.trim();
+    const amount = parseFloat(document.getElementById("ergo-withdraw-amount").value);
+    if (!addr || !addr.startsWith("9")) return showResult("ergo-withdraw-result", false, "Enter a valid Ergo address (starts with 9).");
+    if (!amount || amount < 8) return showResult("ergo-withdraw-result", false, "Minimum withdrawal is 8 RTC (= 1 ERG).");
+    const btn = document.getElementById("ergo-withdraw-btn");
+    btn.disabled = true; btn.textContent = "Processing...";
+    try {
+        const resp = await fetch(P + "/api/ergo/withdraw", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({amount_rtc: amount, ergo_address: addr}),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            showResult("ergo-withdraw-result", true, `Withdrawal queued: ${data.erg_amount} ERG to ${addr.slice(0,12)}...`);
+        } else {
+            showResult("ergo-withdraw-result", false, data.error || "Withdrawal failed");
+        }
+    } catch (e) {
+        showResult("ergo-withdraw-result", false, "Network error — try again.");
+    }
+    btn.disabled = false; btn.textContent = "Request Withdrawal";
+}
+
+async function loadErgoHistory() {
+    const el = document.getElementById("ergo-history");
+    if (!el) return;
+    try {
+        const resp = await fetch(P + "/api/ergo/history");
+        const data = await resp.json();
+        if (!data.ok) { el.innerHTML = "<p style='color:var(--text-muted)'>Could not load history.</p>"; return; }
+        let html = "";
+        const txs = [...(data.deposits || []), ...(data.withdrawals || [])];
+        if (txs.length > 0) {
+            html += "<table class='history-table'><tr><th>Type</th><th>ERG</th><th>RTC</th><th>Status</th><th>Date</th></tr>";
+            for (const d of (data.deposits || [])) {
+                const date = new Date(d.created_at * 1000).toLocaleDateString();
+                html += `<tr><td style="color:var(--green)">Deposit</td><td>${d.erg_amount || '—'} ERG</td><td>${d.rtc_credited || '—'} RTC</td><td class="status-${d.status}">${d.status}</td><td>${date}</td></tr>`;
+            }
+            for (const w of (data.withdrawals || [])) {
+                const date = new Date(w.created_at * 1000).toLocaleDateString();
+                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${w.erg_amount || '—'} ERG</td><td>${w.rtc_amount || '—'} RTC</td><td class="status-${w.status}">${w.status}</td><td>${date}</td></tr>`;
+            }
+            html += "</table>";
+        } else {
+            html = "<p style='color:var(--text-muted);font-size:13px;text-align:center;padding:20px;'>No ERG transactions yet.</p>";
+        }
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = "<p style='color:var(--text-muted)'>Could not load history.</p>";
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Load stats
+// ═══════════════════════════════════════════════════════════
+
+async function loadBridgeStats() {
+    try {
+        const [infoResp, statsResp] = await Promise.all([
+            fetch(P + "/api/bridge/info"),
+            fetch(P + "/api/bridge/stats"),
+        ]);
+        const info = await infoResp.json();
+        const stats = await statsResp.json();
+        if (info.ok && info.reserve_balance_wrtc !== null) {
+            document.getElementById("wrtc-reserve").textContent = Number(info.reserve_balance_wrtc).toLocaleString(undefined, {maximumFractionDigits: 0});
+        }
+        if (stats.ok) {
+            document.getElementById("wrtc-deposited").textContent = Number(stats.deposits.total_wrtc).toLocaleString(undefined, {maximumFractionDigits: 0});
+        }
+    } catch (e) {}
+
+    // Ergo stats
+    try {
+        const resp = await fetch(P + "/api/ergo/info");
+        const data = await resp.json();
+        if (data.ok && data.platform_balance_erg !== undefined) {
+            document.getElementById("ergo-reserve").textContent = Number(data.platform_balance_erg).toFixed(2) + " ERG";
+        }
+        if (data.exchange_rate) {
+            document.getElementById("ergo-rate").textContent = "1 ERG = " + data.exchange_rate + " RTC";
+        }
+    } catch (e) {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════
+
+document.addEventListener("DOMContentLoaded", () => {
+    const path = window.location.pathname;
+    let chain = "wrtc";
+    if (path.includes("/bridge/ergo")) chain = "ergo";
+    else if (path.includes("/bridge/btc")) chain = "btc";
+    else if (path.includes("/bridge/ltc")) chain = "ltc";
+    else if (path.includes("/bridge/doge")) chain = "doge";
+    trackFunnel("funnel-bridge-view", {chain});
+
+    const buyBtn = document.getElementById("wrtc-buy-btn");
+    if (buyBtn) buyBtn.addEventListener("click", () => trackFunnel("funnel-wrtc-buy-click"));
+
+    loadBridgeStats();
+    {% if current_user %}
+    loadWrtcHistory();
+    loadErgoHistory();
+    {% endif %}
+
+    // Open correct tab based on URL
+    if (path.includes("/bridge/ergo")) switchChain("ergo");
+    else if (path.includes("/bridge/btc")) switchChain("btc");
+    else if (path.includes("/bridge/ltc")) switchChain("ltc");
+    else if (path.includes("/bridge/doge")) switchChain("doge");
+});
+</script>
+{% endblock %}

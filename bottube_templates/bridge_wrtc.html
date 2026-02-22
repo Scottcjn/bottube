@@ -119,6 +119,11 @@
 
 {% block content %}
 <section class="wrtc-shell">
+  <div style="display:flex;gap:8px;margin-bottom:14px;">
+    <a style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;font-weight:700;font-size:14px;border:1px solid rgba(62,166,255,.4);background:linear-gradient(120deg,rgba(62,166,255,.2),rgba(62,166,255,.05));color:#3ea6ff;text-decoration:none;" href="{{ P }}/bridge/wrtc">Solana</a>
+    <a style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;font-weight:700;font-size:14px;border:1px solid #333;background:#1a1a1a;color:var(--text-secondary);text-decoration:none;" href="{{ P }}/bridge/base">Base (Ethereum L2)</a>
+  </div>
+
   <div class="wrtc-hero">
     <h1>wRTC Bridge Console</h1>
     <p>Canonical mint and reserve are hard-locked. Deposits are idempotent and withdrawals are queued for safe processing.</p>
@@ -138,27 +143,27 @@
     </div>
 
     <div class="card">
-      <h2>Deposit Verification</h2>
-      <p>Paste a Solana tx signature that transferred canonical wRTC to reserve wallet.</p>
+      <h2>Deposit Credits</h2>
+      <p>Already bridged wRTC to the reserve wallet? Paste your transaction signature below to verify and credit your BoTTube account instantly.</p>
       <label for="apiKeyInput">X-API-Key</label>
       <input id="apiKeyInput" type="password" placeholder="bottube_sk_..." autocomplete="off">
-      <label for="txSigInput">tx_signature</label>
-      <input id="txSigInput" type="text" placeholder="5X...">
-      <button class="btn btn-primary" id="depositBtn" type="button">Verify & Credit</button>
-      <div id="depositPanel" class="panel" style="margin-top:10px;">No requests yet.</div>
-      <div class="warn">Sender wallet must match your account's bound Solana address (`sol_address`).</div>
+      <label for="txSigInput">Transaction Signature (Solana)</label>
+      <input id="txSigInput" type="text" placeholder="5X... (Base58 signature)">
+      <button class="btn btn-primary" id="depositBtn" type="button">Verify Transaction</button>
+      <div id="depositPanel" class="panel" style="margin-top:10px;">Awaiting signature...</div>
+      <div class="warn">🔒 Verification is secure. Ensure your bound Solana wallet matches the sender address.</div>
     </div>
 
     <div class="card">
-      <h2>Withdrawal Queue</h2>
-      <p>Queue a withdrawal back to Solana. Balance debit happens immediately.</p>
-      <label for="withdrawAddressInput">to_address</label>
-      <input id="withdrawAddressInput" type="text" placeholder="Solana wallet address">
-      <label for="withdrawAmountInput">amount (wRTC)</label>
-      <input id="withdrawAmountInput" type="number" min="0" step="0.000001" placeholder="10">
-      <button class="btn btn-primary" id="withdrawBtn" type="button">Queue Withdrawal</button>
-      <div id="withdrawPanel" class="panel" style="margin-top:10px;">No requests yet.</div>
-      <a class="link-btn" href="{{ wrtc_buy_url }}" target="_blank" rel="noopener">Buy wRTC on Raydium</a>
+      <h2>Withdraw Credits</h2>
+      <p>Convert your internal BoTTube credits back to on-chain wRTC. Withdrawals are processed safely from the reserve vault.</p>
+      <label for="withdrawAddressInput">Destination Wallet (Solana)</label>
+      <input id="withdrawAddressInput" type="text" placeholder="Your Solana public key">
+      <label for="withdrawAmountInput">Amount to Withdraw (wRTC)</label>
+      <input id="withdrawAmountInput" type="number" min="0" step="0.000001" placeholder="Minimum: 1 wRTC">
+      <button class="btn btn-primary" id="withdrawBtn" type="button">Queue Vault Withdrawal</button>
+      <div id="withdrawPanel" class="panel" style="margin-top:10px;">Queue is currently active.</div>
+      <a class="link-btn" href="{{ wrtc_buy_url }}" target="_blank" rel="noopener">Get wRTC on Raydium ↗</a>
     </div>
 
     <div class="card">
@@ -284,5 +289,35 @@
   document.getElementById("withdrawBtn").addEventListener("click", submitWithdraw);
   document.getElementById("historyBtn").addEventListener("click", loadHistory);
   loadInfo();
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // Umami Event Tracking Helper
+  function trackFunnel(eventName, details = {}) {
+    if (window.umami) {
+      window.umami.track(eventName, details);
+    }
+  }
+
+  // Tracking for analytics events
+  document.addEventListener('DOMContentLoaded', () => {
+    trackFunnel('Funnel: View Bridge Console');
+
+    const dBtn = document.getElementById("depositBtn");
+    if (dBtn) dBtn.addEventListener("click", () => trackFunnel('Funnel: Start Deposit Verification'));
+
+    const wBtn = document.getElementById("withdrawBtn");
+    if (wBtn) wBtn.addEventListener("click", () => trackFunnel('Funnel: Start Withdrawal Queue'));
+
+    const hBtn = document.getElementById("historyBtn");
+    if (hBtn) hBtn.addEventListener("click", () => trackFunnel('Funnel: View Bridge History'));
+    
+    const raydiumBtn = document.querySelector('a[href*="raydium.io"]');
+    if (raydiumBtn) {
+      raydiumBtn.addEventListener('click', () => trackFunnel('Funnel: Click Buy Credits (Raydium)'));
+    }
+  });
 </script>
 {% endblock %}

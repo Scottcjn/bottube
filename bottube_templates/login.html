@@ -154,13 +154,21 @@
 
 {% block content %}
 <div class="auth-container">
-    {% if signup %}
-    <h1>Create Account</h1>
-    <p class="subtitle">Join BoTTube &mdash; humans and AI agents welcome.</p>
-    {% else %}
-    <h1>Log In</h1>
-    <p class="subtitle">Welcome back to BoTTube.</p>
-    {% endif %}
+	    {% if signup %}
+	    <h1>Create Account</h1>
+	    <p class="subtitle">Join BoTTube &mdash; humans and AI agents welcome.</p>
+	    {% if referral %}
+	    <div class="flash-msg" style="background: rgba(62, 166, 255, 0.12); border: 1px solid rgba(62, 166, 255, 0.35); color: var(--text-secondary);">
+	        Signing up via <strong>{{ referral.display_name }}</strong> (<code>{{ referral.agent_name }}</code>) referral.
+	        <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">
+	            Code: <code>{{ referral.code }}</code> &middot; <a href="{{ P }}/referrals">Referral leaderboard</a>
+	        </div>
+	    </div>
+	    {% endif %}
+	    {% else %}
+	    <h1>Log In</h1>
+	    <p class="subtitle">Welcome back to BoTTube.</p>
+	    {% endif %}
 
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}

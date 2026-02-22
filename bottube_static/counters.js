@@ -11,6 +11,7 @@
   }
 
   var P = getPrefix();
+  var _loaded = false;
 
   function fmt(n) {
     n = Number(n);
@@ -26,58 +27,81 @@
     el.textContent = value;
   }
 
-  function loadJson(url, onOk) {
-    fetch(P + url)
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (d) {
-        onOk(d || {});
-      })
+  function applyCounters(d) {
+    d = d || {};
+    var b = d.bottube || {};
+    var c = d.clawrtc || {};
+    var g = d.grazer || {};
+
+    function setNum(id, n) {
+      if (n === undefined || n === null) return;
+      setText(id, fmt(n));
+    }
+
+    setNum("ctr-clawhub", b.downloads && b.downloads.clawhub);
+    setNum("ctr-npm", b.downloads && b.downloads.npm);
+    setNum("ctr-pypi", b.downloads && b.downloads.pypi);
+    setNum("ctr-github-stars", b.github && b.github.stars);
+    setNum("ctr-github-clones", b.github && b.github.clones);
+    setNum("ctr-bottube-brew", b.installs && b.installs.homebrew);
+    setNum("ctr-bottube-apt", b.installs && b.installs.apt);
+    setNum("ctr-bottube-docker", b.installs && b.installs.docker);
+
+    setNum("ctr-clawrtc-clawhub", c.downloads && c.downloads.clawhub);
+    setNum("ctr-clawrtc-npm", c.downloads && c.downloads.npm);
+    setNum("ctr-clawrtc-pypi", c.downloads && c.downloads.pypi);
+    setNum("ctr-clawrtc-stars", c.github && c.github.stars);
+    setNum("ctr-clawrtc-forks", c.github && c.github.forks);
+    setNum("ctr-clawrtc-brew", c.installs && c.installs.homebrew);
+    setNum("ctr-clawrtc-apt", c.installs && c.installs.apt);
+    setNum("ctr-clawrtc-aur", c.installs && c.installs.aur);
+    setNum("ctr-clawrtc-tiger", c.installs && c.installs.tigerbrew);
+
+    setNum("ctr-grazer-clawhub", g.downloads && g.downloads.clawhub);
+    setNum("ctr-grazer-npm", g.downloads && g.downloads.npm);
+    setNum("ctr-grazer-pypi", g.downloads && g.downloads.pypi);
+    setNum("ctr-grazer-stars", g.github && g.github.stars);
+    setNum("ctr-grazer-forks", g.github && g.github.forks);
+    setNum("ctr-grazer-brew", g.installs && g.installs.homebrew);
+    setNum("ctr-grazer-apt", g.installs && g.installs.apt);
+  }
+
+  function loadCounters() {
+    if (_loaded) return;
+    _loaded = true;
+    fetch(P + "/api/footer-counters")
+      .then(function (r) { return r.json(); })
+      .then(function (d) { applyCounters(d || {}); })
       .catch(function () {});
   }
 
-  function loadValue(url, id, key) {
-    loadJson(url, function (d) {
-      if (d[key] === undefined) return;
-      setText(id, fmt(d[key]));
-    });
+  function init() {
+    // Lazy-load: these counters are nice-to-have and should not cost users a rate-limit budget
+    // unless they actually scroll to the footer.
+    var anchor = document.getElementById("bottube-counters") || document.querySelector("footer");
+    if (!anchor) return loadCounters();
+
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].isIntersecting) {
+            io.disconnect();
+            loadCounters();
+            break;
+          }
+        }
+      }, { rootMargin: "200px 0px" });
+      io.observe(anchor);
+      return;
+    }
+
+    // Fallback for older browsers: small delay so we don't compete with core page loads.
+    setTimeout(loadCounters, 800);
   }
 
-  // BoTTube SDK
-  loadValue("/api/clawhub-downloads", "ctr-clawhub", "downloads");
-  loadValue("/api/npm-downloads", "ctr-npm", "downloads");
-  loadValue("/api/pypi-downloads", "ctr-pypi", "downloads");
-  loadJson("/api/github-stats", function (d) {
-    if (d.stars !== undefined) setText("ctr-github-stars", fmt(d.stars));
-    if (d.clones !== undefined) setText("ctr-github-clones", fmt(d.clones));
-  });
-  loadValue("/api/platform-installs?product=bottube&platform=homebrew", "ctr-bottube-brew", "installs");
-  loadValue("/api/platform-installs?product=bottube&platform=apt", "ctr-bottube-apt", "installs");
-  loadValue("/api/platform-installs?product=bottube&platform=docker", "ctr-bottube-docker", "installs");
-
-  // ClawRTC miner
-  loadValue("/api/clawrtc-clawhub-downloads", "ctr-clawrtc-clawhub", "downloads");
-  loadValue("/api/clawrtc-npm-downloads", "ctr-clawrtc-npm", "downloads");
-  loadValue("/api/clawrtc-pypi-downloads", "ctr-clawrtc-pypi", "downloads");
-  loadJson("/api/clawrtc-github-stats", function (d) {
-    if (d.stars !== undefined) setText("ctr-clawrtc-stars", fmt(d.stars));
-    if (d.forks !== undefined) setText("ctr-clawrtc-forks", fmt(d.forks));
-  });
-  loadValue("/api/platform-installs?product=clawrtc&platform=homebrew", "ctr-clawrtc-brew", "installs");
-  loadValue("/api/platform-installs?product=clawrtc&platform=apt", "ctr-clawrtc-apt", "installs");
-  loadValue("/api/platform-installs?product=clawrtc&platform=aur", "ctr-clawrtc-aur", "installs");
-  loadValue("/api/platform-installs?product=clawrtc&platform=tigerbrew", "ctr-clawrtc-tiger", "installs");
-
-  // Grazer
-  loadValue("/api/grazer-clawhub-downloads", "ctr-grazer-clawhub", "downloads");
-  loadValue("/api/grazer-npm-downloads", "ctr-grazer-npm", "downloads");
-  loadValue("/api/grazer-pypi-downloads", "ctr-grazer-pypi", "downloads");
-  loadJson("/api/grazer-github-stats", function (d) {
-    if (d.stars !== undefined) setText("ctr-grazer-stars", fmt(d.stars));
-    if (d.forks !== undefined) setText("ctr-grazer-forks", fmt(d.forks));
-  });
-  loadValue("/api/platform-installs?product=grazer&platform=homebrew", "ctr-grazer-brew", "installs");
-  loadValue("/api/platform-installs?product=grazer&platform=apt", "ctr-grazer-apt", "installs");
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();
-

@@ -12,10 +12,21 @@ import os
 import glob
 import sys
 
+try:
+    from providers.router import generate_video as router_generate_video
+except Exception:
+    router_generate_video = None
+
 COMFYUI_URL = "http://192.168.0.133:8188"
 BOTTUBE_URL = "https://bottube.ai"
 OUTPUT_DIR = "/home/scott/bottube-repo/generated_videos"
 NEGATIVE_PROMPT = "blurry, distorted, low quality, pixelated, watermark, text overlay"
+VIDEO_PROVIDER = os.environ.get("BOTTUBE_VIDEO_PROVIDER", "comfyui").strip().lower()
+VIDEO_PROVIDER_FALLBACK = os.environ.get("BOTTUBE_VIDEO_PROVIDER_FALLBACK", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 # ---- Bot API Keys (loaded from environment) ----
 # Set: BOTTUBE_KEY_<bot_name_upper> (e.g., BOTTUBE_KEY_PIXEL_PETE)
@@ -328,6 +339,49 @@ def post_comment(video_id, content, api_key):
     return resp.status_code, resp.text[:200]
 
 
+def generate_with_router(vdef, bot_name, prefix):
+    """Generate a video using provider router (Grok/Runway)."""
+    if VIDEO_PROVIDER in {"", "comfyui", "ltx", "ltx2", "ltx-2"}:
+        return None
+
+    if router_generate_video is None:
+        print("  Provider router requested but unavailable; falling back to ComfyUI.")
+        return None
+
+    output_path = os.path.join(OUTPUT_DIR, f"{prefix}_{bot_name}.mp4")
+    duration = int(os.environ.get("BOTTUBE_PROVIDER_DURATION", "5"))
+
+    try:
+        generation = router_generate_video(
+            prompt=vdef["prompt"],
+            prefer=VIDEO_PROVIDER,
+            fallback=VIDEO_PROVIDER_FALLBACK,
+            duration=duration,
+            output_path=output_path,
+            # Grok settings
+            grok_model=os.environ.get("GROK_MODEL", "grok-imagine-video"),
+            aspect_ratio=os.environ.get("GROK_ASPECT_RATIO", "1:1"),
+            resolution=os.environ.get("GROK_RESOLUTION", "720p"),
+            # Runway settings
+            runway_model=os.environ.get("RUNWAY_MODEL", "gen4.5"),
+            ratio=os.environ.get("RUNWAY_RATIO", "1280:720"),
+            audio=os.environ.get("RUNWAY_AUDIO", "0").strip().lower() in {"1", "true", "yes"},
+            prompt_image=os.environ.get("RUNWAY_IMAGE", "") or None,
+        )
+
+        local_path = str(generation.output_path)
+        size_mb = os.path.getsize(local_path) / (1024 * 1024)
+        print(
+            f"  Provider generated via {generation.provider}: {local_path} "
+            f"({size_mb:.1f} MB)"
+        )
+        return local_path
+    except Exception as e:
+        print(f"  Provider generation failed ({VIDEO_PROVIDER}): {e}")
+        print("  Falling back to ComfyUI generation...")
+        return None
+
+
 # ======================= MAIN =======================
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -339,6 +393,7 @@ def main():
     print("=" * 70)
     print("PHASE 1: GENERATING AND UPLOADING 10 VIDEOS")
     print("=" * 70)
+    print(f"Video provider mode: {VIDEO_PROVIDER} (fallback={VIDEO_PROVIDER_FALLBACK})")
 
     for i, vdef in enumerate(VIDEOS):
         bot_name = vdef["bot"]
@@ -346,29 +401,31 @@ def main():
         prefix = vdef["prefix"]
         print(f"\n--- [{i+1}/10] {bot_name}: {vdef['title']} (prefix={prefix}) ---")
 
-        # Build and queue workflow
-        seed = random.randint(1, 2**31)
-        workflow = build_workflow(vdef["prompt"], prefix, seed)
-        prompt_id = queue_prompt(workflow)
+        # Try provider router first if requested.
+        local_path = generate_with_router(vdef, bot_name, prefix)
 
-        if not prompt_id:
-            print("  FAILED to queue prompt, skipping.")
-            continue
+        # Fall back to legacy ComfyUI workflow.
+        if not local_path:
+            seed = random.randint(1, 2**31)
+            workflow = build_workflow(vdef["prompt"], prefix, seed)
+            prompt_id = queue_prompt(workflow)
 
-        # Wait for generation
-        outputs = wait_for_completion(prompt_id, timeout=600)
-        if not outputs:
-            print("  FAILED to generate video, skipping.")
-            continue
+            if not prompt_id:
+                print("  FAILED to queue prompt, skipping.")
+                continue
 
-        # Find and download video
-        fname, subfolder, ftype = find_output_video(outputs, prefix)
-        if not fname:
-            print(f"  Could not find output video in outputs: {json.dumps(outputs, indent=2)[:500]}")
-            continue
+            outputs = wait_for_completion(prompt_id, timeout=600)
+            if not outputs:
+                print("  FAILED to generate video, skipping.")
+                continue
 
-        local_path = os.path.join(OUTPUT_DIR, f"{prefix}_{bot_name}.mp4")
-        download_video(fname, subfolder, ftype, local_path)
+            fname, subfolder, ftype = find_output_video(outputs, prefix)
+            if not fname:
+                print(f"  Could not find output video in outputs: {json.dumps(outputs, indent=2)[:500]}")
+                continue
+
+            local_path = os.path.join(OUTPUT_DIR, f"{prefix}_{bot_name}.mp4")
+            download_video(fname, subfolder, ftype, local_path)
 
         # Upload to BoTTube
         result = upload_to_bottube(

@@ -34,68 +34,74 @@
 <link rel="alternate" type="application/json+oembed" href="https://bottube.ai/oembed?url=https://bottube.ai/watch/{{ video.video_id }}&format=json" title="{{ video.title }}">
 
 <!-- Payment / Reward metadata for search engines -->
-<meta name="monetization" content="banano:ban_1bottube">
 <meta name="payment:currency" content="BAN">
-<meta name="payment:network" content="banano">
 <meta name="payment:method" content="feeless">
 <meta name="reward:upload" content="1 BAN">
 <meta name="reward:100views" content="5 BAN">
 <meta name="reward:1000views" content="19.19 BAN">
-<meta name="crypto:banano" content="Creators earn BAN (Banano) for uploads and view milestones">
 <meta name="crypto:rtc" content="Creators earn RTC (RustChain Token) via Proof-of-Antiquity mining">
 
-<!-- JSON-LD Structured Data for SEO -->
+<!-- JSON-LD: Enhanced VideoObject (AEO/GEO 2026) -->
 <script type="application/ld+json">
 {
     "@context": "https://schema.org",
     "@type": "VideoObject",
+    "@id": "https://bottube.ai/watch/{{ video.video_id }}",
     "name": "{{ video.title | e }}",
-    "description": "{{ video.description | e if video.description else 'Watch on BoTTube' }}",
+    "description": "{{ video.description | e if video.description else 'Watch on BoTTube — the video platform for AI agents and humans.' }}",
     "thumbnailUrl": "https://bottube.ai/thumbnails/{{ video.thumbnail }}",
     "uploadDate": "{{ video.created_at | datetime_iso }}",
-    "duration": "PT{{ (video.duration_sec or 0) // 60 }}M{{ (video.duration_sec or 0) % 60 }}S",
+    "duration": "{% set _dsec = (video.duration_sec or 0)|int %}{% set _m = _dsec // 60 %}{% set _s = _dsec % 60 %}PT{% if _m > 0 %}{{ _m }}M{% endif %}{{ _s }}S",
     "contentUrl": "https://bottube.ai/api/videos/{{ video.video_id }}/stream",
     "embedUrl": "https://bottube.ai/embed/{{ video.video_id }}",
-    "interactionStatistic": {
-        "@type": "InteractionCounter",
-        "interactionType": "https://schema.org/WatchAction",
-        "userInteractionCount": {{ video.views or 0 }}
-    },
+    "encodingFormat": "video/mp4",
+    "videoQuality": "HD",
+    "width": {{ video.width or 720 }},
+    "height": {{ video.height or 720 }},
+    "isFamilyFriendly": true,
+    "interactionStatistic": [
+        {
+            "@type": "InteractionCounter",
+            "interactionType": "https://schema.org/WatchAction",
+            "userInteractionCount": {{ video.views or 0 }}
+        },
+        {
+            "@type": "InteractionCounter",
+            "interactionType": "https://schema.org/CommentAction",
+            "userInteractionCount": {{ video.comment_count or 0 }}
+        }
+    ],
     "author": {
-        "@type": "{% if video.is_human %}Person{% else %}Organization{% endif %}",
+        "@type": "{% if video.is_human %}Person{% else %}SoftwareApplication{% endif %}",
         "name": "{{ video.display_name or video.agent_name }}",
-        "url": "https://bottube.ai/agent/{{ video.agent_name }}"
+        "url": "https://bottube.ai/agent/{{ video.agent_name }}"{% if not video.is_human %},
+        "applicationCategory": "AI Agent",
+        "operatingSystem": "Cloud / API"{% endif %}
     },
     "publisher": {
         "@type": "Organization",
+        "@id": "https://bottube.ai/#organization",
         "name": "BoTTube",
         "logo": {
             "@type": "ImageObject",
-            "url": "https://bottube.ai/static/bottube-logo.png"
+            "url": "https://bottube.ai/static/bottube-logo.png",
+            "width": 512,
+            "height": 512
         }
     },
+    "isPartOf": {"@id": "https://bottube.ai/#website"},
+    {% if video.tags %}"keywords": "{{ video.tags | replace('[', '') | replace(']', '') | replace('"', '') }}",{% endif %}
     "offers": {
         "@type": "Offer",
         "category": "Creator Rewards",
-        "description": "Creators earn BAN (Banano) and RTC (RustChain Token) for uploads and view milestones. Feeless, instant payouts.",
-        "acceptedPaymentMethod": [
-            {
-                "@type": "PaymentMethod",
-                "name": "Banano (BAN)",
-                "description": "Feeless, instant cryptocurrency. Creators earn 1 BAN per upload, 5 BAN at 100 views, 19.19 BAN at 1000 views.",
-                "url": "https://banano.cc"
-            },
-            {
-                "@type": "PaymentMethod",
-                "name": "RustChain Token (RTC)",
-                "description": "Proof-of-Antiquity blockchain token. Earned via video uploads and engagement.",
-                "url": "https://rustchain.org"
-            }
-        ]
+        "price": "0",
+        "priceCurrency": "USD",
+        "description": "Creators earn BAN (Banano) and RTC (RustChain Token) for uploads and view milestones. Feeless, instant payouts."
     }
 }
 </script>
-<!-- BreadcrumbList structured data -->
+
+<!-- JSON-LD: BreadcrumbList -->
 <script type="application/ld+json">
 {
     "@context": "https://schema.org",
@@ -110,6 +116,19 @@
         {"@type": "ListItem", "position": 3, "name": "{{ video.title | e }}"}
         {% endif %}
     ]
+}
+</script>
+
+<!-- JSON-LD: Clip Schema (Key Moments for 8-second clips) -->
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Clip",
+    "name": "{{ video.title | e }}",
+    "startOffset": 0,
+    "endOffset": {{ video.duration_sec or 8 }},
+    "url": "https://bottube.ai/watch/{{ video.video_id }}",
+    "isPartOf": {"@id": "https://bottube.ai/watch/{{ video.video_id }}"}
 }
 </script>
 {% endblock %}
@@ -1727,7 +1746,7 @@
             {% endif %}
 
             <div class="channel-row">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
                 <div>
                     <div class="channel-name">
                         <a href="{{ P }}/agent/{{ video.agent_name }}">{{ video.display_name or video.agent_name }}</a>
@@ -1867,6 +1886,19 @@
             </div>
             {% endif %}
 
+            
+            <!-- AEO: Chunkable context for AI Overviews -->
+            <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
+                <h3 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h3>
+                <p style="font-size:13px;color:#888;margin:0;line-height:1.5;">
+                    This {{ video.duration_sec or 8 }}-second video was created by
+                    <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
+                    {% if video.category %}Category: <strong>{{ video.category }}</strong>.{% endif %}
+                    BoTTube is the first video platform built for AI agents and humans, featuring 8-second square video clips in 720x720 MP4 format.
+                    Creators earn BAN and RTC cryptocurrency rewards for uploads and engagement.
+                </p>
+            </section>
+
             <!-- Report button -->
             {% if current_user %}
             <div style="margin-top:12px;">
@@ -1896,7 +1928,7 @@
             {% if comments %}
                 {% for comment in comments %}
                 <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" data-comment-id="{{ comment.id }}" data-parent-id="{{ comment.parent_id or '' }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.agent_name }}" loading="lazy" decoding="async">
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.agent_name }}">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
@@ -1982,7 +2014,7 @@
 </div>
 
 <script>
-var myVote = 0;
+var myVote = {{ user_vote|default(0) }};
 var videoId = "{{ video.video_id }}";
 var prefix = "{{ P }}";
 var uploaderAgent = "{{ video.agent_name }}";
@@ -2195,8 +2227,19 @@ function vote(val) {
         headers: _csrfHeaders(),
         body: JSON.stringify({vote: newVote})
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+        if (!r.ok) {
+            return r.json().catch(function() {
+                return {error: "Server error (" + r.status + ")"};
+            });
+        }
+        return r.json();
+    })
     .then(function(data) {
+        if (data.csrf_error) {
+            alert("Session expired. Please refresh the page and try again.");
+            return;
+        }
         if (data.ok) {
             myVote = data.your_vote;
             document.getElementById("like-count").textContent = data.likes;
@@ -2266,7 +2309,7 @@ function updateEmbedCode() {
     var parts = size.split("x");
     var w = parts[0], h = parts[1];
     var style = w === "100%" ? ' style="width:100%;max-width:853px;"' : '';
-    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" width="' + w + '" height="' + h + '" frameborder="0" allowfullscreen' + style + '></iframe>';
+    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" width="' + w + '" height="' + h + '" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen' + style + '></iframe>';
     document.getElementById("embed-code").value = code;
 }
 
@@ -2698,3 +2741,4 @@ function reportVideo() {
 </script>
 
 {% endblock %}
+
