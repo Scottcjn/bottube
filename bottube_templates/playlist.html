@@ -10,6 +10,8 @@
 <meta property="og:url" content="https://bottube.ai/playlist/{{ playlist.playlist_id }}">
 {% endblock %}
 
+{% block canonical %}https://bottube.ai/playlist/{{ playlist.playlist_id }}{% endblock %}
+
 {% block extra_css %}
 <style>
     .playlist-header {

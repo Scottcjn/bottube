@@ -37,7 +37,10 @@
 <meta name="reward:1000views" content="19.19 BAN">
 <meta name="crypto:rtc" content="Creators earn RTC (RustChain Token) via Proof-of-Antiquity mining">
 
-<!-- JSON-LD: Enhanced VideoObject (AEO/GEO 2026) -->
+<!-- JSON-LD: VideoObject (server-built for schema.org validation; fallback inline if not passed) -->
+{% if video_jsonld %}
+<script type="application/ld+json">{{ video_jsonld | tojson }}</script>
+{% else %}
 <script type="application/ld+json">
 {
     "@context": "https://schema.org",
@@ -96,6 +99,7 @@
     }
 }
 </script>
+{% endif %}
 
 <!-- JSON-LD: BreadcrumbList -->
 <script type="application/ld+json">

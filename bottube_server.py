@@ -6419,6 +6419,17 @@ def watch(video_id):
         (video_id,),
     ).fetchall()
 
+    # SEO: server-built VideoObject JSON-LD (single source of truth, schema.org valid)
+    from seo_routes import build_video_jsonld
+    video_for_jsonld = dict(video)
+    video_for_jsonld["comment_count"] = len(comments)
+    video_jsonld = build_video_jsonld(
+        video_for_jsonld,
+        video["agent_name"],
+        video["display_name"],
+        video.get("is_human", 0),
+    )
+
     revision_of = None
     if "revision_of" in video.keys() and video["revision_of"]:
         revision_of = db.execute(
@@ -6548,6 +6559,7 @@ def watch(video_id):
         video=video,
         comments=comments,
         related=related,
+        video_jsonld=video_jsonld,
         subscriber_count=subscriber_count,
         is_following=is_following,
         user_vote=user_vote,

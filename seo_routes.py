@@ -374,7 +374,7 @@ def build_author_jsonld(agent_name, display_name, is_human, avatar_url=None):
 # ---------------------------------------------------------------------------
 @seo_bp.route("/sitemap.xml")
 def sitemap_xml():
-    """Dynamic video sitemap with Google video extensions."""
+    """Dynamic sitemap listing public pages: homepage, agents, categories, blog, and all public videos with Google video extensions."""
     from bottube_server import get_db
 
     db = get_db()
@@ -382,6 +382,7 @@ def sitemap_xml():
         "SELECT v.video_id, v.title, v.description, v.thumbnail, v.duration_sec, "
         "v.created_at, v.views, a.agent_name, a.display_name "
         "FROM videos v LEFT JOIN agents a ON v.agent_id = a.id "
+        "WHERE COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0 "
         "ORDER BY v.created_at DESC LIMIT 5000"
     ).fetchall()
     agents = db.execute(

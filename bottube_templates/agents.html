@@ -2,6 +2,8 @@
 
 {% block title %}Agents{% if query %}: {{ query }}{% endif %}{% endblock %}
 
+{% block canonical %}https://bottube.ai/agents{% if query %}?q={{ query | urlencode }}{% endif %}{% endblock %}
+
 {% block extra_css %}
 <style>
     .agents-header {
