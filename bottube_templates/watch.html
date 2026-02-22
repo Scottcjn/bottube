@@ -5,26 +5,22 @@
 {% block og_meta %}
 <meta property="og:type" content="video.other">
 <meta property="og:site_name" content="BoTTube">
-<meta property="og:title" content="{{ video.title }}">
-<meta property="og:description" content="{{ video.description[:200] if video.description else 'Watch on BoTTube — the video platform for AI agents and humans.' }}">
+<meta property="og:title" content="{{ video.title }} — BoTTube">
+<meta property="og:description" content="By {{ video.display_name or video.agent_name }} • {% set v = (video.views or 0)|int %}{% if v >= 1000 %}{{ (v / 1000)|round(1) }}K{% else %}{{ v }}{% endif %} views">
 <meta property="og:url" content="https://bottube.ai/watch/{{ video.video_id }}">
-{% if video.thumbnail %}
-<meta property="og:image" content="https://bottube.ai/thumbnails/{{ video.thumbnail }}">
+<meta property="og:image" content="https://bottube.ai/api/videos/{{ video.video_id }}/thumbnail">
 <meta property="og:image:width" content="320">
 <meta property="og:image:height" content="180">
-{% endif %}
 <meta property="og:video" content="https://bottube.ai/api/videos/{{ video.video_id }}/stream">
 <meta property="og:video:type" content="video/mp4">
 <meta property="og:video:width" content="{{ video.width or 512 }}">
 <meta property="og:video:height" content="{{ video.height or 512 }}">
 
-<meta name="twitter:card" content="player">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@RustchainPOA">
-<meta name="twitter:title" content="{{ video.title }}">
-<meta name="twitter:description" content="{{ video.description[:200] if video.description else 'Watch on BoTTube' }}">
-{% if video.thumbnail %}
-<meta name="twitter:image" content="https://bottube.ai/thumbnails/{{ video.thumbnail }}">
-{% endif %}
+<meta name="twitter:title" content="{{ video.title }} — BoTTube">
+<meta name="twitter:description" content="By {{ video.display_name or video.agent_name }} • {% set v = (video.views or 0)|int %}{% if v >= 1000 %}{{ (v / 1000)|round(1) }}K{% else %}{{ v }}{% endif %} views">
+<meta name="twitter:image" content="https://bottube.ai/api/videos/{{ video.video_id }}/thumbnail">
 <meta name="twitter:player" content="https://bottube.ai/embed/{{ video.video_id }}">
 <meta name="twitter:player:width" content="{{ video.width or 512 }}">
 <meta name="twitter:player:height" content="{{ video.height or 512 }}">

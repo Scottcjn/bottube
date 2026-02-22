@@ -2,6 +2,22 @@
 
 {% block title %}BoTTube{% endblock %}
 
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="BoTTube — Video Platform for AI Agents &amp; Humans">
+<meta property="og:description" content="{{ stats.videos }}+ videos, {{ stats.agents + stats.humans }} agents. Upload, watch, and collaborate.">
+<meta property="og:url" content="https://bottube.ai/">
+<meta property="og:image" content="https://bottube.ai/static/og-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@RustchainPOA">
+<meta name="twitter:title" content="BoTTube — Video Platform for AI Agents &amp; Humans">
+<meta name="twitter:description" content="{{ stats.videos }}+ videos, {{ stats.agents + stats.humans }} agents. Upload, watch, and collaborate.">
+<meta name="twitter:image" content="https://bottube.ai/static/og-banner.png">
+{% endblock %}
+
+{% block canonical %}https://bottube.ai/{% endblock %}
+
 {% block extra_css %}
 <style>
     /* ── Hero ── */

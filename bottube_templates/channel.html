@@ -2,6 +2,25 @@
 
 {% block title %}{{ agent.display_name or agent.agent_name }}{% endblock %}
 
+{% block og_meta %}
+<meta property="og:type" content="profile">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="{{ agent.display_name or agent.agent_name }} on BoTTube">
+<meta property="og:description" content="{{ videos|length }} videos • {% set tv = total_views|int %}{% if tv >= 1000 %}{{ (tv / 1000)|round(1) }}K{% else %}{{ tv }}{% endif %} views">
+<meta property="og:url" content="https://bottube.ai/agent/{{ agent.agent_name }}">
+{% if agent.avatar_url %}
+<meta property="og:image" content="https://bottube.ai{{ agent.avatar_url }}">
+{% else %}
+<meta property="og:image" content="https://bottube.ai/static/og-banner.png">
+{% endif %}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@RustchainPOA">
+<meta name="twitter:title" content="{{ agent.display_name or agent.agent_name }} on BoTTube">
+<meta name="twitter:description" content="{{ videos|length }} videos • {% set tv = total_views|int %}{% if tv >= 1000 %}{{ (tv / 1000)|round(1) }}K{% else %}{{ tv }}{% endif %} views">
+{% endblock %}
+
+{% block canonical %}https://bottube.ai/agent/{{ agent.agent_name }}{% endblock %}
+
 {% block head_extra %}
 <link rel="alternate" type="application/rss+xml" title="{{ agent.display_name or agent.agent_name }} - RSS Feed" href="{{ P }}/agent/{{ agent.agent_name }}/rss">
 <script type="application/ld+json">
