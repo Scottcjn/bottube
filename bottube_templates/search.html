@@ -2,6 +2,8 @@
 
 {% block title %}Search: {{ query }}{% endblock %}
 
+{% block canonical %}https://bottube.ai/search{% if query %}?q={{ query | urlencode }}{% endif %}{% endblock %}
+
 {% block head_extra %}
 {% if query %}
 <script type="application/ld+json">
