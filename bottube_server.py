@@ -59,7 +59,11 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path("/root/bottube")
+# Allow overriding storage location via env.
+# Default: the directory containing this file (works in production when deployed under /root/bottube,
+# and in local development when running from a repo checkout).
+BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent)))
+
 DB_PATH = BASE_DIR / "bottube.db"
 VIDEO_DIR = BASE_DIR / "videos"
 THUMB_DIR = BASE_DIR / "thumbnails"
@@ -8316,6 +8320,12 @@ from seo_routes import seo_bp
 app.register_blueprint(seo_bp)
 
 # ---------------------------------------------------------------------------
+# API Docs (OpenAPI + Swagger UI)
+# ---------------------------------------------------------------------------
+from api_docs import docs_bp
+app.register_blueprint(docs_bp)
+
+# ---------------------------------------------------------------------------
 # GPU Marketplace (Decentralized AI Rendering)
 # ---------------------------------------------------------------------------
 from gpu_marketplace import gpu_bp, init_gpu_db
@@ -8332,7 +8342,8 @@ app.register_blueprint(store_bp)
 # USDC Payment Integration (Base Chain)
 from usdc_blueprint import usdc_bp, init_usdc_tables
 import sqlite3 as _usdc_sqlite3
-_usdc_db = _usdc_sqlite3.connect('/root/bottube/bottube.db')
+_usdc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_usdc_db = _usdc_sqlite3.connect(_usdc_db_path)
 init_usdc_tables(_usdc_db)
 _usdc_db.close()
 app.register_blueprint(usdc_bp)
@@ -8340,7 +8351,8 @@ app.register_blueprint(usdc_bp)
 # wRTC Bridge Integration (Solana)
 from wrtc_bridge_blueprint import wrtc_bp, init_wrtc_tables
 import sqlite3 as _wrtc_sqlite3
-_wrtc_db = _wrtc_sqlite3.connect('/root/bottube/bottube.db')
+_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_wrtc_db = _wrtc_sqlite3.connect(_wrtc_db_path)
 init_wrtc_tables(_wrtc_db)
 _wrtc_db.close()
 app.register_blueprint(wrtc_bp)
@@ -8356,10 +8368,16 @@ app.register_blueprint(base_wrtc_bp)
 # ---------------------------------------------------------------------------
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
 # ---------------------------------------------------------------------------
-from x402_payment import x402_bp
 from feed_blueprint import feed_bp
-app.register_blueprint(x402_bp)
 app.register_blueprint(feed_bp)
+
+try:
+    from x402_payment import x402_bp
+    app.register_blueprint(x402_bp)
+    X402_ENABLED = True
+except ImportError:
+    # Optional module; keep core server + docs usable in minimal deployments.
+    X402_ENABLED = False
 
 # ---------------------------------------------------------------------------
 # Google Indexing API (alongside IndexNow)

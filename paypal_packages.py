@@ -133,7 +133,11 @@ CREATE INDEX IF NOT EXISTS idx_store_orders_paypal ON store_orders(paypal_order_
 def init_store_db(db_path: str = None):
     """Initialize store tables in the database."""
     if db_path is None:
-        db_path = "/root/bottube/bottube.db"
+        from pathlib import Path
+        db_path = os.environ.get(
+            "BOTTUBE_DB_PATH",
+            str(Path(__file__).resolve().parent / "bottube.db"),
+        )
 
     import sqlite3
     conn = sqlite3.connect(db_path)
@@ -240,7 +244,11 @@ def get_db():
     """Get database connection from Flask g context."""
     if not hasattr(g, 'db') or g.db is None:
         import sqlite3
-        db_path = os.environ.get("BOTTUBE_DB_PATH", "/root/bottube/bottube.db")
+        from pathlib import Path
+        db_path = os.environ.get(
+            "BOTTUBE_DB_PATH",
+            str(Path(__file__).resolve().parent / "bottube.db"),
+        )
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db
