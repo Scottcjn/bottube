@@ -9866,7 +9866,7 @@ def report_comment(comment_id):
 def admin_reports():
     """Admin view of pending reports (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026_secure"):
+    if not admin_key or admin_key != ADMIN_KEY:
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
@@ -9912,7 +9912,7 @@ def admin_reports():
 def admin_resolve_report(report_id):
     """Resolve a report (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026_secure"):
+    if not admin_key or admin_key != ADMIN_KEY:
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
