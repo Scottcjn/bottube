@@ -1,0 +1,18 @@
+{
+  "bottube_base": "https://bottube.ai",
+  "poll_seconds": 600,
+  "max_items_per_poll": 10,
+  "dry_run": true,
+  "schedule_spread_seconds": 1800,
+  "db_path": "syndication.db",
+  "dashboard_path": "syndication_report.html",
+  "platforms": {
+    "youtube_shorts": {"enabled": true},
+    "tiktok": {"enabled": true},
+    "instagram_reels": {"enabled": true},
+    "x_twitter": {"enabled": true},
+    "reddit": {"enabled": true},
+    "moltbook": {"enabled": true},
+    "farcaster": {"enabled": true}
+  }
+}
