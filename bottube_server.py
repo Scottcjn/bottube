@@ -6640,6 +6640,24 @@ body:hover .overlay{{opacity:1}}
     return resp
 
 
+def _extract_oembed_video_id(url: str):
+    """Extract BoTTube video id from watch/embed URL and reject non-BoTTube hosts."""
+    if not url:
+        return None
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return None
+    host = (parsed.netloc or "").lower()
+    if host not in {"bottube.ai", "www.bottube.ai"}:
+        return None
+
+    m = re.match(r"^/(watch|embed)/([A-Za-z0-9_-]{11})$", parsed.path or "")
+    if not m:
+        return None
+    return m.group(2)
+
+
 @app.route("/oembed")
 def oembed():
     """oEmbed discovery endpoint. Returns JSON with iframe embed HTML."""
@@ -6649,12 +6667,10 @@ def oembed():
     if fmt != "json":
         return jsonify({"error": "Only JSON format supported"}), 501
 
-    # Extract video_id from URL
-    match = re.search(r"/watch/([A-Za-z0-9_-]{11})", url)
-    if not match:
+    video_id = _extract_oembed_video_id(url)
+    if not video_id:
         return jsonify({"error": "Invalid URL"}), 404
 
-    video_id = match.group(1)
     db = get_db()
     video = db.execute(
         "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
@@ -6664,27 +6680,48 @@ def oembed():
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    w = request.args.get("maxwidth", video["width"] or 512, type=int)
-    h = request.args.get("maxheight", video["height"] or 512, type=int)
-    # Clamp dimensions
-    w = min(w, 1920)
-    h = min(h, 1080)
+    native_w = int(video["width"] or 560)
+    native_h = int(video["height"] or 315)
+    if native_w <= 0:
+        native_w = 560
+    if native_h <= 0:
+        native_h = 315
 
-    return jsonify({
+    req_w = request.args.get("maxwidth", type=int)
+    req_h = request.args.get("maxheight", type=int)
+
+    w = req_w if req_w else native_w
+    h = req_h if req_h else native_h
+
+    # Preserve aspect ratio when one side is provided.
+    if req_w and not req_h:
+        h = max(120, int(round(req_w * native_h / native_w)))
+    elif req_h and not req_w:
+        w = max(200, int(round(req_h * native_w / native_h)))
+
+    # Clamp dimensions to reasonable embed bounds
+    w = max(200, min(int(w), 1920))
+    h = max(120, min(int(h), 1080))
+
+    resp = jsonify({
         "version": "1.0",
         "type": "video",
         "provider_name": "BoTTube",
         "provider_url": "https://bottube.ai",
+        "cache_age": 3600,
         "title": video["title"],
         "author_name": video["display_name"] or video["agent_name"],
         "author_url": f"https://bottube.ai/agent/{video['agent_name']}",
         "width": w,
         "height": h,
-        "html": f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>',
+        "html": f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>',
         "thumbnail_url": f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video["thumbnail"] else "",
         "thumbnail_width": 320,
         "thumbnail_height": 180,
     })
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 @app.route("/agents")
