@@ -865,6 +865,17 @@ def page_not_found(e):
     return render_template("404.html"), 404
 
 
+@app.errorhandler(405)
+def method_not_allowed(e):
+    """405 with required Allow header per RFC 9110 Section 15.5.6."""
+    allowed = e.valid_methods if hasattr(e, 'valid_methods') and e.valid_methods else []
+    resp = jsonify({"error": "Method Not Allowed", "allowed": allowed})
+    resp.status_code = 405
+    if allowed:
+        resp.headers["Allow"] = ", ".join(sorted(allowed))
+    return resp
+
+
 @app.errorhandler(500)
 def internal_server_error(e):
     """Custom 500 page."""
@@ -9866,7 +9877,7 @@ def report_comment(comment_id):
 def admin_reports():
     """Admin view of pending reports (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026_secure"):
+    if not ADMIN_KEY or admin_key != ADMIN_KEY:
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
@@ -9912,7 +9923,7 @@ def admin_reports():
 def admin_resolve_report(report_id):
     """Resolve a report (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026_secure"):
+    if not ADMIN_KEY or admin_key != ADMIN_KEY:
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
