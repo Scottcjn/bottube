@@ -4262,6 +4262,75 @@ def get_agent(agent_name):
 # Trending / Feed
 # ---------------------------------------------------------------------------
 
+def _recommend_feed_videos(db, limit=20, category=None):
+    """Rank feed videos with a lightweight recommendation score.
+
+    Score combines freshness, engagement, and novelty with a per-creator
+    diversity penalty so one creator cannot dominate the first page.
+    """
+    now = time.time()
+    day = 86400
+    query_limit = max(limit * 4, 80)
+
+    where = "v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"
+    params = [now - day, now - day]
+    if category:
+        where += " AND v.category = ?"
+        params.append(category)
+
+    rows = db.execute(
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url,
+                  COALESCE(rv.recent_views, 0) AS recent_views,
+                  COALESCE(rc.recent_comments, 0) AS recent_comments
+           FROM videos v
+           JOIN agents a ON v.agent_id = a.id
+           LEFT JOIN (
+               SELECT video_id, COUNT(*) AS recent_views
+               FROM views WHERE created_at > ?
+               GROUP BY video_id
+           ) rv ON rv.video_id = v.video_id
+           LEFT JOIN (
+               SELECT video_id, COUNT(*) AS recent_comments
+               FROM comments WHERE created_at > ?
+               GROUP BY video_id
+           ) rc ON rc.video_id = v.video_id
+           WHERE {where}
+           ORDER BY v.created_at DESC
+           LIMIT ?""",
+        tuple(params + [query_limit]),
+    ).fetchall()
+
+    scored = []
+    for row in rows:
+        age_h = max(0.0, (now - float(row["created_at"] or now)) / 3600.0)
+        freshness = max(0.0, 24.0 - min(24.0, age_h)) * 0.7
+        engagement = (
+            float(row["likes"] or 0) * 2.0
+            + float(row["recent_comments"] or 0) * 3.0
+            + float(row["recent_views"] or 0) * 0.2
+        )
+        novelty = float(row["novelty_score"] or 0) * 0.3
+        scored.append((freshness + engagement + novelty, row))
+
+    scored.sort(key=lambda x: (x[0], x[1]["created_at"]), reverse=True)
+
+    result = []
+    per_agent = {}
+    for base_score, row in scored:
+        aid = row["agent_id"]
+        seen = per_agent.get(aid, 0)
+        # Diversity penalty: after two videos from same agent, ranking drops fast.
+        adjusted = base_score - (seen * 6.0)
+        if seen >= 4 and adjusted < 5:
+            continue
+        per_agent[aid] = seen + 1
+        result.append(row)
+        if len(result) >= limit:
+            break
+
+    return result
+
+
 def _get_trending_videos(db, limit=20):
     """Compute trending videos with improved scoring.
 
@@ -4367,20 +4436,32 @@ def trending():
 
 @app.route("/api/feed")
 def feed():
-    """Get chronological feed of recent videos."""
+    """Get feed videos.
+
+    Modes:
+    - recommended (default): lightweight recommendation ranking
+    - latest: chronological order
+    """
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
     offset = (page - 1) * per_page
+    mode = (request.args.get("mode", "recommended") or "recommended").lower()
+    category = (request.args.get("category") or "").strip() or None
 
     db = get_db()
-    rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
-           FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-           ORDER BY v.created_at DESC
-           LIMIT ? OFFSET ?""",
-        (per_page, offset),
-    ).fetchall()
+    if mode == "latest":
+        rows = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+               ORDER BY v.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (per_page, offset),
+        ).fetchall()
+    else:
+        # recommendation mode: compute enough rows, then slice by page
+        ranked = _recommend_feed_videos(db, limit=max(80, page * per_page), category=category)
+        rows = ranked[offset: offset + per_page]
 
     videos = []
     for row in rows:
@@ -4390,7 +4471,7 @@ def feed():
         d["avatar_url"] = row["avatar_url"]
         videos.append(d)
 
-    return jsonify({"videos": videos, "page": page})
+    return jsonify({"videos": videos, "page": page, "mode": mode})
 
 
 @app.route("/api/challenges")
