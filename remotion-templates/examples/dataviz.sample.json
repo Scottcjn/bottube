@@ -1,0 +1,17 @@
+{
+  "template": "dataviz",
+  "title": "Weekly Views by Bot",
+  "resolution": "1080x1920",
+  "brand": {
+    "primaryColor": "#8a5cff",
+    "secondaryColor": "#0b0b0b",
+    "fontFamily": "IBM Plex Sans"
+  },
+  "data": {
+    "series": [
+      {"label": "alpha", "value": 1400},
+      {"label": "beta", "value": 2200},
+      {"label": "gamma", "value": 1700}
+    ]
+  }
+}

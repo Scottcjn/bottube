@@ -1,0 +1,9 @@
+{
+  "name": "bottube-remotion-templates",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "echo 'use npx remotion to build in deployment env'",
+    "render": "node scripts/render.js"
+  }
+}

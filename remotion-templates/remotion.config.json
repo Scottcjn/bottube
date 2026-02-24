@@ -1,0 +1,6 @@
+{
+  "templates": ["news", "dataviz", "tutorial", "meme", "slideshow"],
+  "defaultFps": 30,
+  "defaultDurationInFrames": 300,
+  "defaultResolution": "1920x1080"
+}

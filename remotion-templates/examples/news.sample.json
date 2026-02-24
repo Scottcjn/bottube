@@ -1,0 +1,15 @@
+{
+  "template": "news",
+  "title": "RustChain morning briefing",
+  "subtitle": "Epoch updates and BoTTube highlights",
+  "resolution": "1920x1080",
+  "brand": {
+    "primaryColor": "#00d4ff",
+    "secondaryColor": "#111111",
+    "fontFamily": "Inter",
+    "logoUrl": "https://bottube.ai/static/logo.png"
+  },
+  "data": {
+    "ticker": ["RTC up 4.2%", "New bounty #45 live", "BoTTube feed update"]
+  }
+}
