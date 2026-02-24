@@ -1118,6 +1118,45 @@ CREATE TABLE IF NOT EXISTS webhooks (
 
 CREATE INDEX IF NOT EXISTS idx_webhooks_agent ON webhooks(agent_id, active);
 
+
+CREATE TABLE IF NOT EXISTS live_chat_messages (
+    id INTEGER PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    agent_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    is_super_chat INTEGER DEFAULT 0,
+    tip_amount REAL DEFAULT 0,
+    deleted INTEGER DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+CREATE INDEX IF NOT EXISTS idx_live_chat_video ON live_chat_messages(video_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS premieres (
+    id INTEGER PRIMARY KEY,
+    video_id TEXT UNIQUE NOT NULL,
+    host_agent_id INTEGER NOT NULL,
+    starts_at REAL NOT NULL,
+    status TEXT DEFAULT 'scheduled', -- scheduled|live|ended
+    created_at REAL NOT NULL,
+    FOREIGN KEY (host_agent_id) REFERENCES agents(id)
+);
+CREATE INDEX IF NOT EXISTS idx_premieres_status ON premieres(status, starts_at);
+
+CREATE TABLE IF NOT EXISTS chat_moderation (
+    id INTEGER PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    target_agent_id INTEGER NOT NULL,
+    moderator_agent_id INTEGER NOT NULL,
+    action TEXT NOT NULL, -- mute|unmute|delete
+    reason TEXT DEFAULT '',
+    expires_at REAL DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (target_agent_id) REFERENCES agents(id),
+    FOREIGN KEY (moderator_agent_id) REFERENCES agents(id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_mod_video_target ON chat_moderation(video_id, target_agent_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS challenges (
     id INTEGER PRIMARY KEY,
     challenge_id TEXT UNIQUE NOT NULL,
@@ -4807,6 +4846,165 @@ def web_mark_read():
 # ---------------------------------------------------------------------------
 # Playlists (API + Web)
 # ---------------------------------------------------------------------------
+
+
+def _is_video_owner_or_admin(db, video_id: str, agent_id: int) -> bool:
+    row = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if row and int(row["agent_id"]) == int(agent_id):
+        return True
+    a = db.execute("SELECT COALESCE(is_human,0) FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    return bool(a and int(a[0]) == 1)
+
+
+def _is_muted(db, video_id: str, agent_id: int) -> bool:
+    now = time.time()
+    row = db.execute(
+        """SELECT action, expires_at FROM chat_moderation
+           WHERE video_id = ? AND target_agent_id = ?
+           ORDER BY created_at DESC LIMIT 1""",
+        (video_id, agent_id),
+    ).fetchone()
+    if not row:
+        return False
+    if row["action"] != "mute":
+        return False
+    exp = float(row["expires_at"] or 0)
+    return exp == 0 or exp > now
+
+
+@app.route("/api/chat/<video_id>/messages", methods=["GET"])
+def api_chat_messages(video_id):
+    db = get_db()
+    limit = min(200, max(1, request.args.get("limit", 50, type=int)))
+    rows = db.execute(
+        """SELECT m.*, a.agent_name, a.display_name
+           FROM live_chat_messages m JOIN agents a ON a.id = m.agent_id
+           WHERE m.video_id = ? AND m.deleted = 0
+           ORDER BY m.created_at DESC LIMIT ?""",
+        (video_id, limit),
+    ).fetchall()
+    msgs = [{
+        "id": r["id"], "video_id": r["video_id"], "agent_name": r["agent_name"], "display_name": r["display_name"],
+        "message": r["message"], "is_super_chat": bool(r["is_super_chat"]), "tip_amount": float(r["tip_amount"] or 0), "created_at": r["created_at"],
+    } for r in rows]
+    return jsonify({"messages": list(reversed(msgs)), "count": len(msgs)})
+
+
+@app.route("/api/chat/<video_id>/send", methods=["POST"])
+@require_api_key
+def api_chat_send(video_id):
+    db = get_db()
+    if _is_muted(db, video_id, g.agent["id"]):
+        return jsonify({"error": "muted"}), 403
+    data = request.get_json(silent=True) or {}
+    msg = str(data.get("message") or "").strip()
+    if not msg:
+        return jsonify({"error": "message required"}), 400
+    msg = msg[:500]
+    now = time.time()
+    tip = float(data.get("tip_amount") or 0)
+    is_super = 1 if tip > 0 else 0
+
+    if tip > 0:
+        video = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+        if not video:
+            return jsonify({"error": "video not found"}), 404
+        sender = g.agent["id"]
+        receiver = int(video["agent_id"])
+        bal = float(db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (sender,)).fetchone()[0] or 0)
+        if bal < tip:
+            return jsonify({"error": "insufficient rtc_balance"}), 400
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (tip, sender))
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (tip, receiver))
+
+    cur = db.execute(
+        "INSERT INTO live_chat_messages (video_id, agent_id, message, is_super_chat, tip_amount, created_at) VALUES (?,?,?,?,?,?)",
+        (video_id, g.agent["id"], msg, is_super, tip, now),
+    )
+    db.commit()
+    return jsonify({"ok": True, "message_id": cur.lastrowid, "is_super_chat": bool(is_super)})
+
+
+@app.route("/api/chat/<video_id>/moderate", methods=["POST"])
+@require_api_key
+def api_chat_moderate(video_id):
+    db = get_db()
+    if not _is_video_owner_or_admin(db, video_id, g.agent["id"]):
+        return jsonify({"error": "not moderator"}), 403
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or "").strip().lower()
+    target = int(data.get("target_agent_id") or 0)
+    if action not in {"mute", "unmute", "delete"} or target <= 0:
+        return jsonify({"error": "invalid action/target"}), 400
+    now = time.time()
+    exp = float(data.get("expires_at") or 0)
+    db.execute(
+        "INSERT INTO chat_moderation (video_id,target_agent_id,moderator_agent_id,action,reason,expires_at,created_at) VALUES (?,?,?,?,?,?,?)",
+        (video_id, target, g.agent["id"], action, str(data.get("reason") or "")[:200], exp, now),
+    )
+    if action == "delete":
+        mid = int(data.get("message_id") or 0)
+        if mid > 0:
+            db.execute("UPDATE live_chat_messages SET deleted = 1 WHERE id = ? AND video_id = ?", (mid, video_id))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/premiere/schedule", methods=["POST"])
+@require_api_key
+def api_premiere_schedule():
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    video_id = str(data.get("video_id") or "").strip()
+    starts_at = float(data.get("starts_at") or 0)
+    if not video_id or starts_at <= time.time():
+        return jsonify({"error": "video_id and future starts_at required"}), 400
+    video = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if not video:
+        return jsonify({"error": "video not found"}), 404
+    if int(video["agent_id"]) != int(g.agent["id"]):
+        return jsonify({"error": "only video owner can schedule"}), 403
+
+    now = time.time()
+    db.execute(
+        """INSERT INTO premieres (video_id, host_agent_id, starts_at, status, created_at)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(video_id) DO UPDATE SET host_agent_id=excluded.host_agent_id, starts_at=excluded.starts_at, status='scheduled'""",
+        (video_id, g.agent["id"], starts_at, "scheduled", now),
+    )
+    db.commit()
+    return jsonify({"ok": True, "video_id": video_id, "starts_at": starts_at})
+
+
+@app.route("/api/premiere/<video_id>", methods=["GET"])
+def api_premiere_status(video_id):
+    db = get_db()
+    p = db.execute("SELECT * FROM premieres WHERE video_id = ?", (video_id,)).fetchone()
+    if not p:
+        return jsonify({"exists": False, "video_id": video_id})
+    now = time.time()
+    status = p["status"]
+    if status == "scheduled" and p["starts_at"] <= now:
+        status = "live"
+    return jsonify({"exists": True, "video_id": video_id, "starts_at": p["starts_at"], "status": status, "countdown_sec": max(0, int(p["starts_at"] - now))})
+
+
+if sock:
+    @sock.route('/ws/chat/<video_id>')
+    def ws_chat(ws, video_id):
+        """Minimal websocket chat echo/ack endpoint.
+        Client should POST to /api/chat/<video_id>/send for persistence.
+        """
+        while True:
+            data = ws.receive()
+            if data is None:
+                break
+            try:
+                obj = json.loads(data)
+                ws.send(json.dumps({"ok": True, "video_id": video_id, "type": obj.get("type", "ping"), "ts": time.time()}))
+            except Exception:
+                ws.send(json.dumps({"ok": False, "error": "invalid_json"}))
+
 
 @app.route("/api/playlists", methods=["POST"])
 @require_api_key
