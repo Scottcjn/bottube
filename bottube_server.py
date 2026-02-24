@@ -1118,6 +1118,49 @@ CREATE TABLE IF NOT EXISTS webhooks (
 
 CREATE INDEX IF NOT EXISTS idx_webhooks_agent ON webhooks(agent_id, active);
 
+
+CREATE TABLE IF NOT EXISTS render_nodes (
+    id INTEGER PRIMARY KEY,
+    node_id TEXT UNIQUE NOT NULL,
+    agent_id INTEGER,
+    wallet_name TEXT DEFAULT '',
+    gpu_model TEXT DEFAULT '',
+    vram_gb REAL DEFAULT 0,
+    cuda_version TEXT DEFAULT '',
+    rocm_version TEXT DEFAULT '',
+    price_render_per_min REAL DEFAULT 0.0,
+    price_tts_per_1k_chars REAL DEFAULT 0.0,
+    price_stt_per_min REAL DEFAULT 0.0,
+    price_llm_per_1k_tokens REAL DEFAULT 0.0,
+    status TEXT DEFAULT 'online',
+    last_seen REAL DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE TABLE IF NOT EXISTS render_jobs (
+    id INTEGER PRIMARY KEY,
+    job_id TEXT UNIQUE NOT NULL,
+    job_type TEXT NOT NULL, -- render|tts|stt|llm
+    requester_id INTEGER,
+    assigned_node_id INTEGER,
+    input_json TEXT DEFAULT '{}',
+    callback_url TEXT DEFAULT '',
+    status TEXT DEFAULT 'queued', -- queued|running|completed|failed
+    escrow_rtc REAL DEFAULT 0,
+    result_url TEXT DEFAULT '',
+    error_message TEXT DEFAULT '',
+    created_at REAL NOT NULL,
+    started_at REAL DEFAULT 0,
+    completed_at REAL DEFAULT 0,
+    FOREIGN KEY (requester_id) REFERENCES agents(id),
+    FOREIGN KEY (assigned_node_id) REFERENCES render_nodes(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_render_nodes_status ON render_nodes(status, last_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_render_jobs_status ON render_jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_render_jobs_requester ON render_jobs(requester_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS challenges (
     id INTEGER PRIMARY KEY,
     challenge_id TEXT UNIQUE NOT NULL,
@@ -4807,6 +4850,216 @@ def web_mark_read():
 # ---------------------------------------------------------------------------
 # Playlists (API + Web)
 # ---------------------------------------------------------------------------
+
+def _select_best_render_node(db, job_type: str):
+    price_field = {
+        "render": "price_render_per_min",
+        "tts": "price_tts_per_1k_chars",
+        "stt": "price_stt_per_min",
+        "llm": "price_llm_per_1k_tokens",
+    }.get(job_type, "price_render_per_min")
+    return db.execute(
+        f"""SELECT * FROM render_nodes
+           WHERE status = 'online'
+           ORDER BY {price_field} ASC, last_seen DESC
+           LIMIT 1"""
+    ).fetchone()
+
+
+@app.route("/api/render/register", methods=["POST"])
+@require_api_key
+def api_render_register():
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    node_id = (data.get("node_id") or "").strip() or gen_video_id()
+    now = time.time()
+
+    db.execute(
+        """INSERT INTO render_nodes (
+               node_id, agent_id, wallet_name, gpu_model, vram_gb, cuda_version, rocm_version,
+               price_render_per_min, price_tts_per_1k_chars, price_stt_per_min, price_llm_per_1k_tokens,
+               status, last_seen, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(node_id) DO UPDATE SET
+               agent_id=excluded.agent_id,
+               wallet_name=excluded.wallet_name,
+               gpu_model=excluded.gpu_model,
+               vram_gb=excluded.vram_gb,
+               cuda_version=excluded.cuda_version,
+               rocm_version=excluded.rocm_version,
+               price_render_per_min=excluded.price_render_per_min,
+               price_tts_per_1k_chars=excluded.price_tts_per_1k_chars,
+               price_stt_per_min=excluded.price_stt_per_min,
+               price_llm_per_1k_tokens=excluded.price_llm_per_1k_tokens,
+               status=excluded.status,
+               last_seen=excluded.last_seen""",
+        (
+            node_id,
+            g.agent["id"],
+            str(data.get("wallet_name") or g.agent.get("agent_name") or "")[:120],
+            str(data.get("gpu_model") or "")[:160],
+            float(data.get("vram_gb") or 0),
+            str(data.get("cuda_version") or "")[:40],
+            str(data.get("rocm_version") or "")[:40],
+            float(data.get("price_render_per_min") or 0),
+            float(data.get("price_tts_per_1k_chars") or 0),
+            float(data.get("price_stt_per_min") or 0),
+            float(data.get("price_llm_per_1k_tokens") or 0),
+            str(data.get("status") or "online")[:20],
+            now,
+            now,
+        ),
+    )
+    db.commit()
+    return jsonify({"ok": True, "node_id": node_id})
+
+
+@app.route("/api/render/nodes", methods=["GET"])
+def api_render_nodes():
+    db = get_db()
+    rows = db.execute(
+        """SELECT rn.*, a.agent_name FROM render_nodes rn
+           LEFT JOIN agents a ON a.id = rn.agent_id
+           ORDER BY rn.status='online' DESC, rn.last_seen DESC LIMIT 200"""
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "node_id": r["node_id"], "agent_name": r["agent_name"], "wallet_name": r["wallet_name"],
+            "gpu_model": r["gpu_model"], "vram_gb": r["vram_gb"], "cuda_version": r["cuda_version"], "rocm_version": r["rocm_version"],
+            "price_render_per_min": r["price_render_per_min"], "price_tts_per_1k_chars": r["price_tts_per_1k_chars"],
+            "price_stt_per_min": r["price_stt_per_min"], "price_llm_per_1k_tokens": r["price_llm_per_1k_tokens"],
+            "status": r["status"], "last_seen": r["last_seen"],
+        })
+    return jsonify({"nodes": out, "count": len(out)})
+
+
+def _submit_render_job(job_type: str, payload: dict):
+    db = get_db()
+    node = _select_best_render_node(db, job_type)
+    if not node:
+        return jsonify({"error": "no available render nodes"}), 503
+
+    escrow = float(payload.get("escrow_rtc") or 0)
+    uid = g.agent["id"]
+    if escrow > 0:
+        bal = float(db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (uid,)).fetchone()[0] or 0)
+        if bal < escrow:
+            return jsonify({"error": "insufficient rtc_balance for escrow"}), 400
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (escrow, uid))
+
+    now = time.time()
+    job_id = gen_video_id()
+    db.execute(
+        """INSERT INTO render_jobs (job_id, job_type, requester_id, assigned_node_id, input_json, callback_url, status, escrow_rtc, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            job_id,
+            job_type,
+            uid,
+            node["id"],
+            json.dumps(payload.get("input") or payload),
+            str(payload.get("callback_url") or "")[:400],
+            "queued",
+            escrow,
+            now,
+        ),
+    )
+    db.commit()
+    return jsonify({"ok": True, "job_id": job_id, "assigned_node_id": node["node_id"], "status": "queued"}), 201
+
+
+@app.route("/api/render/job", methods=["POST"])
+@require_api_key
+def api_render_job_submit():
+    payload = request.get_json(silent=True) or {}
+    return _submit_render_job("render", payload)
+
+
+@app.route("/api/voice/synthesize", methods=["POST"])
+@require_api_key
+def api_voice_synthesize():
+    payload = request.get_json(silent=True) or {}
+    payload.setdefault("job_kind", "tts")
+    return _submit_render_job("tts", payload)
+
+
+@app.route("/api/voice/transcribe", methods=["POST"])
+@require_api_key
+def api_voice_transcribe():
+    payload = request.get_json(silent=True) or {}
+    payload.setdefault("job_kind", "stt")
+    return _submit_render_job("stt", payload)
+
+
+@app.route("/api/llm/inference", methods=["POST"])
+@require_api_key
+def api_llm_inference():
+    payload = request.get_json(silent=True) or {}
+    payload.setdefault("job_kind", "llm")
+    return _submit_render_job("llm", payload)
+
+
+@app.route("/api/render/job/<job_id>", methods=["GET"])
+def api_render_job_status(job_id):
+    db = get_db()
+    row = db.execute(
+        """SELECT rj.*, rn.node_id as assigned_node FROM render_jobs rj
+           LEFT JOIN render_nodes rn ON rn.id = rj.assigned_node_id
+           WHERE rj.job_id = ?""",
+        (job_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "job not found"}), 404
+    return jsonify({
+        "job_id": row["job_id"], "job_type": row["job_type"], "status": row["status"],
+        "assigned_node_id": row["assigned_node"], "escrow_rtc": row["escrow_rtc"], "result_url": row["result_url"],
+        "error_message": row["error_message"], "created_at": row["created_at"], "started_at": row["started_at"], "completed_at": row["completed_at"],
+    })
+
+
+@app.route("/api/render/complete", methods=["POST"])
+@require_api_key
+def api_render_complete():
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    job_id = (data.get("job_id") or "").strip()
+    status = (data.get("status") or "completed").strip().lower()
+    if status not in {"completed", "failed"}:
+        return jsonify({"error": "status must be completed or failed"}), 400
+
+    row = db.execute(
+        """SELECT rj.*, rn.agent_id as node_agent_id
+           FROM render_jobs rj JOIN render_nodes rn ON rn.id = rj.assigned_node_id
+           WHERE rj.job_id = ?""",
+        (job_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "job not found"}), 404
+    if int(row["node_agent_id"] or 0) != int(g.agent["id"]):
+        return jsonify({"error": "only assigned node owner can complete"}), 403
+    if row["status"] in {"completed", "failed"}:
+        return jsonify({"ok": True, "status": row["status"]})
+
+    now = time.time()
+    if status == "completed":
+        if float(row["escrow_rtc"] or 0) > 0:
+            db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (row["escrow_rtc"], g.agent["id"]))
+        db.execute(
+            "UPDATE render_jobs SET status='completed', result_url=?, completed_at=?, error_message='' WHERE id = ?",
+            (str(data.get("result_url") or "")[:500], now, row["id"]),
+        )
+    else:
+        if float(row["escrow_rtc"] or 0) > 0 and row["requester_id"]:
+            db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (row["escrow_rtc"], row["requester_id"]))
+        db.execute(
+            "UPDATE render_jobs SET status='failed', error_message=?, completed_at=? WHERE id = ?",
+            (str(data.get("error_message") or "render failed")[:400], now, row["id"]),
+        )
+
+    db.commit()
+    return jsonify({"ok": True, "status": status})
+
 
 @app.route("/api/playlists", methods=["POST"])
 @require_api_key
