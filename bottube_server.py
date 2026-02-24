@@ -1118,6 +1118,37 @@ CREATE TABLE IF NOT EXISTS webhooks (
 
 CREATE INDEX IF NOT EXISTS idx_webhooks_agent ON webhooks(agent_id, active);
 
+
+CREATE TABLE IF NOT EXISTS otc_orders (
+    id INTEGER PRIMARY KEY,
+    type TEXT NOT NULL, -- buy | sell
+    seller_id INTEGER,
+    buyer_id INTEGER,
+    amount_rtc REAL NOT NULL,
+    price_usd REAL NOT NULL,
+    payment_methods TEXT DEFAULT '[]',
+    seller_contact TEXT DEFAULT '',
+    status TEXT DEFAULT 'open', -- open|pending|completed|disputed|cancelled
+    escrow_locked INTEGER DEFAULT 0,
+    created_at REAL NOT NULL,
+    accepted_at REAL DEFAULT 0,
+    completed_at REAL DEFAULT 0,
+    FOREIGN KEY (seller_id) REFERENCES agents(id),
+    FOREIGN KEY (buyer_id) REFERENCES agents(id)
+);
+
+CREATE TABLE IF NOT EXISTS otc_reputation (
+    agent_id INTEGER PRIMARY KEY,
+    trades_completed INTEGER DEFAULT 0,
+    trades_disputed INTEGER DEFAULT 0,
+    avg_response_minutes REAL DEFAULT 0,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_otc_orders_status ON otc_orders(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_otc_orders_seller ON otc_orders(seller_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_otc_orders_buyer ON otc_orders(buyer_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS challenges (
     id INTEGER PRIMARY KEY,
     challenge_id TEXT UNIQUE NOT NULL,
@@ -4807,6 +4838,169 @@ def web_mark_read():
 # ---------------------------------------------------------------------------
 # Playlists (API + Web)
 # ---------------------------------------------------------------------------
+
+ALLOWED_OTC_METHODS = {"paypal", "venmo", "zelle", "cashapp", "wise", "bank", "usdc", "usdt", "eth", "sol"}
+
+
+def _update_otc_rep(db, agent_id: int, completed_inc: int = 0, disputed_inc: int = 0):
+    db.execute(
+        "INSERT OR IGNORE INTO otc_reputation (agent_id, trades_completed, trades_disputed, avg_response_minutes) VALUES (?,0,0,0)",
+        (agent_id,),
+    )
+    if completed_inc:
+        db.execute("UPDATE otc_reputation SET trades_completed = trades_completed + ? WHERE agent_id = ?", (completed_inc, agent_id))
+    if disputed_inc:
+        db.execute("UPDATE otc_reputation SET trades_disputed = trades_disputed + ? WHERE agent_id = ?", (disputed_inc, agent_id))
+
+
+@app.route("/api/otc/order", methods=["POST"])
+@require_api_key
+def api_otc_create_order():
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    otype = (data.get("type") or "").strip().lower()
+    if otype not in {"buy", "sell"}:
+        return jsonify({"error": "type must be buy or sell"}), 400
+    amount = float(data.get("amount_rtc") or 0)
+    price = float(data.get("price_usd") or 0)
+    if amount <= 0 or price <= 0:
+        return jsonify({"error": "amount_rtc and price_usd must be > 0"}), 400
+    methods = data.get("payment_methods") or []
+    if not isinstance(methods, list) or not methods:
+        return jsonify({"error": "payment_methods list required"}), 400
+    methods = [str(m).strip().lower() for m in methods if str(m).strip()]
+    if any(m not in ALLOWED_OTC_METHODS for m in methods):
+        return jsonify({"error": "invalid payment method"}), 400
+
+    seller_id = None
+    buyer_id = None
+    escrow_locked = 0
+    if otype == "sell":
+        seller_id = g.agent["id"]
+        bal = float(db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (seller_id,)).fetchone()[0] or 0)
+        if bal < amount:
+            return jsonify({"error": "insufficient rtc_balance for escrow"}), 400
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, seller_id))
+        escrow_locked = 1
+    else:
+        buyer_id = g.agent["id"]
+
+    now = time.time()
+    cur = db.execute(
+        """INSERT INTO otc_orders (type, seller_id, buyer_id, amount_rtc, price_usd, payment_methods, seller_contact, status, escrow_locked, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (otype, seller_id, buyer_id, amount, price, json.dumps(methods), str(data.get("seller_contact") or "")[:300], "open", escrow_locked, now),
+    )
+    db.commit()
+    return jsonify({"ok": True, "order_id": cur.lastrowid}), 201
+
+
+@app.route("/api/otc/orders", methods=["GET"])
+def api_otc_list_orders():
+    db = get_db()
+    status = (request.args.get("status") or "open").strip().lower()
+    q = "SELECT o.*, s.agent_name as seller_name, b.agent_name as buyer_name FROM otc_orders o LEFT JOIN agents s ON s.id=o.seller_id LEFT JOIN agents b ON b.id=o.buyer_id"
+    params = []
+    if status != "all":
+        q += " WHERE o.status = ?"
+        params.append(status)
+    q += " ORDER BY o.created_at DESC LIMIT 200"
+    rows = db.execute(q, tuple(params)).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"], "type": r["type"], "status": r["status"], "amount_rtc": r["amount_rtc"], "price_usd": r["price_usd"],
+            "payment_methods": _safe_json_loads_list(r["payment_methods"]), "seller_name": r["seller_name"], "buyer_name": r["buyer_name"],
+            "created_at": r["created_at"], "accepted_at": r["accepted_at"], "completed_at": r["completed_at"],
+        })
+    return jsonify({"orders": out, "count": len(out)})
+
+
+@app.route("/api/otc/accept/<int:order_id>", methods=["POST"])
+@require_api_key
+def api_otc_accept(order_id: int):
+    db = get_db()
+    o = db.execute("SELECT * FROM otc_orders WHERE id = ?", (order_id,)).fetchone()
+    if not o or o["status"] != "open":
+        return jsonify({"error": "order not open"}), 404
+    uid = g.agent["id"]
+    now = time.time()
+
+    if o["type"] == "sell":
+        if o["seller_id"] == uid:
+            return jsonify({"error": "seller cannot accept own order"}), 400
+        db.execute("UPDATE otc_orders SET buyer_id = ?, status = 'pending', accepted_at = ? WHERE id = ?", (uid, now, order_id))
+    else:
+        if o["buyer_id"] == uid:
+            return jsonify({"error": "buyer cannot accept own order"}), 400
+        bal = float(db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (uid,)).fetchone()[0] or 0)
+        if bal < float(o["amount_rtc"]):
+            return jsonify({"error": "insufficient rtc_balance for escrow"}), 400
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (o["amount_rtc"], uid))
+        db.execute("UPDATE otc_orders SET seller_id = ?, status = 'pending', accepted_at = ?, escrow_locked = 1 WHERE id = ?", (uid, now, order_id))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/otc/confirm/<int:order_id>", methods=["POST"])
+@require_api_key
+def api_otc_confirm(order_id: int):
+    db = get_db()
+    o = db.execute("SELECT * FROM otc_orders WHERE id = ?", (order_id,)).fetchone()
+    if not o or o["status"] != "pending":
+        return jsonify({"error": "order not pending"}), 404
+    if o["seller_id"] != g.agent["id"]:
+        return jsonify({"error": "only seller can confirm"}), 403
+    if not o["buyer_id"]:
+        return jsonify({"error": "buyer missing"}), 400
+
+    amount = float(o["amount_rtc"])
+    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, o["buyer_id"]))
+    db.execute("UPDATE otc_orders SET status='completed', completed_at=? WHERE id = ?", (time.time(), order_id))
+    _update_otc_rep(db, int(o["seller_id"]), completed_inc=1)
+    _update_otc_rep(db, int(o["buyer_id"]), completed_inc=1)
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/otc/cancel/<int:order_id>", methods=["POST"])
+@require_api_key
+def api_otc_cancel(order_id: int):
+    db = get_db()
+    o = db.execute("SELECT * FROM otc_orders WHERE id = ?", (order_id,)).fetchone()
+    if not o:
+        return jsonify({"error": "order not found"}), 404
+    if o["status"] != "open":
+        return jsonify({"error": "only open orders can be cancelled"}), 400
+    uid = g.agent["id"]
+    if uid not in [o["seller_id"], o["buyer_id"]]:
+        return jsonify({"error": "not your order"}), 403
+
+    if int(o["escrow_locked"] or 0) == 1 and o["seller_id"]:
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (o["amount_rtc"], o["seller_id"]))
+    db.execute("UPDATE otc_orders SET status='cancelled' WHERE id = ?", (order_id,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/otc/dispute/<int:order_id>", methods=["POST"])
+@require_api_key
+def api_otc_dispute(order_id: int):
+    db = get_db()
+    o = db.execute("SELECT * FROM otc_orders WHERE id = ?", (order_id,)).fetchone()
+    if not o or o["status"] not in {"open", "pending"}:
+        return jsonify({"error": "order not disputable"}), 404
+    uid = g.agent["id"]
+    if uid not in [o["seller_id"], o["buyer_id"]]:
+        return jsonify({"error": "not your order"}), 403
+    db.execute("UPDATE otc_orders SET status='disputed' WHERE id = ?", (order_id,))
+    if o["seller_id"]:
+        _update_otc_rep(db, int(o["seller_id"]), disputed_inc=1)
+    if o["buyer_id"]:
+        _update_otc_rep(db, int(o["buyer_id"]), disputed_inc=1)
+    db.commit()
+    return jsonify({"ok": True})
+
 
 @app.route("/api/playlists", methods=["POST"])
 @require_api_key
