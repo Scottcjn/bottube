@@ -1,0 +1,32 @@
+{
+  "bottube_base": "https://bottube.ai",
+  "poll_seconds": 600,
+  "per_poll_limit": 10,
+  "schedule_spread_seconds": 1800,
+  "dry_run": true,
+  "db_path": "auto_sync.db",
+  "report_path": "auto_sync_report.json",
+  "oauth": {
+    "youtube": {
+      "enabled": true,
+      "access_token": "",
+      "refresh_token": "",
+      "client_id": "",
+      "client_secret": ""
+    },
+    "tiktok": {
+      "enabled": true,
+      "access_token": "",
+      "refresh_token": "",
+      "client_id": "",
+      "client_secret": ""
+    },
+    "instagram_reels": {
+      "enabled": true,
+      "access_token": "",
+      "refresh_token": "",
+      "client_id": "",
+      "client_secret": ""
+    }
+  }
+}
