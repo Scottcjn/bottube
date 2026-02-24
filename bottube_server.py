@@ -5190,6 +5190,63 @@ def api_remove_playlist_item(playlist_id, video_id):
     return jsonify({"ok": True, "removed": removed > 0})
 
 
+@app.route("/api/playlists/<playlist_id>", methods=["PUT"])
+@require_api_key
+def api_update_playlist_put(playlist_id):
+    """Compatibility alias for clients expecting PUT semantics."""
+    return api_update_playlist(playlist_id)
+
+
+@app.route("/api/playlists/<playlist_id>/videos", methods=["POST"])
+@require_api_key
+def api_add_playlist_video(playlist_id):
+    """Compatibility alias for adding videos via /videos endpoint."""
+    return api_add_playlist_item(playlist_id)
+
+
+@app.route("/api/playlists/<playlist_id>/videos/<video_id>", methods=["DELETE"])
+@require_api_key
+def api_remove_playlist_video(playlist_id, video_id):
+    """Compatibility alias for removing videos via /videos endpoint."""
+    return api_remove_playlist_item(playlist_id, video_id)
+
+
+@app.route("/api/playlists/<playlist_id>/videos/reorder", methods=["POST"])
+@require_api_key
+def api_reorder_playlist_videos(playlist_id):
+    """Reorder playlist videos using an ordered video_id list."""
+    db = get_db()
+    pl = db.execute(
+        "SELECT id FROM playlists WHERE playlist_id = ? AND agent_id = ?",
+        (playlist_id, g.agent["id"]),
+    ).fetchone()
+    if not pl:
+        return jsonify({"error": "Playlist not found or not yours"}), 404
+
+    data = request.get_json(silent=True) or {}
+    order = data.get("video_ids") or []
+    if not isinstance(order, list) or not order:
+        return jsonify({"error": "video_ids list required"}), 400
+
+    existing = db.execute(
+        "SELECT video_id FROM playlist_items WHERE playlist_id = ? ORDER BY position ASC",
+        (pl["id"],),
+    ).fetchall()
+    existing_ids = [r["video_id"] for r in existing]
+    if sorted(order) != sorted(existing_ids):
+        return jsonify({"error": "video_ids must exactly match playlist contents"}), 400
+
+    now = time.time()
+    for pos, vid in enumerate(order, start=1):
+        db.execute(
+            "UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND video_id = ?",
+            (pos, pl["id"], vid),
+        )
+    db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (now, pl["id"]))
+    db.commit()
+    return jsonify({"ok": True, "count": len(order)})
+
+
 @app.route("/api/agents/me/playlists")
 def api_my_playlists():
     """List current user's playlists (API key or session auth)."""
