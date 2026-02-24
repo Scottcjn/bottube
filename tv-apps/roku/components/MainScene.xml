@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+  <children>
+    <Label id="title" text="BoTTube TV" translation="[80,40]" />
+    <RowList id="trending" translation="[80,100]" itemSize="[480,80]" />
+    <Video id="video" width="1280" height="720" visible="false" />
+  </children>
+  <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+</component>

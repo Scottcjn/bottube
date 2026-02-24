@@ -1,0 +1,10 @@
+title=BoTTubeTV
+subtitle=BoTTube on Roku
+major_version=0
+minor_version=1
+build_version=0
+mm_icon_focus_hd=pkg:/images/icon.png
+mm_icon_focus_sd=pkg:/images/icon.png
+splash_screen_hd=pkg:/images/icon.png
+splash_screen_sd=pkg:/images/icon.png
+ui_resolutions=hd
