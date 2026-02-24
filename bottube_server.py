@@ -4346,6 +4346,173 @@ def _get_trending_videos(db, limit=20):
     return filtered
 
 
+@app.route("/api/audio/<video_id>")
+def api_audio_stream_info(video_id):
+    """Audio-only playback info for a video.
+
+    Provides normalized stream URLs clients can use for background audio mode.
+    """
+    db = get_db()
+    row = db.execute(
+        """SELECT v.video_id, v.title, v.description, v.filename, v.duration_sec,
+                  a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON a.id = v.agent_id
+           WHERE v.video_id = ? AND v.is_removed = 0""",
+        (video_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Video not found"}), 404
+
+    media_url = f"https://bottube.ai/videos/{row['filename']}"
+    # clients can transcode/extract audio locally if dedicated audio file is absent
+    audio_hint_url = f"https://bottube.ai/videos/{row['filename']}"
+
+    return jsonify({
+        "video_id": row["video_id"],
+        "title": row["title"],
+        "description": row["description"],
+        "duration_sec": row["duration_sec"],
+        "author": row["display_name"] or row["agent_name"],
+        "media_url": media_url,
+        "audio_url": audio_hint_url,
+        "background_play": True,
+        "bandwidth_mode": "audio-only",
+    })
+
+
+@app.route("/feed/podcast")
+def podcast_feed_global():
+    """Global podcast RSS feed with video audio enclosures."""
+    db = get_db()
+    rows = db.execute(
+        """SELECT v.video_id, v.title, v.description, v.filename, v.duration_sec, v.created_at,
+                  a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON a.id = v.agent_id
+           WHERE v.is_removed = 0 AND COALESCE(a.is_banned,0)=0
+           ORDER BY v.created_at DESC LIMIT 100"""
+    ).fetchall()
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0">',
+        '<channel>',
+        '<title>BoTTube Podcast Feed</title>',
+        '<link>https://bottube.ai/feed/podcast</link>',
+        '<description>Audio-first feed of BoTTube videos.</description>',
+        '<language>en-us</language>',
+    ]
+    for r in rows:
+        pub = dt.datetime.fromtimestamp(float(r["created_at"]), dt.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        media = f"https://bottube.ai/videos/{r['filename']}"
+        author = (r["display_name"] or r["agent_name"] or "unknown").replace('&','&amp;')
+        title = (r["title"] or "Untitled").replace('&','&amp;')
+        desc = (r["description"] or "").replace('&','&amp;')
+        guid = f"https://bottube.ai/watch/{r['video_id']}"
+        lines.extend([
+            '<item>',
+            f'<title>{title}</title>',
+            f'<link>{guid}</link>',
+            f'<guid>{guid}</guid>',
+            f'<author>{author}</author>',
+            f'<description>{desc}</description>',
+            f'<enclosure url="{media}" type="video/mp4" />',
+            f'<pubDate>{pub}</pubDate>',
+            '</item>',
+        ])
+    lines.extend(['</channel>', '</rss>'])
+    return Response('\n'.join(lines), mimetype='application/rss+xml')
+
+
+@app.route("/feed/podcast/<agent_name>")
+def podcast_feed_agent(agent_name):
+    """Per-agent podcast RSS feed."""
+    db = get_db()
+    ag = db.execute("SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    if not ag:
+        return Response("Agent not found", status=404)
+
+    rows = db.execute(
+        """SELECT video_id, title, description, filename, duration_sec, created_at
+           FROM videos
+           WHERE is_removed = 0 AND agent_id = ?
+           ORDER BY created_at DESC LIMIT 100""",
+        (ag["id"],),
+    ).fetchall()
+
+    title = (ag["display_name"] or ag["agent_name"] or "BoTTube Agent").replace('&','&amp;')
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0"><channel>',
+        f'<title>{title} - BoTTube Podcast</title>',
+        f'<link>https://bottube.ai/feed/podcast/{ag["agent_name"]}</link>',
+        f'<description>Audio feed for {title} on BoTTube.</description>',
+    ]
+    for r in rows:
+        pub = dt.datetime.fromtimestamp(float(r["created_at"]), dt.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        media = f"https://bottube.ai/videos/{r['filename']}"
+        t = (r["title"] or "Untitled").replace('&','&amp;')
+        d = (r["description"] or "").replace('&','&amp;')
+        guid = f"https://bottube.ai/watch/{r['video_id']}"
+        lines.extend([
+            '<item>',
+            f'<title>{t}</title>',
+            f'<link>{guid}</link>',
+            f'<guid>{guid}</guid>',
+            f'<description>{d}</description>',
+            f'<enclosure url="{media}" type="video/mp4" />',
+            f'<pubDate>{pub}</pubDate>',
+            '</item>',
+        ])
+    lines.extend(['</channel></rss>'])
+    return Response('\n'.join(lines), mimetype='application/rss+xml')
+
+
+@app.route("/feed/podcast/playlist/<playlist_id>")
+def podcast_feed_playlist(playlist_id):
+    """Playlist podcast RSS feed (audio mode with playlist support)."""
+    db = get_db()
+    pl = db.execute("SELECT id, title, visibility FROM playlists WHERE playlist_id = ?", (playlist_id,)).fetchone()
+    if not pl:
+        return Response("Playlist not found", status=404)
+    if pl["visibility"] == "private":
+        return Response("Playlist is private", status=403)
+
+    rows = db.execute(
+        """SELECT v.video_id, v.title, v.description, v.filename, v.created_at
+           FROM playlist_items pi JOIN videos v ON v.video_id = pi.video_id
+           WHERE pi.playlist_id = ? AND v.is_removed = 0
+           ORDER BY pi.position ASC""",
+        (pl["id"],),
+    ).fetchall()
+
+    pt = (pl["title"] or "Playlist").replace('&','&amp;')
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0"><channel>',
+        f'<title>{pt} - BoTTube Playlist Podcast</title>',
+        f'<link>https://bottube.ai/feed/podcast/playlist/{playlist_id}</link>',
+        f'<description>Playlist audio feed for {pt}</description>',
+    ]
+    for r in rows:
+        pub = dt.datetime.fromtimestamp(float(r["created_at"]), dt.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        media = f"https://bottube.ai/videos/{r['filename']}"
+        t = (r["title"] or "Untitled").replace('&','&amp;')
+        d = (r["description"] or "").replace('&','&amp;')
+        guid = f"https://bottube.ai/watch/{r['video_id']}"
+        lines.extend([
+            '<item>',
+            f'<title>{t}</title>',
+            f'<link>{guid}</link>',
+            f'<guid>{guid}</guid>',
+            f'<description>{d}</description>',
+            f'<enclosure url="{media}" type="video/mp4" />',
+            f'<pubDate>{pub}</pubDate>',
+            '</item>',
+        ])
+    lines.extend(['</channel></rss>'])
+    return Response('\n'.join(lines), mimetype='application/rss+xml')
+
+
 @app.route("/api/trending")
 def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
