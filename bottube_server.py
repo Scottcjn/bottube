@@ -27,6 +27,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 from flask import (
     Flask,
@@ -4402,11 +4403,11 @@ def podcast_feed_global():
         '<language>en-us</language>',
     ]
     for r in rows:
-        pub = dt.datetime.fromtimestamp(float(r["created_at"]), dt.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        pub = datetime.datetime.fromtimestamp(float(r["created_at"]), datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         media = f"https://bottube.ai/videos/{r['filename']}"
-        author = (r["display_name"] or r["agent_name"] or "unknown").replace('&','&amp;')
-        title = (r["title"] or "Untitled").replace('&','&amp;')
-        desc = (r["description"] or "").replace('&','&amp;')
+        author = xml_escape((r["display_name"] or r["agent_name"] or "unknown"), {"\"": "&quot;", "'": "&apos;"})
+        title = xml_escape((r["title"] or "Untitled"), {"\"": "&quot;", "'": "&apos;"})
+        desc = xml_escape((r["description"] or ""), {"\"": "&quot;", "'": "&apos;"})
         guid = f"https://bottube.ai/watch/{r['video_id']}"
         lines.extend([
             '<item>',
@@ -4439,7 +4440,7 @@ def podcast_feed_agent(agent_name):
         (ag["id"],),
     ).fetchall()
 
-    title = (ag["display_name"] or ag["agent_name"] or "BoTTube Agent").replace('&','&amp;')
+    title = xml_escape((ag["display_name"] or ag["agent_name"] or "BoTTube Agent"), {"\"": "&quot;", "'": "&apos;"})
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0"><channel>',
@@ -4448,10 +4449,10 @@ def podcast_feed_agent(agent_name):
         f'<description>Audio feed for {title} on BoTTube.</description>',
     ]
     for r in rows:
-        pub = dt.datetime.fromtimestamp(float(r["created_at"]), dt.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        pub = datetime.datetime.fromtimestamp(float(r["created_at"]), datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         media = f"https://bottube.ai/videos/{r['filename']}"
-        t = (r["title"] or "Untitled").replace('&','&amp;')
-        d = (r["description"] or "").replace('&','&amp;')
+        t = xml_escape((r["title"] or "Untitled"), {"\"": "&quot;", "'": "&apos;"})
+        d = xml_escape((r["description"] or ""), {"\"": "&quot;", "'": "&apos;"})
         guid = f"https://bottube.ai/watch/{r['video_id']}"
         lines.extend([
             '<item>',
@@ -4485,7 +4486,7 @@ def podcast_feed_playlist(playlist_id):
         (pl["id"],),
     ).fetchall()
 
-    pt = (pl["title"] or "Playlist").replace('&','&amp;')
+    pt = xml_escape((pl["title"] or "Playlist"), {"\"": "&quot;", "'": "&apos;"})
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0"><channel>',
@@ -4494,10 +4495,10 @@ def podcast_feed_playlist(playlist_id):
         f'<description>Playlist audio feed for {pt}</description>',
     ]
     for r in rows:
-        pub = dt.datetime.fromtimestamp(float(r["created_at"]), dt.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        pub = datetime.datetime.fromtimestamp(float(r["created_at"]), datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         media = f"https://bottube.ai/videos/{r['filename']}"
-        t = (r["title"] or "Untitled").replace('&','&amp;')
-        d = (r["description"] or "").replace('&','&amp;')
+        t = xml_escape((r["title"] or "Untitled"), {"\"": "&quot;", "'": "&apos;"})
+        d = xml_escape((r["description"] or ""), {"\"": "&quot;", "'": "&apos;"})
         guid = f"https://bottube.ai/watch/{r['video_id']}"
         lines.extend([
             '<item>',
