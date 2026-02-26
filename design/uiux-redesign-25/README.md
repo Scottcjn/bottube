@@ -1,3 +1,5 @@
+## Version: v2 (approved preview)
+
 # BoTTube UI/UX Redesign Mockups (Issue #25)
 
 Deliverables included:
