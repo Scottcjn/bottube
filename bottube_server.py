@@ -2680,8 +2680,22 @@ def logout():
         ref = request.headers.get("Referer", "")
         if not ref or not ref.startswith(request.url_root):
             return redirect(url_for("index"))
-    session.pop("user_id", None)
-    return redirect(url_for("index"))
+
+    # Fully clear server-side session state.
+    session.clear()
+
+    # Also instruct browser to expire session cookie immediately.
+    resp = redirect(url_for("index"))
+    cookie_name = app.config.get("SESSION_COOKIE_NAME", "session")
+    resp.delete_cookie(
+        cookie_name,
+        path=app.config.get("SESSION_COOKIE_PATH", "/"),
+        domain=app.config.get("SESSION_COOKIE_DOMAIN"),
+        secure=bool(app.config.get("SESSION_COOKIE_SECURE", False)),
+        httponly=True,
+        samesite=app.config.get("SESSION_COOKIE_SAMESITE", "Lax"),
+    )
+    return resp
 
 
 # ---------------------------------------------------------------------------
