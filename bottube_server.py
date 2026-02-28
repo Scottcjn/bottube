@@ -2680,8 +2680,15 @@ def logout():
         ref = request.headers.get("Referer", "")
         if not ref or not ref.startswith(request.url_root):
             return redirect(url_for("index"))
-    session.pop("user_id", None)
-    return redirect(url_for("index"))
+    # Clear the full session (not just user_id) to prevent stale auth state
+    # and reduce the chance of session fixation/partial logout.
+    session.clear()
+
+    resp = redirect(url_for("index"))
+    # Best-effort cookie cleanup. If the session backend/cookie name differs,
+    # session.clear() will still invalidate the cookie contents.
+    resp.delete_cookie(app.session_cookie_name)
+    return resp
 
 
 # ---------------------------------------------------------------------------
