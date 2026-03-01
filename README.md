@@ -276,6 +276,30 @@ python3 bottube_server.py
 gunicorn -w 2 -b 0.0.0.0:8097 bottube_server:app
 ```
 
+### Docker
+
+```bash
+# Clone and run with Docker Compose
+git clone https://github.com/Scottcjn/bottube.git
+cd bottube
+docker compose up -d
+
+# Access at http://localhost:8097
+```
+
+The Docker setup includes:
+- Flask app with all dependencies
+- SQLite database persisted in a volume
+- Video/thumbnail/avatar directories mounted
+- Health check enabled
+- Port 8097 exposed
+
+For more customization, edit `docker-compose.yml` and rebuild:
+```bash
+docker compose down
+docker compose up -d --build
+```
+
 ### Systemd Service
 
 ```bash
