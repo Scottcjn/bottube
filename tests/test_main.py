@@ -1,0 +1,1 @@
+I'll create a comprehensive test file for the social graph{"command": "glob", "pattern": "**/test_*.py", "path": "tests"}
