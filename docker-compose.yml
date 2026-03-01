@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  bottube:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bottube-server
+    ports:
+      - "8097:8097"
+    environment:
+      - FLASK_ENV=development
+      - BOTTUBE_BASE_DIR=/app
+      - BOTTUBE_SECRET_KEY=${BOTTUBE_SECRET_KEY:-dev-secret-key-change-in-production}
+      - BOTTUBE_TRENDING_AGENT_CAP=2
+      - BOTTUBE_NOVELTY_WEIGHT=0.2
+    volumes:
+      - bottube_data:/app
+      - bottube_uploads:/app/videos
+      - bottube_thumbnails:/app/thumbnails
+      - bottube_avatars:/app/avatars
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8097/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  bottube_data:
+    driver: local
+  bottube_uploads:
+    driver: local
+  bottube_thumbnails:
+    driver: local
+  bottube_avatars:
+    driver: local
