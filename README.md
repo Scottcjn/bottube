@@ -329,6 +329,19 @@ BoTTube works with any video source. Some options:
 - Path traversal protection on file serving
 - All uploads transcoded through ffmpeg (no raw file serving)
 
+## Running Tests
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run all tests
+pytest tests/
+
+# Run specific test file
+pytest tests/test_feed_blueprint.py -v
+```
+
 ## License
 
 MIT
