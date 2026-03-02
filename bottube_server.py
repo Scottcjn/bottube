@@ -11102,3 +11102,99 @@ def tips_dashboard():
         ],
     )
 
+
+
+# ============================================================
+# Embed & oEmbed Endpoints (Bounty #143)
+# ============================================================
+
+@app.route("/embed/<video_id>")
+def embed_video(video_id):
+    """Minimal embed player page."""
+    db = get_db()
+    try:
+        video = db.execute(
+            "SELECT video_id, title, agent_name, display_name FROM videos WHERE video_id = ?",
+            (video_id,)
+        ).fetchone()
+        
+        if not video:
+            return "Video not found", 404
+        
+        autoplay = request.args.get("autoplay", "false").lower() == "true"
+        
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{video["title"]} - BoTTube</title>
+    <style>
+        body {{ margin: 0; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }}
+        .video-container {{ position: relative; width: 100%; max-width: 640px; aspect-ratio: 16/9; }}
+        iframe {{ width: 100%; height: 100%; border: none; }}
+        .brand {{ position: absolute; bottom: 5px; right: 10px; font-size: 12px; }}
+        .brand a {{ color: #fff; text-decoration: none; opacity: 0.7; }}
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <iframe src="https://bottube.ai/watch/{video_id}{'?autoplay=1' if autoplay else ''}" allowfullscreen></iframe>
+        <div class="brand"><a href="https://bottube.ai/watch/{video_id}">Watch on BoTTube</a></div>
+    </div>
+</body>
+</html>"""
+    finally:
+        db.close()
+
+
+@app.route("/oembed")
+def oembed_endpoint():
+    """oEmbed discovery endpoint."""
+    url = request.args.get("url", "")
+    format_type = request.args.get("format", "json")
+    
+    if format_type != "json":
+        return "Only JSON format supported", 400
+    
+    # Extract video_id from URL
+    # Formats: https://bottube.ai/watch/VIDEO_ID, https://bottube.ai/VIDEO_ID
+    video_id = None
+    if "/watch/" in url:
+        video_id = url.split("/watch/")[-1].split("?")[0]
+    else:
+        # Try to extract as video_id directly
+        video_id = url.split("/")[-1].split("?")[0]
+    
+    if not video_id:
+        return "Invalid URL", 400
+    
+    db = get_db()
+    try:
+        video = db.execute("""
+            SELECT v.video_id, v.title, a.agent_name, a.display_name 
+            FROM videos v 
+            JOIN agents a ON v.agent_id = a.id 
+            WHERE v.video_id = ?
+        """, (video_id,)).fetchone()
+        
+        if not video:
+            return "Video not found", 404
+        
+        oembed_response = {
+            "type": "video",
+            "version": "1.0",
+            "title": video["title"],
+            "author_name": video["display_name"] or video["agent_name"],
+            "author_url": f"https://bottube.ai/agent/{video['agent_name']}",
+            "provider_name": "BoTTube",
+            "provider_url": "https://bottube.ai",
+            "thumbnail_url": f"https://bottube.ai/api/videos/{video_id}/thumbnail",
+            "html": f'<iframe src="https://bottube.ai/embed/{video_id}" width="640" height="360" frameborder="0" allowfullscreen></iframe>',
+            "width": 640,
+            "height": 360
+        }
+        
+        return jsonify(oembed_response)
+    finally:
+        db.close()
