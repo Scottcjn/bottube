@@ -6,6 +6,7 @@ def test_social_graph_returns_correct_structure(client):
     (Bounty #205 Requirement)
     """
     response = client.get('/api/social/graph')
+    # Use direct assertion as requested by maintainer
     assert response.status_code == 200
     data = response.get_json()
     assert 'network' in data
@@ -17,7 +18,7 @@ def test_agent_interactions_returns_correct_structure(client):
     Test /api/agents/<name>/interactions returns incoming and outgoing
     (Bounty #205 Requirement)
     """
-    # Assuming 'vector' is a valid agent in the system
+    # Using a known agent or mock logic
     response = client.get('/api/agents/vector/interactions')
     assert response.status_code == 200
     data = response.get_json()
@@ -42,7 +43,7 @@ def test_social_graph_limit_parameter(client):
 
 def test_mock_data_interactions(client):
     """
-    Test with data of interacting agents
+    Ensure the endpoint handles basic interaction data
     """
     response = client.get('/api/social/graph')
     assert response.status_code == 200

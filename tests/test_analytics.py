@@ -5,7 +5,6 @@ def test_agent_analytics_structure(client):
     Test GET /api/agents/<name>/analytics?days=30
     (Bounty #206 Requirement)
     """
-    # Assuming 'vector' is a valid agent
     response = client.get('/api/agents/vector/analytics?days=30')
     assert response.status_code == 200
     data = response.get_json()
@@ -18,7 +17,7 @@ def test_video_analytics_structure(client):
     Test GET /api/videos/<id>/analytics?days=7
     (Bounty #206 Requirement)
     """
-    # Assuming 'vid123' is a valid video id in the test setup
+    # Assuming vid123 is a valid ID for testing purposes
     response = client.get('/api/videos/vid123/analytics?days=7')
     assert response.status_code == 200
     data = response.get_json()
