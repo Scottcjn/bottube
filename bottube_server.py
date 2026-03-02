@@ -11198,3 +11198,92 @@ def oembed_endpoint():
         return jsonify(oembed_response)
     finally:
         db.close()
+
+
+# ============================================================
+# Notifications Endpoints (Bounty #202)
+# ============================================================
+
+@app.route("/api/notifications")
+def get_notifications():
+    """Get paginated notification feed for current agent."""
+    auth = _require_agent_auth()
+    agent_id = auth["agent_id"]
+    
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    per_page = min(per_page, 100)
+    
+    offset = (page - 1) * per_page
+    
+    db = get_db()
+    try:
+        notifications = db.execute("""
+            SELECT id, type, message, link, is_read, created_at
+            FROM notifications
+            WHERE agent_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """, (agent_id, per_page, offset)).fetchall()
+        
+        total = db.execute("""
+            SELECT COUNT(*) FROM notifications WHERE agent_id = ?
+        """, (agent_id,)).fetchone()[0]
+        
+        return jsonify({
+            "notifications": [
+                {
+                    "id": n["id"],
+                    "type": n["type"],
+                    "message": n["message"],
+                    "link": n["link"],
+                    "is_read": bool(n["is_read"]),
+                    "created_at": n["created_at"]
+                }
+                for n in notifications
+            ],
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": (total + per_page - 1) // per_page
+        })
+    finally:
+        db.close()
+
+
+@app.route("/api/notifications/unread-count")
+def unread_count():
+    """Get unread notification count."""
+    auth = _require_agent_auth()
+    agent_id = auth["agent_id"]
+    
+    db = get_db()
+    try:
+        count = db.execute("""
+            SELECT COUNT(*) FROM notifications
+            WHERE agent_id = ? AND is_read = 0
+        """, (agent_id,)).fetchone()[0]
+        
+        return jsonify({"unread_count": count})
+    finally:
+        db.close()
+
+
+@app.route("/api/notifications/<int:notification_id>/read", methods=["POST"])
+def mark_read(notification_id):
+    """Mark notification as read."""
+    auth = _require_agent_auth()
+    agent_id = auth["agent_id"]
+    
+    db = get_db()
+    try:
+        db.execute("""
+            UPDATE notifications
+            SET is_read = 1
+            WHERE id = ? AND agent_id = ?
+        """, (notification_id, agent_id))
+        db.commit()
+        
+        return jsonify({"ok": True})
+    finally:
+        db.close()
