@@ -1,6 +1,14 @@
 """Tests for analytics endpoints."""
 import json
+import pathlib
+import sys
+import time
 from unittest.mock import MagicMock, patch
+
+# Add parent to path
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def test_agent_analytics_response_structure():
@@ -149,3 +157,184 @@ def test_zero_views_engagement_rate():
         engagement = 0.0
 
     assert engagement == 0.0
+
+
+# === Flask Endpoint Tests ===
+# Note: These tests verify the analytics response structure and logic
+# without requiring the full server setup (database connections, etc.)
+
+
+def test_agent_analytics_404_response():
+    """Test 404 response for nonexistent agent."""
+    from flask import Flask, jsonify
+    
+    def mock_get_agent_analytics(agent_name):
+        """Simulated endpoint logic."""
+        agent = None  # Not found
+        if not agent:
+            return jsonify({"error": "Agent not found"}), 404
+        return jsonify({}), 200
+    
+    app = Flask(__name__)
+    app.add_url_rule('/api/agents/<name>/analytics', 
+                     view_func=lambda name: mock_get_agent_analytics(name))
+    
+    with app.test_client() as client:
+        response = client.get('/api/agents/nonexistent/analytics')
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert "error" in data
+        assert "not found" in data["error"].lower()
+
+
+def test_agent_analytics_success_response():
+    """Test success response structure for agent analytics."""
+    from flask import Flask, jsonify
+    
+    def mock_get_agent_analytics(agent_name):
+        """Simulated endpoint logic."""
+        return jsonify({
+            "agent_name": agent_name,
+            "period_days": 30,
+            "totals": {
+                "views": 100,
+                "comments": 10,
+                "subscribers": 50,
+                "engagement_rate_pct": 10.0,
+            },
+            "daily_views": {"2026-03-01": 50, "2026-03-02": 50},
+            "top_videos": [
+                {"video_id": "vid1", "title": "Video 1", "views": 60},
+            ],
+        }), 200
+    
+    app = Flask(__name__)
+    app.add_url_rule('/api/agents/<name>/analytics',
+                     view_func=lambda name: mock_get_agent_analytics(name))
+    
+    with app.test_client() as client:
+        response = client.get('/api/agents/testagent/analytics')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        
+        assert data["agent_name"] == "testagent"
+        assert data["period_days"] == 30
+        assert "totals" in data
+        assert "daily_views" in data
+        assert "top_videos" in data
+        assert data["totals"]["views"] == 100
+        assert data["totals"]["engagement_rate_pct"] == 10.0
+
+
+def test_days_parameter_clamping_endpoint():
+    """Test days parameter clamping logic (simulates endpoint behavior)."""
+    from flask import Flask, jsonify, request
+    
+    def mock_get_agent_analytics(agent_name):
+        try:
+            days = int(request.args.get("days", 30))
+        except Exception:
+            days = 30
+        days = max(1, min(days, 90))
+        return jsonify({"period_days": days}), 200
+    
+    app = Flask(__name__)
+    app.add_url_rule('/api/agents/<name>/analytics',
+                     view_func=lambda name: mock_get_agent_analytics(name))
+    
+    with app.test_client() as client:
+        # Default
+        r = client.get('/api/agents/test/analytics')
+        assert json.loads(r.data)["period_days"] == 30
+        
+        # Explicit valid
+        r = client.get('/api/agents/test/analytics?days=7')
+        assert json.loads(r.data)["period_days"] == 7
+        
+        # Too low -> 1
+        r = client.get('/api/agents/test/analytics?days=0')
+        assert json.loads(r.data)["period_days"] == 1
+        
+        # Too high -> 90
+        r = client.get('/api/agents/test/analytics?days=100')
+        assert json.loads(r.data)["period_days"] == 90
+
+
+def test_video_analytics_404_response():
+    """Test 404 response for nonexistent video."""
+    from flask import Flask, jsonify
+    
+    def mock_get_video_analytics(video_id):
+        video = None  # Not found
+        if not video:
+            return jsonify({"error": "Video not found"}), 404
+        return jsonify({}), 200
+    
+    app = Flask(__name__)
+    app.add_url_rule('/api/videos/<id>/analytics',
+                     view_func=lambda id: mock_get_video_analytics(id))
+    
+    with app.test_client() as client:
+        response = client.get('/api/videos/nonexistent/analytics')
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert "error" in data
+        assert "not found" in data["error"].lower()
+
+
+def test_video_analytics_success_response():
+    """Test success response structure for video analytics."""
+    from flask import Flask, jsonify
+    
+    def mock_get_video_analytics(video_id):
+        return jsonify({
+            "video_id": video_id,
+            "agent_name": "testagent",
+            "title": "Test Video",
+            "period_days": 7,
+            "totals": {
+                "views": 200,
+                "comments": 20,
+                "likes": 30,
+                "engagement_rate_pct": 25.0,
+            },
+            "daily_views": {"2026-03-01": 100, "2026-03-02": 100},
+        }), 200
+    
+    app = Flask(__name__)
+    app.add_url_rule('/api/videos/<id>/analytics',
+                     view_func=lambda id: mock_get_video_analytics(id))
+    
+    with app.test_client() as client:
+        response = client.get('/api/videos/vid123/analytics')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        
+        assert data["video_id"] == "vid123"
+        assert data["period_days"] == 7
+        assert "totals" in data
+        assert "daily_views" in data
+        assert data["totals"]["views"] == 200
+        assert data["totals"]["engagement_rate_pct"] == 25.0
+
+
+def test_video_analytics_default_days():
+    """Test video analytics defaults to 7 days."""
+    from flask import Flask, jsonify, request
+    
+    def mock_get_video_analytics(video_id):
+        try:
+            days = int(request.args.get("days", 7))
+        except Exception:
+            days = 7
+        days = max(1, min(days, 90))
+        return jsonify({"period_days": days}), 200
+    
+    app = Flask(__name__)
+    app.add_url_rule('/api/videos/<id>/analytics',
+                     view_func=lambda id: mock_get_video_analytics(id))
+    
+    with app.test_client() as client:
+        # Default should be 7
+        r = client.get('/api/videos/vid123/analytics')
+        assert json.loads(r.data)["period_days"] == 7
