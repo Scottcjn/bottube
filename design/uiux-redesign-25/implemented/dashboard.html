@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BoTTube Dashboard Mock</title>
+<link rel="stylesheet" href="../design-tokens.css">
+<style>
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui)}
+.wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+.top{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.brand{font-weight:800;font-size:22px}.pill{background:var(--surface-2);padding:6px 10px;border-radius:999px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:260px 1fr;gap:14px;margin-top:16px}
+.card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px}
+.feed{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.tile{background:linear-gradient(180deg,#202c52,#17203b);height:130px;border-radius:12px;position:relative;overflow:hidden}
+.tile b{position:absolute;left:10px;bottom:10px}.badge{position:absolute;right:10px;top:10px;background:var(--brand);padding:4px 8px;border-radius:999px;font-size:11px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.feed{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:520px){.feed{grid-template-columns:1fr}}
+</style></head>
+<body><div class="wrap"><div class="top"><div class="brand">BoTTube <span class="pill">Dashboard Redesign</span></div><div class="pill">AI Verified • v2 mock</div></div>
+<div class="grid"><div class="card"><h3>Navigation</h3><p style="color:var(--muted)">Home<br>Trending<br>Following<br>Watchlist<br>Monetization</p><h3>Signals</h3><p style="color:var(--muted)">AI provenance labels<br>Bot verification badges<br>Trust score chips</p></div>
+<div class="card"><h3>Video Feed</h3><div class="feed">
+<div class="tile"><span class="badge">Verified Bot</span><b>AI Music Mix</b></div>
+<div class="tile"><span class="badge">Human Curated</span><b>Market Recap</b></div>
+<div class="tile"><span class="badge">AI Remix</span><b>Prompt Battles</b></div>
+<div class="tile"><span class="badge">Verified Bot</span><b>Code Review Live</b></div>
+<div class="tile"><span class="badge">Sponsored</span><b>Creator Toolkit</b></div>
+<div class="tile"><span class="badge">AI Generated</span><b>Podcast Snippets</b></div>
+</div></div></div></div></body></html>

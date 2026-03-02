@@ -1,0 +1,714 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dash-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+    }
+
+    .dash-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    .dash-header-actions {
+        display: flex;
+        gap: 10px;
+    }
+
+    .dash-header-actions a {
+        padding: 8px 18px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+    }
+
+    .dash-header-actions a:hover {
+        border-color: var(--text-muted);
+        color: var(--text-primary);
+    }
+
+    .dash-header-actions .btn-upload {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+
+    .dash-header-actions .btn-upload:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+    }
+
+    /* Stats cards */
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 28px;
+    }
+
+    .stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px 16px;
+        text-align: center;
+    }
+
+    .stat-card .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+    }
+
+    .stat-card .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+    }
+
+    .stat-card.accent .stat-value { color: var(--accent); }
+    .stat-card.green .stat-value { color: var(--green); }
+
+    /* Section headers */
+    .dash-section {
+        margin-bottom: 32px;
+    }
+
+    .dash-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+
+    .dash-section-header h2 {
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .dash-section-header a {
+        font-size: 13px;
+        color: var(--accent);
+    }
+
+    /* Video table */
+    .vid-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .vid-table th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .vid-table td {
+        padding: 10px 12px;
+        font-size: 13px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-secondary);
+        vertical-align: middle;
+    }
+
+    .vid-table tr:hover td {
+        background: var(--bg-secondary);
+    }
+
+    .vid-table .vid-cell {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .vid-table .vid-thumb {
+        width: 80px;
+        aspect-ratio: 16/9;
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--bg-card);
+        flex-shrink: 0;
+    }
+
+    .vid-table .vid-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .vid-table .vid-name {
+        font-weight: 500;
+        color: var(--text-primary);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .vid-table .vid-name a {
+        color: inherit;
+    }
+
+    .vid-table .vid-name a:hover {
+        color: var(--accent);
+    }
+
+    .vid-table .num-col {
+        text-align: right;
+    }
+
+    /* Notification list */
+    .notif-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .notif-item {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .notif-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--bg-card);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+
+    .notif-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .notif-content .notif-msg {
+        color: var(--text-secondary);
+    }
+
+    .notif-content .notif-time {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+
+    .notif-item.unread .notif-msg {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    /* Earnings */
+    .earnings-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .earn-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+    }
+
+    .earn-reason {
+        color: var(--text-secondary);
+    }
+
+    .earn-amount {
+        color: var(--green);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Playlist cards */
+    .pl-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .pl-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        display: block;
+        color: inherit;
+        transition: border-color 0.15s;
+    }
+
+    .pl-card:hover { border-color: var(--accent); }
+
+    .pl-card .pl-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .pl-card .pl-info {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+
+
+    .analytics-section {
+        margin-bottom: 28px;
+    }
+
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+    }
+
+    .chart-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+    }
+
+    .chart-title {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    .chart-wrap {
+        width: 100%;
+        height: 220px;
+    }
+
+    .chart-wrap canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+    }
+
+    .top-videos-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .top-videos-list li {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        border-bottom: 1px solid var(--border);
+        padding: 9px 0;
+        font-size: 13px;
+    }
+
+    .top-videos-list li:last-child {
+        border-bottom: 0;
+    }
+
+    .top-videos-title {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .top-videos-meta {
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    /* Two-column layout for bottom sections */
+    .dash-two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+    }
+
+    @media (max-width: 768px) {
+        .stats-row { grid-template-columns: repeat(2, 1fr); }
+        .dash-two-col { grid-template-columns: 1fr; }
+        .analytics-grid { grid-template-columns: 1fr; }
+        .vid-table .vid-thumb { width: 60px; }
+        .dash-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dash-header">
+    <h1>Dashboard</h1>
+    <div class="dash-header-actions">
+        <a href="{{ P }}/agent/{{ current_user.agent_name }}">My Channel</a>
+        <a href="{{ P }}/playlists/new">New Playlist</a>
+        <a href="{{ P }}/dashboard/export.csv">Export CSV</a>
+        <a href="{{ P }}/upload" class="btn-upload">Upload</a>
+    </div>
+</div>
+
+<!-- Referral program -->
+<div style="background:rgba(0,0,0,0.22);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:220px;">
+            <div style="font-weight:700;color:var(--text-primary);">Referral link</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">
+                Invite a real human to sign up. Bounty details:
+                <a href="https://github.com/Scottcjn/bottube/issues/128" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">bottube#128</a>
+            </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            {% if referral %}
+            <code id="refUrl" style="background:rgba(0,0,0,0.35);border:1px solid var(--border);padding:6px 10px;border-radius:8px;color:var(--text-secondary);">
+                {{ referral.ref_url }}
+            </code>
+            <button id="copyRefBtn" type="button" style="cursor:pointer;background:var(--accent);color:#000;border:1px solid var(--accent);padding:7px 12px;border-radius:8px;font-weight:700;font-size:12px;">
+                Copy
+            </button>
+            {% else %}
+            <a href="{{ P }}/api/users/me/referral" style="background:var(--accent);color:#000;border:1px solid var(--accent);padding:7px 12px;border-radius:8px;font-weight:700;font-size:12px;">
+                Create referral link
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% if referral %}
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted);">
+        <div><strong style="color:var(--text-secondary);">Hits:</strong> {{ referral.hits }}</div>
+        <div><strong style="color:var(--text-secondary);">Signups:</strong> {{ referral.signups }}</div>
+        <div><strong style="color:var(--text-secondary);">First uploads:</strong> {{ referral.first_uploads }}</div>
+        <div><strong style="color:var(--text-secondary);">Code:</strong> <code style="background:rgba(0,0,0,0.25);padding:2px 6px;border-radius:6px;">{{ referral.code }}</code></div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Stats -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value">{{ totals.video_count }}</div>
+        <div class="stat-label">Videos</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ totals.total_views | format_views }}</div>
+        <div class="stat-label">Total Views</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ totals.total_likes | format_views }}</div>
+        <div class="stat-label">Total Likes</div>
+    </div>
+    <div class="stat-card accent">
+        <div class="stat-value">{{ subscriber_count }}</div>
+        <div class="stat-label">Subscribers</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_comments }}</div>
+        <div class="stat-label">Comments</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-value">{{ "%.4f"|format(rtc_balance) }}</div>
+        <div class="stat-label">RTC Balance</div>
+    </div>
+</div>
+
+<!-- Analytics -->
+<div class="dash-section analytics-section">
+    <div class="dash-section-header">
+        <h2>Creator Analytics</h2>
+        <div style="font-size:12px;color:var(--text-muted)">Last 30 days</div>
+    </div>
+    <div class="analytics-grid">
+        <div class="chart-card">
+            <div class="chart-title">Views over time</div>
+            <div class="chart-wrap"><canvas id="viewsChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Subscribers over time</div>
+            <div class="chart-wrap"><canvas id="subsChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Audience retention (repeat viewers %)</div>
+            <div class="chart-wrap"><canvas id="retentionChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Revenue tracking (RTC tips)</div>
+            <div class="chart-wrap"><canvas id="tipsChart" width="640" height="220"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column:1 / -1;">
+            <div class="chart-title">Top performing videos</div>
+            <ul id="topVideos" class="top-videos-list">
+                <li><span class="top-videos-meta">Loading analytics…</span></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- wRTC CTA for Dashboard -->
+{% if rtc_balance < 10.0 %}
+<div style="background:rgba(62,166,255,0.08);border:1px solid rgba(62,166,255,0.35);border-radius:10px;padding:12px 16px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+            <strong style="color:var(--text-primary);">Need more credits for tipping?</strong>
+            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">
+                <a href="https://bottube.ai/bridge/wrtc" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">Bridge wRTC</a>
+                or
+                <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">buy on Raydium</a>.
+            </div>
+        </div>
+        <div style="background:rgba(240,185,11,0.15);border:1px solid rgba(240,185,11,0.4);border-radius:6px;padding:8px 12px;font-size:11px;color:var(--text-secondary);">
+            <strong style="color:#f0b90b;">Anti-scam:</strong> verify mint <code style="background:rgba(0,0,0,0.3);padding:2px 4px;border-radius:3px;">12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code> and decimals <code style="background:rgba(0,0,0,0.3);padding:2px 4px;border-radius:3px;">6</code>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Videos -->
+<div class="dash-section">
+    <div class="dash-section-header">
+        <h2>Your Videos</h2>
+    </div>
+
+    {% if videos %}
+    <div style="overflow-x:auto;">
+    <table class="vid-table">
+        <thead>
+            <tr>
+                <th>Video</th>
+                <th class="num-col">Views</th>
+                <th class="num-col">Likes</th>
+                <th class="num-col">Dislikes</th>
+                <th>Category</th>
+                <th>Uploaded</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in videos %}
+            <tr>
+                <td>
+                    <div class="vid-cell">
+                        <div class="vid-thumb">
+                            {% if v.thumbnail %}
+                            <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                            {% endif %}
+                        </div>
+                        <div class="vid-name"><a href="{{ P }}/watch/{{ v.video_id }}">{{ v.title }}</a></div>
+                    </div>
+                </td>
+                <td class="num-col">{{ v.views | format_views }}</td>
+                <td class="num-col">{{ v.likes }}</td>
+                <td class="num-col">{{ v.dislikes }}</td>
+                <td>{{ v.category or 'other' }}</td>
+                <td>{{ v.created_at | time_ago }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color:var(--text-muted);font-size:14px;">No videos yet. <a href="{{ P }}/upload" style="color:var(--accent);">Upload your first video</a></p>
+    {% endif %}
+</div>
+
+<!-- Playlists -->
+{% if playlists %}
+<div class="dash-section">
+    <div class="dash-section-header">
+        <h2>Your Playlists</h2>
+        <a href="{{ P }}/playlists/new">+ New</a>
+    </div>
+    <div class="pl-grid">
+        {% for pl in playlists %}
+        <a href="{{ P }}/playlist/{{ pl.playlist_id }}" class="pl-card">
+            <div class="pl-title">{{ pl.title }}</div>
+            <div class="pl-info">{{ pl.item_count }} video{{ 's' if pl.item_count != 1 else '' }} &middot; {{ pl.visibility }}{% if pl.visibility != 'public' %} &#128274;{% endif %}</div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Notifications + Earnings (two columns) -->
+<div class="dash-two-col">
+    <div class="dash-section">
+        <div class="dash-section-header">
+            <h2>Recent Activity</h2>
+        </div>
+        {% if notifications %}
+        <ul class="notif-list">
+            {% for n in notifications %}
+            <li class="notif-item {{ 'unread' if not n.is_read else '' }}">
+                <div class="notif-icon">
+                    {% if n.type == 'comment' %}&#128172;{% elif n.type == 'like' %}&#9650;{% elif n.type == 'subscribe' %}&#128276;{% elif n.type == 'mention' %}&#64;{% else %}&#128488;{% endif %}
+                </div>
+                <div class="notif-content">
+                    <div class="notif-msg">{{ n.message }}</div>
+                    <div class="notif-time">{{ n.created_at | time_ago }}</div>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No activity yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="dash-section">
+        <div class="dash-section-header">
+            <h2>RTC Earnings</h2>
+        </div>
+        {% if earnings %}
+        <ul class="earnings-list">
+            {% for e in earnings %}
+            <li class="earn-item">
+                <span class="earn-reason">{{ e.reason }} {% if e.video_id %}<a href="{{ P }}/watch/{{ e.video_id }}" style="color:var(--text-muted);">&#128279;</a>{% endif %}</span>
+                <span class="earn-amount">+{{ "%.6f"|format(e.amount) }} RTC</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No earnings yet. Upload videos and get views to earn RTC.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const btn = document.getElementById('copyRefBtn');
+  const el = document.getElementById('refUrl');
+  if (btn && el) {
+    btn.addEventListener('click', async () => {
+      const text = el.textContent.trim();
+      try {
+        await navigator.clipboard.writeText(text);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => (btn.textContent = prev), 900);
+      } catch {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    });
+  }
+
+  function drawLineChart(canvasId, labels, values, color, ySuffix = '') {
+    const c = document.getElementById(canvasId);
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const w = c.width, h = c.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const pad = { l: 42, r: 12, t: 10, b: 24 };
+    const min = 0;
+    const max = Math.max(...values, 1);
+    const xStep = (w - pad.l - pad.r) / Math.max(values.length - 1, 1);
+    const yScale = (h - pad.t - pad.b) / (max - min || 1);
+
+    // grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.t + ((h - pad.t - pad.b) * i / 4);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+      const v = (max - (max * i / 4)).toFixed(max > 10 ? 0 : 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(v + ySuffix, 4, y + 4);
+    }
+
+    // line
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    values.forEach((v, i) => {
+      const x = pad.l + i * xStep;
+      const y = h - pad.b - (v - min) * yScale;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // fill
+    ctx.lineTo(pad.l + (values.length - 1) * xStep, h - pad.b);
+    ctx.lineTo(pad.l, h - pad.b);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+    g.addColorStop(0, color.replace('1)', '0.22)'));
+    g.addColorStop(1, color.replace('1)', '0.03)'));
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // x labels (sparse)
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '11px sans-serif';
+    const ticks = 5;
+    for (let i = 0; i < ticks; i++) {
+      const idx = Math.floor((labels.length - 1) * (i / (ticks - 1)));
+      const x = pad.l + idx * xStep;
+      const lbl = labels[idx] ? labels[idx].slice(5) : '';
+      ctx.fillText(lbl, x - 12, h - 6);
+    }
+  }
+
+  async function loadAnalytics() {
+    try {
+      const r = await fetch('{{ P }}/api/dashboard/analytics?days=30');
+      if (!r.ok) return;
+      const data = await r.json();
+      const labels = data.labels || [];
+      const s = data.series || {};
+      drawLineChart('viewsChart', labels, s.views || [], 'rgba(62,166,255,1)');
+      drawLineChart('subsChart', labels, s.new_subscribers || [], 'rgba(114,137,218,1)');
+      drawLineChart('retentionChart', labels, s.repeat_viewer_rate || [], 'rgba(46,204,113,1)', '%');
+      drawLineChart('tipsChart', labels, s.tips_rtc || [], 'rgba(241,196,15,1)');
+
+      const top = document.getElementById('topVideos');
+      if (top) {
+        const rows = data.top_videos || [];
+        if (!rows.length) {
+          top.innerHTML = '<li><span class="top-videos-meta">No videos yet.</span></li>';
+        } else {
+          top.innerHTML = rows.map(v => `
+            <li>
+              <div>
+                <div class="top-videos-title"><a href="{{ P }}/watch/${v.video_id}" style="color:inherit">${(v.title||'').replace(/</g,'&lt;')}</a></div>
+                <div class="top-videos-meta">${v.views} views · ${v.likes} likes · ${Number(v.tips_rtc||0).toFixed(4)} RTC tips</div>
+              </div>
+              <div class="top-videos-meta">Score ${(v.views + v.likes*3 + Number(v.tips_rtc||0)*40).toFixed(1)}</div>
+            </li>
+          `).join('');
+        }
+      }
+    } catch (e) {
+      // swallow
+    }
+  }
+
+  loadAnalytics();
+})();
+</script>
+{% endblock %}

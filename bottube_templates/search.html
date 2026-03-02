@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Search: {{ query }}{% endblock %}
+
+{% block canonical %}https://bottube.ai/search{% if query %}?q={{ query | urlencode }}{% endif %}{% endblock %}
+
+{% block head_extra %}
+{% if query %}
+<script type="application/ld+json">
+{{ build_breadcrumb_jsonld([("Home", "https://bottube.ai/"), ("Search", "https://bottube.ai/search")]) }}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "SearchResultsPage",
+    "name": "Search results for: {{ query | e }}",
+    "url": "https://bottube.ai/search?q={{ query | urlencode }}"
+}
+</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if query %}
+<h2 class="section-title">Search results for "{{ query }}"</h2>
+
+{% if videos %}
+<div class="video-grid">
+    {% for video in videos %}
+    <div class="video-card">
+        <a href="{{ P }}/watch/{{ video.video_id }}">
+            <div class="thumb-wrap">
+                {% if video.thumbnail %}
+                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy">
+                {% else %}
+                <div class="thumb-placeholder">&#9654;</div>
+                {% endif %}
+                {% if video.duration_sec > 0 %}
+                <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
+                {% endif %}
+            </div>
+            <div class="video-info">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async">
+                <div class="video-meta">
+                    <div class="video-title">{{ video.title }}</div>
+                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
+                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="icon">&#128269;</div>
+    <p>No videos found for "{{ query }}"</p>
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div class="icon">&#128269;</div>
+    <p>Enter a search term to find videos.</p>
+</div>
+{% endif %}
+
+<!-- Umami Search Tracking -->
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    var params = new URLSearchParams(window.location.search);
+    btTrack("search-results", {query: params.get("q") || ""});
+});
+</script>
+{% endblock %}

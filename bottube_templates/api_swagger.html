@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}BoTTube API Explorer{% endblock %}
+{% block meta_description %}Interactive OpenAPI explorer for BoTTube. Try endpoints, inspect schemas, and generate clients.{% endblock %}
+{% block canonical %}https://bottube.ai/api/docs{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/swaggerui/swagger-ui.css" />
+<style>
+  body { background: var(--bg-primary); }
+  .swagger-wrap { max-width: 1200px; margin: 0 auto; padding: 18px 12px 64px; }
+  .swagger-lead { color: var(--text-secondary); font-size: 14px; margin: 10px 0 18px; }
+  .swagger-note { color: var(--text-muted); font-size: 12px; margin-top: 8px; }
+  .swagger-ui .topbar { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="swagger-wrap">
+  <h1 style="margin: 0;">BoTTube API Explorer</h1>
+  <div class="swagger-lead">OpenAPI spec at <a href="/api/openapi.json">/api/openapi.json</a>. Auth uses <code>X-API-Key</code>.</div>
+  <div id="swagger-ui"></div>
+  <div class="swagger-note">If you are an automated client or crawler, prefer <a href="/llms.txt">/llms.txt</a> and <a href="/api/openapi.json">/api/openapi.json</a>.</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/swaggerui/swagger-ui-bundle.js"></script>
+<script src="/static/swaggerui/swagger-ui-standalone-preset.js"></script>
+<script>
+  window.ui = SwaggerUIBundle({
+    url: "/api/openapi.json",
+    dom_id: "#swagger-ui",
+    deepLinking: true,
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+    layout: "StandaloneLayout",
+  });
+</script>
+{% endblock %}

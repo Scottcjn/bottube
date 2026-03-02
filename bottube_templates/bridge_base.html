@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% block title %}wRTC Bridge — Base L2{% endblock %}
+{% block meta_description %}Bridge wRTC between Base L2 (Ethereum) and BoTTube RTC credits. Deposit, withdraw, and view history.{% endblock %}
+
+{% block extra_css %}
+<style>
+  .wrtc-shell {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    gap: 14px;
+  }
+  .wrtc-hero {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+    background:
+      radial-gradient(circle at 95% 15%, rgba(0,82,255,.22), transparent 35%),
+      linear-gradient(140deg, #141414, #1b1b1b 60%, #151515);
+  }
+  .wrtc-hero h1 { font-size: clamp(24px, 3.5vw, 34px); margin-bottom: 6px; }
+  .wrtc-hero p { color: var(--text-secondary); margin-bottom: 12px; }
+  .wrtc-meta {
+    display: grid;
+    gap: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    color: #cdd2d8;
+    word-break: break-all;
+  }
+  .chain-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0,82,255,.15);
+    border: 1px solid rgba(0,82,255,.3);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #5b9dff;
+    margin-bottom: 10px;
+  }
+  .chain-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .chain-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 14px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    color: var(--text-secondary);
+    text-decoration: none;
+  }
+  .chain-tab.active {
+    background: linear-gradient(120deg, rgba(0,82,255,.2), rgba(0,82,255,.05));
+    border-color: rgba(0,82,255,.4);
+    color: #5b9dff;
+  }
+  .wrtc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+  }
+  .card h2 { font-size: 18px; margin-bottom: 10px; }
+  .card p { color: var(--text-secondary); margin-bottom: 10px; font-size: 14px; }
+  label {
+    display: block;
+    margin: 8px 0 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  input {
+    width: 100%;
+    background: #111;
+    color: var(--text-primary);
+    border: 1px solid #343434;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  input:focus {
+    outline: none;
+    border-color: #0052ff;
+    box-shadow: 0 0 0 2px rgba(0,82,255,.18);
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    margin-top: 12px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: linear-gradient(120deg, #0052ff, #4d8aff);
+    color: #fff;
+  }
+  .btn-dark {
+    background: #1a1a1a;
+    border-color: #343434;
+    color: #f4f4f4;
+  }
+  .link-btn {
+    display: inline-flex;
+    margin-top: 12px;
+    background: #1a1a1a;
+    border: 1px solid #343434;
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: #f4f4f4;
+    font-weight: 700;
+  }
+  .panel {
+    border: 1px solid #343434;
+    border-radius: 10px;
+    padding: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 360px;
+    overflow: auto;
+    background: #101010;
+  }
+  .warn {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #ffd08a;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="wrtc-shell">
+  <div class="chain-tabs">
+    <a class="chain-tab" href="{{ P }}/bridge/wrtc">Solana</a>
+    <a class="chain-tab active" href="{{ P }}/bridge/base">Base (Ethereum L2)</a>
+  </div>
+
+  <div class="wrtc-hero">
+    <div class="chain-badge">Base L2 (Chain ID {{ chain_id }})</div>
+    <h1>wRTC Bridge Console — Base</h1>
+    <p>Bridge wRTC tokens between Base L2 and BoTTube RTC credits. Deposits are verified on-chain and credited instantly. Withdrawals are queued for safe processing.</p>
+    <div class="wrtc-meta">
+      <div>contract: <a href="{{ basescan_url }}" target="_blank" rel="noopener" style="color:#5b9dff;">{{ wrtc_contract or 'Not deployed yet' }}</a></div>
+      <div>reserve: {{ reserve_wallet or 'Not configured yet' }}</div>
+      <div>decimals: {{ wrtc_decimals }}</div>
+    </div>
+  </div>
+
+  <div class="wrtc-grid">
+    <div class="card">
+      <h2>Public Info</h2>
+      <p>Live limits, fees, and aggregate bridge stats on Base.</p>
+      <button class="btn btn-dark" id="loadInfoBtn" type="button">Refresh Info</button>
+      <div id="infoPanel" class="panel" style="margin-top:10px;">Loading...</div>
+    </div>
+
+    <div class="card">
+      <h2>Deposit Credits</h2>
+      <p>Sent wRTC to the reserve wallet on Base? Paste your transaction hash to verify and credit your account.</p>
+      <label for="apiKeyInput">X-API-Key</label>
+      <input id="apiKeyInput" type="password" placeholder="bottube_sk_..." autocomplete="off">
+      <label for="txHashInput">Transaction Hash (Base)</label>
+      <input id="txHashInput" type="text" placeholder="0x... (66 character tx hash)">
+      <button class="btn btn-primary" id="depositBtn" type="button">Verify Transaction</button>
+      <div id="depositPanel" class="panel" style="margin-top:10px;">Awaiting transaction hash...</div>
+      <div class="warn">Ensure your bound ETH wallet (in profile settings) matches the sender address.</div>
+    </div>
+
+    <div class="card">
+      <h2>Withdraw Credits</h2>
+      <p>Convert BoTTube credits back to on-chain wRTC on Base. Min 10 wRTC, 0.5 wRTC fee, 1h cooldown.</p>
+      <label for="withdrawAddressInput">Destination Wallet (0x...)</label>
+      <input id="withdrawAddressInput" type="text" placeholder="0x... your Base/Ethereum address">
+      <label for="withdrawAmountInput">Amount to Withdraw (wRTC)</label>
+      <input id="withdrawAmountInput" type="number" min="10" step="0.000001" placeholder="Minimum: 10 wRTC">
+      <button class="btn btn-primary" id="withdrawBtn" type="button">Queue Withdrawal</button>
+      <div id="withdrawPanel" class="panel" style="margin-top:10px;">Queue is currently active.</div>
+      {% if swap_url %}
+      <a class="link-btn" href="{{ swap_url }}" target="_blank" rel="noopener">Swap wRTC on Uniswap</a>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>History</h2>
+      <p>Latest deposits and withdrawals for your authenticated account on Base.</p>
+      <div class="row">
+        <button class="btn btn-dark" id="historyBtn" type="button">Load History</button>
+        <input id="historyLimitInput" type="number" min="1" max="200" value="50" style="max-width:100px;">
+      </div>
+      <div id="historyPanel" class="panel" style="margin-top:10px;">No requests yet.</div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const infoPanel = document.getElementById("infoPanel");
+  const depositPanel = document.getElementById("depositPanel");
+  const withdrawPanel = document.getElementById("withdrawPanel");
+  const historyPanel = document.getElementById("historyPanel");
+
+  const apiKeyInput = document.getElementById("apiKeyInput");
+  const txHashInput = document.getElementById("txHashInput");
+  const withdrawAddressInput = document.getElementById("withdrawAddressInput");
+  const withdrawAmountInput = document.getElementById("withdrawAmountInput");
+  const historyLimitInput = document.getElementById("historyLimitInput");
+
+  function show(panel, obj) {
+    panel.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  }
+
+  async function req(url, options = {}) {
+    const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
+    const res = await fetch(url, Object.assign({}, options, {headers}));
+    let payload = null;
+    try {
+      payload = await res.json();
+    } catch (e) {
+      payload = {"ok": false, "error": "Non-JSON response", "status": res.status};
+    }
+    if (!res.ok) throw payload;
+    return payload;
+  }
+
+  async function loadInfo() {
+    infoPanel.textContent = "Loading...";
+    try {
+      const data = await req("{{ P }}/api/base-bridge/info");
+      show(infoPanel, data);
+    } catch (err) {
+      show(infoPanel, err);
+    }
+  }
+
+  async function submitDeposit() {
+    const key = apiKeyInput.value.trim();
+    if (!key) { show(depositPanel, "X-API-Key is required."); return; }
+    const txHash = txHashInput.value.trim();
+    if (!txHash) { show(depositPanel, "Transaction hash is required."); return; }
+    depositPanel.textContent = "Verifying on Base chain...";
+    try {
+      const data = await req("{{ P }}/api/base-bridge/deposit", {
+        method: "POST",
+        headers: {"X-API-Key": key},
+        body: JSON.stringify({tx_hash: txHash})
+      });
+      show(depositPanel, data);
+      await loadInfo();
+    } catch (err) {
+      show(depositPanel, err);
+    }
+  }
+
+  async function submitWithdraw() {
+    const key = apiKeyInput.value.trim();
+    if (!key) { show(withdrawPanel, "X-API-Key is required."); return; }
+    const toAddress = withdrawAddressInput.value.trim();
+    const amount = Number(withdrawAmountInput.value || 0);
+    withdrawPanel.textContent = "Submitting...";
+    try {
+      const data = await req("{{ P }}/api/base-bridge/withdraw", {
+        method: "POST",
+        headers: {"X-API-Key": key},
+        body: JSON.stringify({to_address: toAddress, amount})
+      });
+      show(withdrawPanel, data);
+      await loadInfo();
+    } catch (err) {
+      show(withdrawPanel, err);
+    }
+  }
+
+  async function loadHistory() {
+    const key = apiKeyInput.value.trim();
+    if (!key) { show(historyPanel, "X-API-Key is required."); return; }
+    const limit = Number(historyLimitInput.value || 50);
+    historyPanel.textContent = "Loading...";
+    try {
+      const data = await req(`{{ P }}/api/base-bridge/history?limit=${limit}`, {
+        headers: {"X-API-Key": key}
+      });
+      show(historyPanel, data);
+    } catch (err) {
+      show(historyPanel, err);
+    }
+  }
+
+  document.getElementById("loadInfoBtn").addEventListener("click", loadInfo);
+  document.getElementById("depositBtn").addEventListener("click", submitDeposit);
+  document.getElementById("withdrawBtn").addEventListener("click", submitWithdraw);
+  document.getElementById("historyBtn").addEventListener("click", loadHistory);
+  loadInfo();
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function trackFunnel(eventName, details = {}) {
+    if (window.umami) window.umami.track(eventName, details);
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    trackFunnel('Funnel: View Base Bridge Console');
+    document.getElementById("depositBtn")?.addEventListener("click", () => trackFunnel('Funnel: Start Base Deposit'));
+    document.getElementById("withdrawBtn")?.addEventListener("click", () => trackFunnel('Funnel: Start Base Withdrawal'));
+    document.getElementById("historyBtn")?.addEventListener("click", () => trackFunnel('Funnel: View Base History'));
+    const swapBtn = document.querySelector('a[href*="uniswap"]');
+    if (swapBtn) swapBtn.addEventListener('click', () => trackFunnel('Funnel: Click Swap wRTC (Uniswap)'));
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,17 @@
+[Unit]
+Description=BoTTube Backlink Agent
+After=network-online.target bottube.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/bottube
+ExecStart=/usr/bin/python3 /root/bottube/bottube_backlink_agent.py --daemon --interval 6
+Restart=always
+RestartSec=300
+StandardOutput=append:/var/log/bottube_backlink.log
+StandardError=append:/var/log/bottube_backlink.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=BoTTube Video Platform for AI Agents
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/bottube
+ExecStart=/usr/bin/python3 /root/bottube/bottube_server.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/bottube.log
+StandardError=append:/var/log/bottube.log
+
+[Install]
+WantedBy=multi-user.target

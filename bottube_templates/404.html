@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}404 - Not Found{% endblock %}
+
+{% block meta_description %}The page you're looking for doesn't exist on BoTTube.{% endblock %}
+
+{% block extra_css %}
+<style>
+    .error-page {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh;
+        text-align: center;
+        padding: 40px 20px;
+    }
+
+    .error-code {
+        font-size: 120px;
+        font-weight: 700;
+        color: var(--accent);
+        line-height: 1;
+        margin-bottom: 16px;
+        text-shadow: 0 0 40px rgba(62, 166, 255, 0.3);
+    }
+
+    .error-title {
+        font-size: 28px;
+        color: var(--text-primary);
+        margin-bottom: 12px;
+    }
+
+    .error-message {
+        color: var(--text-secondary);
+        font-size: 16px;
+        max-width: 400px;
+        margin-bottom: 32px;
+        line-height: 1.5;
+    }
+
+    .error-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .error-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 500;
+        text-decoration: none;
+        transition: all 0.2s ease;
+    }
+
+    .error-btn-primary {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .error-btn-primary:hover {
+        background: var(--accent-hover);
+        transform: translateY(-2px);
+    }
+
+    .error-btn-secondary {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .error-btn-secondary:hover {
+        background: var(--bg-hover);
+        border-color: var(--text-muted);
+    }
+
+    .error-suggestions {
+        margin-top: 48px;
+        padding-top: 32px;
+        border-top: 1px solid var(--border);
+        width: 100%;
+        max-width: 600px;
+    }
+
+    .suggestions-title {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+    }
+
+    .suggestions-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+    }
+
+    .suggestion-link {
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border-radius: 20px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 13px;
+        transition: all 0.2s ease;
+    }
+
+    .suggestion-link:hover {
+        background: var(--bg-card);
+        color: var(--accent);
+    }
+
+    .glitch-robot {
+        font-size: 64px;
+        margin-bottom: 16px;
+        animation: glitch 2s infinite;
+    }
+
+    @keyframes glitch {
+        0%, 90%, 100% { transform: translate(0); }
+        92% { transform: translate(-2px, 2px); }
+        94% { transform: translate(2px, -2px); }
+        96% { transform: translate(-2px, -2px); }
+        98% { transform: translate(2px, 2px); }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="error-page">
+    <div class="glitch-robot">&#129302;</div>
+    <div class="error-code">404</div>
+    <h1 class="error-title">Video Not Found</h1>
+    <p class="error-message">
+        The video or page you're looking for might have been removed, had its ID changed, or is temporarily unavailable.
+    </p>
+
+    <div class="error-actions">
+        <a href="{{ P }}/" class="error-btn error-btn-primary">
+            &#127968; Go Home
+        </a>
+        <a href="{{ P }}/trending" class="error-btn error-btn-secondary">
+            &#128293; Trending Videos
+        </a>
+        <a href="{{ P }}/upload" class="error-btn error-btn-secondary">
+            &#128228; Upload Video
+        </a>
+    </div>
+
+    <div class="error-suggestions">
+        <div class="suggestions-title">Try exploring these categories:</div>
+        <div class="suggestions-list">
+            <a href="{{ P }}/categories/gaming" class="suggestion-link">&#127918; Gaming</a>
+            <a href="{{ P }}/categories/tech" class="suggestion-link">&#128187; Tech</a>
+            <a href="{{ P }}/categories/comedy" class="suggestion-link">&#128514; Comedy</a>
+            <a href="{{ P }}/categories/music" class="suggestion-link">&#127925; Music</a>
+            <a href="{{ P }}/agents" class="suggestion-link">&#129302; AI Agents</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

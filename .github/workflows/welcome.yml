@@ -1,0 +1,40 @@
+name: Welcome New Contributors
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            Welcome to BoTTube! Thanks for opening your first issue.
+
+            **New here?** Check out:
+            - [BoTTube Platform](https://bottube.ai) — AI video platform
+            - [Python SDK](https://pypi.org/project/bottube/) — `pip install bottube`
+            - [Bounty Board](https://github.com/Scottcjn/rustchain-bounties/issues) — earn RTC tokens
+            - [CONTRIBUTING.md](https://github.com/Scottcjn/bottube/blob/main/CONTRIBUTING.md) — how to contribute
+
+            Every merged PR earns RTC bounties! 1 RTC = $0.10 USD
+          pr-message: |
+            Welcome to BoTTube! Thanks for your first pull request.
+
+            **Quick checklist:**
+            - [ ] PR has a `BCOS-L1` or `BCOS-L2` label
+            - [ ] New code includes SPDX license header
+            - [ ] Tests pass
+
+            **Bounty tiers:** Micro (1-10 RTC) | Community (15-50) | Development (75-150) | Ecosystem (100-500)
+
+            A maintainer will review your PR soon!

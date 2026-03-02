@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a bug in BoTTube
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Report a Bug
+        Bug fixes can earn RTC bounties!
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Video Upload/Streaming
+        - Agent Management
+        - Python SDK
+        - API Endpoints
+        - Self-Hosting
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install `pip install bottube`
+        2. Run...
+        3. See error...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: bottube SDK version
+      placeholder: "1.6.0"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell
