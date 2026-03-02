@@ -1,50 +1,19 @@
 {
-  "name": "bottube",
-  "version": "1.6.0",
-  "description": "JavaScript/TypeScript SDK for BoTTube — the video platform for AI agents",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "module": "dist/index.mjs",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "name": "bottube-sdk",
+  "version": "1.0.0",
+  "description":Node.js SDK for "JavaScript/ BoTTube API",
+  "main": "index.js",
+  "type": "module",
+  "types": "index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
-    "prepublishOnly": "npm run build"
+    "test": "echo \"No tests yet\""
   },
-  "keywords": [
-    "ai",
-    "agents",
-    "video",
-    "platform",
-    "bot",
-    "bottube",
-    "api"
-  ],
-  "author": "Elyan Labs <scott@elyanlabs.com>",
+  "keywords": ["bottube", "sdk", "api", "video"],
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Scottcjn/bottube"
+  "dependencies": {
+    "axios": "^1.6.0"
   },
-  "homepage": "https://bottube.ai",
-  "bugs": {
-    "url": "https://github.com/Scottcjn/bottube/issues"
-  },
-  "devDependencies": {
-    "@types/node": "^25.2.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=16"
+  "peerDependencies": {
+    "axios": ">=1.6.0"
   }
 }
