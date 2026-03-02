@@ -4802,6 +4802,96 @@ def unsubscribe_agent(agent_name):
     return jsonify({"ok": True, "following": False, "agent": agent_name})
 
 
+@app.route("/api/agents/<agent_name>/analytics")
+def get_agent_analytics(agent_name):
+    """Get analytics for an agent."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+
+    try:
+        days = int(request.args.get("days", 30))
+    except Exception:
+        days = 30
+    days = max(1, min(days, 90))
+
+    now = time.time()
+    day_sec = 86400
+    since = now - days * day_sec
+
+    # Total views
+    total_views = db.execute(
+        """SELECT COUNT(*) FROM views v
+           JOIN videos vid ON v.video_id = vid.video_id
+           WHERE vid.agent_id = ? AND v.created_at >= ?""",
+        (agent["id"], since),
+    ).fetchone()[0] or 0
+
+    # Total comments
+    total_comments = db.execute(
+        """SELECT COUNT(*) FROM comments c
+           JOIN videos vid ON c.video_id = vid.video_id
+           WHERE vid.agent_id = ? AND c.created_at >= ?""",
+        (agent["id"], since),
+    ).fetchone()[0] or 0
+
+    # Total subscribers
+    total_subscribers = db.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?",
+        (agent["id"],),
+    ).fetchone()[0] or 0
+
+    # Daily views
+    daily_views_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(v.created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM views v
+           JOIN videos vid ON v.video_id = vid.video_id
+           WHERE vid.agent_id = ? AND v.created_at >= ?
+           GROUP BY day""",
+        (agent["id"], since),
+    ).fetchall()
+    daily_views = {r["day"]: int(r["c"] or 0) for r in daily_views_rows}
+
+    # Top videos
+    top_videos_rows = db.execute(
+        """SELECT v.video_id, v.title, COUNT(vw.id) AS view_count
+           FROM videos v
+           LEFT JOIN views vw ON v.video_id = vw.video_id AND vw.created_at >= ?
+           WHERE v.agent_id = ?
+           GROUP BY v.video_id
+           ORDER BY view_count DESC
+           LIMIT 10""",
+        (since, agent["id"]),
+    ).fetchall()
+    top_videos = [
+        {"video_id": r["video_id"], "title": r["title"], "views": r["view_count"]}
+        for r in top_videos_rows
+    ]
+
+    # Calculate engagement rate
+    engagement_rate_pct = 0.0
+    if total_views > 0:
+        engagement_rate_pct = round((total_comments / total_views) * 100, 2)
+
+    return jsonify({
+        "agent_name": agent_name,
+        "period_days": days,
+        "totals": {
+            "views": total_views,
+            "comments": total_comments,
+            "subscribers": total_subscribers,
+            "engagement_rate_pct": engagement_rate_pct,
+        },
+        "daily_views": daily_views,
+        "top_videos": top_videos,
+    })
+
+
 @app.route("/api/agents/me/subscriptions")
 @require_api_key
 def my_subscriptions():
@@ -6355,6 +6445,78 @@ def get_video_tips(video_id):
         "pending_amount": round(pending_amount, 6),
         "page": page,
         "per_page": per_page,
+    })
+
+
+@app.route("/api/videos/<video_id>/analytics")
+def get_video_analytics(video_id):
+    """Get analytics for a specific video."""
+    db = get_db()
+    video = db.execute(
+        """SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    try:
+        days = int(request.args.get("days", 7))
+    except Exception:
+        days = 7
+    days = max(1, min(days, 90))
+
+    now = time.time()
+    day_sec = 86400
+    since = now - days * day_sec
+
+    # Total views
+    total_views = db.execute(
+        "SELECT COUNT(*) FROM views WHERE video_id = ? AND created_at >= ?",
+        (video_id, since),
+    ).fetchone()[0] or 0
+
+    # Total comments
+    total_comments = db.execute(
+        "SELECT COUNT(*) FROM comments WHERE video_id = ? AND created_at >= ?",
+        (video_id, since),
+    ).fetchone()[0] or 0
+
+    # Total likes/votes
+    total_likes = db.execute(
+        "SELECT COUNT(*) FROM video_votes WHERE video_id = ? AND vote = 1 AND created_at >= ?",
+        (video_id, since),
+    ).fetchone()[0] or 0
+
+    # Daily views
+    daily_views_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM views
+           WHERE video_id = ? AND created_at >= ?
+           GROUP BY day""",
+        (video_id, since),
+    ).fetchall()
+    daily_views = {r["day"]: int(r["c"] or 0) for r in daily_views_rows}
+
+    # Calculate engagement rate
+    engagement_rate_pct = 0.0
+    if total_views > 0:
+        engagement_rate_pct = round(((total_comments + total_likes) / total_views) * 100, 2)
+
+    return jsonify({
+        "video_id": video_id,
+        "agent_name": video["agent_name"],
+        "title": video["title"],
+        "period_days": days,
+        "totals": {
+            "views": total_views,
+            "comments": total_comments,
+            "likes": total_likes,
+            "engagement_rate_pct": engagement_rate_pct,
+        },
+        "daily_views": daily_views,
     })
 
 
