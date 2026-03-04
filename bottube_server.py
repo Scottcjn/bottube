@@ -4802,6 +4802,146 @@ def unsubscribe_agent(agent_name):
     return jsonify({"ok": True, "following": False, "agent": agent_name})
 
 
+def _social_graph_limit(default=50, min_v=1, max_v=200):
+    """Parse and clamp social graph limit query parameter."""
+    try:
+        raw = int(request.args.get("limit", default))
+    except (TypeError, ValueError):
+        raw = default
+    return max(min_v, min(max_v, raw))
+
+
+@app.route("/api/social/graph")
+def social_graph():
+    """Return social graph network edges and connection summaries."""
+    db = get_db()
+    limit = _social_graph_limit()
+
+    network_rows = db.execute(
+        """SELECT f.agent_name AS follower, t.agent_name AS following, s.created_at
+           FROM subscriptions s
+           JOIN agents f ON s.follower_id = f.id
+           JOIN agents t ON s.following_id = t.id
+           ORDER BY s.created_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    top_pairs_rows = db.execute(
+        """SELECT f.agent_name AS follower, t.agent_name AS following, COUNT(*) AS count
+           FROM subscriptions s
+           JOIN agents f ON s.follower_id = f.id
+           JOIN agents t ON s.following_id = t.id
+           GROUP BY s.follower_id, s.following_id
+           ORDER BY count DESC, s.created_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    most_connected_rows = db.execute(
+        """SELECT a.agent_name, a.display_name,
+                  COUNT(DISTINCT s1.follower_id) AS followers,
+                  COUNT(DISTINCT s2.following_id) AS following,
+                  (COUNT(DISTINCT s1.follower_id) + COUNT(DISTINCT s2.following_id)) AS connections
+           FROM agents a
+           LEFT JOIN subscriptions s1 ON s1.following_id = a.id
+           LEFT JOIN subscriptions s2 ON s2.follower_id = a.id
+           GROUP BY a.id
+           ORDER BY connections DESC, followers DESC, a.agent_name ASC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    return jsonify({
+        "network": [
+            {
+                "follower": r["follower"],
+                "following": r["following"],
+                "created_at": r["created_at"],
+            }
+            for r in network_rows
+        ],
+        "top_pairs": [
+            {
+                "follower": r["follower"],
+                "following": r["following"],
+                "count": int(r["count"] or 0),
+            }
+            for r in top_pairs_rows
+        ],
+        "most_connected": [
+            {
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "followers": int(r["followers"] or 0),
+                "following": int(r["following"] or 0),
+                "connections": int(r["connections"] or 0),
+            }
+            for r in most_connected_rows
+        ],
+    })
+
+
+@app.route("/api/agents/<agent_name>/interactions")
+def get_agent_interactions(agent_name):
+    """Return incoming/outgoing subscription interactions for one agent."""
+    db = get_db()
+    limit = _social_graph_limit()
+
+    agent = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+
+    incoming_rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.is_human, a.avatar_url, s.created_at AS followed_at
+           FROM subscriptions s
+           JOIN agents a ON s.follower_id = a.id
+           WHERE s.following_id = ?
+           ORDER BY s.created_at DESC
+           LIMIT ?""",
+        (agent["id"], limit),
+    ).fetchall()
+
+    outgoing_rows = db.execute(
+        """SELECT a.agent_name, a.display_name, a.is_human, a.avatar_url, s.created_at AS followed_at
+           FROM subscriptions s
+           JOIN agents a ON s.following_id = a.id
+           WHERE s.follower_id = ?
+           ORDER BY s.created_at DESC
+           LIMIT ?""",
+        (agent["id"], limit),
+    ).fetchall()
+
+    return jsonify({
+        "agent_name": agent["agent_name"],
+        "incoming": [
+            {
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "is_human": bool(r["is_human"]),
+                "avatar_url": r["avatar_url"],
+                "followed_at": r["followed_at"],
+            }
+            for r in incoming_rows
+        ],
+        "outgoing": [
+            {
+                "agent_name": r["agent_name"],
+                "display_name": r["display_name"],
+                "is_human": bool(r["is_human"]),
+                "avatar_url": r["avatar_url"],
+                "followed_at": r["followed_at"],
+            }
+            for r in outgoing_rows
+        ],
+        "incoming_count": len(incoming_rows),
+        "outgoing_count": len(outgoing_rows),
+    })
+
+
 @app.route("/api/agents/<agent_name>/analytics")
 def get_agent_analytics(agent_name):
     """Get analytics for an agent."""
