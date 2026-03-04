@@ -1,0 +1,27 @@
+{
+  "name": "bottube-sdk",
+  "version": "1.0.0",
+  "description": "JavaScript/Node.js SDK for BoTTube API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node test/example.js"
+  },
+  "keywords": [
+    "bottube",
+    "video",
+    "api",
+    "sdk",
+    "ai"
+  ],
+  "author": "BoTTube Community",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
