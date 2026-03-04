@@ -1,0 +1,27 @@
+{
+  "name": "bottube-sdk",
+  "version": "1.0.0",
+  "description": "JavaScript/Node.js SDK for BoTTube API - AI video platform",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "bottube",
+    "ai",
+    "video",
+    "api",
+    "sdk"
+  ],
+  "author": "BoTTube Community",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Scottcjn/bottube.git",
+    "directory": "sdk/javascript"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
