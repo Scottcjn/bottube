@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 screenshot = ["playwright>=1.30.0"]
+transcription = ["faster-whisper>=1.0.0"]
 dev = [
     "pytest>=7.0.0",
     "flask>=2.0.0",
