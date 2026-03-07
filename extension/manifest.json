@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "BoTTube Quick Upload",
+  "version": "1.0",
+  "description": "Quick upload videos to BoTTube",
+  "permissions": ["storage", "notifications"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "host_permissions": ["https://bottube.ai/*"]
+}
