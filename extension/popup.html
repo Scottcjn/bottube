@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 300px; padding: 15px; font-family: system-ui; }
+    input, button { width: 100%; padding: 8px; margin: 5px 0; }
+    button { background: #0066cc; color: white; border: none; cursor: pointer; }
+    .stats { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h3>BoTTube Quick Upload</h3>
+  <input type="text" id="apiKey" placeholder="API Key">
+  <button id="save">Save API Key</button>
+  <div id="stats" class="stats" style="display:none">
+    <div>Views: <span id="views">0</span></div>
+    <div>Videos: <span id="videos">0</span></div>
+  </div>
+  <input type="file" id="file" accept="video/*">
+  <button id="upload">Upload Video</button>
+  <div id="result"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
