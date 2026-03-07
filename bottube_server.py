@@ -9089,6 +9089,255 @@ def global_rss():
     return resp
 
 
+@app.route("/feed/rss")
+def feed_rss():
+    """RSS 2.0 feed with optional filtering by agent, tag, or category."""
+    db = get_db()
+    
+    # Get query parameters
+    agent_name = request.args.get("agent")
+    tag = request.args.get("tag")
+    category = request.args.get("category")
+    limit = min(50, max(1, request.args.get("limit", 50, type=int)))
+    
+    # Build query
+    query = """SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail, v.tags, v.category,
+                      a.agent_name, a.display_name
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
+    params = []
+    
+    if agent_name:
+        query += " AND a.agent_name = ?"
+        params.append(agent_name)
+    
+    if tag:
+        query += " AND v.tags LIKE ?"
+        params.append(f'%"{tag}"%')
+    
+    if category:
+        query += " AND v.category = ?"
+        params.append(category)
+    
+    query += " ORDER BY v.created_at DESC LIMIT ?"
+    params.append(limit)
+    
+    videos = db.execute(query, params).fetchall()
+
+    base = request.url_root.rstrip("/").replace("http://", "https://")
+    prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
+    
+    # Build channel title
+    if agent_name:
+        channel_title = f"BoTTube - Videos by {agent_name}"
+    elif tag:
+        channel_title = f"BoTTube - Videos tagged '{tag}'"
+    elif category:
+        channel_title = f"BoTTube - {category} Videos"
+    else:
+        channel_title = "BoTTube - Latest Videos"
+    
+    items = []
+    for v in videos:
+        pub_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(v["created_at"]))
+        link = f"{base}{prefix}/watch/{v['video_id']}"
+        author_display = _xml_escape(v["display_name"] or v["agent_name"])
+        desc = v["description"] or v["title"]
+        thumb_tag = ""
+        if v["thumbnail"]:
+            thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
+            thumb_tag = f'<img src="{thumb_url}" alt="Video thumbnail" loading="lazy" decoding="async" /><br/>'
+        
+        # Add tags to description if available
+        tags_list = _safe_json_loads_list(v["tags"])
+        tags_str = ", ".join(tags_list) if tags_list else ""
+        
+        items.append(f"""    <item>
+      <title><![CDATA[{_cdata_safe(v["title"])}]]></title>
+      <link>{link}</link>
+      <guid isPermaLink="true">{link}</guid>
+      <pubDate>{pub_date}</pubDate>
+      <author>{_xml_escape(v["agent_name"])}</author>
+      <description><![CDATA[{thumb_tag}By {_cdata_safe(author_display)} - {_cdata_safe(desc)}]]></description>
+      <category>{tags_str}</category>
+    </item>""")
+
+    build_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>{channel_title}</title>
+    <link>{base}{prefix}/</link>
+    <description>Latest videos from AI agents on BoTTube</description>
+    <language>en-us</language>
+    <lastBuildDate>{build_date}</lastBuildDate>
+    <atom:link href="{base}{prefix}/feed/rss" rel="self" type="application/rss+xml"/>
+{chr(10).join(items)}
+  </channel>
+</rss>"""
+
+    resp = app.response_class(xml, mimetype="application/rss+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/feed/rss/<agent_name>")
+def feed_rss_agent(agent_name):
+    """RSS 2.0 feed for a specific agent."""
+    db = get_db()
+    limit = min(50, max(1, request.args.get("limit", 50, type=int)))
+    
+    videos = db.execute(
+        """SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail, v.tags,
+                  a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE a.agent_name = ? AND v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+           ORDER BY v.created_at DESC LIMIT ?""",
+        (agent_name, limit),
+    ).fetchall()
+
+    base = request.url_root.rstrip("/").replace("http://", "https://")
+    prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
+
+    items = []
+    for v in videos:
+        pub_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(v["created_at"]))
+        link = f"{base}{prefix}/watch/{v['video_id']}"
+        author_display = _xml_escape(v["display_name"] or v["agent_name"])
+        desc = v["description"] or v["title"]
+        thumb_tag = ""
+        if v["thumbnail"]:
+            thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
+            thumb_tag = f'<img src="{thumb_url}" alt="Video thumbnail" loading="lazy" decoding="async" /><br/>'
+        
+        tags_list = _safe_json_loads_list(v["tags"])
+        tags_str = ", ".join(tags_list) if tags_list else ""
+        
+        items.append(f"""    <item>
+      <title><![CDATA[{_cdata_safe(v["title"])}]]></title>
+      <link>{link}</link>
+      <guid isPermaLink="true">{link}</guid>
+      <pubDate>{pub_date}</pubDate>
+      <author>{_xml_escape(v["agent_name"])}</author>
+      <description><![CDATA[{thumb_tag}By {_cdata_safe(author_display)} - {_cdata_safe(desc)}]]></description>
+      <category>{tags_str}</category>
+    </item>""")
+
+    build_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>BoTTube - Videos by {agent_name}</title>
+    <link>{base}{prefix}/agent/{agent_name}</link>
+    <description>Videos by {agent_name} on BoTTube</description>
+    <language>en-us</language>
+    <lastBuildDate>{build_date}</lastBuildDate>
+    <atom:link href="{base}{prefix}/feed/rss/{agent_name}" rel="self" type="application/rss+xml"/>
+{chr(10).join(items)}
+  </channel>
+</rss>"""
+
+    resp = app.response_class(xml, mimetype="application/rss+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/feed/atom")
+def feed_atom():
+    """Atom 1.0 feed with optional filtering by agent, tag, or category."""
+    db = get_db()
+    
+    # Get query parameters
+    agent_name = request.args.get("agent")
+    tag = request.args.get("tag")
+    category = request.args.get("category")
+    limit = min(50, max(1, request.args.get("limit", 50, type=int)))
+    
+    # Build query
+    query = """SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail, v.tags, v.category,
+                      a.agent_name, a.display_name
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
+    params = []
+    
+    if agent_name:
+        query += " AND a.agent_name = ?"
+        params.append(agent_name)
+    
+    if tag:
+        query += " AND v.tags LIKE ?"
+        params.append(f'%"{tag}"%')
+    
+    if category:
+        query += " AND v.category = ?"
+        params.append(category)
+    
+    query += " ORDER BY v.created_at DESC LIMIT ?"
+    params.append(limit)
+    
+    videos = db.execute(query, params).fetchall()
+
+    base = request.url_root.rstrip("/").replace("http://", "https://")
+    prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
+    
+    # Build title
+    if agent_name:
+        feed_title = f"BoTTube - Videos by {agent_name}"
+    elif tag:
+        feed_title = f"BoTTube - Videos tagged '{tag}'"
+    elif category:
+        feed_title = f"BoTTube - {category} Videos"
+    else:
+        feed_title = "BoTTube - Latest Videos"
+    
+    entries = []
+    for v in videos:
+        pub_date = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(v["created_at"]))
+        updated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(v["created_at"]))
+        link = f"{base}{prefix}/watch/{v['video_id']}"
+        author_display = _xml_escape(v["display_name"] or v["agent_name"])
+        desc = v["description"] or v["title"]
+        
+        thumb_tag = ""
+        if v["thumbnail"]:
+            thumb_url = f"{base}{prefix}/thumbnails/{v['thumbnail']}"
+            thumb_tag = f'<media:thumbnail url="{thumb_url}"/>'
+        
+        tags_list = _safe_json_loads_list(v["tags"])
+        
+        entries.append(f"""    <entry>
+      <title>{_xml_escape(v["title"])}</title>
+      <link href="{link}"/>
+      <id>{link}</id>
+      <updated>{updated}</updated>
+      <published>{pub_date}</published>
+      <author>
+        <name>{_xml_escape(v["agent_name"])}</name>
+        <uri>{base}{prefix}/agent/{v["agent_name"]}</uri>
+      </author>
+      <summary>{_xml_escape(desc)}</summary>
+      {thumb_tag}
+    </entry>""")
+
+    build_date = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>{feed_title}</title>
+  <link rel="alternate" href="{base}{prefix}/"/>
+  <link rel="self" href="{base}{prefix}/feed/atom"/>
+  <updated>{build_date}</updated>
+  <subtitle>Latest videos from AI agents on BoTTube</subtitle>
+{chr(10).join(entries)}
+</feed>"""
+
+    resp = app.response_class(xml, mimetype="application/atom+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
 # ---------------------------------------------------------------------------
