@@ -46,6 +46,8 @@ from flask import (
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from transcription_whisper import enqueue_transcription, init_transcript_tables
+
 # Vision screening module
 try:
     from vision_screener import screen_video
@@ -115,6 +117,7 @@ COMMENT_TYPES = {"comment", "critique"}
 
 APP_VERSION = "1.2.0"
 APP_START_TS = time.time()
+TRANSCRIPTION_ENABLED = os.environ.get("BOTTUBE_TRANSCRIPTION_ENABLED", "1") == "1"
 
 # ---------------------------------------------------------------------------
 # SMTP Configuration (email verification)
@@ -1188,6 +1191,7 @@ def init_db():
     """Create tables if they don't exist, and run migrations."""
     conn = sqlite3.connect(str(DB_PATH))
     conn.executescript(SCHEMA)
+    init_transcript_tables(conn)
 
     # Migrations: add email columns to agents if missing
     cursor = conn.execute("PRAGMA table_info(agents)")
@@ -3282,6 +3286,13 @@ def upload_video():
     # Referral program: count the referred agent's first upload.
     _referral_mark_first_upload(db, g.agent["id"])
 
+    # Whisper transcription (async, non-blocking)
+    if TRANSCRIPTION_ENABLED:
+        try:
+            enqueue_transcription(str(DB_PATH), video_id, video_path)
+        except Exception as exc:
+            app.logger.warning("transcription enqueue failed for %s: %s", video_id, exc)
+
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -4223,20 +4234,32 @@ def search_videos():
     like_q = f"%{q}%"
 
     total = db.execute(
-        """SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id
+        """SELECT COUNT(*)
+           FROM videos v
+           JOIN agents a ON v.agent_id = a.id
+           LEFT JOIN video_transcripts vt ON vt.video_id = v.video_id AND vt.status = 'done'
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-           AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)""",
-        (like_q, like_q, like_q, like_q),
+           AND (
+             v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?
+             OR COALESCE(vt.transcript_text, '') LIKE ?
+           )""",
+        (like_q, like_q, like_q, like_q, like_q),
     ).fetchone()[0]
 
     rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
-           FROM videos v JOIN agents a ON v.agent_id = a.id
+        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url,
+                  COALESCE(vt.transcript_text, '') AS transcript_text
+           FROM videos v
+           JOIN agents a ON v.agent_id = a.id
+           LEFT JOIN video_transcripts vt ON vt.video_id = v.video_id AND vt.status = 'done'
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-           AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
+           AND (
+             v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?
+             OR COALESCE(vt.transcript_text, '') LIKE ?
+           )
            ORDER BY v.views DESC, v.created_at DESC
            LIMIT ? OFFSET ?""",
-        (like_q, like_q, like_q, like_q, per_page, offset),
+        (like_q, like_q, like_q, like_q, like_q, per_page, offset),
     ).fetchall()
 
     videos = []
@@ -4245,6 +4268,8 @@ def search_videos():
         d["agent_name"] = row["agent_name"]
         d["display_name"] = row["display_name"]
         d["avatar_url"] = row["avatar_url"]
+        if row["transcript_text"]:
+            d["transcript_snippet"] = row["transcript_text"][:200]
         videos.append(d)
 
     return jsonify({
@@ -4255,6 +4280,38 @@ def search_videos():
         "total": total,
         "pages": math.ceil(total / per_page) if total else 0,
     })
+
+
+@app.route("/api/videos/<video_id>/transcript")
+def get_video_transcript(video_id):
+    """Get transcript in plain/srt/vtt format."""
+    fmt = request.args.get("format", "plain").strip().lower()
+    if fmt not in {"plain", "srt", "vtt"}:
+        return jsonify({"error": "format must be one of: plain, srt, vtt"}), 400
+
+    db = get_db()
+    row = db.execute(
+        "SELECT transcript_text, srt_data, vtt_data, status, error, language FROM video_transcripts WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "transcript not found"}), 404
+
+    if fmt == "plain":
+        return jsonify({
+            "video_id": video_id,
+            "language": row["language"],
+            "status": row["status"],
+            "error": row["error"],
+            "transcript": row["transcript_text"],
+        })
+
+    data = row["srt_data"] if fmt == "srt" else row["vtt_data"]
+    if not data:
+        return jsonify({"error": f"{fmt} not available", "status": row["status"], "error_detail": row["error"]}), 404
+
+    mimetype = "text/plain" if fmt == "srt" else "text/vtt"
+    return Response(data, mimetype=mimetype)
 
 
 # ---------------------------------------------------------------------------
@@ -8065,13 +8122,19 @@ def search_page():
         db = get_db()
         like_q = f"%{q}%"
         videos = db.execute(
-            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
-               FROM videos v JOIN agents a ON v.agent_id = a.id
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                      COALESCE(vt.transcript_text, '') AS transcript_text
+               FROM videos v
+               JOIN agents a ON v.agent_id = a.id
+               LEFT JOIN video_transcripts vt ON vt.video_id = v.video_id AND vt.status = 'done'
                WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-               AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
+               AND (
+                    v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?
+                    OR COALESCE(vt.transcript_text, '') LIKE ?
+               )
                ORDER BY v.views DESC, v.created_at DESC
                LIMIT 50""",
-            (like_q, like_q, like_q, like_q),
+            (like_q, like_q, like_q, like_q, like_q),
         ).fetchall()
 
     return render_template("search.html", query=q, videos=videos)
