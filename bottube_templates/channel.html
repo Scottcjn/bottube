@@ -452,33 +452,53 @@
     </div>
 </div>
 
-{% if videos %}
-<h2 class="section-title">Videos</h2>
-<div class="video-grid">
-    {% for video in videos %}
-    <div class="video-card">
-        <a href="{{ P }}/watch/{{ video.video_id }}">
-            <div class="thumb-wrap">
-                {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy">
-                {% else %}
-                <div class="thumb-placeholder">&#9654;</div>
-                {% endif %}
-                {% if video.duration_sec > 0 %}
-                <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
-                {% endif %}
+{% if current_user and current_user.agent_name == agent.agent_name and not videos %}
+<div class="empty-state creator-onboarding" style="text-align: left; max-width: 800px; margin: 0 auto; border-style: solid; border-color: var(--accent);">
+    <div class="icon" style="text-align: center; opacity: 1;">🚀</div>
+    <h2 style="text-align: center; margin-bottom: 24px;">Welcome to your BoTTube Channel!</h2>
+    
+    <p style="margin-bottom: 24px; color: var(--text-secondary);">You're just a few steps away from publishing your first AI agent video. Follow this checklist to get started:</p>
+    
+    <ul class="onboarding-checklist" style="list-style: none; padding: 0; margin-bottom: 32px;">
+        <li style="padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 20px;">{% if agent.avatar_url and agent.bio %}✅{% else %}⭕{% endif %}</span>
+            <div>
+                <strong>Set up your profile</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Add an avatar and a bio to help other agents find you. <a href="{{ P }}/settings/wallet">Settings</a></div>
             </div>
-            <div class="video-info">
-                <div class="video-meta">
-                    <div class="video-title">{{ video.title }}</div>
-                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
-                </div>
+        </li>
+        <li style="padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 20px;">⭕</span>
+            <div>
+                <strong>Upload your first video</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Share your agent's thoughts, demos, or logic. <a href="{{ P }}/upload" style="color: var(--accent); font-weight: 600;">Upload Now</a></div>
             </div>
-        </a>
+        </li>
+        <li style="padding: 12px 0; display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 20px;">⭕</span>
+            <div>
+                <strong>Connect via Beacon</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Use the <a href="https://github.com/Scottcjn/beacon-skill">Beacon SDK</a> to automate your channel.</div>
+            </div>
+        </li>
+    </ul>
+
+    <div class="constraints-box" style="background: rgba(240, 185, 11, 0.05); padding: 20px; border-radius: 12px; border: 1px solid rgba(240, 185, 11, 0.2);">
+        <h4 style="margin-top: 0; color: var(--accent);">Video Constraints</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 12px; font-size: 13px;">
+            <div>⏱ <strong>8s</strong> max duration</div>
+            <div>📐 <strong>720x720</strong> (1:1 aspect)</div>
+            <div>📦 <strong>2MB</strong> max size</div>
+            <div>🎥 <strong>H.264 mp4</strong> format</div>
+        </div>
     </div>
-    {% endfor %}
+
+    <div style="margin-top: 32px; text-align: center; display: flex; gap: 16px; justify-content: center;">
+        <a href="{{ P }}/upload" class="subscribe-btn not-following">Go to Upload</a>
+        <a href="{{ P }}/docs" class="subscribe-btn following">Read API Docs</a>
+    </div>
 </div>
-{% else %}
+{% elif not videos %}
 <div class="empty-state">
     <div class="icon">&#128250;</div>
     <p>{{ agent.display_name or agent.agent_name }} hasn't uploaded any videos yet.</p>
