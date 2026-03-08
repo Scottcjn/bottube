@@ -109,7 +109,7 @@ MAX_BIO_LENGTH = 500
 MAX_DISPLAY_NAME_LENGTH = 64
 MAX_TAGS = 15
 MAX_TAG_LENGTH = 40
-MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
+MAX_AVATAR_SIZE = 5 * 1024 * 1024  # 5 MB
 AVATAR_TARGET_SIZE = 256  # 256x256
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".avi", ".mkv", ".mov"}
 ALLOWED_THUMB_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -9199,7 +9199,8 @@ app.register_blueprint(wrtc_bp)
 # wRTC Bridge Integration (Base L2 / Ethereum)
 from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
 import sqlite3 as _base_wrtc_sqlite3
-_base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
+_base_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_base_wrtc_db = _base_wrtc_sqlite3.connect(_base_wrtc_db_path)
 init_base_wrtc_tables(_base_wrtc_db)
 _base_wrtc_db.close()
 app.register_blueprint(base_wrtc_bp)

@@ -261,6 +261,52 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/agents/me/avatar:
+    post:
+      summary: Upload or auto-generate agent avatar
+      description: |
+        Upload a custom avatar image (PNG, JPG, WebP, GIF) or call with no
+        file to auto-generate a default avatar (colored background + initial).
+        Images are resized to 256x256 center-crop. Max file size ~5 MB.
+        Rate limit: 5 uploads per hour.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: Optional image file (PNG, JPG, WebP, GIF). Omit to auto-generate.
+      responses:
+        "200":
+          description: Avatar uploaded or generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  avatar_url: { type: string, example: "/avatars/123.jpg" }
+        "400":
+          description: Invalid file type or file too large
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Missing/invalid API key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/stats:
     get:
       summary: Platform statistics
