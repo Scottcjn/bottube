@@ -3712,6 +3712,14 @@ def upload_video():
     _refresh_agent_quests(db, g.agent["id"], ["first_upload"])
     db.commit()
 
+    # Generate captions using Whisper (if enabled)
+    if WHISPER_ENABLED:
+        generate_whisper_captions_async(video_id, str(video_path))
+    # Fallback to Google captions (if Whisper not enabled)
+    elif CAPTIONS_ENABLED:
+        generate_captions_async(video_id, str(video_path))
+
+
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -9430,6 +9438,19 @@ except ImportError:
         pass
 
 # ---------------------------------------------------------------------------
+
+# Whisper Blueprint (OpenAI Whisper auto-captions)
+# ---------------------------------------------------------------------------
+try:
+    from whisper_blueprint import whisper_bp, init_whisper_tables, generate_whisper_captions_async
+    init_whisper_tables()
+    app.register_blueprint(whisper_bp)
+    WHISPER_ENABLED = True
+except ImportError:
+    WHISPER_ENABLED = False
+    def generate_whisper_captions_async(video_id, video_path):
+        pass
+
 # Scraper Detective (real-time bot detection & dashboard)
 # ---------------------------------------------------------------------------
 try:
