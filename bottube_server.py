@@ -4020,6 +4020,9 @@ def upload_video():
     _refresh_agent_quests(db, g.agent["id"], ["first_upload"])
     db.commit()
 
+    # Generate captions from the finalized video asset in the background.
+    generate_captions_async(video_id, str(video_path))
+
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -5006,12 +5009,24 @@ def search_videos():
     like_q = f"%{q}%"
 
     # Build dynamic WHERE clauses
+    search_conditions = [
+        "v.title LIKE ?",
+        "v.description LIKE ?",
+        "v.tags LIKE ?",
+        "a.agent_name LIKE ?",
+    ]
+    params = [like_q, like_q, like_q, like_q]
+    caption_video_ids = find_caption_video_ids(q, limit=500)
+    if caption_video_ids:
+        placeholders = ",".join("?" for _ in caption_video_ids)
+        search_conditions.append(f"v.video_id IN ({placeholders})")
+        params.extend(caption_video_ids)
+
     conditions = [
         "v.is_removed = 0",
         "COALESCE(a.is_banned, 0) = 0",
-        "(v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)",
+        f"({' OR '.join(search_conditions)})",
     ]
-    params = [like_q, like_q, like_q, like_q]
 
     # Category filter (comma-separated)
     cat_param = request.args.get("category", "").strip()
@@ -8861,6 +8876,9 @@ def upload_page():
     award_rtc(db, g.user["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     db.commit()
 
+    # Generate captions from the finalized video asset in the background.
+    generate_captions_async(video_id, str(video_path))
+
     # Ping search engines about the new video
     _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
     ping_google_indexing(f"https://bottube.ai/watch/{video_id}")
@@ -9830,15 +9848,22 @@ except ImportError:
         return 0.0
 
 # ---------------------------------------------------------------------------
-# Captions Blueprint (Google Speech-to-Text auto-captions)
+# Captions Blueprint (Whisper / Google auto-captions + transcript search)
 # ---------------------------------------------------------------------------
 try:
-    from captions_blueprint import captions_bp, init_captions_tables, generate_captions_async
+    from captions_blueprint import (
+        captions_bp,
+        find_caption_video_ids,
+        generate_captions_async,
+        init_captions_tables,
+    )
     init_captions_tables()
     app.register_blueprint(captions_bp)
     CAPTIONS_ENABLED = True
 except ImportError:
     CAPTIONS_ENABLED = False
+    def find_caption_video_ids(query, limit=200):
+        return []
     def generate_captions_async(video_id, video_path):
         pass
 

@@ -1,54 +1,69 @@
 """
-BoTTube Auto-Captions via Google Cloud Speech-to-Text
+BoTTube auto-captions with provider fallback.
 
-Generates WebVTT captions for videos. Stores in DB and serves via API.
-Requires: GOOGLE_APPLICATION_CREDENTIALS env var pointing to service account JSON.
+Supports:
+- OpenAI Whisper when OPENAI_API_KEY is configured
+- Google Cloud Speech-to-Text as a fallback when
+  GOOGLE_APPLICATION_CREDENTIALS is configured
 
-Usage:
-    from captions_blueprint import captions_bp, init_captions_tables, generate_captions_for_video
-    init_captions_tables()
-    app.register_blueprint(captions_bp)
+Captions are stored in both WebVTT and SRT formats and indexed for search.
 """
 
-import io
+import base64
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import tempfile
 import threading
 import time
+import urllib.request
 
-from flask import Blueprint, current_app, g, jsonify, request
+import requests
+from flask import Blueprint, current_app, jsonify, request
+
 
 log = logging.getLogger("bottube.captions")
 
 captions_bp = Blueprint("captions", __name__)
 
-# Google Cloud Speech-to-Text config
 GOOGLE_CREDS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
 SPEECH_API_URL = "https://speech.googleapis.com/v1/speech:recognize"
 SPEECH_LONG_API_URL = "https://speech.googleapis.com/v1/speech:longrunningrecognize"
 
-DB_PATH = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
+WHISPER_MODEL = os.environ.get("BOTTUBE_WHISPER_MODEL", "whisper-1")
+
+DB_PATH = os.environ.get("BOTTUBE_DB_PATH") or os.environ.get("BOTTUBE_DB") or "/root/bottube/bottube.db"
 
 
-def _get_db():
-    """Get database connection."""
-    try:
-        from bottube_server import get_db
-        return get_db()
-    except Exception:
-        db = sqlite3.connect(DB_PATH)
-        db.row_factory = sqlite3.Row
-        return db
+def _db_path() -> str:
+    return str(DB_PATH)
 
 
-def init_captions_tables():
-    """Create captions tables if they don't exist."""
-    db = sqlite3.connect(DB_PATH)
-    db.execute("""
+def _connect_db() -> sqlite3.Connection:
+    db = sqlite3.connect(_db_path())
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def _table_exists(db: sqlite3.Connection, name: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _normalized_sql(sql: str) -> str:
+    return re.sub(r"\s+", "", (sql or "").lower())
+
+
+def _migrate_captions_table(db: sqlite3.Connection) -> None:
+    target_sql = """
         CREATE TABLE IF NOT EXISTS video_captions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             video_id TEXT NOT NULL,
@@ -57,73 +72,235 @@ def init_captions_tables():
             caption_data TEXT NOT NULL,
             source TEXT DEFAULT 'auto',
             created_at REAL NOT NULL,
-            UNIQUE(video_id, language)
+            UNIQUE(video_id, language, format)
         )
-    """)
-    db.commit()
-    db.close()
+    """
+
+    row = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'video_captions'"
+    ).fetchone()
+    if not row:
+        db.execute(target_sql)
+        return
+
+    if "unique(video_id,language,format)" in _normalized_sql(row["sql"]):
+        return
+
+    db.execute("ALTER TABLE video_captions RENAME TO video_captions_legacy")
+    db.execute(target_sql)
+    db.execute(
+        """
+        INSERT OR IGNORE INTO video_captions
+            (video_id, language, format, caption_data, source, created_at)
+        SELECT
+            video_id,
+            COALESCE(language, 'en'),
+            COALESCE(format, 'vtt'),
+            caption_data,
+            COALESCE(source, 'auto'),
+            created_at
+        FROM video_captions_legacy
+        """
+    )
+    db.execute("DROP TABLE video_captions_legacy")
+
+
+def _rebuild_caption_search_index(db: sqlite3.Connection) -> None:
+    try:
+        db.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS video_captions_fts
+            USING fts5(video_id UNINDEXED, caption_data)
+            """
+        )
+        db.execute("DELETE FROM video_captions_fts")
+        rows = db.execute(
+            """
+            SELECT video_id, GROUP_CONCAT(caption_data, ' ') AS caption_blob
+            FROM video_captions
+            GROUP BY video_id
+            """
+        ).fetchall()
+        for row in rows:
+            db.execute(
+                "INSERT INTO video_captions_fts (video_id, caption_data) VALUES (?, ?)",
+                (row["video_id"], row["caption_blob"] or ""),
+            )
+    except sqlite3.Error as exc:
+        log.warning("Caption FTS init failed: %s", exc)
+
+
+def init_captions_tables() -> None:
+    """Create or migrate captions storage and search tables."""
+    with _connect_db() as db:
+        _migrate_captions_table(db)
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_video_captions_video ON video_captions(video_id)"
+        )
+        _rebuild_caption_search_index(db)
+        db.commit()
     log.info("Captions tables initialized")
 
 
 def _extract_audio(video_path: str) -> str:
-    """Extract audio from video file as 16kHz mono WAV using ffmpeg."""
-    audio_path = tempfile.mktemp(suffix=".wav")
+    """Extract audio from a video as 16kHz mono WAV."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
     try:
         subprocess.run(
-            ["ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
-             "-ar", "16000", "-ac", "1", "-y", audio_path],
-            capture_output=True, timeout=120, check=True
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                video_path,
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                tmp.name,
+            ],
+            capture_output=True,
+            timeout=120,
+            check=True,
         )
-        return audio_path
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        log.error(f"Audio extraction failed: {e}")
+        return tmp.name
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        log.error("Audio extraction failed: %s", exc)
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
         return ""
 
 
 def _get_access_token() -> str:
-    """Get Google Cloud access token from service account credentials."""
+    """Get a Google Cloud access token."""
     if not GOOGLE_CREDS or not os.path.exists(GOOGLE_CREDS):
         return ""
     try:
-        # Use gcloud or manual JWT signing
         result = subprocess.run(
             ["gcloud", "auth", "application-default", "print-access-token"],
-            capture_output=True, text=True, timeout=15
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if result.returncode == 0:
             return result.stdout.strip()
     except FileNotFoundError:
         pass
 
-    # Fallback: manual JWT exchange (same pattern as google_indexing.py)
     try:
         from google_indexing import _get_access_token as get_token
+
         return get_token("https://www.googleapis.com/auth/cloud-platform")
-    except Exception as e:
-        log.error(f"Failed to get access token: {e}")
+    except Exception as exc:
+        log.error("Failed to get Google access token: %s", exc)
     return ""
 
 
-def _speech_to_text(audio_path: str) -> list:
-    """Send audio to Google Cloud Speech-to-Text, return timestamped words."""
-    import urllib.request
-
-    token = _get_access_token()
-    if not token:
-        log.error("No access token available for Speech-to-Text")
+def _google_words_to_cues(words: list[dict]) -> list[dict]:
+    """Group Google word timestamps into subtitle cues."""
+    if not words:
         return []
 
-    # Read audio file
-    with open(audio_path, "rb") as f:
-        audio_bytes = f.read()
+    cues = []
+    cue_words = []
+    cue_start = 0.0
 
-    import base64
+    for word in words:
+        if not cue_words:
+            cue_start = word["start"]
+        cue_words.append(word["word"])
+
+        elapsed = word["end"] - cue_start
+        is_sentence_end = word["word"].endswith((".", "!", "?"))
+        if elapsed >= 5.0 or (elapsed >= 3.0 and is_sentence_end) or len(cue_words) >= 15:
+            cues.append(
+                {
+                    "start": cue_start,
+                    "end": word["end"],
+                    "text": " ".join(cue_words).strip(),
+                }
+            )
+            cue_words = []
+
+    if cue_words:
+        cues.append(
+            {
+                "start": cue_start,
+                "end": words[-1]["end"],
+                "text": " ".join(cue_words).strip(),
+            }
+        )
+
+    return [cue for cue in cues if cue["text"]]
+
+
+def _whisper_segments_to_cues(segments: list[dict]) -> list[dict]:
+    cues = []
+    for segment in segments:
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        cues.append(
+            {
+                "start": float(segment.get("start", 0.0)),
+                "end": float(segment.get("end", 0.0)),
+                "text": text,
+            }
+        )
+    return cues
+
+
+def _format_vtt_time(seconds: float) -> str:
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
+
+
+def _format_srt_time(seconds: float) -> str:
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _cues_to_vtt(cues: list[dict]) -> str:
+    lines = ["WEBVTT", ""]
+    for idx, cue in enumerate(cues, start=1):
+        lines.append(str(idx))
+        lines.append(f"{_format_vtt_time(cue['start'])} --> {_format_vtt_time(cue['end'])}")
+        lines.append(cue["text"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _cues_to_srt(cues: list[dict]) -> str:
+    lines = []
+    for idx, cue in enumerate(cues, start=1):
+        lines.append(str(idx))
+        lines.append(f"{_format_srt_time(cue['start'])} --> {_format_srt_time(cue['end'])}")
+        lines.append(cue["text"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _speech_to_text_google(audio_path: str) -> list[dict]:
+    token = _get_access_token()
+    if not token:
+        return []
+
+    with open(audio_path, "rb") as handle:
+        audio_bytes = handle.read()
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
 
-    # Check file size - use long-running API for > 1 minute audio
-    duration_sec = len(audio_bytes) / (16000 * 2)  # 16kHz, 16-bit
+    duration_sec = max(1, len(audio_bytes) // (16000 * 2))
     api_url = SPEECH_LONG_API_URL if duration_sec > 60 else SPEECH_API_URL
-
     payload = {
         "config": {
             "encoding": "LINEAR16",
@@ -136,31 +313,27 @@ def _speech_to_text(audio_path: str) -> list:
         "audio": {"content": audio_b64},
     }
 
-    data = json.dumps(payload).encode()
     req = urllib.request.Request(
         api_url,
-        data=data,
+        data=json.dumps(payload).encode(),
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
     )
-
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
-    except Exception as e:
-        log.error(f"Speech-to-Text API failed: {e}")
+    except Exception as exc:
+        log.error("Google STT failed: %s", exc)
         return []
 
-    # For long-running operations, poll for completion
-    if "name" in result and duration_sec > 60:
+    if "name" in result and api_url == SPEECH_LONG_API_URL:
         op_name = result["name"]
-        for _ in range(60):  # Poll for up to 5 minutes
+        for _ in range(60):
             time.sleep(5)
-            poll_url = f"https://speech.googleapis.com/v1/operations/{op_name}"
             poll_req = urllib.request.Request(
-                poll_url,
+                f"https://speech.googleapis.com/v1/operations/{op_name}",
                 headers={"Authorization": f"Bearer {token}"},
             )
             with urllib.request.urlopen(poll_req, timeout=30) as resp:
@@ -169,100 +342,112 @@ def _speech_to_text(audio_path: str) -> list:
                 result = result.get("response", result)
                 break
 
-    # Extract timestamped words
     words = []
     for alt in result.get("results", []):
         best = alt.get("alternatives", [{}])[0]
-        for w in best.get("words", []):
-            start = float(w.get("startTime", "0s").rstrip("s"))
-            end = float(w.get("endTime", "0s").rstrip("s"))
-            words.append({"word": w["word"], "start": start, "end": end})
-
+        for word in best.get("words", []):
+            words.append(
+                {
+                    "word": word["word"],
+                    "start": float(str(word.get("startTime", "0s")).rstrip("s")),
+                    "end": float(str(word.get("endTime", "0s")).rstrip("s")),
+                }
+            )
     return words
 
 
-def _words_to_vtt(words: list) -> str:
-    """Convert timestamped words to WebVTT format with ~5 second segments."""
-    if not words:
-        return ""
+def _speech_to_text_whisper(audio_path: str) -> dict:
+    if not OPENAI_API_KEY:
+        return {}
 
-    lines = ["WEBVTT", ""]
-    segment_words = []
-    segment_start = 0.0
-    cue_num = 1
-
-    for w in words:
-        if not segment_words:
-            segment_start = w["start"]
-        segment_words.append(w["word"])
-
-        # Create a new cue every ~5 seconds or at sentence boundaries
-        elapsed = w["end"] - segment_start
-        is_sentence_end = w["word"].endswith((".","!","?"))
-        if elapsed >= 5.0 or (elapsed >= 3.0 and is_sentence_end) or len(segment_words) >= 15:
-            segment_end = w["end"]
-            text = " ".join(segment_words)
-            lines.append(str(cue_num))
-            lines.append(
-                f"{_format_vtt_time(segment_start)} --> {_format_vtt_time(segment_end)}"
+    try:
+        with open(audio_path, "rb") as handle:
+            response = requests.post(
+                WHISPER_API_URL,
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                data={"model": WHISPER_MODEL, "response_format": "verbose_json"},
+                files={"file": (os.path.basename(audio_path), handle, "audio/wav")},
+                timeout=300,
             )
-            lines.append(text)
-            lines.append("")
-            cue_num += 1
-            segment_words = []
+        response.raise_for_status()
+        result = response.json()
+        log.info("Whisper transcription succeeded with %s segments", len(result.get("segments", [])))
+        return result
+    except requests.RequestException as exc:
+        log.error("Whisper API failed: %s", exc)
+    except ValueError as exc:
+        log.error("Whisper JSON decode failed: %s", exc)
+    return {}
 
-    # Flush remaining words
-    if segment_words:
-        text = " ".join(segment_words)
-        lines.append(str(cue_num))
-        lines.append(
-            f"{_format_vtt_time(segment_start)} --> {_format_vtt_time(words[-1]['end'])}"
+
+def _refresh_caption_search_index(db: sqlite3.Connection, video_id: str, text: str) -> None:
+    try:
+        db.execute("DELETE FROM video_captions_fts WHERE video_id = ?", (video_id,))
+        db.execute(
+            "INSERT INTO video_captions_fts (video_id, caption_data) VALUES (?, ?)",
+            (video_id, text or ""),
         )
-        lines.append(text)
-        lines.append("")
-
-    return "\n".join(lines)
+    except sqlite3.Error as exc:
+        log.warning("Caption search index update failed for %s: %s", video_id, exc)
 
 
-def _format_vtt_time(seconds: float) -> str:
-    """Format seconds as HH:MM:SS.mmm for WebVTT."""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    return f"{h:02d}:{m:02d}:{s:06.3f}"
+def _caption_provider() -> str | None:
+    if OPENAI_API_KEY:
+        return "whisper"
+    if GOOGLE_CREDS:
+        return "google"
+    return None
 
 
 def generate_captions_for_video(video_id: str, video_path: str) -> bool:
-    """Generate captions for a video and store in DB. Returns True on success."""
-    log.info(f"Generating captions for {video_id}")
+    """Generate captions and store both VTT and SRT tracks."""
+    provider = _caption_provider()
+    if not provider:
+        return False
 
-    # Extract audio
     audio_path = _extract_audio(video_path)
     if not audio_path:
         return False
 
     try:
-        # Send to Speech-to-Text
-        words = _speech_to_text(audio_path)
-        if not words:
-            log.warning(f"No speech detected in {video_id}")
+        if provider == "whisper":
+            result = _speech_to_text_whisper(audio_path)
+            cues = _whisper_segments_to_cues(result.get("segments", []))
+            full_text = str(result.get("text", "")).strip()
+        else:
+            words = _speech_to_text_google(audio_path)
+            cues = _google_words_to_cues(words)
+            full_text = " ".join(word["word"] for word in words).strip()
+
+        if not cues:
+            log.warning("No speech detected for %s", video_id)
             return False
 
-        # Convert to WebVTT
-        vtt = _words_to_vtt(words)
-        if not vtt:
-            return False
+        now = time.time()
+        vtt = _cues_to_vtt(cues)
+        srt = _cues_to_srt(cues)
+        search_text = full_text or " ".join(cue["text"] for cue in cues)
 
-        # Store in database
-        db = sqlite3.connect(DB_PATH)
-        db.execute(
-            "INSERT OR REPLACE INTO video_captions (video_id, language, format, caption_data, source, created_at) "
-            "VALUES (?, 'en', 'vtt', ?, 'auto', ?)",
-            (video_id, vtt, time.time()),
-        )
-        db.commit()
-        db.close()
-        log.info(f"Captions generated for {video_id}: {len(words)} words")
+        with _connect_db() as db:
+            db.execute(
+                """
+                INSERT OR REPLACE INTO video_captions
+                    (video_id, language, format, caption_data, source, created_at)
+                VALUES (?, 'en', 'vtt', ?, ?, ?)
+                """,
+                (video_id, vtt, provider, now),
+            )
+            db.execute(
+                """
+                INSERT OR REPLACE INTO video_captions
+                    (video_id, language, format, caption_data, source, created_at)
+                VALUES (?, 'en', 'srt', ?, ?, ?)
+                """,
+                (video_id, srt, provider, now),
+            )
+            _refresh_caption_search_index(db, video_id, search_text)
+            db.commit()
+        log.info("Generated %s captions for %s", provider, video_id)
         return True
     finally:
         try:
@@ -271,55 +456,111 @@ def generate_captions_for_video(video_id: str, video_path: str) -> bool:
             pass
 
 
-def generate_captions_async(video_id: str, video_path: str):
-    """Fire-and-forget caption generation in background thread."""
-    if not GOOGLE_CREDS:
+def generate_captions_async(video_id: str, video_path: str) -> None:
+    """Fire-and-forget captions generation."""
+    if not _caption_provider():
         return
-    t = threading.Thread(
+    thread = threading.Thread(
         target=generate_captions_for_video,
         args=(video_id, video_path),
         daemon=True,
     )
-    t.start()
+    thread.start()
 
 
-# ---------------------------------------------------------------------------
-# API Endpoints
-# ---------------------------------------------------------------------------
+def _fts_query(raw_query: str) -> str:
+    tokens = re.findall(r"[A-Za-z0-9_]+", raw_query.lower())
+    if not tokens:
+        return ""
+    return " ".join(f'"{token}"' for token in tokens[:8])
+
+
+def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
+    fts_query = _fts_query(query)
+    try:
+        with _connect_db() as db:
+            if not fts_query or not _table_exists(db, "video_captions_fts"):
+                return []
+            rows = db.execute(
+                """
+                SELECT DISTINCT video_id
+                FROM video_captions_fts
+                WHERE caption_data MATCH ?
+                LIMIT ?
+                """,
+                (fts_query, max(1, min(limit, 500))),
+            ).fetchall()
+            return [row["video_id"] for row in rows]
+    except sqlite3.Error as exc:
+        log.warning("Caption search failed: %s", exc)
+        return []
+
 
 @captions_bp.route("/api/videos/<video_id>/captions")
 def get_captions(video_id):
-    """Serve WebVTT captions for a video."""
+    """Serve VTT or SRT captions for a video."""
     lang = request.args.get("lang", "en")
-    db = _get_db()
-    row = db.execute(
-        "SELECT caption_data FROM video_captions WHERE video_id = ? AND language = ?",
-        (video_id, lang),
-    ).fetchone()
+    fmt = request.args.get("format", "vtt").lower()
+    if fmt not in {"vtt", "srt"}:
+        return jsonify({"error": "format must be 'vtt' or 'srt'"}), 400
+
+    with _connect_db() as db:
+        row = db.execute(
+            """
+            SELECT caption_data
+            FROM video_captions
+            WHERE video_id = ? AND language = ? AND format = ?
+            """,
+            (video_id, lang, fmt),
+        ).fetchone()
 
     if not row:
         return "", 404
 
+    mimetype = "text/srt" if fmt == "srt" else "text/vtt"
     return current_app.response_class(
         row["caption_data"],
-        mimetype="text/vtt",
+        mimetype=mimetype,
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
 
 @captions_bp.route("/api/videos/<video_id>/captions/status")
 def caption_status(video_id):
-    """Check if captions exist for a video."""
-    db = _get_db()
-    rows = db.execute(
-        "SELECT language, source, created_at FROM video_captions WHERE video_id = ?",
-        (video_id,),
-    ).fetchall()
+    """Check which caption tracks exist for a video."""
+    with _connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT language, format, source, created_at
+            FROM video_captions
+            WHERE video_id = ?
+            ORDER BY language, format
+            """,
+            (video_id,),
+        ).fetchall()
 
-    return jsonify({
-        "video_id": video_id,
-        "captions": [
-            {"language": r["language"], "source": r["source"], "created_at": r["created_at"]}
-            for r in rows
-        ],
-    })
+    return jsonify(
+        {
+            "video_id": video_id,
+            "captions": [
+                {
+                    "language": row["language"],
+                    "format": row["format"],
+                    "source": row["source"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ],
+        }
+    )
+
+
+@captions_bp.route("/api/search/captions")
+def search_captions():
+    """Search caption text and return matching video ids."""
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "Query parameter 'q' is required"}), 400
+
+    video_ids = find_caption_video_ids(query, limit=request.args.get("limit", 50, type=int))
+    return jsonify({"query": query, "count": len(video_ids), "video_ids": video_ids})
