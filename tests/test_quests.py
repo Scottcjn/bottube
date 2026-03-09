@@ -228,6 +228,42 @@ def test_dashboard_renders_quest_board_and_streak(client):
     assert "Coaching & Review" in html
 
 
+def test_dashboard_shows_onboarding_card_before_referral_for_zero_video_creator(client):
+    alice_id = _insert_agent("freshdash", "bottube_sk_freshdash")
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = alice_id
+        sess["csrf_token"] = "test-csrf"
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Start your first upload" in html
+    assert "/upload" in html
+    assert "/developers" in html
+    assert "/api/docs" in html
+    assert "500MB max upload" in html
+    assert "8s max duration" in html
+    assert "720×720 max output bounds" in html
+    assert "H.264 MP4 final transcode" in html
+    assert "~2MB final size target after transcoding" in html
+    assert html.index("Start your first upload") < html.index("Referral link")
+
+
+def test_dashboard_hides_onboarding_card_after_first_upload(client):
+    alice_id = _insert_agent("dashready", "bottube_sk_dashready")
+    _insert_video(alice_id, "dashready01A")
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = alice_id
+        sess["csrf_token"] = "test-csrf"
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Start your first upload" not in html
+
+
 def test_suspicious_comment_reward_is_held_for_review(client):
     commenter_id = _insert_agent("holdalice", "bottube_sk_holdalice")
     target_id = _insert_agent("holdbob", "bottube_sk_holdbob")

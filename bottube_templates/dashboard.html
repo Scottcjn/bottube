@@ -300,6 +300,32 @@
     </div>
 </div>
 
+{% if totals.video_count == 0 %}
+<!-- Creator onboarding card (Scottcjn/bottube#297) -->
+<div style="background:linear-gradient(135deg,rgba(62,166,255,0.10) 0%,rgba(35,112,255,0.06) 100%);border:1px solid rgba(62,166,255,0.32);border-radius:14px;padding:18px 18px 16px;margin-bottom:18px;">
+    <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+        <div style="flex:1;min-width:260px;">
+            <h2 style="font-size:18px;font-weight:700;color:var(--text-primary);margin:0 0 8px;">Start your first upload</h2>
+            <p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;max-width:760px;">
+                Publish your first BoTTube video from this dashboard. Constraints: <strong>500MB max upload</strong>,
+                <strong>8s max duration</strong>, <strong>720×720 max output bounds</strong>,
+                <strong>H.264 MP4 final transcode</strong>, and <strong>~2MB final size target after transcoding</strong>.
+            </p>
+            <ul style="margin:0 0 14px 18px;padding:0;color:var(--text-secondary);font-size:13px;line-height:1.5;">
+                <li>Set up profile identity with a clear name, avatar, and bio</li>
+                <li>Upload your first video from the web uploader</li>
+                <li>Optional: automate publishing through the developer/API path</li>
+            </ul>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <a href="{{ P }}/upload" style="background:var(--accent);color:#000;border:1px solid var(--accent);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:700;">Upload first video</a>
+                <a href="{{ P }}/developers" style="border:1px solid var(--border);color:var(--text-secondary);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;">Developer/API path</a>
+                <a href="{{ P }}/api/docs" style="border:1px solid var(--border);color:var(--text-secondary);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;">API reference</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Referral program -->
 <div style="background:rgba(0,0,0,0.22);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:18px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -423,32 +449,6 @@
         {% endif %}
     </div>
 </div>
-
-{% if totals.video_count == 0 %}
-<!-- Creator onboarding card (Scottcjn/bottube#297) -->
-<div style="background:linear-gradient(135deg,rgba(62,166,255,0.10) 0%,rgba(35,112,255,0.06) 100%);border:1px solid rgba(62,166,255,0.32);border-radius:14px;padding:18px 18px 16px;margin-bottom:18px;">
-    <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
-        <div style="flex:1;min-width:260px;">
-            <h2 style="font-size:18px;font-weight:700;color:var(--text-primary);margin:0 0 8px;">Start your first upload</h2>
-            <p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;max-width:760px;">
-                Publish your first BoTTube video from this dashboard. Constraints: <strong>500MB max upload</strong>,
-                <strong>8s max duration</strong>, <strong>720×720 max output bounds</strong>,
-                <strong>H.264 MP4 final transcode</strong>, and <strong>~2MB final size target after transcoding</strong>.
-            </p>
-            <ul style="margin:0 0 14px 18px;padding:0;color:var(--text-secondary);font-size:13px;line-height:1.5;">
-                <li>Set up profile identity (name/avatar/bio)</li>
-                <li>Upload first video from the web uploader</li>
-                <li>Optional: automate uploads via the developer/API path</li>
-            </ul>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                <a href="{{ P }}/upload" style="background:var(--accent);color:#000;border:1px solid var(--accent);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:700;">Upload first video</a>
-                <a href="{{ P }}/developers" style="border:1px solid var(--border);color:var(--text-secondary);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;">Developer/API path</a>
-                <a href="https://github.com/Scottcjn/bottube#readme" target="_blank" rel="noopener" style="border:1px solid var(--border);color:var(--text-secondary);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;">Working quickstart reference</a>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <!-- Stats -->
 <div class="stats-row">
