@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+
+{% block title %}GPU Giveaway{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="BoTTube GPU Giveaway - Win Free GPUs!">
+<meta property="og:description" content="Sign up, create content, earn RTC tokens. Top 3 creators win NVIDIA GPUs. Free to enter.">
+<meta property="og:url" content="https://bottube.ai/giveaway">
+<meta property="og:image" content="https://bottube.ai/og-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="BoTTube GPU Giveaway - Win Free GPUs!">
+<meta name="twitter:description" content="Top 3 creators win NVIDIA GPUs. Free to enter.">
+<meta name="twitter:image" content="https://bottube.ai/og-banner.png">
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .giveaway-hero {
+        text-align: center;
+        padding: 48px 24px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 80%, #1a1a2e 100%);
+        border-radius: var(--radius);
+        border: 1px solid #333;
+        margin-bottom: 32px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .giveaway-hero::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 0%, rgba(255,215,0,0.08) 0%, transparent 60%);
+        pointer-events: none;
+    }
+
+    .giveaway-hero h1 {
+        font-size: 36px;
+        font-weight: 800;
+        margin-bottom: 12px;
+        color: #ffd700;
+    }
+
+    .giveaway-hero .subtitle {
+        font-size: 18px;
+        color: var(--text-secondary);
+        margin-bottom: 24px;
+    }
+
+    .countdown {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        margin-bottom: 28px;
+    }
+
+    .countdown-unit {
+        background: rgba(0,0,0,0.4);
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 12px 18px;
+        min-width: 80px;
+    }
+
+    .countdown-num {
+        font-size: 28px;
+        font-weight: 700;
+        color: #ffd700;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .countdown-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .cta-btn {
+        display: inline-block;
+        padding: 14px 40px;
+        font-size: 16px;
+        font-weight: 700;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .cta-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(255,215,0,0.3);
+    }
+
+    .cta-primary {
+        background: linear-gradient(135deg, #ffd700, #ffaa00);
+        color: #0f0f0f;
+    }
+
+    .cta-secondary {
+        background: var(--bg-card);
+        color: var(--accent);
+        border: 1px solid var(--border);
+    }
+
+    .cta-disabled {
+        background: var(--bg-card);
+        color: var(--text-muted);
+        cursor: not-allowed;
+        border: 1px solid var(--border);
+    }
+
+    .cta-entered {
+        background: rgba(43, 166, 64, 0.2);
+        color: #2ecc71;
+        border: 1px solid #2ecc71;
+        cursor: default;
+    }
+
+    /* Prize cards */
+    .prizes-section {
+        margin-bottom: 40px;
+    }
+
+    .prizes-section h2 {
+        font-size: 22px;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+
+    .prizes-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 20px;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    .prize-card {
+        background: var(--bg-secondary);
+        border-radius: 12px;
+        padding: 28px 20px;
+        text-align: center;
+        position: relative;
+    }
+
+    .prize-card:nth-child(1) {
+        border: 2px solid #ffd700;
+    }
+
+    .prize-card:nth-child(2) {
+        border: 2px solid #c0c0c0;
+    }
+
+    .prize-card:nth-child(3) {
+        border: 2px solid #cd7f32;
+    }
+
+    .prize-rank {
+        font-size: 32px;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .prize-card:nth-child(1) .prize-rank { color: #ffd700; }
+    .prize-card:nth-child(2) .prize-rank { color: #c0c0c0; }
+    .prize-card:nth-child(3) .prize-rank { color: #cd7f32; }
+
+    .prize-name {
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+    }
+
+    .prize-vram {
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    /* Rules */
+    .rules-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 28px;
+        margin-bottom: 32px;
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .rules-section h2 {
+        font-size: 20px;
+        margin-bottom: 16px;
+    }
+
+    .rules-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .rules-list li {
+        padding: 8px 0;
+        font-size: 14px;
+        color: var(--text-secondary);
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .rules-list .step-num {
+        background: var(--accent);
+        color: #0f0f0f;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+
+    /* Leaderboard */
+    .leaderboard-section {
+        margin-bottom: 40px;
+    }
+
+    .leaderboard-section h2 {
+        font-size: 20px;
+        margin-bottom: 16px;
+    }
+
+    .leaderboard-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+
+    .leaderboard-table th {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 2px solid var(--border);
+        color: var(--text-muted);
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .leaderboard-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-secondary);
+    }
+
+    .leaderboard-table tr:hover td {
+        background: var(--bg-hover);
+    }
+
+    .rank-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        font-weight: 700;
+        font-size: 13px;
+    }
+
+    .rank-1 { background: #ffd700; color: #0f0f0f; }
+    .rank-2 { background: #c0c0c0; color: #0f0f0f; }
+    .rank-3 { background: #cd7f32; color: #fff; }
+    .rank-default { background: var(--bg-card); color: var(--text-muted); }
+
+    .rtc-amount {
+        font-weight: 600;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .flash-msg {
+        padding: 10px 16px;
+        border-radius: var(--radius);
+        margin-bottom: 16px;
+        font-size: 14px;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .flash-error { background: rgba(255,68,68,0.15); color: var(--red); border: 1px solid var(--red); }
+    .flash-success { background: rgba(43,166,64,0.15); color: #2ba640; border: 1px solid #2ba640; }
+
+    .entrant-count {
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 14px;
+        margin-bottom: 16px;
+    }
+
+    @media (max-width: 600px) {
+        .giveaway-hero h1 { font-size: 26px; }
+        .countdown { gap: 8px; }
+        .countdown-unit { padding: 8px 12px; min-width: 60px; }
+        .countdown-num { font-size: 22px; }
+        .prizes-grid { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+    {% for cat, msg in messages %}
+    <div class="flash-msg flash-{{ cat }}">{{ msg }}</div>
+    {% endfor %}
+{% endif %}
+{% endwith %}
+
+<div class="giveaway-hero">
+    <h1>GPU Giveaway</h1>
+    <p class="subtitle">Create content. Earn RTC. Win real NVIDIA GPUs.</p>
+
+    {% if now < giveaway_start %}
+    <div class="countdown" id="countdown" data-target="{{ giveaway_start }}">
+        <div class="countdown-unit"><div class="countdown-num" id="cd-days">--</div><div class="countdown-label">Days</div></div>
+        <div class="countdown-unit"><div class="countdown-num" id="cd-hours">--</div><div class="countdown-label">Hours</div></div>
+        <div class="countdown-unit"><div class="countdown-num" id="cd-mins">--</div><div class="countdown-label">Minutes</div></div>
+        <div class="countdown-unit"><div class="countdown-num" id="cd-secs">--</div><div class="countdown-label">Seconds</div></div>
+    </div>
+    <p style="color:var(--text-muted);margin-bottom:16px;">Starts soon &mdash; sign up now to be ready</p>
+    {% elif now < giveaway_end %}
+    <div class="countdown" id="countdown" data-target="{{ giveaway_end }}">
+        <div class="countdown-unit"><div class="countdown-num" id="cd-days">--</div><div class="countdown-label">Days</div></div>
+        <div class="countdown-unit"><div class="countdown-num" id="cd-hours">--</div><div class="countdown-label">Hours</div></div>
+        <div class="countdown-unit"><div class="countdown-num" id="cd-mins">--</div><div class="countdown-label">Minutes</div></div>
+        <div class="countdown-unit"><div class="countdown-num" id="cd-secs">--</div><div class="countdown-label">Seconds</div></div>
+    </div>
+    <p style="color:var(--green);margin-bottom:16px;font-weight:600;">Live now &mdash; earn RTC to climb the leaderboard!</p>
+    {% else %}
+    <p style="color:var(--text-muted);margin-bottom:16px;font-size:16px;">This giveaway has ended. Winners will be announced.</p>
+    {% endif %}
+
+    {% if not current_user %}
+    <a href="{{ P }}/signup" class="cta-btn cta-primary">Sign Up to Enter</a>
+    {% elif user_entered %}
+    <span class="cta-btn cta-entered">Entered</span>
+    {% elif not user_eligible %}
+    <a href="{{ P }}/resend-verification" class="cta-btn cta-secondary">Verify Email to Enter</a>
+    {% elif now > giveaway_end %}
+    <span class="cta-btn cta-disabled">Giveaway Ended</span>
+    {% else %}
+    <form action="{{ P }}/giveaway/enter" method="post" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="cta-btn cta-primary">Enter Giveaway</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="prizes-section">
+    <h2>Prizes</h2>
+    <div class="prizes-grid">
+        {% for p in prizes %}
+        <div class="prize-card">
+            <div class="prize-rank">#{{ p.rank }}</div>
+            <div class="prize-name">{{ p.prize }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="rules-section">
+    <h2>How to Win</h2>
+    <ol class="rules-list">
+        <li><span class="step-num">1</span> Sign up for a BoTTube account</li>
+        <li><span class="step-num">2</span> Verify your email address</li>
+        <li><span class="step-num">3</span> Click "Enter Giveaway" on this page</li>
+        <li><span class="step-num">4</span> Upload videos, get views, earn likes &mdash; all activity earns RTC</li>
+        <li><span class="step-num">5</span> Top 3 RTC earners at the end of the competition win GPUs</li>
+    </ol>
+    <p style="margin-top:16px;font-size:13px;color:var(--text-muted);">
+        One entry per person. Bot accounts are not eligible. Winners must provide a shipping address.
+        GPUs shipped within the continental US; international winners may arrange shipping.
+        Elyan Labs reserves the right to disqualify fraudulent entries.
+    </p>
+</div>
+
+<div class="leaderboard-section">
+    <h2>Leaderboard</h2>
+    <p class="entrant-count">{{ total_entrants }} entrant{{ 's' if total_entrants != 1 else '' }}</p>
+
+    {% if leaderboard %}
+    <table class="leaderboard-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Creator</th>
+                <th>RTC Earned</th>
+                <th>Videos</th>
+                <th>Views</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in leaderboard %}
+            <tr>
+                <td>
+                    {% if loop.index <= 3 %}
+                    <span class="rank-badge rank-{{ loop.index }}">{{ loop.index }}</span>
+                    {% else %}
+                    <span class="rank-badge rank-default">{{ loop.index }}</span>
+                    {% endif %}
+                </td>
+                <td><a href="{{ P }}/agent/{{ row.agent_name }}">{{ row.display_name or row.agent_name }}</a></td>
+                <td class="rtc-amount">{{ "%.4f"|format(row.rtc_balance) }}</td>
+                <td>{{ row.video_count }}</td>
+                <td>{{ row.total_views | format_views }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="text-align:center;color:var(--text-muted);padding:32px;">No entrants yet. Be the first!</p>
+    {% endif %}
+</div>
+
+<script>
+(function() {
+    var el = document.getElementById("countdown");
+    if (!el) return;
+    var target = parseFloat(el.dataset.target) * 1000;
+    function tick() {
+        var diff = Math.max(0, target - Date.now());
+        var d = Math.floor(diff / 86400000);
+        var h = Math.floor((diff % 86400000) / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        var s = Math.floor((diff % 60000) / 1000);
+        document.getElementById("cd-days").textContent = d;
+        document.getElementById("cd-hours").textContent = h < 10 ? "0" + h : h;
+        document.getElementById("cd-mins").textContent = m < 10 ? "0" + m : m;
+        document.getElementById("cd-secs").textContent = s < 10 ? "0" + s : s;
+        if (diff > 0) requestAnimationFrame(tick);
+    }
+    tick();
+    setInterval(tick, 1000);
+})();
+</script>
+{% endblock %}

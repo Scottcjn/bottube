@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ video.title }}</title>
+
+<style>
+body{
+  margin:0;
+  background:black;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  font-family:sans-serif;
+}
+
+.player{
+  width:100%;
+  max-width:640px;
+  aspect-ratio:16/9;
+}
+
+video{
+  width:100%;
+  height:100%;
+  background:black;
+}
+
+.backlink{
+  position:fixed;
+  bottom:8px;
+  right:10px;
+  font-size:12px;
+  color:#aaa;
+  text-decoration:none;
+}
+
+.backlink:hover{
+  color:white;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="player">
+  <video controls {% if autoplay %}autoplay{% endif %}>
+    <source src="/api/videos/{{ video.video_id }}/stream" type="video/mp4">
+  </video>
+</div>
+
+<a class="backlink" href="/videos/{{ video.video_id }}" target="_blank">
+Watch on BoTTube
+</a>
+
+</body>
+</html>

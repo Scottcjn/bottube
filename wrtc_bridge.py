@@ -1,0 +1,687 @@
+"""
+BoTTube wRTC Bridge — Solana SPL Token ↔ Platform RTC Credits
+
+Deposit wRTC from Solana wallet → credit rtc_balance (activates tipping).
+Withdraw rtc_balance → send wRTC to user's Solana wallet.
+
+Blueprint pattern matches paypal_packages.py / usdc_blueprint.py.
+"""
+
+import json
+import os
+import subprocess
+import sqlite3
+import time
+
+import requests as http_requests
+from flask import Blueprint, request, jsonify, g
+
+# ---------------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------------
+
+SOLANA_RPC = os.environ.get("SOLANA_RPC", "https://api.mainnet-beta.solana.com")
+WRTC_MINT = "12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X"
+WRTC_DECIMALS = 6
+RESERVE_WALLET = "3n7RJanhRghRzW2PBg1UbkV9syiod8iUMugTvLzwTRkW"
+RAYDIUM_SWAP_URL = (
+    "https://raydium.io/swap/"
+    "?inputMint=sol"
+    "&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X"
+)
+
+MIN_DEPOSIT = 1.0        # Minimum 1 wRTC deposit
+MIN_WITHDRAW = 10.0      # Minimum 10 wRTC withdrawal
+WITHDRAW_FEE = 0.5       # 0.5 wRTC flat fee per withdrawal
+WITHDRAW_COOLDOWN = 3600  # 1 hour between withdrawals per user
+
+ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+
+# Path to Node.js withdrawal helper
+SEND_WRTC_SCRIPT = os.path.join(os.path.dirname(__file__), "send_wrtc.mjs")
+
+# ---------------------------------------------------------------------------
+# BLUEPRINT
+# ---------------------------------------------------------------------------
+
+wrtc_bridge_bp = Blueprint("wrtc_bridge", __name__)
+
+# ---------------------------------------------------------------------------
+# DATABASE
+# ---------------------------------------------------------------------------
+
+WRTC_SCHEMA = """
+CREATE TABLE IF NOT EXISTS wrtc_deposits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tx_signature TEXT UNIQUE NOT NULL,
+    from_address TEXT NOT NULL,
+    amount_wrtc REAL NOT NULL,
+    agent_id INTEGER,
+    status TEXT DEFAULT 'credited',
+    created_at REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE TABLE IF NOT EXISTS wrtc_withdrawals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id INTEGER NOT NULL,
+    amount_wrtc REAL NOT NULL,
+    fee_wrtc REAL NOT NULL,
+    net_wrtc REAL NOT NULL,
+    to_address TEXT NOT NULL,
+    tx_signature TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at REAL NOT NULL,
+    completed_at REAL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wrtc_deposits_agent ON wrtc_deposits(agent_id);
+CREATE INDEX IF NOT EXISTS idx_wrtc_deposits_tx ON wrtc_deposits(tx_signature);
+CREATE INDEX IF NOT EXISTS idx_wrtc_withdrawals_agent ON wrtc_withdrawals(agent_id);
+CREATE INDEX IF NOT EXISTS idx_wrtc_withdrawals_status ON wrtc_withdrawals(status);
+"""
+
+
+def init_wrtc_tables(db_path: str = "/root/bottube/bottube.db"):
+    """Create wRTC bridge tables if they don't exist, and run migrations."""
+    conn = sqlite3.connect(db_path)
+    conn.executescript(WRTC_SCHEMA)
+
+    # Migration: add 'status' column to wrtc_deposits if missing
+    # (table may have been created by a prior deployment without this column)
+    cursor = conn.execute("PRAGMA table_info(wrtc_deposits)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if "status" not in existing_cols:
+        conn.execute("ALTER TABLE wrtc_deposits ADD COLUMN status TEXT DEFAULT 'credited'")
+
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
+
+def _get_db():
+    """Get database connection from Flask g context (matches main app pattern)."""
+    if "db" not in g:
+        g.db = sqlite3.connect("/root/bottube/bottube.db")
+        g.db.row_factory = sqlite3.Row
+        g.db.execute("PRAGMA journal_mode=WAL")
+        g.db.execute("PRAGMA foreign_keys=ON")
+    return g.db
+
+
+def _get_authenticated_agent():
+    """Get agent from session (web UI) or X-API-Key header."""
+    # Web session
+    if g.get("user"):
+        return dict(g.user)
+    # API key
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key:
+        db = _get_db()
+        row = db.execute(
+            "SELECT * FROM agents WHERE api_key = ?", (api_key,)
+        ).fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def _is_admin():
+    """Check if request has valid admin key."""
+    key = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    return key and key == ADMIN_KEY
+
+
+def _award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""):
+    """Credit RTC to an agent's balance and log earning (mirrors bottube_server.award_rtc)."""
+    db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+        (amount, agent_id),
+    )
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        (agent_id, amount, reason, video_id, time.time()),
+    )
+
+
+def _debit_rtc(db, agent_id: int, amount: float):
+    """Debit RTC from an agent's balance. Returns True if sufficient funds."""
+    row = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    if not row or row["rtc_balance"] < amount:
+        return False
+    db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?",
+        (amount, agent_id),
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
+# SOLANA TX VERIFICATION
+# ---------------------------------------------------------------------------
+
+def verify_solana_deposit(tx_signature: str):
+    """
+    Verify a Solana transaction is a valid wRTC deposit to our reserve wallet.
+
+    Returns (info_dict, error_string). On success info_dict is populated and
+    error_string is None. On failure info_dict is None.
+    """
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTransaction",
+            "params": [
+                tx_signature,
+                {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+            ],
+        }
+        resp = http_requests.post(SOLANA_RPC, json=payload, timeout=30)
+        if not resp.ok:
+            return None, f"Solana RPC error: HTTP {resp.status_code}"
+
+        result = resp.json().get("result")
+        if not result:
+            return None, "Transaction not found — it may still be confirming. Try again in a minute."
+
+        # Check confirmation
+        meta = result.get("meta", {})
+        if meta.get("err"):
+            return None, f"Transaction failed on-chain: {meta['err']}"
+
+        # Walk through inner + outer instructions looking for transferChecked
+        all_instructions = []
+        tx = result.get("transaction", {})
+        msg = tx.get("message", {})
+        all_instructions.extend(msg.get("instructions", []))
+        for inner in meta.get("innerInstructions", []):
+            all_instructions.extend(inner.get("instructions", []))
+
+        for ix in all_instructions:
+            parsed = ix.get("parsed")
+            if not parsed:
+                continue
+            ix_type = parsed.get("type", "")
+            info = parsed.get("info", {})
+
+            # Match transferChecked (standard for SPL tokens with decimals)
+            if ix_type == "transferChecked":
+                if info.get("mint") != WRTC_MINT:
+                    continue
+                token_amount = info.get("tokenAmount", {})
+                ui_amount = float(token_amount.get("uiAmount", 0))
+                dest_ata = info.get("destination", "")
+                source_ata = info.get("source", "")
+                authority = info.get("authority", "")
+
+                # Verify destination is our reserve wallet's ATA
+                if not _is_reserve_ata(dest_ata):
+                    continue
+
+                return {
+                    "tx_signature": tx_signature,
+                    "from_address": authority,
+                    "from_ata": source_ata,
+                    "to_ata": dest_ata,
+                    "amount_wrtc": ui_amount,
+                    "slot": result.get("slot"),
+                }, None
+
+            # Also match plain "transfer" (some wallets use this)
+            if ix_type == "transfer" and ix.get("program") == "spl-token":
+                dest_ata = info.get("destination", "")
+                source_ata = info.get("source", "")
+                authority = info.get("authority", "")
+                raw_amount = int(info.get("amount", 0))
+                ui_amount = raw_amount / (10 ** WRTC_DECIMALS)
+
+                if not _is_reserve_ata(dest_ata):
+                    continue
+
+                # For plain transfer, we need to verify the token account holds wRTC
+                if _verify_token_account_mint(dest_ata):
+                    return {
+                        "tx_signature": tx_signature,
+                        "from_address": authority,
+                        "from_ata": source_ata,
+                        "to_ata": dest_ata,
+                        "amount_wrtc": ui_amount,
+                        "slot": result.get("slot"),
+                    }, None
+
+        return None, "No wRTC transfer to reserve wallet found in this transaction."
+
+    except http_requests.Timeout:
+        return None, "Solana RPC timeout — try again."
+    except Exception as e:
+        return None, f"Verification error: {str(e)}"
+
+
+# Cache the reserve ATA address (it's deterministic and never changes)
+_reserve_ata_cache = None
+
+
+def _get_reserve_ata():
+    """Get the Associated Token Account for our reserve wallet + wRTC mint."""
+    global _reserve_ata_cache
+    if _reserve_ata_cache:
+        return _reserve_ata_cache
+
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTokenAccountsByOwner",
+            "params": [
+                RESERVE_WALLET,
+                {"mint": WRTC_MINT},
+                {"encoding": "jsonParsed"}
+            ],
+        }
+        resp = http_requests.post(SOLANA_RPC, json=payload, timeout=15)
+        data = resp.json().get("result", {}).get("value", [])
+        if data:
+            _reserve_ata_cache = data[0]["pubkey"]
+            return _reserve_ata_cache
+    except Exception:
+        pass
+    return None
+
+
+def _is_reserve_ata(account_address: str) -> bool:
+    """Check if a token account belongs to our reserve wallet."""
+    ata = _get_reserve_ata()
+    if ata and account_address == ata:
+        return True
+    # Fallback: query the account owner
+    return _check_account_owner(account_address, RESERVE_WALLET)
+
+
+def _check_account_owner(token_account: str, expected_owner: str) -> bool:
+    """Check if a token account is owned by the expected wallet."""
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [token_account, {"encoding": "jsonParsed"}],
+        }
+        resp = http_requests.post(SOLANA_RPC, json=payload, timeout=10)
+        info = resp.json().get("result", {}).get("value", {})
+        if not info:
+            return False
+        parsed = info.get("data", {}).get("parsed", {}).get("info", {})
+        return parsed.get("owner", "").lower() == expected_owner.lower()
+    except Exception:
+        return False
+
+
+def _verify_token_account_mint(token_account: str) -> bool:
+    """Verify that a token account holds wRTC tokens."""
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [token_account, {"encoding": "jsonParsed"}],
+        }
+        resp = http_requests.post(SOLANA_RPC, json=payload, timeout=10)
+        info = resp.json().get("result", {}).get("value", {})
+        if not info:
+            return False
+        parsed = info.get("data", {}).get("parsed", {}).get("info", {})
+        return parsed.get("mint", "") == WRTC_MINT
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# API ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@wrtc_bridge_bp.route("/api/bridge/info", methods=["GET"])
+def bridge_info():
+    """Public endpoint — token info, fees, links."""
+    balance = None
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTokenAccountsByOwner",
+            "params": [
+                RESERVE_WALLET,
+                {"mint": WRTC_MINT},
+                {"encoding": "jsonParsed"},
+            ],
+        }
+        resp = http_requests.post(SOLANA_RPC, json=payload, timeout=10)
+        accounts = resp.json().get("result", {}).get("value", [])
+        if accounts:
+            parsed = accounts[0]["account"]["data"]["parsed"]["info"]
+            balance = float(parsed["tokenAmount"]["uiAmount"])
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "token": {
+            "name": "Wrapped RustChain Token",
+            "symbol": "wRTC",
+            "mint": WRTC_MINT,
+            "decimals": WRTC_DECIMALS,
+            "total_supply": 8_300_000,
+        },
+        "reserve_wallet": RESERVE_WALLET,
+        "reserve_balance_wrtc": balance,
+        "swap_url": RAYDIUM_SWAP_URL,
+        "fees": {
+            "deposit_fee": 0,
+            "withdraw_fee": WITHDRAW_FEE,
+            "min_deposit": MIN_DEPOSIT,
+            "min_withdraw": MIN_WITHDRAW,
+        },
+    })
+
+
+@wrtc_bridge_bp.route("/api/bridge/deposit", methods=["POST"])
+def bridge_deposit():
+    """
+    Verify a Solana TX and credit the user's rtc_balance.
+
+    POST /api/bridge/deposit
+    {
+        "tx_signature": "5abc..."
+    }
+
+    Auth: session (web) or X-API-Key header.
+    """
+    agent = _get_authenticated_agent()
+    if not agent:
+        return jsonify({"error": "Login required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    tx_sig = (data.get("tx_signature") or "").strip()
+    if not tx_sig:
+        return jsonify({"error": "tx_signature required"}), 400
+    if len(tx_sig) < 60 or len(tx_sig) > 120:
+        return jsonify({"error": "Invalid transaction signature format"}), 400
+
+    db = _get_db()
+
+    # Dedup check
+    existing = db.execute(
+        "SELECT id FROM wrtc_deposits WHERE tx_signature = ?", (tx_sig,)
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "This transaction has already been claimed"}), 409
+
+    # Verify on-chain
+    info, err = verify_solana_deposit(tx_sig)
+    if err:
+        return jsonify({"error": err}), 400
+
+    amount = info["amount_wrtc"]
+    if amount < MIN_DEPOSIT:
+        return jsonify({
+            "error": f"Minimum deposit is {MIN_DEPOSIT} wRTC (got {amount})"
+        }), 400
+
+    # Credit balance
+    _award_rtc(db, agent["id"], amount, "bridge_deposit")
+
+    # Record deposit
+    db.execute(
+        "INSERT INTO wrtc_deposits (tx_signature, from_address, amount_wrtc, agent_id, status, created_at) "
+        "VALUES (?, ?, ?, ?, 'credited', ?)",
+        (tx_sig, info["from_address"], amount, agent["id"], time.time()),
+    )
+    db.commit()
+
+    # Get updated balance
+    updated = db.execute(
+        "SELECT rtc_balance FROM agents WHERE id = ?", (agent["id"],)
+    ).fetchone()
+
+    return jsonify({
+        "ok": True,
+        "credited": amount,
+        "new_balance": round(updated["rtc_balance"], 6) if updated else amount,
+        "tx_signature": tx_sig,
+        "from_address": info["from_address"],
+    })
+
+
+@wrtc_bridge_bp.route("/api/bridge/withdraw", methods=["POST"])
+def bridge_withdraw():
+    """
+    Queue a wRTC withdrawal to user's Solana address.
+
+    POST /api/bridge/withdraw
+    {
+        "amount": 50.0,
+        "sol_address": "ABC..."
+    }
+    """
+    agent = _get_authenticated_agent()
+    if not agent:
+        return jsonify({"error": "Login required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    amount = float(data.get("amount", 0))
+    sol_address = (data.get("sol_address") or "").strip()
+
+    if not sol_address or len(sol_address) < 32 or len(sol_address) > 50:
+        return jsonify({"error": "Valid Solana wallet address required"}), 400
+
+    if amount < MIN_WITHDRAW:
+        return jsonify({
+            "error": f"Minimum withdrawal is {MIN_WITHDRAW} wRTC"
+        }), 400
+
+    total_debit = amount  # We debit the full amount, fee comes from it
+    net = amount - WITHDRAW_FEE
+
+    if net <= 0:
+        return jsonify({"error": "Amount too small after fee"}), 400
+
+    db = _get_db()
+
+    # Rate limit: 1 withdrawal per hour
+    recent = db.execute(
+        "SELECT created_at FROM wrtc_withdrawals WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1",
+        (agent["id"],),
+    ).fetchone()
+    if recent and (time.time() - recent["created_at"]) < WITHDRAW_COOLDOWN:
+        wait = int(WITHDRAW_COOLDOWN - (time.time() - recent["created_at"]))
+        return jsonify({
+            "error": f"Withdrawal cooldown — try again in {wait // 60} minutes"
+        }), 429
+
+    # Debit balance
+    if not _debit_rtc(db, agent["id"], total_debit):
+        return jsonify({"error": "Insufficient balance"}), 400
+
+    # Record withdrawal as pending
+    db.execute(
+        "INSERT INTO wrtc_withdrawals (agent_id, amount_wrtc, fee_wrtc, net_wrtc, to_address, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+        (agent["id"], amount, WITHDRAW_FEE, net, sol_address, time.time()),
+    )
+    db.commit()
+
+    # Log the debit as a negative earning
+    db.execute(
+        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, '', ?)",
+        (agent["id"], -amount, "bridge_withdrawal", time.time()),
+    )
+    db.commit()
+
+    return jsonify({
+        "ok": True,
+        "amount": amount,
+        "fee": WITHDRAW_FEE,
+        "net": round(net, 6),
+        "to_address": sol_address,
+        "status": "pending",
+        "message": "Withdrawal queued. Processing usually completes within 1 hour.",
+    })
+
+
+@wrtc_bridge_bp.route("/api/bridge/history", methods=["GET"])
+def bridge_history():
+    """Get deposit/withdrawal history for the authenticated user."""
+    agent = _get_authenticated_agent()
+    if not agent:
+        return jsonify({"error": "Login required"}), 401
+
+    db = _get_db()
+
+    deposits = db.execute(
+        "SELECT tx_signature, from_address, amount_wrtc, status, created_at "
+        "FROM wrtc_deposits WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50",
+        (agent["id"],),
+    ).fetchall()
+
+    withdrawals = db.execute(
+        "SELECT amount_wrtc, fee_wrtc, net_wrtc, to_address, tx_signature, status, created_at, completed_at "
+        "FROM wrtc_withdrawals WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50",
+        (agent["id"],),
+    ).fetchall()
+
+    return jsonify({
+        "ok": True,
+        "deposits": [
+            {
+                "tx_signature": d["tx_signature"],
+                "from_address": d["from_address"],
+                "amount": d["amount_wrtc"],
+                "status": d["status"],
+                "created_at": d["created_at"],
+            }
+            for d in deposits
+        ],
+        "withdrawals": [
+            {
+                "amount": w["amount_wrtc"],
+                "fee": w["fee_wrtc"],
+                "net": w["net_wrtc"],
+                "to_address": w["to_address"],
+                "tx_signature": w["tx_signature"],
+                "status": w["status"],
+                "created_at": w["created_at"],
+                "completed_at": w["completed_at"],
+            }
+            for w in withdrawals
+        ],
+    })
+
+
+@wrtc_bridge_bp.route("/api/bridge/process-withdrawals", methods=["POST"])
+def process_withdrawals():
+    """
+    Admin endpoint: process pending withdrawals by sending wRTC on-chain.
+
+    POST /api/bridge/process-withdrawals
+    X-Admin-Key: <key>
+    """
+    if not _is_admin():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = _get_db()
+    pending = db.execute(
+        "SELECT id, agent_id, net_wrtc, to_address FROM wrtc_withdrawals "
+        "WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10"
+    ).fetchall()
+
+    if not pending:
+        return jsonify({"ok": True, "processed": 0, "message": "No pending withdrawals"})
+
+    results = []
+    for w in pending:
+        wid = w["id"]
+        try:
+            result = subprocess.run(
+                [
+                    "node", SEND_WRTC_SCRIPT,
+                    "--to", w["to_address"],
+                    "--amount", str(w["net_wrtc"]),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=90,
+                cwd=os.path.dirname(SEND_WRTC_SCRIPT),
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                results.append({"id": wid, "ok": False, "error": error_msg})
+                db.execute(
+                    "UPDATE wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                    (wid,),
+                )
+                # Refund the agent
+                db.execute(
+                    "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+                    (w["net_wrtc"] + WITHDRAW_FEE, w["agent_id"]),
+                )
+                continue
+
+            out = json.loads(result.stdout.strip())
+            if out.get("ok"):
+                tx_sig = out.get("tx", "")
+                db.execute(
+                    "UPDATE wrtc_withdrawals SET status = 'completed', tx_signature = ?, completed_at = ? WHERE id = ?",
+                    (tx_sig, time.time(), wid),
+                )
+                results.append({"id": wid, "ok": True, "tx": tx_sig})
+            else:
+                err = out.get("error", "Send failed")
+                results.append({"id": wid, "ok": False, "error": err})
+                db.execute(
+                    "UPDATE wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                    (wid,),
+                )
+                # Refund
+                db.execute(
+                    "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+                    (w["net_wrtc"] + WITHDRAW_FEE, w["agent_id"]),
+                )
+
+        except subprocess.TimeoutExpired:
+            results.append({"id": wid, "ok": False, "error": "Timeout"})
+        except Exception as e:
+            results.append({"id": wid, "ok": False, "error": str(e)})
+
+    db.commit()
+
+    return jsonify({
+        "ok": True,
+        "processed": len(results),
+        "results": results,
+    })
+
+
+@wrtc_bridge_bp.route("/api/bridge/stats", methods=["GET"])
+def bridge_stats():
+    """Public stats — total deposits, withdrawals, volume."""
+    db = _get_db()
+
+    dep = db.execute(
+        "SELECT COUNT(*), COALESCE(SUM(amount_wrtc), 0) FROM wrtc_deposits WHERE status = 'credited'"
+    ).fetchone()
+
+    wd = db.execute(
+        "SELECT COUNT(*), COALESCE(SUM(net_wrtc), 0), COALESCE(SUM(fee_wrtc), 0) "
+        "FROM wrtc_withdrawals WHERE status = 'completed'"
+    ).fetchone()
+
+    return jsonify({
+        "ok": True,
+        "deposits": {"count": dep[0], "total_wrtc": round(dep[1], 6)},
+        "withdrawals": {"count": wd[0], "total_wrtc": round(wd[1], 6), "total_fees": round(wd[2], 6)},
+    })

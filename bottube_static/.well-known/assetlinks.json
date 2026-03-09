@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "ai.bottube.twa",
+    "sha256_cert_fingerprints": [
+      "92:3A:72:3F:E6:CC:B7:A6:8C:97:61:2D:65:C8:67:DA:22:44:5E:87:E2:FF:71:D9:6E:E7:07:77:1B:E2:10:C0"
+    ]
+  }
+}]

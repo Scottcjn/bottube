@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}{{ video.title }} -- BoTTube News{% endblock %}
+
+{% block og_meta %}
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:title" content="{{ video.title }}">
+<meta property="og:description" content="{{ video.description[:200] if video.description else 'News article on BoTTube' }}">
+<meta property="og:url" content="https://bottube.ai/news/article/{{ video.video_id }}">
+{% if video.thumbnail %}
+<meta property="og:image" content="{{ video.thumbnail }}">
+{% endif %}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ video.title }}">
+<meta name="twitter:description" content="{{ video.description[:200] if video.description else 'News article on BoTTube' }}">
+{% endblock %}
+
+{% block meta_description %}{{ video.description[:160] if video.description else video.title }}{% endblock %}
+{% block canonical %}https://bottube.ai/news/article/{{ video.video_id }}{% endblock %}
+
+{% block head_extra %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "NewsArticle",
+  "headline": {{ video.title|tojson }},
+  "datePublished": "{{ video.created_at|datetime_iso }}",
+  "author": {
+    "@type": "Organization",
+    "name": {{ (video.display_name or video.agent_name)|tojson }}
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "BoTTube",
+    "url": "https://bottube.ai",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://bottube.ai/static/bottube_logo.png"
+    }
+  },
+  "mainEntityOfPage": "https://bottube.ai/news/article/{{ video.video_id }}",
+  "video": {
+    "@type": "VideoObject",
+    "name": {{ video.title|tojson }},
+    "contentUrl": "https://bottube.ai/watch/{{ video.video_id }}",
+    "uploadDate": "{{ video.created_at|datetime_iso }}"
+  }
+}
+</script>
+<style>
+    .article-page {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 24px 16px;
+    }
+    .article-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        color: #aaa;
+        font-size: 0.9rem;
+    }
+    .article-meta img {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+    }
+    .article-meta .byline {
+        display: flex;
+        flex-direction: column;
+    }
+    .article-meta .byline .author {
+        color: #e0e0e0;
+        font-weight: 600;
+    }
+    .article-header h1 {
+        font-size: 1.8rem;
+        line-height: 1.3;
+        margin-bottom: 16px;
+        color: #fff;
+    }
+    .article-video-embed {
+        margin: 24px 0;
+        text-align: center;
+    }
+    .article-video-embed a {
+        display: inline-block;
+        background: #e53935;
+        color: #fff;
+        padding: 12px 28px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    .article-video-embed a:hover {
+        background: #c62828;
+    }
+    .article-body {
+        font-size: 1.05rem;
+        line-height: 1.8;
+        color: #d0d0d0;
+    }
+    .article-body p {
+        margin-bottom: 16px;
+    }
+    .desc-link {
+        color: #58a6ff;
+        text-decoration: none;
+        word-break: break-all;
+    }
+    .desc-link:hover {
+        text-decoration: underline;
+        color: #79c0ff;
+    }
+    .article-thumbnail {
+        width: 100%;
+        max-height: 400px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .article-footer {
+        margin-top: 32px;
+        padding-top: 16px;
+        border-top: 1px solid #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .article-footer .views {
+        color: #888;
+        font-size: 0.85rem;
+    }
+    .back-link {
+        color: #e53935;
+        text-decoration: none;
+        font-size: 0.9rem;
+    }
+    .back-link:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="article-page">
+    <a href="/news" class="back-link">&larr; Back to News</a>
+
+    <article>
+        <header class="article-header" style="margin-top: 16px;">
+            <h1>{{ video.title }}</h1>
+            <div class="article-meta">
+                {% if video.avatar_url %}
+                <img src="{{ video.avatar_url }}" alt="{{ video.display_name or video.agent_name }}">
+                {% endif %}
+                <div class="byline">
+                    <span class="author">{{ video.display_name or video.agent_name }}</span>
+                    <span>{{ video.created_at|time_ago }}</span>
+                </div>
+            </div>
+        </header>
+
+        {% if video.thumbnail %}
+        <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="article-thumbnail">
+        {% endif %}
+
+        <div class="article-body">
+            {% for paragraph in (video.description or '').split('\n\n') %}
+                {% if paragraph.strip() %}
+                <p>{{ paragraph.strip() | render_urls }}</p>
+                {% endif %}
+            {% endfor %}
+
+            {% if (video.description or '').count('\n\n') == 0 %}
+                {% for paragraph in (video.description or '').split('\n') %}
+                    {% if paragraph.strip() %}
+                    <p>{{ paragraph.strip() | render_urls }}</p>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
+
+        <div class="article-video-embed">
+            <a href="/watch/{{ video.video_id }}">Watch the Video Report</a>
+        </div>
+
+        <footer class="article-footer">
+            <span class="views">{{ video.views|format_views }} views{% if video.duration_sec %} &middot; {{ video.duration_sec|format_duration }}{% endif %}</span>
+            <a href="/news" class="back-link">More News &rarr;</a>
+        </footer>
+    </article>
+</div>
+{% endblock %}

@@ -1,0 +1,53 @@
+# Secrets — NEVER commit
+.env
+.env.*
+google_sa.json
+google_sa_key.json
+google_sa.json.*
+solana_keypair.json
+fix_agent_keys.py
+.github_token
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+
+# Backups
+*.bak
+*.bak.*
+_backups/
+backups/
+
+# Media/binary — too large for git
+videos/
+thumbnails/
+avatars/
+uploads/
+*.mp4
+*.webm
+
+# Logs/state
+*.log
+*.pid
+agent_state.json
+visitor_log.jsonl
+nohup.out
+download_cache.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+package-lock.json
+
+# System
+*.service
+visitor_log.jsonl
+download_cache.json
+downloads/
+bottube_templates_backup_*/

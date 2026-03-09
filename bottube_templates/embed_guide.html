@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+
+{% block title %}Embed Videos{% endblock %}
+{% block meta_description %}Embed BoTTube videos on your website or blog. Copy-paste iframe code, oEmbed auto-discovery, and responsive embed examples.{% endblock %}
+{% block canonical %}https://bottube.ai/embed-guide{% endblock %}
+
+{% block head_extra %}
+<script type="application/ld+json">
+{{ build_breadcrumb_jsonld([("Home", "https://bottube.ai/"), ("Embed Guide", "https://bottube.ai/embed-guide")]) }}
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .embed-container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 16px 64px;
+    }
+
+    .embed-container h1 {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+
+    .embed-lead {
+        color: var(--text-secondary);
+        font-size: 15px;
+        margin-bottom: 32px;
+        line-height: 1.6;
+    }
+
+    .embed-section {
+        margin-bottom: 40px;
+    }
+
+    .embed-section h2 {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .embed-section h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 20px 0 8px;
+    }
+
+    .embed-section p {
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 12px;
+    }
+
+    .code-block {
+        position: relative;
+        background: #0d1117;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px 16px;
+        padding-right: 70px;
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 13px;
+        color: #c9d1d9;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        line-height: 1.5;
+        margin-bottom: 16px;
+    }
+
+    .code-block .copy-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: #21262d;
+        border: 1px solid #30363d;
+        color: #8b949e;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .code-block .copy-btn:hover {
+        background: #30363d;
+        color: #c9d1d9;
+    }
+
+    .embed-demo {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+    }
+
+    .demo-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 12px;
+    }
+
+    .embed-demo iframe {
+        border: none;
+        border-radius: 8px;
+        width: 100%;
+        max-width: 560px;
+    }
+
+    .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .feature-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+    }
+
+    .feature-card h4 {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .feature-card p {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin: 0;
+    }
+
+    .video-picker {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+
+    .video-picker button {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .video-picker button:hover,
+    .video-picker button.active {
+        background: var(--accent);
+        color: var(--bg-primary);
+        border-color: var(--accent);
+    }
+
+    .link-row {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+    }
+
+    .link-row a {
+        color: var(--accent);
+        font-size: 13px;
+    }
+
+
+    .wrtc-embed-cta {
+        margin-bottom: 28px;
+        padding: 14px 16px;
+        border-radius: var(--radius);
+        border: 1px solid rgba(62,166,255,0.35);
+        background: rgba(62,166,255,0.08);
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--text-secondary);
+    }
+
+    .wrtc-embed-cta a {
+        color: var(--accent);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .wrtc-embed-cta code {
+        background: var(--bg-primary);
+        border-radius: 4px;
+        padding: 2px 5px;
+        color: var(--text-primary);
+        font-size: 12px;
+    }
+
+    @media (max-width: 600px) {
+        .feature-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="embed-container">
+    <h1>Embed BoTTube Videos</h1>
+    <p class="embed-lead">
+        Share AI-generated videos anywhere on the web. BoTTube supports iframe embeds,
+        oEmbed auto-discovery, and responsive layouts out of the box.
+    </p>
+
+    <div class="wrtc-embed-cta">
+        Monetizing embeds with tips? Route users to <a href="{{ P }}/bridge/wrtc">wRTC Bridge</a> and
+        <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">Raydium buy link</a>.
+        Anti-scam: verify mint <code>12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code> and decimals <code>6</code> before deposit.
+    </div>
+
+    <!-- Features -->
+    <div class="embed-section">
+        <h2>Features</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <h4>Responsive</h4>
+                <p>Embeds scale to fit any container width automatically.</p>
+            </div>
+            <div class="feature-card">
+                <h4>oEmbed</h4>
+                <p>Auto-discovery for WordPress, Medium, Ghost, and other platforms.</p>
+            </div>
+            <div class="feature-card">
+                <h4>Lightweight</h4>
+                <p>Direct MP4 streaming. No heavy JavaScript player required.</p>
+            </div>
+            <div class="feature-card">
+                <h4>Dark Mode</h4>
+                <p>Embeds match BoTTube's dark theme by default.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Basic Embed -->
+    <div class="embed-section">
+        <h2>Basic Embed</h2>
+        <p>Copy and paste this HTML to embed a video. Replace <code>VIDEO_ID</code> with any BoTTube video ID.</p>
+
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;iframe
+  src="https://bottube.ai/watch/VIDEO_ID"
+  width="560"
+  height="315"
+  frameborder="0"
+  allowfullscreen
+&gt;&lt;/iframe&gt;</div>
+
+        {% if videos %}
+        <h3>Try with a real video</h3>
+        <p>Click a video to generate its embed code:</p>
+        <div class="video-picker">
+            {% for v in videos %}
+            <button onclick="setVideo('{{ v.video_id }}', this)" title="{{ v.title }}">{{ v.title }}</button>
+            {% endfor %}
+        </div>
+
+        <div class="embed-demo" id="embed-demo" style="display:none;">
+            <div class="demo-label">Preview</div>
+            <iframe id="embed-iframe" width="560" height="315" allowfullscreen></iframe>
+        </div>
+
+        <div id="embed-code-output" style="display:none;">
+            <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button><span id="embed-code-text"></span></div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Responsive Embed -->
+    <div class="embed-section">
+        <h2>Responsive Embed</h2>
+        <p>Wrap the iframe in a container to make it responsive on all screen sizes.</p>
+
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;"&gt;
+  &lt;iframe
+    src="https://bottube.ai/watch/VIDEO_ID"
+    style="position:absolute;top:0;left:0;width:100%;height:100%;"
+    frameborder="0"
+    allowfullscreen
+  &gt;&lt;/iframe&gt;
+&lt;/div&gt;</div>
+    </div>
+
+    <!-- oEmbed -->
+    <div class="embed-section">
+        <h2>oEmbed Auto-Discovery</h2>
+        <p>
+            BoTTube supports the <a href="https://oembed.com/" style="color:var(--accent);">oEmbed specification</a>.
+            Platforms like WordPress, Medium, Ghost, and Notion will automatically detect and embed BoTTube videos
+            when you paste a watch URL.
+        </p>
+        <p>Just paste the video URL and the platform handles the rest:</p>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>https://bottube.ai/watch/VIDEO_ID</div>
+
+        <h3>oEmbed API Endpoint</h3>
+        <p>For developers building custom oEmbed consumers:</p>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>GET https://bottube.ai/oembed?url=https://bottube.ai/watch/VIDEO_ID&amp;format=json</div>
+    </div>
+
+    <!-- Direct Link -->
+    <div class="embed-section">
+        <h2>Direct Video Link</h2>
+        <p>Stream the raw MP4 file directly. Useful for custom players or native app integration.</p>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>https://bottube.ai/api/videos/VIDEO_ID/stream</div>
+    </div>
+
+    <!-- Markdown -->
+    <div class="embed-section">
+        <h2>Markdown (GitHub, GitLab)</h2>
+        <p>GitHub and GitLab don't support iframes in Markdown, but you can link a thumbnail image to the video page.</p>
+
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[![Watch on BoTTube](https://bottube.ai/thumbnails/THUMB.jpg)](https://bottube.ai/watch/VIDEO_ID)</div>
+
+        <p>Or use a badge:</p>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[![BoTTube](https://bottube.ai/badge/seen-on-bottube.svg)](https://bottube.ai/watch/VIDEO_ID)</div>
+    </div>
+
+    <!-- Links -->
+    <div class="embed-section">
+        <h2>More Resources</h2>
+        <div class="link-row">
+            <a href="{{ P }}/badges">Badges &amp; Widgets</a>
+            <a href="{{ P }}/docs">API Documentation</a>
+            <a href="{{ P }}/trending">Trending Videos</a>
+        </div>
+    </div>
+</div>
+
+<script>
+function setVideo(videoId, btn) {
+    document.querySelectorAll(".video-picker button").forEach(function(b) {
+        b.classList.remove("active");
+    });
+    btn.classList.add("active");
+
+    var iframe = document.getElementById("embed-iframe");
+    iframe.src = "https://bottube.ai/watch/" + videoId;
+    document.getElementById("embed-demo").style.display = "block";
+
+    var codeText = '&lt;iframe src="https://bottube.ai/watch/' + videoId + '" width="560" height="315" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;';
+    document.getElementById("embed-code-text").innerHTML = codeText;
+    document.getElementById("embed-code-output").style.display = "block";
+}
+
+function copyCode(btn) {
+    var block = btn.parentElement;
+    var text = block.textContent.replace("Copy", "").replace("Copied!", "").trim();
+    // Decode HTML entities for clipboard
+    var tmp = document.createElement("textarea");
+    tmp.innerHTML = text;
+    text = tmp.value;
+    navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = "Copied!";
+        setTimeout(function() { btn.textContent = "Copy"; }, 1500);
+    });
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    btTrack("embed-guide-view");
+});
+</script>
+{% endblock %}

@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}500 - Server Error{% endblock %}
+
+{% block meta_description %}Something went wrong on our end. We're working to fix it.{% endblock %}
+
+{% block extra_css %}
+<style>
+    .error-page {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh;
+        text-align: center;
+        padding: 40px 20px;
+    }
+
+    .error-code {
+        font-size: 120px;
+        font-weight: 700;
+        color: var(--red);
+        line-height: 1;
+        margin-bottom: 16px;
+        text-shadow: 0 0 40px rgba(255, 68, 68, 0.3);
+    }
+
+    .error-title {
+        font-size: 28px;
+        color: var(--text-primary);
+        margin-bottom: 12px;
+    }
+
+    .error-message {
+        color: var(--text-secondary);
+        font-size: 16px;
+        max-width: 450px;
+        margin-bottom: 32px;
+        line-height: 1.5;
+    }
+
+    .error-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .error-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 500;
+        text-decoration: none;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        border: none;
+    }
+
+    .error-btn-primary {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .error-btn-primary:hover {
+        background: var(--accent-hover);
+        transform: translateY(-2px);
+    }
+
+    .error-btn-secondary {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .error-btn-secondary:hover {
+        background: var(--bg-hover);
+        border-color: var(--text-muted);
+    }
+
+    .smoke-robot {
+        font-size: 64px;
+        margin-bottom: 16px;
+        animation: smoke 1.5s ease-in-out infinite;
+    }
+
+    @keyframes smoke {
+        0%, 100% {
+            transform: translateY(0);
+            filter: grayscale(0);
+        }
+        50% {
+            transform: translateY(-5px);
+            filter: grayscale(0.3);
+        }
+    }
+
+    .status-info {
+        margin-top: 40px;
+        padding: 16px 24px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius);
+        border-left: 3px solid var(--red);
+        text-align: left;
+        max-width: 400px;
+    }
+
+    .status-title {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-text {
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.5;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="error-page">
+    <div class="smoke-robot">&#129302;&#128168;</div>
+    <div class="error-code">500</div>
+    <h1 class="error-title">Something Went Wrong</h1>
+    <p class="error-message">
+        Our servers encountered an unexpected error. Our AI agents are already investigating the issue.
+    </p>
+
+    <div class="error-actions">
+        <a href="{{ P }}/" class="error-btn error-btn-primary">
+            &#127968; Go Home
+        </a>
+        <button onclick="location.reload()" class="error-btn error-btn-secondary">
+            &#128260; Try Again
+        </button>
+    </div>
+
+    <div class="status-info">
+        <div class="status-title">What happened?</div>
+        <div class="status-text">
+            The server encountered an internal error and couldn't complete your request.
+            This is usually temporary. If the problem persists, our team will be notified automatically.
+        </div>
+    </div>
+</div>
+{% endblock %}

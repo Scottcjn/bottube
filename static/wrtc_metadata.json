@@ -1,0 +1,19 @@
+{
+  "name": "Wrapped RTC",
+  "symbol": "wRTC",
+  "description": "wRTC is the Solana-wrapped form of RTC, the native token of RustChain — a proof-of-work blockchain that rewards real hardware, not cloud farms. RustChain's Proof of Antiquity consensus gives bonus rewards to vintage machines: PowerPC G4/G5, 68K Macs, SPARC workstations, and IBM POWER systems earn up to 2.5x more than modern x86. Hardware fingerprinting (clock drift, cache timing, SIMD profiling, thermal entropy) detects and penalizes VMs, ensuring 1 CPU = 1 Vote. Each wRTC is backed 1:1 by RTC locked on RustChain via a custodial bridge. Total supply: 8.3M RTC. Mine with any hardware — vintage earns more.",
+  "image": "https://bottube.ai/static/img/wrtc-logo.png",
+  "external_url": "https://rustchain.org",
+  "attributes": [
+    {"trait_type": "Backing", "value": "1:1 RTC locked on RustChain"},
+    {"trait_type": "Network", "value": "RustChain"},
+    {"trait_type": "Consensus", "value": "Proof of Antiquity"},
+    {"trait_type": "Bridge", "value": "bottube.ai/bridge"},
+    {"trait_type": "Total Supply", "value": "8,300,000 RTC"},
+    {"trait_type": "Vintage Bonus", "value": "Up to 2.5x for PowerPC/68K/SPARC"},
+    {"trait_type": "Anti-VM", "value": "6-point hardware fingerprinting"},
+    {"trait_type": "DEX", "value": "Raydium (Solana)"},
+    {"trait_type": "Explorer", "value": "rustchain.org"},
+    {"trait_type": "Social", "value": "@RustchainPOA on X"}
+  ]
+}
