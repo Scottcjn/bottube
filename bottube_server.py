@@ -2499,6 +2499,80 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
     threading.Thread(target=_send_email_bg, daemon=True).start()
 
 
+def _notification_link_for_row(row) -> str:
+    video_id = str(row["video_id"] or "").strip()
+    from_agent = str(row["from_agent"] or "").strip()
+    if video_id:
+        return f"{g.prefix}/watch/{video_id}"
+    if from_agent:
+        return f"{g.prefix}/agent/{from_agent}"
+    return f"{g.prefix}/dashboard"
+
+
+def _notification_to_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "type": row["type"],
+        "message": row["message"],
+        "from_agent": row["from_agent"],
+        "video_id": row["video_id"],
+        "is_read": bool(row["is_read"]),
+        "created_at": row["created_at"],
+        "link": _notification_link_for_row(row),
+    }
+
+
+def _notification_unread_count(db, agent_id: int) -> int:
+    return int(
+        db.execute(
+            "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
+            (agent_id,),
+        ).fetchone()[0]
+    )
+
+
+def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only: bool) -> tuple[list[dict], int]:
+    where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
+    total = int(db.execute(f"SELECT COUNT(*) FROM notifications {where}", (agent_id,)).fetchone()[0])
+    offset = (page - 1) * per_page
+    rows = db.execute(
+        f"""
+        SELECT id, type, message, from_agent, video_id, is_read, created_at
+        FROM notifications {where}
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (agent_id, per_page, offset),
+    ).fetchall()
+    return ([_notification_to_dict(row) for row in rows], total)
+
+
+def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_all: bool = False) -> int:
+    if mark_all:
+        cur = db.execute(
+            "UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0",
+            (agent_id,),
+        )
+        return int(cur.rowcount or 0)
+
+    ids = []
+    for raw in notification_ids or []:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+
+    if not ids:
+        return 0
+
+    placeholders = ",".join("?" for _ in ids)
+    cur = db.execute(
+        f"UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND id IN ({placeholders})",
+        [agent_id] + ids,
+    )
+    return int(cur.rowcount or 0)
+
+
 def _canonical_webhook_event(event: str) -> str:
     mapping = {
         "new_video": "video.uploaded",
@@ -6007,26 +6081,13 @@ def my_notifications():
     """List notifications for the authenticated agent."""
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
-    offset = (page - 1) * per_page
-    unread_only = request.args.get("unread", "").lower() in ("1", "true", "yes")
-
     db = get_db()
-    where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
-    total = db.execute(f"SELECT COUNT(*) FROM notifications {where}", (g.agent["id"],)).fetchone()[0]
-    rows = db.execute(
-        f"""SELECT id, type, message, from_agent, video_id, is_read, created_at
-            FROM notifications {where}
-            ORDER BY created_at DESC LIMIT ? OFFSET ?""",
-        (g.agent["id"], per_page, offset),
-    ).fetchall()
+    unread_only = request.args.get("unread", "").lower() in ("1", "true", "yes")
+    notifications, total = _notification_page(db, int(g.agent["id"]), page, per_page, unread_only)
     return jsonify({
-        "notifications": [
-            {"id": r["id"], "type": r["type"], "message": r["message"],
-             "from_agent": r["from_agent"], "video_id": r["video_id"],
-             "is_read": bool(r["is_read"]), "created_at": r["created_at"]}
-            for r in rows
-        ],
+        "notifications": notifications,
         "page": page, "per_page": per_page, "total": total,
+        "unread": _notification_unread_count(db, int(g.agent["id"])),
     })
 
 
@@ -6035,11 +6096,7 @@ def my_notifications():
 def notification_count():
     """Get unread notification count."""
     db = get_db()
-    count = db.execute(
-        "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
-        (g.agent["id"],),
-    ).fetchone()[0]
-    return jsonify({"unread": count})
+    return jsonify({"unread": _notification_unread_count(db, int(g.agent["id"]))})
 
 
 @app.route("/api/agents/me/notifications/read", methods=["POST"])
@@ -6048,21 +6105,45 @@ def mark_notifications_read():
     """Mark notifications as read. Send {ids: [1,2,3]} or {all: true}."""
     db = get_db()
     data = request.get_json(silent=True) or {}
-    if data.get("all"):
-        db.execute("UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0", (g.agent["id"],))
-    else:
-        ids = data.get("ids", [])
-        if ids:
-            placeholders = ",".join("?" for _ in ids)
-            db.execute(
-                f"UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND id IN ({placeholders})",
-                [g.agent["id"]] + list(ids),
-            )
+    updated = _mark_notification_rows_read(
+        db,
+        int(g.agent["id"]),
+        notification_ids=data.get("ids", []),
+        mark_all=bool(data.get("all")),
+    )
     db.commit()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "updated": updated})
 
 
 # Web notification endpoints (session auth)
+
+@app.route("/api/notifications")
+@app.route("/api/notifications/web-list")
+def web_notification_list():
+    """Get notifications for the logged-in web user."""
+    if not g.user:
+        return jsonify({"error": "Login required", "login_required": True}), 401
+
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    unread_only = request.args.get("unread_only", request.args.get("unread", "0")).lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    db = get_db()
+    notifications, total = _notification_page(db, int(g.user["id"]), page, per_page, unread_only)
+    return jsonify(
+        {
+            "notifications": notifications,
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "unread": _notification_unread_count(db, int(g.user["id"])),
+        }
+    )
+
 
 @app.route("/api/notifications/unread-count")
 def web_notification_count():
@@ -6070,35 +6151,10 @@ def web_notification_count():
     if not g.user:
         return jsonify({"unread": 0})
     db = get_db()
-    count = db.execute(
-        "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
-        (g.user["id"],),
-    ).fetchone()[0]
-    return jsonify({"unread": count})
+    return jsonify({"unread": _notification_unread_count(db, int(g.user["id"]))})
 
 
-@app.route("/api/notifications/web-list")
-def web_notification_list():
-    """Get notifications for the logged-in web user."""
-    if not g.user:
-        return jsonify({"error": "Login required", "login_required": True}), 401
-    db = get_db()
-    rows = db.execute(
-        """SELECT id, type, message, from_agent, video_id, is_read, created_at
-           FROM notifications WHERE agent_id = ?
-           ORDER BY created_at DESC LIMIT 30""",
-        (g.user["id"],),
-    ).fetchall()
-    return jsonify({
-        "notifications": [
-            {"id": r["id"], "type": r["type"], "message": r["message"],
-             "from_agent": r["from_agent"], "video_id": r["video_id"],
-             "is_read": bool(r["is_read"]), "created_at": r["created_at"]}
-            for r in rows
-        ],
-    })
-
-
+@app.route("/api/notifications/read", methods=["POST"])
 @app.route("/api/notifications/web-read", methods=["POST"])
 def web_mark_read():
     """Mark notifications as read from web UI."""
@@ -6107,18 +6163,28 @@ def web_mark_read():
     _verify_csrf()
     db = get_db()
     data = request.get_json(silent=True) or {}
-    if data.get("all"):
-        db.execute("UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0", (g.user["id"],))
-    else:
-        ids = data.get("ids", [])
-        if ids:
-            placeholders = ",".join("?" for _ in ids)
-            db.execute(
-                f"UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND id IN ({placeholders})",
-                [g.user["id"]] + list(ids),
-            )
+    updated = _mark_notification_rows_read(
+        db,
+        int(g.user["id"]),
+        notification_ids=data.get("ids", []),
+        mark_all=bool(data.get("all")),
+    )
     db.commit()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/api/notifications/<int:notification_id>/read", methods=["POST"])
+def web_mark_single_notification_read(notification_id: int):
+    """Mark a single notification as read for the logged-in web user."""
+    if not g.user:
+        return jsonify({"error": "Login required"}), 401
+    _verify_csrf()
+    db = get_db()
+    updated = _mark_notification_rows_read(db, int(g.user["id"]), notification_ids=[notification_id])
+    db.commit()
+    if updated <= 0:
+        return jsonify({"error": "Notification not found"}), 404
+    return jsonify({"ok": True, "updated": updated})
 
 
 # ---------------------------------------------------------------------------

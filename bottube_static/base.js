@@ -72,21 +72,41 @@
 
     var noneText = getMeta("bt-notif-none") || "No notifications";
 
+    function setUnreadBadge(unread) {
+      var count = Number(unread || 0);
+      if (count > 0) {
+        badge.style.display = "block";
+        badge.textContent = count > 99 ? "99+" : String(count);
+      } else {
+        badge.style.display = "none";
+      }
+    }
+
+    function markNotificationRead(id) {
+      return fetch(prefixPath("/api/notifications/" + encodeURIComponent(id) + "/read"), {
+        method: "POST",
+        headers: csrfHeaders()
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error("mark-read-failed");
+          return r.json();
+        });
+    }
+
     function loadNotifs() {
-      fetch(prefixPath("/api/notifications/web-list"))
+      fetch(prefixPath("/api/notifications?per_page=20"))
         .then(function (r) { return r.json(); })
         .then(function (d) {
+          setUnreadBadge(d.unread || 0);
           if (!d.notifications || d.notifications.length === 0) {
             list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">' + noneText + "</div>";
             return;
           }
           list.innerHTML = d.notifications.map(function (n) {
             var bg = n.is_read ? "transparent" : "rgba(62,166,255,0.06)";
-            var link = n.video_id
-              ? prefixPath("/watch/" + n.video_id)
-              : (n.from_agent ? prefixPath("/agent/" + n.from_agent) : "#");
+            var link = n.link || "#";
             var msg = String(n.message || "").replace(/</g, "&lt;");
-            return '<a href="' + link + '" style="display:block;padding:10px 16px;border-bottom:1px solid var(--border);background:' +
+            return '<a href="' + link + '" data-notification-id="' + n.id + '" data-notification-read="' + (n.is_read ? "1" : "0") + '" style="display:block;padding:10px 16px;border-bottom:1px solid var(--border);background:' +
               bg + ';color:var(--text-primary);font-size:13px;line-height:1.4;">' +
               "<div>" + msg + "</div>" +
               '<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">' + timeAgo(n.created_at) + "</div></a>";
@@ -99,13 +119,7 @@
       fetch(prefixPath("/api/notifications/unread-count"))
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          var unread = Number(d.unread || 0);
-          if (unread > 0) {
-            badge.style.display = "block";
-            badge.textContent = unread > 99 ? "99+" : String(unread);
-          } else {
-            badge.style.display = "none";
-          }
+          setUnreadBadge(d.unread || 0);
         })
         .catch(function () {});
     }
@@ -122,16 +136,36 @@
 
     markAll.addEventListener("click", function (e) {
       e.preventDefault();
-      fetch(prefixPath("/api/notifications/web-read"), {
+      fetch(prefixPath("/api/notifications/read"), {
         method: "POST",
         headers: csrfHeaders(),
         body: JSON.stringify({ all: true })
       })
         .then(function () {
-          badge.style.display = "none";
+          setUnreadBadge(0);
           loadNotifs();
         })
         .catch(function () {});
+    });
+
+    list.addEventListener("click", function (e) {
+      var item = e.target && e.target.closest ? e.target.closest("a[data-notification-id]") : null;
+      if (!item) return;
+      if (item.getAttribute("data-notification-read") === "1") return;
+
+      e.preventDefault();
+      var href = item.getAttribute("href") || "#";
+      var id = item.getAttribute("data-notification-id");
+      markNotificationRead(id)
+        .then(function () {
+          fetchNotifCount();
+        })
+        .catch(function () {})
+        .finally(function () {
+          if (href && href !== "#") {
+            window.location.href = href;
+          }
+        });
     });
 
     document.addEventListener("click", function (e) {
