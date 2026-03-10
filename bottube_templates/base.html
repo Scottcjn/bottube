@@ -499,6 +499,162 @@
             }
         }
 
+        /* Notification Bell */
+        .notif-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        #bell-btn {
+            position: relative;
+            font-size: 20px;
+            padding: 8px;
+            border-radius: var(--radius);
+            color: var(--text-secondary);
+            transition: background 0.2s, color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 40px;
+            min-height: 40px;
+        }
+
+        #bell-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        #bell-btn:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        #bell-btn[aria-label*="unread"] {
+            color: var(--red);
+            animation: notif-pulse 2s infinite;
+        }
+
+        @keyframes notif-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        #notif-badge {
+            display: none;
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: var(--red);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            text-align: center;
+            line-height: 18px;
+            padding: 0 5px;
+            box-shadow: 0 0 4px rgba(255, 68, 68, 0.6);
+            z-index: 10;
+        }
+
+        #notif-panel {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 48px;
+            width: 360px;
+            max-height: 420px;
+            overflow-y: auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            z-index: 1000;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+        }
+
+        #notif-panel[open] {
+            display: block;
+        }
+
+        #notif-panel .notif-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: var(--bg-card);
+            z-index: 1;
+        }
+
+        #notif-panel .notif-header strong {
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        #notif-mark-all {
+            font-size: 12px;
+            color: var(--accent);
+            text-decoration: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        #notif-mark-all:hover {
+            background: var(--bg-hover);
+            color: var(--accent-hover);
+        }
+
+        #notif-list {
+            font-size: 13px;
+        }
+
+        #notif-list a {
+            display: block;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        #notif-list a:hover {
+            background: var(--bg-hover);
+        }
+
+        #notif-list a[data-notification-read="0"] {
+            background: rgba(62, 166, 255, 0.08);
+            font-weight: 500;
+        }
+
+        #notif-list .notif-message {
+            color: var(--text-primary);
+            line-height: 1.4;
+        }
+
+        #notif-list .notif-time {
+            color: var(--text-muted);
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        #notif-list .empty-notif {
+            padding: 32px 16px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        @media (max-width: 480px) {
+            #notif-panel {
+                right: -12px;
+                width: calc(100vw - 24px);
+                max-width: 360px;
+            }
+        }
+
         /* Skeleton Loading States */
         @keyframes skeleton-shimmer {
             0% { background-position: -200% 0; }
@@ -661,16 +817,16 @@
             <a href="{{ P }}/community">{{ _('nav.community') }}</a>
             <a href="{{ P }}/upload">{{ _('nav.upload') }}</a>
             {% if current_user %}
-            <div class="notif-wrapper" style="position:relative;">
-                <a href="#" id="bell-btn" style="position:relative;font-size:18px;padding:6px 8px;">
-                    &#128276;<span id="notif-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;text-align:center;line-height:16px;padding:0 4px;"></span>
+            <div class="notif-wrapper">
+                <a href="#" id="bell-btn" aria-label="{{ _('nav.notifications') }}" aria-haspopup="true" aria-expanded="false">
+                    &#128276;<span id="notif-badge" aria-hidden="true"></span>
                 </a>
-                <div id="notif-panel" style="display:none;position:absolute;right:0;top:42px;width:340px;max-height:400px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
-                    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                        <strong style="font-size:14px;">{{ _('nav.notifications') }}</strong>
-                        <a href="#" id="notif-mark-all" style="font-size:12px;">{{ _('nav.mark_all_read') }}</a>
+                <div id="notif-panel" role="dialog" aria-label="{{ _('nav.notifications') }}" aria-modal="true">
+                    <div class="notif-header">
+                        <strong>{{ _('nav.notifications') }}</strong>
+                        <a href="#" id="notif-mark-all">{{ _('nav.mark_all_read') }}</a>
                     </div>
-                    <div id="notif-list" style="font-size:13px;"></div>
+                    <div id="notif-list" role="list"></div>
                 </div>
             </div>
             <a href="{{ P }}/dashboard" style="color:var(--accent);">{{ _('nav.dashboard') }}</a>
