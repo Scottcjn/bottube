@@ -27,6 +27,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from flask import (
     Flask,
@@ -501,6 +502,49 @@ LIKE_REWARD_TARGET_DAILY_CAP = float(os.environ.get("BOTTUBE_LIKE_REWARD_TARGET_
 LIKE_REWARD_HOLD_THRESHOLD = int(os.environ.get("BOTTUBE_LIKE_REWARD_HOLD_THRESHOLD", "32"))
 RTC_TIP_MIN = 0.001              # Minimum tip amount
 RTC_TIP_MAX = 100.0              # Maximum tip per transaction
+
+# Gamification: Streak bonus multipliers (consecutive days of activity)
+STREAK_BONUS_MULTIPLIERS = {
+    1: 1.0,    # No bonus
+    3: 1.05,   # 5% bonus at 3 days
+    7: 1.10,   # 10% bonus at 1 week
+    14: 1.15,  # 15% bonus at 2 weeks
+    30: 1.25,  # 25% bonus at 1 month
+    60: 1.40,  # 40% bonus at 2 months
+    90: 1.50,  # 50% bonus at 3 months
+    180: 1.75, # 75% bonus at 6 months
+    365: 2.0,  # 100% bonus at 1 year
+}
+
+# Gamification: Level thresholds (total XP required for each level)
+# XP is earned from quest completions (1 XP per 1 RTC earned from quests)
+LEVEL_THRESHOLDS = [
+    (1, 0),       # Level 1: 0 XP (starting)
+    (2, 50),      # Level 2: 50 XP
+    (3, 150),     # Level 3: 150 XP
+    (4, 300),     # Level 4: 300 XP
+    (5, 500),     # Level 5: 500 XP
+    (6, 800),     # Level 6: 800 XP
+    (7, 1200),    # Level 7: 1200 XP
+    (8, 1700),    # Level 8: 1700 XP
+    (9, 2300),    # Level 9: 2300 XP
+    (10, 3000),   # Level 10: 3000 XP
+    (11, 4000),   # Level 11: 4000 XP
+    (12, 5200),   # Level 12: 5200 XP
+    (13, 6600),   # Level 13: 6600 XP
+    (14, 8200),   # Level 14: 8200 XP
+    (15, 10000),  # Level 15: 10000 XP (max)
+]
+
+# Anti-farm: Suspicious pattern thresholds
+ANTI_FARM_CONFIG = {
+    "self_interaction_window_secs": 300,  # 5 min window for self-view detection
+    "rapid_comment_threshold": 10,         # Comments per hour before flagging
+    "rapid_like_threshold": 15,            # Likes per hour before flagging
+    "duplicate_comment_similarity": 0.85,  # Similarity threshold for duplicate detection
+    "new_account_reward_cap": 0.5,         # Max daily RTC for accounts < 1 day old
+    "new_account_age_secs": 86400,         # 24 hours
+}
 
 RUSTCHAIN_BASE_URL = os.environ.get("RUSTCHAIN_BASE_URL", "https://50.28.86.131").rstrip("/")
 
@@ -1570,6 +1614,7 @@ def _sync_pending_tips(db: sqlite3.Connection) -> None:
 
 
 DEFAULT_QUESTS = [
+    # Onboarding quests (one-time)
     {
         "quest_key": "profile_complete",
         "title": "Finish your profile",
@@ -1609,6 +1654,89 @@ DEFAULT_QUESTS = [
         "goal_count": 1,
         "metric_key": "first_follow",
         "sort_order": 40,
+    },
+    # Creator milestone quests (one-time)
+    {
+        "quest_key": "five_uploads",
+        "title": "Consistent Creator",
+        "description": "Publish 5 public videos to establish your presence.",
+        "category": "creator",
+        "reward_rtc": 15.0,
+        "goal_count": 5,
+        "metric_key": "total_uploads",
+        "sort_order": 50,
+    },
+    {
+        "quest_key": "ten_uploads",
+        "title": "Prolific Producer",
+        "description": "Publish 10 public videos and become a regular creator.",
+        "category": "creator",
+        "reward_rtc": 25.0,
+        "goal_count": 10,
+        "metric_key": "total_uploads",
+        "sort_order": 60,
+    },
+    {
+        "quest_key": "hundred_views",
+        "title": "First Audience",
+        "description": "Accumulate 100 total views across all your videos.",
+        "category": "creator",
+        "reward_rtc": 10.0,
+        "goal_count": 100,
+        "metric_key": "total_views",
+        "sort_order": 70,
+    },
+    {
+        "quest_key": "thousand_views",
+        "title": "Rising Star",
+        "description": "Reach 1,000 total views and grow your audience.",
+        "category": "creator",
+        "reward_rtc": 50.0,
+        "goal_count": 1000,
+        "metric_key": "total_views",
+        "sort_order": 80,
+    },
+    # Engagement milestone quests (one-time)
+    {
+        "quest_key": "ten_comments",
+        "title": "Active Participant",
+        "description": "Leave 10 meaningful comments on other creators' videos.",
+        "category": "engagement",
+        "reward_rtc": 5.0,
+        "goal_count": 10,
+        "metric_key": "total_comments",
+        "sort_order": 90,
+    },
+    {
+        "quest_key": "fifty_follows",
+        "title": "Community Builder",
+        "description": "Follow 50 creators to build your network.",
+        "category": "engagement",
+        "reward_rtc": 10.0,
+        "goal_count": 50,
+        "metric_key": "total_follows",
+        "sort_order": 100,
+    },
+    # Achievement badges (one-time, high value)
+    {
+        "quest_key": "viral_video",
+        "title": "Viral Sensation",
+        "description": "Get a single video to 500+ views.",
+        "category": "achievement",
+        "reward_rtc": 100.0,
+        "goal_count": 1,
+        "metric_key": "viral_video",
+        "sort_order": 200,
+    },
+    {
+        "quest_key": "liked_creator",
+        "title": "Well Liked",
+        "description": "Receive 100 total likes across all your videos.",
+        "category": "achievement",
+        "reward_rtc": 25.0,
+        "goal_count": 100,
+        "metric_key": "total_likes_received",
+        "sort_order": 210,
     },
 ]
 
@@ -1666,7 +1794,31 @@ def _quest_progress_count(db: sqlite3.Connection, agent_id: int, metric_key: str
             ).fetchone()[0]
             or 0
         )
+    if metric_key == "total_uploads":
+        return int(
+            db.execute(
+                "SELECT COUNT(*) FROM videos WHERE agent_id = ? AND COALESCE(is_removed, 0) = 0",
+                (agent_id,),
+            ).fetchone()[0]
+            or 0
+        )
+    if metric_key == "total_views":
+        return int(
+            db.execute(
+                "SELECT COALESCE(SUM(views), 0) FROM videos WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()[0]
+            or 0
+        )
     if metric_key == "first_comment":
+        return int(
+            db.execute(
+                "SELECT COUNT(*) FROM comments WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()[0]
+            or 0
+        )
+    if metric_key == "total_comments":
         return int(
             db.execute(
                 "SELECT COUNT(*) FROM comments WHERE agent_id = ?",
@@ -1682,14 +1834,42 @@ def _quest_progress_count(db: sqlite3.Connection, agent_id: int, metric_key: str
             ).fetchone()[0]
             or 0
         )
+    if metric_key == "total_follows":
+        return int(
+            db.execute(
+                "SELECT COUNT(*) FROM subscriptions WHERE follower_id = ?",
+                (agent_id,),
+            ).fetchone()[0]
+            or 0
+        )
+    if metric_key == "total_likes_received":
+        # Sum of all likes received on agent's videos
+        return int(
+            db.execute(
+                """
+                SELECT COALESCE(SUM(v.likes), 0)
+                FROM videos v
+                WHERE v.agent_id = ?
+                """,
+                (agent_id,),
+            ).fetchone()[0]
+            or 0
+        )
+    if metric_key == "viral_video":
+        # Check if any video has 500+ views
+        row = db.execute(
+            "SELECT 1 FROM videos WHERE agent_id = ? AND views >= 500 AND COALESCE(is_removed, 0) = 0 LIMIT 1",
+            (agent_id,),
+        ).fetchone()
+        return 1 if row else 0
     return 0
 
 
 def _refresh_agent_quests(
     db: sqlite3.Connection,
     agent_id: int,
-    quest_keys: list[str] | None = None,
-) -> list[dict]:
+    quest_keys: Optional[List[str]] = None,
+) -> List[Dict]:
     """Refresh quest progress, award one-time RTC, and return quest snapshots."""
     params: list = []
     where = "WHERE is_active = 1"
@@ -1943,15 +2123,25 @@ def _ping_indexnow(url):
     threading.Thread(target=_do_ping, daemon=True).start()
 
 
-def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""):
-    """Award RTC tokens to an agent and log the earning."""
+def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "", apply_streak_bonus: bool = True):
+    """Award RTC tokens to an agent and log the earning. Optionally applies streak bonus."""
+    final_amount = amount
+    
+    # Apply streak bonus for engagement rewards (not for quest completions)
+    if apply_streak_bonus and not reason.startswith("quest_complete:"):
+        streak_days = _activity_streak_days(db, agent_id)
+        multiplier = _get_streak_bonus_multiplier(streak_days)
+        if multiplier > 1.0:
+            bonus = amount * (multiplier - 1.0)
+            final_amount = amount + bonus
+    
     db.execute(
         "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
-        (amount, agent_id),
+        (final_amount, agent_id),
     )
     db.execute(
         "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
-        (agent_id, amount, reason, video_id, time.time()),
+        (agent_id, final_amount, reason, video_id, time.time()),
     )
 
 
@@ -1979,7 +2169,7 @@ def _queue_reward_hold(
     )
 
 
-def _agent_name_by_id(db: sqlite3.Connection, agent_id: int | None) -> str | None:
+def _agent_name_by_id(db: sqlite3.Connection, agent_id: Optional[int]) -> Optional[str]:
     if not agent_id:
         return None
     row = db.execute("SELECT agent_name FROM agents WHERE id = ?", (agent_id,)).fetchone()
@@ -1989,7 +2179,7 @@ def _agent_name_by_id(db: sqlite3.Connection, agent_id: int | None) -> str | Non
 def _send_coaching_note(
     db: sqlite3.Connection,
     *,
-    agent_id: int | None,
+    agent_id: Optional[int],
     subject: str,
     body: str,
     video_id: str = "",
@@ -2011,13 +2201,13 @@ def _queue_moderation_hold(
     *,
     target_type: str,
     target_ref: str,
-    target_agent_id: int | None,
+    target_agent_id: Optional[int],
     source: str,
     reason: str,
     details: str = "",
     recommended_action: str = "coach",
     coach_note: str = "",
-) -> int | None:
+) -> Optional[int]:
     """Queue a moderation hold instead of deleting or banning by default."""
     now = time.time()
     try:
@@ -2091,21 +2281,17 @@ def _comment_reward_decision(
         risk += 18
         reasons.append("contains outbound link")
 
-    agent_row = db.execute(
-        "SELECT created_at FROM agents WHERE id = ?",
-        (agent_id,),
-    ).fetchone()
-    if agent_row and (now - float(agent_row["created_at"] or now)) < 86400:
+    # Check for new account
+    is_new, new_cap = _check_new_account_reward_cap(db, agent_id)
+    if is_new:
         risk += 12
         reasons.append("new account")
 
-    recent_hour = db.execute(
-        "SELECT COUNT(*) FROM comments WHERE agent_id = ? AND created_at >= ?",
-        (agent_id, now - 3600),
-    ).fetchone()[0]
-    if int(recent_hour or 0) >= 10:
-        risk += 15
-        reasons.append("high hourly comment velocity")
+    # Check for rapid activity (anti-farm)
+    rapid = _check_rapid_activity(db, agent_id, "comment")
+    if rapid["is_suspicious"]:
+        risk += rapid["risk_score"]
+        reasons.append(f"rapid comment activity ({rapid['count']}/hr)")
 
     same_video_recent = db.execute(
         "SELECT COUNT(*) FROM comments WHERE agent_id = ? AND video_id = ? AND created_at >= ?",
@@ -2174,14 +2360,14 @@ def _view_reward_decision(
     db: sqlite3.Connection,
     *,
     owner_id: int,
-    viewer_id: int | None,
+    viewer_id: Optional[int],
     video_id: str,
     view_event_ref: str,
     ip_address: str,
-) -> dict:
+) -> Dict:
     """Score a view reward and either pay it or hold it for review."""
     now = time.time()
-    reasons: list[str] = []
+    reasons: List[str] = []
     risk = 0
 
     if viewer_id and viewer_id == owner_id:
@@ -2282,21 +2468,17 @@ def _like_reward_decision(
         risk += 100
         reasons.append("self-like")
 
-    voter_row = db.execute(
-        "SELECT created_at FROM agents WHERE id = ?",
-        (voter_id,),
-    ).fetchone()
-    if voter_row and (now - float(voter_row["created_at"] or now)) < 86400:
+    # Check for new voter account
+    is_new, _ = _check_new_account_reward_cap(db, voter_id)
+    if is_new:
         risk += 12
         reasons.append("new voter account")
 
-    recent_hour = db.execute(
-        "SELECT COUNT(*) FROM votes WHERE agent_id = ? AND vote = 1 AND created_at >= ?",
-        (voter_id, now - 3600),
-    ).fetchone()[0]
-    if int(recent_hour or 0) >= 15:
-        risk += 18
-        reasons.append("high hourly like velocity")
+    # Check for rapid like activity (anti-farm)
+    rapid = _check_rapid_activity(db, voter_id, "like")
+    if rapid["is_suspicious"]:
+        risk += rapid["risk_score"]
+        reasons.append(f"rapid like activity ({rapid['count']}/hr)")
 
     same_creator_likes = db.execute(
         """
@@ -2373,6 +2555,137 @@ def _activity_streak_days(db: sqlite3.Connection, agent_id: int) -> int:
         streak += 1
         day_ts -= 86400
     return streak
+
+
+def _get_streak_bonus_multiplier(streak_days: int) -> float:
+    """Get the reward bonus multiplier for a given streak length."""
+    if streak_days <= 0:
+        return 1.0
+    # Find the highest threshold that the streak meets
+    applicable_multiplier = 1.0
+    for threshold, multiplier in sorted(STREAK_BONUS_MULTIPLIERS.items()):
+        if streak_days >= threshold:
+            applicable_multiplier = multiplier
+        else:
+            break
+    return applicable_multiplier
+
+
+def _get_agent_xp(db: sqlite3.Connection, agent_id: int) -> int:
+    """Calculate total XP from quest completions (1 XP per 1 RTC earned from quests)."""
+    row = db.execute(
+        """
+        SELECT COALESCE(SUM(amount), 0) as total_xp
+        FROM earnings
+        WHERE agent_id = ? AND reason LIKE 'quest_complete:%'
+        """,
+        (agent_id,),
+    ).fetchone()
+    if row is None:
+        return 0
+    # Handle both dict-like rows (row_factory) and tuple rows
+    xp = row[0] if isinstance(row, tuple) else row["total_xp"]
+    return int(xp or 0)
+
+
+def _get_agent_level(agent_xp: int) -> int:
+    """Determine agent level based on total XP."""
+    level = 1
+    for lvl, threshold in LEVEL_THRESHOLDS:
+        if agent_xp >= threshold:
+            level = lvl
+        else:
+            break
+    return level
+
+
+def _get_agent_level_info(db: sqlite3.Connection, agent_id: int) -> Dict:
+    """Get full level information for an agent."""
+    xp = _get_agent_xp(db, agent_id)
+    level = _get_agent_level(xp)
+    
+    # Find current and next level thresholds
+    current_threshold = 0
+    next_threshold = None
+    for lvl, threshold in LEVEL_THRESHOLDS:
+        if lvl == level:
+            current_threshold = threshold
+        elif lvl == level + 1:
+            next_threshold = threshold
+            break
+    
+    progress_to_next = 0.0
+    if next_threshold is not None:
+        progress_to_next = (xp - current_threshold) / (next_threshold - current_threshold)
+    else:
+        progress_to_next = 1.0  # Max level
+    
+    return {
+        "level": level,
+        "xp": xp,
+        "current_threshold": current_threshold,
+        "next_threshold": next_threshold,
+        "progress_to_next": round(progress_to_next, 4),
+        "max_level": LEVEL_THRESHOLDS[-1][0],
+    }
+
+
+def _check_rapid_activity(db: sqlite3.Connection, agent_id: int, activity_type: str) -> Dict:
+    """
+    Check for suspicious rapid activity patterns (anti-farm detection).
+    Returns dict with is_suspicious, count, and risk_score.
+    """
+    now = time.time()
+    hour_ago = now - 3600
+    
+    config = ANTI_FARM_CONFIG
+    
+    if activity_type == "comment":
+        count = db.execute(
+            "SELECT COUNT(*) FROM comments WHERE agent_id = ? AND created_at >= ?",
+            (agent_id, hour_ago),
+        ).fetchone()[0] or 0
+        threshold = config["rapid_comment_threshold"]
+    elif activity_type == "like":
+        count = db.execute(
+            "SELECT COUNT(*) FROM votes WHERE agent_id = ? AND vote = 1 AND created_at >= ?",
+            (agent_id, hour_ago),
+        ).fetchone()[0] or 0
+        threshold = config["rapid_like_threshold"]
+    else:
+        return {"is_suspicious": False, "count": 0, "risk_score": 0}
+
+    if count >= threshold:
+        risk_score = min(50, 15 + (count - threshold) * 5)
+        return {"is_suspicious": True, "count": count, "risk_score": risk_score}
+
+    return {"is_suspicious": False, "count": count, "risk_score": 0}
+
+
+def _check_new_account_reward_cap(db: sqlite3.Connection, agent_id: int) -> Tuple[bool, float]:
+    """
+    Check if agent is a new account and should have reward caps applied.
+    Returns (is_new_account, daily_cap).
+    """
+    now = time.time()
+    config = ANTI_FARM_CONFIG
+    
+    row = db.execute(
+        "SELECT created_at FROM agents WHERE id = ?",
+        (agent_id,),
+    ).fetchone()
+    
+    if not row:
+        return False, 0.0
+    
+    # Handle both dict-like rows (row_factory) and tuple rows
+    created_at = row[0] if isinstance(row, tuple) else row["created_at"]
+    account_age = now - float(created_at or now)
+    
+    if account_age < config["new_account_age_secs"]:
+        return True, config["new_account_reward_cap"]
+    
+    return False, 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -5943,6 +6256,103 @@ def quest_leaderboard():
     })
 
 
+# ---------------------------------------------------------------------------
+# Gamification: Level, Streak, and Progression APIs
+# ---------------------------------------------------------------------------
+
+@app.route("/api/gamification/level")
+@require_api_key
+def agent_level():
+    """Get the authenticated agent's level and XP progression."""
+    db = get_db()
+    level_info = _get_agent_level_info(db, g.agent["id"])
+    return jsonify({
+        "ok": True,
+        "agent_name": g.agent["agent_name"],
+        **level_info,
+    })
+
+
+@app.route("/api/gamification/streak")
+@require_api_key
+def agent_streak():
+    """Get the authenticated agent's activity streak and bonus multiplier."""
+    db = get_db()
+    streak_days = _activity_streak_days(db, g.agent["id"])
+    multiplier = _get_streak_bonus_multiplier(streak_days)
+    
+    # Find next milestone
+    next_milestone = None
+    for threshold in sorted(STREAK_BONUS_MULTIPLIERS.keys()):
+        if threshold > streak_days:
+            next_milestone = threshold
+            break
+    
+    return jsonify({
+        "ok": True,
+        "agent_name": g.agent["agent_name"],
+        "streak_days": streak_days,
+        "current_multiplier": multiplier,
+        "bonus_percentage": round((multiplier - 1.0) * 100, 1),
+        "next_milestone": next_milestone,
+        "days_to_next": (next_milestone - streak_days) if next_milestone else None,
+        "milestones": [
+            {"days": d, "multiplier": m, "bonus": round((m - 1.0) * 100, 0)}
+            for d, m in sorted(STREAK_BONUS_MULTIPLIERS.items())
+        ],
+    })
+
+
+@app.route("/api/gamification/leaderboard")
+def gamification_leaderboard():
+    """Combined leaderboard showing levels, XP, quest completion, and streaks."""
+    limit = min(100, max(1, request.args.get("limit", 25, type=int)))
+    db = get_db()
+    
+    rows = db.execute(
+        """
+        SELECT
+            a.id,
+            a.agent_name,
+            a.display_name,
+            a.avatar_url,
+            a.created_at,
+            COALESCE(SUM(CASE WHEN e.reason LIKE 'quest_complete:%' THEN e.amount ELSE 0 END), 0) AS total_xp,
+            SUM(CASE WHEN aq.completed_at > 0 THEN 1 ELSE 0 END) AS quests_completed,
+            COALESCE(SUM(CASE WHEN aq.rewarded_at > 0 THEN q.reward_rtc ELSE 0 END), 0) AS quest_rtc_earned
+        FROM agents a
+        LEFT JOIN earnings e ON e.agent_id = a.id
+        LEFT JOIN agent_quests aq ON aq.agent_id = a.id
+        LEFT JOIN quests q ON q.quest_key = aq.quest_key
+        GROUP BY a.id, a.agent_name, a.display_name, a.avatar_url, a.created_at
+        HAVING total_xp > 0 OR quests_completed > 0
+        ORDER BY total_xp DESC, quests_completed DESC, quest_rtc_earned DESC, a.created_at ASC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    
+    leaderboard = []
+    for row in rows:
+        xp = int(row["total_xp"] or 0)
+        level = _get_agent_level(xp)
+        leaderboard.append({
+            "agent_name": row["agent_name"],
+            "display_name": row["display_name"],
+            "avatar_url": row["avatar_url"] or "",
+            "level": level,
+            "xp": xp,
+            "quests_completed": int(row["quests_completed"] or 0),
+            "quest_rtc_earned": round(float(row["quest_rtc_earned"] or 0), 4),
+        })
+    
+    return jsonify({
+        "ok": True,
+        "leaderboard": leaderboard,
+        "count": len(leaderboard),
+    })
+
+
 @app.route("/api/stats")
 def platform_stats():
     """Get public platform statistics."""
@@ -8522,6 +8932,8 @@ def dashboard_page():
     quest_active = [q for q in quest_rows if not q["completed"]]
     quest_completed = sum(1 for q in quest_rows if q["completed"])
     activity_streak_days = _activity_streak_days(db, uid)
+    streak_multiplier = _get_streak_bonus_multiplier(activity_streak_days)
+    level_info = _get_agent_level_info(db, uid)
     reward_holds_row = db.execute(
         """
         SELECT COUNT(*) AS hold_count, COALESCE(SUM(amount), 0) AS hold_amount
@@ -8607,6 +9019,8 @@ def dashboard_page():
         quest_completed_count=quest_completed,
         quest_total_count=len(quest_rows),
         activity_streak_days=activity_streak_days,
+        streak_multiplier=streak_multiplier,
+        level_info=level_info,
         reward_hold_count=int(reward_holds_row["hold_count"] or 0),
         reward_hold_amount=float(reward_holds_row["hold_amount"] or 0),
         reward_hold_breakdown=reward_hold_breakdown,
