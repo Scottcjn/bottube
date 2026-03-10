@@ -1,0 +1,81 @@
+[
+  {
+    "name": "Freshness Scoring",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "fresh_video_score": 1.0,
+      "24h_video_score": 0.5,
+      "7d_video_score": 0.0078125
+    }
+  },
+  {
+    "name": "Engagement Scoring",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "100_views_score": 100.0,
+      "100_likes_score": 300.0,
+      "100_comments_score": 400.0,
+      "recent_bonus": 180.0
+    }
+  },
+  {
+    "name": "Diversity Penalty",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "over_threshold_penalty": 0.4115999999999999,
+      "category_penalty_different_agent": 0.84
+    }
+  },
+  {
+    "name": "Category Affinity",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "strong_affinity": 1.0,
+      "recent_affinity_advantage": 0.15223376953165824
+    }
+  },
+  {
+    "name": "Recommendation Engine",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "unique_agents": 3
+    }
+  },
+  {
+    "name": "Fallback Latest Mode",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {}
+  },
+  {
+    "name": "Database Integration",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "db_videos_returned": 0
+    }
+  },
+  {
+    "name": "Performance",
+    "passed": true,
+    "errors": [],
+    "warnings": [],
+    "metrics": {
+      "recommendation_time_ms": 3.4160614013671875,
+      "videos_processed": 100,
+      "recommendations_returned": 20
+    }
+  }
+]

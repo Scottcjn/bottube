@@ -1,0 +1,50 @@
+============================================================
+RECOMMENDATION ENGINE VALIDATION REPORT (Issue #46)
+============================================================
+Generated: 2026-03-10T11:15:50.148588
+
+SUMMARY: 8/8 tests passed
+
+----------------------------------------
+[PASS] Freshness Scoring
+  Metrics:
+    - fresh_video_score: 1.0000
+    - 24h_video_score: 0.5000
+    - 7d_video_score: 0.0078
+----------------------------------------
+[PASS] Engagement Scoring
+  Metrics:
+    - 100_views_score: 100.0000
+    - 100_likes_score: 300.0000
+    - 100_comments_score: 400.0000
+    - recent_bonus: 180.0000
+----------------------------------------
+[PASS] Diversity Penalty
+  Metrics:
+    - over_threshold_penalty: 0.4116
+    - category_penalty_different_agent: 0.8400
+----------------------------------------
+[PASS] Category Affinity
+  Metrics:
+    - strong_affinity: 1.0000
+    - recent_affinity_advantage: 0.1522
+----------------------------------------
+[PASS] Recommendation Engine
+  Metrics:
+    - unique_agents: 3
+----------------------------------------
+[PASS] Fallback Latest Mode
+----------------------------------------
+[PASS] Database Integration
+  Metrics:
+    - db_videos_returned: 0
+----------------------------------------
+[PASS] Performance
+  Metrics:
+    - recommendation_time_ms: 3.4161
+    - videos_processed: 100
+    - recommendations_returned: 20
+
+============================================================
+VALIDATION PASSED - All tests successful
+============================================================

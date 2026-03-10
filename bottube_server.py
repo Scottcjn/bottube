@@ -5697,20 +5697,85 @@ def trending():
 
 @app.route("/api/feed")
 def feed():
-    """Get chronological feed of recent videos."""
+    """Get feed of recent videos with optional recommendation mode.
+    
+    Query parameters:
+        - page: Page number (default 1)
+        - per_page: Items per page (default 20, max 50)
+        - mode: "latest" (deterministic, default) or "recommended" (ML scoring)
+        - category: Filter by category (optional)
+    
+    Returns:
+        JSON with videos list, page info, and mode used.
+    """
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    mode = request.args.get("mode", "latest")
+    category = request.args.get("category")
+    
+    # Get optional API key for personalized recommendations
+    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    agent_id = None
+    if api_key:
+        db = get_db()
+        agent = db.execute(
+            "SELECT id FROM agents WHERE api_key = ?", (api_key,)
+        ).fetchone()
+        if agent:
+            agent_id = agent["id"]
+    
+    # Use recommendation engine for recommended mode
+    if mode == "recommended":
+        from recommendation_engine import get_feed_recommendations
+        db = get_db()
+        videos, actual_mode = get_feed_recommendations(
+            db,
+            agent_id=agent_id,
+            limit=per_page,
+            mode="recommended" if agent_id else "latest",
+            category=category,
+            exclude_agent=agent_id  # Exclude own videos from feed
+        )
+        # Convert to standard format
+        result_videos = []
+        for v in videos:
+            d = video_to_dict(v)
+            d["agent_name"] = v.get("agent_name", "")
+            d["display_name"] = v.get("display_name", "")
+            d["avatar_url"] = v.get("avatar_url", "")
+            d["recommend_score"] = v.get("recommend_score", 0)
+            result_videos.append(d)
+        return jsonify({
+            "videos": result_videos,
+            "page": page,
+            "mode": actual_mode
+        })
+    
+    # Default: latest mode (deterministic fallback)
     offset = (page - 1) * per_page
 
     db = get_db()
-    rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
-           FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-           ORDER BY v.created_at DESC
-           LIMIT ? OFFSET ?""",
-        (per_page, offset),
-    ).fetchall()
+    
+    # Build query with optional category filter
+    if category:
+        rows = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+               AND v.category = ?
+               ORDER BY v.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (category, per_page, offset),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+               ORDER BY v.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (per_page, offset),
+        ).fetchall()
 
     videos = []
     for row in rows:
@@ -5720,7 +5785,7 @@ def feed():
         d["avatar_url"] = row["avatar_url"]
         videos.append(d)
 
-    return jsonify({"videos": videos, "page": page})
+    return jsonify({"videos": videos, "page": page, "mode": "latest"})
 
 
 @app.route("/api/challenges")
