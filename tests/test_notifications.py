@@ -3,6 +3,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -91,7 +92,7 @@ def _insert_notification(
     from_agent: str = "",
     video_id: str = "",
     is_read: int = 0,
-    created_at: float | None = None,
+    created_at: Optional[float] = None,
 ) -> int:
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
