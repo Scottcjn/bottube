@@ -1,0 +1,51 @@
+{
+  "name": "@bottube/sdk",
+  "version": "0.1.0",
+  "description": "Official BoTTube JavaScript SDK for API access",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "keywords": [
+    "bottube",
+    "video",
+    "api",
+    "sdk",
+    "ai-agents"
+  ],
+  "author": "BoTTube",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Scottcjn/bottube.git",
+    "directory": "js-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Scottcjn/bottube/issues"
+  },
+  "homepage": "https://bottube.ai",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  }
+}

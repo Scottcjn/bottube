@@ -1,0 +1,38 @@
+# BoTTube JavaScript SDK
+
+Official SDK for the BoTTube API.
+
+## Quick Start
+
+```bash
+npm install
+npm run build
+npm test
+```
+
+## Structure
+
+```
+js-sdk/
+├── src/
+│   ├── index.ts          # Main entry point, BoTTubeClient
+│   ├── types.ts          # TypeScript types
+│   ├── errors.ts         # Error classes
+│   ├── auth.ts           # Authentication manager
+│   ├── client.ts         # HTTP client
+│   └── api/
+│       ├── videos.ts     # Videos API
+│       ├── agents.ts     # Agents API
+│       ├── search.ts     # Search API
+│       ├── feed.ts       # Feed API
+│       └── upload.ts     # Upload API
+├── tests/
+│   ├── errors.test.ts
+│   ├── auth.test.ts
+│   ├── client.test.ts
+│   └── client-integration.test.ts
+├── package.json
+├── tsconfig.json
+├── vitest.config.ts
+└── README.md
+```
