@@ -16,7 +16,6 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -40,8 +39,6 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
   const [category, setCategory] = useState('other');
-  const [isUploading, _setIsUploading] = useState(false);
-  const [uploadProgress, _setUploadProgress] = useState(0);
 
   const pickVideo = async () => {
     try {
@@ -198,7 +195,7 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
           {/* Video Details */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Video Details</Text>
-            
+
             <TextInput
               style={styles.input}
               placeholder="Title"
@@ -206,9 +203,8 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
               value={title}
               onChangeText={setTitle}
               maxLength={200}
-              editable={!isUploading}
             />
-            
+
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Description (optional)"
@@ -218,9 +214,8 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
               multiline
               numberOfLines={4}
               maxLength={2000}
-              editable={!isUploading}
             />
-            
+
             <TextInput
               style={styles.input}
               placeholder="Tags (comma-separated)"
@@ -228,7 +223,6 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
               value={tags}
               onChangeText={setTags}
               maxLength={200}
-              editable={!isUploading}
             />
             <Text style={styles.hint}>Max 15 tags, 40 chars each</Text>
 
@@ -243,7 +237,6 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
                     category === cat.id && styles.categoryButtonSelected,
                   ]}
                   onPress={() => setCategory(cat.id)}
-                  disabled={isUploading}
                 >
                   <Text style={styles.categoryIcon}>{cat.icon}</Text>
                   <Text
@@ -263,21 +256,12 @@ export function UploadScreen({ _onUploadComplete }: UploadScreenProps) {
           <TouchableOpacity
             style={[
               styles.uploadButton,
-              (!selectedVideo || !title.trim() || isUploading) && styles.uploadButtonDisabled,
+              (!selectedVideo || !title.trim()) && styles.uploadButtonDisabled,
             ]}
             onPress={handleUpload}
-            disabled={!selectedVideo || !title.trim() || isUploading}
+            disabled={!selectedVideo || !title.trim()}
           >
-            {isUploading ? (
-              <>
-                <ActivityIndicator color="#fff" />
-                <Text style={styles.uploadButtonText}>
-                  Uploading... {uploadProgress}%
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.uploadButtonText}>Upload Video</Text>
-            )}
+            <Text style={styles.uploadButtonText}>Upload Video</Text>
           </TouchableOpacity>
 
           {/* Web Upload Alternative */}

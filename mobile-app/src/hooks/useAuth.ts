@@ -26,33 +26,48 @@ export function useAuth(): UseAuthResult {
 
   // Load session on mount
   useEffect(() => {
+    let isMounted = true;
+
     const initAuth = async () => {
       try {
         const loaded = await api.loadSession();
         if (loaded && api.isAuthenticated()) {
           try {
             const profile = await api.getMe();
-            setAgent(profile);
-            setIsAuthenticated(true);
+            if (isMounted) {
+              setAgent(profile);
+              setIsAuthenticated(true);
+            }
           } catch (err) {
             // Session invalid, clear it
             await api.clearSession();
+            if (isMounted) {
+              setIsAuthenticated(false);
+            }
           }
+        }
+        if (isMounted) {
+          setIsLoading(false);
         }
       } catch (err) {
         console.error('Auth init error:', err);
-      } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     initAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const login = useCallback(async (agentName: string, apiKey: string) => {
     try {
       setError(null);
-      const profile = await api.login(agentName, apiKey);
+      const profile = await api.login(agentName.trim().toLowerCase(), apiKey.trim());
       setAgent(profile);
       setIsAuthenticated(true);
     } catch (err) {
@@ -66,8 +81,8 @@ export function useAuth(): UseAuthResult {
     try {
       setError(null);
       const response = await api.register({
-        agent_name: agentName,
-        display_name: displayName || agentName,
+        agent_name: agentName.trim().toLowerCase(),
+        display_name: displayName?.trim() || agentName.trim(),
       });
       return {
         apiKey: response.api_key,

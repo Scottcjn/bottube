@@ -58,8 +58,8 @@ function ProfileVideoCard({ video, onPress }: VideoCardProps) {
   );
 }
 
-export function ProfileScreen({ 
-  agentName: propAgentName, 
+export function ProfileScreen({
+  agentName: propAgentName,
   onVideoPress,
   onBack,
 }: ProfileScreenProps) {
@@ -70,6 +70,7 @@ export function ProfileScreen({
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Determine if viewing own profile
   const isOwnProfile = !propAgentName || propAgentName === currentAgent?.agent_name;
@@ -77,34 +78,57 @@ export function ProfileScreen({
 
   // Fetch profile
   useEffect(() => {
+    let isMounted = true;
+
     const fetchProfile = async () => {
       if (!viewAgentName) {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
         return;
       }
 
       try {
-        setIsLoading(true);
-        setError(null);
+        if (isMounted) {
+          setIsLoading(true);
+          setError(null);
+        }
         const data = await api.getAgentProfile(viewAgentName);
-        setProfile(data);
-        setDisplayName(data.display_name || '');
-        setBio(data.bio || '');
+        if (isMounted) {
+          setProfile(data);
+          setDisplayName(data.display_name || '');
+          setBio(data.bio || '');
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load profile';
-        setError(message);
+        if (isMounted) {
+          setError(message);
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchProfile();
+
+    return () => {
+      isMounted = false;
+    };
   }, [viewAgentName]);
 
-  // Load videos from this agent
+  // Load videos from this agent - filter to only this agent's videos
   const { videos, isLoading: videosLoading } = useFeed('videos');
+  const agentVideos = videos.filter(v => v.agent_name === viewAgentName);
 
   const handleSaveProfile = async () => {
+    if (!displayName.trim()) {
+      Alert.alert('Error', 'Display name cannot be empty');
+      return;
+    }
+
+    setIsSaving(true);
     try {
       await api.updateProfile({
         display_name: displayName.trim(),
@@ -118,7 +142,10 @@ export function ProfileScreen({
       }
       Alert.alert('Success', 'Profile updated');
     } catch (err) {
-      Alert.alert('Error', 'Failed to update profile');
+      const message = err instanceof Error ? err.message : 'Failed to update profile';
+      Alert.alert('Error', message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -209,14 +236,20 @@ export function ProfileScreen({
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={() => setIsEditing(false)}
+                disabled={isSaving}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.saveButton}
+                style={[styles.saveButton, isSaving && styles.buttonDisabled]}
                 onPress={handleSaveProfile}
+                disabled={isSaving}
               >
-                <Text style={styles.saveButtonText}>Save</Text>
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
@@ -287,14 +320,14 @@ export function ProfileScreen({
       {/* Videos Section */}
       <View style={styles.videosSection}>
         <Text style={styles.sectionTitle}>Videos</Text>
-        
+
         {videosLoading ? (
           <ActivityIndicator size="small" color="#ff4500" />
-        ) : videos.length === 0 ? (
+        ) : agentVideos.length === 0 ? (
           <Text style={styles.noVideos}>No videos yet</Text>
         ) : (
           <View style={styles.videosGrid}>
-            {videos.map((video) => (
+            {agentVideos.map((video) => (
               <ProfileVideoCard
                 key={video.video_id}
                 video={video}
@@ -437,6 +470,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginLeft: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     color: '#fff',

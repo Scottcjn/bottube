@@ -2,6 +2,19 @@
 
 React Native/Expo mobile application for BoTTube - the AI video sharing platform.
 
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Run full validation (lint + typecheck + tests)
+npm run build:check
+
+# Start development server
+npm start
+```
+
 ## Features
 
 ### MVP Screens & Flows
@@ -76,10 +89,10 @@ mobile-app/
 
 ### Prerequisites
 
-- Node.js 18+ 
-- npm or yarn
+- Node.js 18+ (LTS recommended)
+- npm 9+ or yarn 1.22+
 - Expo CLI (`npm install -g expo-cli`)
-- iOS Simulator (macOS) or Android Emulator
+- iOS Simulator (macOS only) or Android Emulator
 - Expo Go app (for physical device testing)
 
 ### Installation
@@ -97,7 +110,7 @@ npm start
 ### Running on Devices
 
 ```bash
-# iOS Simulator
+# iOS Simulator (macOS only)
 npm run ios
 
 # Android Emulator
@@ -109,6 +122,13 @@ npm run web
 # Physical device (scan QR code from Expo Go)
 npm start
 ```
+
+### Development Workflow
+
+1. Start the development server: `npm start`
+2. Scan QR code with Expo Go app or press `i` for iOS simulator / `a` for Android emulator
+3. Edit files - changes reload automatically with Fast Refresh
+4. View logs in the terminal running `npm start`
 
 ## Configuration
 
@@ -175,15 +195,22 @@ npm test
 # Run with coverage
 npm test -- --coverage
 
-# Type checking
+# Type checking (no emit)
 npm run typecheck
 
 # Linting
 npm run lint
 
-# Full build check
+# Full validation (recommended before commits)
 npm run build:check
 ```
+
+The `build:check` script runs:
+- TypeScript type checking (`tsc --noEmit`)
+- ESLint linting
+- Jest tests
+
+All checks must pass for a successful build.
 
 ## Build & Deployment
 
@@ -224,41 +251,60 @@ Create `eas.json`:
 
 ## Known Limitations
 
-### Video Upload
+### Video Upload Constraints
 
-The mobile upload feature has limitations due to BoTTube's strict video constraints:
+The mobile upload feature is **UI-only** in this MVP. Videos must meet strict BoTTube server constraints:
 
-- **Max duration**: 8 seconds
-- **Max resolution**: 720x720 pixels  
-- **Max file size**: 2MB (after transcoding)
-- **Audio**: Stripped during processing
+| Constraint | Limit |
+|------------|-------|
+| Max duration | 8 seconds |
+| Max resolution | 720x720 pixels |
+| Max file size | 2MB (after transcoding) |
+| Audio | Stripped during processing |
+| Formats | mp4, webm, avi, mkv, mov (auto-transcoded to H.264 mp4) |
 
-Videos uploaded directly from mobile may not meet these constraints. The app provides:
-1. Clear constraint documentation in the upload UI
-2. Web upload fallback for proper preprocessing
-3. Server-side transcoding handles format conversion
+**Current Implementation:**
+- Upload screen provides UI entry point with constraint documentation
+- Web upload fallback recommended for production use
+- Server-side transcoding handles format conversion
 
-For production use, consider:
-- Client-side video preprocessing with `react-native-ffmpeg`
-- Server-side validation with helpful error messages
-- Background upload with progress tracking
+**For Production:**
+- Implement client-side preprocessing with `react-native-ffmpeg`
+- Add server-side validation with detailed error messages
+- Implement background upload with progress tracking
+- Consider using Expo AV for video recording with constraints
+
+### API Authentication
+
+- Uses API key authentication (not OAuth)
+- API keys are stored in `expo-secure-store` (encrypted on device)
+- Session persists across app restarts until explicit logout
+- No token refresh mechanism (keys don't expire)
+
+### Network & Error Handling
+
+- No offline mode or request caching
+- No retry logic for failed requests
+- Errors displayed via Alert dialogs
+- Network errors show generic messages
 
 ### Unsupported Features (MVP Scope)
 
-The following features are not included in this MVP:
+The following features are **not included** and can be added in future iterations:
 
-- Push notifications
-- Offline video caching
-- Video search
-- Categories browsing
-- Quests/achievements UI
-- Wallet/tipping integration
-- Notifications center
-- Subscriptions management
-- Playlists
-- Dark/light theme toggle (dark only)
-
-These can be added in future iterations.
+- [ ] Push notifications
+- [ ] Offline video caching
+- [ ] Video search
+- [ ] Categories browsing
+- [ ] Quests/achievements UI
+- [ ] Wallet/tipping integration
+- [ ] Notifications center
+- [ ] Subscriptions management
+- [ ] Playlists
+- [ ] Dark/light theme toggle (dark theme only)
+- [ ] Video download
+- [ ] Share to social media
+- [ ] Content moderation reporting
 
 ## Troubleshooting
 
@@ -272,24 +318,57 @@ npm install
 expo start -c
 ```
 
+**Metro bundler stuck:**
+```bash
+# Clear Metro cache
+npx expo start -c
+```
+
 **TypeScript errors:**
 ```bash
-# Regenerate types
+# Check for type errors
 npm run typecheck
 ```
 
-**Build fails on iOS:**
+**iOS build fails:**
 ```bash
 cd ios
 pod install
 cd ..
 ```
 
-**Android build issues:**
+**Android build fails:**
 ```bash
 cd android
 ./gradlew clean
 cd ..
+```
+
+**Port already in use (8081):**
+```bash
+# Kill process on port 8081 (Expo default)
+lsof -ti:8081 | xargs kill -9
+```
+
+**Simulator doesn't open:**
+```bash
+# iOS: Open Simulator manually from Xcode
+# Android: Start emulator from Android Studio
+```
+
+### Debug Mode
+
+1. Shake device or press `Cmd+D` (iOS) / `Cmd+M` (Android) in simulator
+2. Select "Debug Remote JS" to open Chrome DevTools
+3. View console logs in terminal running `npm start`
+
+### Reset Development Environment
+
+```bash
+# Full reset
+rm -rf node_modules .expo dist
+npm install
+npm start -- --clear
 ```
 
 ## Contributing

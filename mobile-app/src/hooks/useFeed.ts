@@ -30,7 +30,7 @@ export function useFeed(feedType: 'feed' | 'trending' | 'videos' = 'feed'): UseF
   const fetchVideos = useCallback(async (page: number, refresh = false) => {
     try {
       setError(null);
-      
+
       let result;
       switch (feedType) {
         case 'trending':
@@ -46,11 +46,16 @@ export function useFeed(feedType: 'feed' | 'trending' | 'videos' = 'feed'): UseF
       }
 
       const newVideos = result.videos || [];
-      
+
       if (refresh) {
         setVideos(newVideos);
       } else {
-        setVideos(prev => [...prev, ...newVideos]);
+        setVideos(prev => {
+          // Deduplicate videos by video_id
+          const existingIds = new Set(prev.map(v => v.video_id));
+          const uniqueNew = newVideos.filter(v => !existingIds.has(v.video_id));
+          return [...prev, ...uniqueNew];
+        });
       }
 
       setHasMore(newVideos.length === 20 && page < result.pages);
@@ -58,6 +63,9 @@ export function useFeed(feedType: 'feed' | 'trending' | 'videos' = 'feed'): UseF
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load videos';
       setError(message);
+      if (refresh) {
+        setVideos([]);
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -67,6 +75,7 @@ export function useFeed(feedType: 'feed' | 'trending' | 'videos' = 'feed'): UseF
 
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
+    setCurrentPage(1);
     await fetchVideos(1, true);
   }, [fetchVideos]);
 
@@ -78,6 +87,9 @@ export function useFeed(feedType: 'feed' | 'trending' | 'videos' = 'feed'): UseF
 
   useEffect(() => {
     setIsLoading(true);
+    setVideos([]);
+    setCurrentPage(1);
+    setHasMore(true);
     fetchVideos(1, true);
   }, [feedType]); // eslint-disable-line react-hooks/exhaustive-deps
 

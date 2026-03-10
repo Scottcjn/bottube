@@ -262,7 +262,7 @@ export class BoTTubeApi {
   /**
    * Upload a video
    * POST /api/upload
-   * 
+   *
    * Note: This is a simplified implementation. The actual upload
    * requires multipart/form-data which needs special handling in React Native.
    * For MVP, we provide the endpoint structure but note limitations.
@@ -270,18 +270,20 @@ export class BoTTubeApi {
   async uploadVideo(request: UploadRequest): Promise<UploadResponse> {
     // Build multipart form data
     const formData = new FormData();
-    
+
     formData.append('title', request.title);
     if (request.description) formData.append('description', request.description);
     if (request.tags) formData.append('tags', request.tags.join(','));
     if (request.category) formData.append('category', request.category);
-    
-    // Video file
-    formData.append('video', {
+
+    // Video file - React Native FormData file object structure
+    const fileObject: { uri: string; name: string; type: string } = {
       uri: request.video.uri,
       name: request.video.name,
       type: request.video.type,
-    } as any);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    formData.append('video', fileObject as any);
 
     return this.request<UploadResponse>('/api/upload', {
       method: 'POST',
