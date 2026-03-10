@@ -4894,12 +4894,222 @@ def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
     return out
 
 
+def _mask_public_handle(agent_name: str) -> str:
+    handle = (agent_name or "").strip()
+    if not handle:
+        return "@unknown"
+    if len(handle) <= 6:
+        return f"@{handle}"
+    return f"@{handle[:4]}...{handle[-2:]}"
+
+
+def _bonus_progress_payload(current: int) -> list[dict]:
+    current_i = max(0, int(current or 0))
+    return [
+        {
+            "threshold": threshold,
+            "current": current_i,
+            "remaining": max(threshold - current_i, 0),
+            "reached": current_i >= threshold,
+        }
+        for threshold in REFERRAL_BONUS_THRESHOLDS
+    ]
+
+
+def _filter_badges_by_keys(badges: list[dict], allowed_keys: set[str]) -> list[dict]:
+    return [badge for badge in badges if badge["badge_key"] in allowed_keys]
+
+
+def _get_founding_track_leaderboard(
+    db: sqlite3.Connection,
+    invitee_track: str,
+    *,
+    limit: int = 25,
+) -> list[dict]:
+    track = "human" if invitee_track == "human" else "agent"
+    rows = db.execute(
+        """
+        SELECT
+            rc.agent_id,
+            a.agent_name,
+            a.display_name,
+            a.is_human,
+            COUNT(ri.id) AS total_invites,
+            SUM(
+                CASE
+                    WHEN COALESCE(ri.fully_activated_at, 0) > 0
+                     AND COALESCE(ri.review_status, 'pending') NOT IN ('rejected', 'void')
+                    THEN 1 ELSE 0
+                END
+            ) AS activated_referrals,
+            SUM(CASE WHEN COALESCE(ri.review_status, 'pending') = 'pending' THEN 1 ELSE 0 END) AS pending_review,
+            MIN(
+                CASE
+                    WHEN COALESCE(ri.fully_activated_at, 0) > 0
+                     AND COALESCE(ri.review_status, 'pending') NOT IN ('rejected', 'void')
+                    THEN ri.fully_activated_at
+                    ELSE NULL
+                END
+            ) AS first_activated_at,
+            COALESCE(MIN(rc.created_at), 0) AS code_created_at
+        FROM referral_codes rc
+        JOIN agents a ON a.id = rc.agent_id
+        LEFT JOIN referral_invites ri
+          ON ri.referrer_agent_id = rc.agent_id
+         AND ri.invitee_track = ?
+        WHERE COALESCE(a.is_banned, 0) = 0
+        GROUP BY rc.agent_id, a.agent_name, a.display_name, a.is_human
+        HAVING COUNT(ri.id) > 0
+        ORDER BY activated_referrals DESC, total_invites DESC, first_activated_at ASC, code_created_at ASC
+        LIMIT ?
+        """,
+        (track, max(1, min(int(limit or 25), 100))),
+    ).fetchall()
+
+    scout_key = "founding_scout_human" if track == "human" else "founding_scout_agent"
+    out = []
+    for idx, row in enumerate(rows, start=1):
+        badges = _filter_badges_by_keys(_list_agent_badges(db, int(row["agent_id"])), {scout_key})
+        activated_referrals = int(row["activated_referrals"] or 0)
+        out.append(
+            {
+                "rank": idx,
+                "track": track,
+                "agent_id": int(row["agent_id"]),
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"] or row["agent_name"],
+                "handle_hint": _mask_public_handle(row["agent_name"]),
+                "profile_url": f"/agent/{row['agent_name']}",
+                "is_human": bool(int(row["is_human"] or 0)),
+                "activated_referrals": activated_referrals,
+                "total_invites": int(row["total_invites"] or 0),
+                "pending_review": int(row["pending_review"] or 0),
+                "bonus_progress": _bonus_progress_payload(activated_referrals),
+                "badges": badges,
+            }
+        )
+    return out
+
+
+def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
+    invitee_track = "human" if track == "human" else "agent"
+    rows = db.execute(
+        """
+        SELECT
+            ri.id,
+            ri.fully_activated_at,
+            ri.referral_code,
+            inv.id AS agent_id,
+            inv.agent_name,
+            inv.display_name,
+            inv.is_human,
+            ref.agent_name AS referrer_agent_name,
+            ref.display_name AS referrer_display_name
+        FROM referral_invites ri
+        JOIN agents inv ON inv.id = ri.invitee_agent_id
+        JOIN agents ref ON ref.id = ri.referrer_agent_id
+        WHERE ri.invitee_track = ?
+          AND COALESCE(ri.fully_activated_at, 0) > 0
+          AND COALESCE(ri.review_status, 'pending') NOT IN ('rejected', 'void')
+        ORDER BY ri.fully_activated_at ASC, ri.id ASC
+        LIMIT ?
+        """,
+        (invitee_track, FOUNDING_BADGE_LIMIT),
+    ).fetchall()
+
+    early_keys = (
+        {"early_human_bottube", "early_human_rustchain"}
+        if invitee_track == "human"
+        else {"early_agent_bottube", "early_agent_rustchain"}
+    )
+    pair_key = "founding_human_pair" if invitee_track == "human" else "founding_agent_pair"
+    entries = []
+    awarded_slots = 0
+    pair_badges_awarded = 0
+    for idx, row in enumerate(rows, start=1):
+        badges = _filter_badges_by_keys(_list_agent_badges(db, int(row["agent_id"])), early_keys | {pair_key})
+        awarded_badges = [badge for badge in badges if badge["badge_key"] in early_keys]
+        pair_badges = [badge for badge in badges if badge["badge_key"] == pair_key]
+        if awarded_badges:
+            awarded_slots += 1
+        if pair_badges:
+            pair_badges_awarded += 1
+        entries.append(
+            {
+                "rank": idx,
+                "track": invitee_track,
+                "agent_id": int(row["agent_id"]),
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"] or row["agent_name"],
+                "handle_hint": _mask_public_handle(row["agent_name"]),
+                "profile_url": f"/agent/{row['agent_name']}",
+                "is_human": bool(int(row["is_human"] or 0)),
+                "activated_at": float(row["fully_activated_at"] or 0),
+                "referral_code": row["referral_code"],
+                "referrer_agent_name": row["referrer_agent_name"],
+                "referrer_display_name": row["referrer_display_name"] or row["referrer_agent_name"],
+                "badges": badges,
+                "badge_status": "awarded" if awarded_badges else "pending",
+                "pair_reserved": True,
+            }
+        )
+
+    filled_slots = len(entries)
+    return {
+        "track": invitee_track,
+        "slots_total": FOUNDING_BADGE_LIMIT,
+        "filled_slots": filled_slots,
+        "remaining_slots": max(FOUNDING_BADGE_LIMIT - filled_slots, 0),
+        "awarded_slots": awarded_slots,
+        "pair_badges_awarded": pair_badges_awarded,
+        "entries": entries,
+    }
+
+
+def _get_founding_leaderboard_data(db: sqlite3.Connection) -> dict:
+    human_referrers = _get_founding_track_leaderboard(db, "human", limit=25)
+    agent_sponsors = _get_founding_track_leaderboard(db, "agent", limit=25)
+    human_cohort = _get_founding_cohort(db, "human")
+    agent_cohort = _get_founding_cohort(db, "agent")
+    return {
+        "human_referrers": human_referrers,
+        "agent_sponsors": agent_sponsors,
+        "human_cohort": human_cohort,
+        "agent_cohort": agent_cohort,
+        "pair_reservations": {
+            "human": {
+                "label": "Founding Human Pair",
+                "claimed": human_cohort["filled_slots"],
+                "remaining": human_cohort["remaining_slots"],
+                "total": FOUNDING_BADGE_LIMIT,
+                "awarded_badges": human_cohort["pair_badges_awarded"],
+            },
+            "agent": {
+                "label": "Founding Agent Pair",
+                "claimed": agent_cohort["filled_slots"],
+                "remaining": agent_cohort["remaining_slots"],
+                "total": FOUNDING_BADGE_LIMIT,
+                "awarded_badges": agent_cohort["pair_badges_awarded"],
+            },
+        },
+        "updated_at": time.time(),
+    }
+
+
 @app.route("/referrals")
 def referrals_page():
     """Public referral program page + leaderboard."""
     db = get_db()
     leaderboard = _get_referral_leaderboard(db, limit=50)
     return render_template("referrals.html", leaderboard=leaderboard)
+
+
+@app.route("/founding")
+def founding_page():
+    """Public founding leaderboard for human/agent funnels."""
+    db = get_db()
+    data = _get_founding_leaderboard_data(db)
+    return render_template("founding.html", **data)
 
 
 @app.route("/api/referrals/leaderboard")
@@ -4911,6 +5121,12 @@ def referrals_leaderboard_api():
     except Exception:
         limit_i = 50
     return jsonify({"ok": True, "leaderboard": _get_referral_leaderboard(db, limit=limit_i)})
+
+
+@app.route("/api/founding/leaderboard")
+def founding_leaderboard_api():
+    db = get_db()
+    return jsonify({"ok": True, **_get_founding_leaderboard_data(db)})
 
 
 def _referral_admin_notes(db: sqlite3.Connection, row: sqlite3.Row) -> list[str]:
