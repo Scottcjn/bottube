@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-BoTTube Syndication Routes — Issue #312
+BoTTube Syndication Routes — Issue #312 / #360
 API endpoints for syndication tracking and outbound reporting.
 
 Endpoints:
     POST   /api/syndication/run/start       - Start a new syndication run
     POST   /api/syndication/run/<id>/end    - End a syndication run
     POST   /api/syndication/item            - Log a syndication item
-    PUT    /api/syndication/item/<id>       - Update item status
+    PUT    /api/syndication/item/<id>       - Update item status (owner/admin only)
     GET    /api/syndication/run/<id>        - Get run details
     GET    /api/syndication/runs            - List recent runs
     GET    /api/syndication/runs/active     - List active runs
-    GET    /api/syndication/report/daily    - Generate daily report
-    GET    /api/syndication/report/weekly   - Generate weekly report
-    GET    /api/syndication/report/outbound - Generate outbound network report
-    GET    /api/syndication/report/export   - Export report to JSON
+    GET    /api/syndication/report/daily    - Generate daily report (agent-scoped, admin network-wide)
+    GET    /api/syndication/report/weekly   - Generate weekly report (agent-scoped, admin network-wide)
+    GET    /api/syndication/report/outbound - Generate outbound network report (agent-scoped, admin network-wide)
+    GET    /api/syndication/report/export   - Export report to JSON (inline, no file write)
+
+Issue #360 Changes:
+    - PUT /api/syndication/item/<id>: Enforce owner/admin authorization
+    - Report endpoints: Agent-scoped by default, admin can access network-wide via ?scope=network
+    - /report/export: Returns JSON directly without writing server files
 """
 
 import json
@@ -54,6 +59,13 @@ def get_generator() -> ReportGenerator:
     return _generator
 
 
+def _is_admin_request() -> bool:
+    """Check if request has admin key authentication."""
+    from bottube_server import ADMIN_KEY
+    admin_key = request.headers.get("X-Admin-Key", "")
+    return bool(ADMIN_KEY and admin_key == ADMIN_KEY)
+
+
 def require_api_key(f):
     """Decorator to require API key authentication."""
     @wraps(f)
@@ -61,7 +73,7 @@ def require_api_key(f):
         api_key = request.headers.get("X-API-Key")
         if not api_key:
             return jsonify({"error": "Missing X-API-Key header"}), 401
-        
+
         # Validate API key against database
         from bottube_server import get_db
         db = get_db()
@@ -69,11 +81,12 @@ def require_api_key(f):
             "SELECT id, agent_name FROM agents WHERE api_key = ?",
             (api_key,)
         ).fetchone()
-        
+
         if not agent:
             return jsonify({"error": "Invalid API key"}), 403
-        
+
         request.agent = agent
+        request.is_admin = _is_admin_request()
         return f(*args, **kwargs)
     return decorated
 
@@ -231,24 +244,49 @@ def log_item():
 def update_item(item_id):
     """
     Update a syndication item status.
-    
+
+    Authorization: Only the owner of the item's run or an admin can update.
+
     Request JSON:
         status (str): New status (required)
         external_id (str): External platform content ID
         external_url (str): External platform content URL
         error_message (str): Error message if failed
-    
+
     Response:
         ok (bool): Success indicator
     """
     data = request.get_json() or {}
-    
+
     status = data.get("status")
     if not status or status not in ("success", "failed", "pending", "skipped"):
         return jsonify({"error": "Valid status is required"}), 400
-    
+
     try:
         tracker = get_tracker()
+        
+        # Get the item to verify ownership
+        conn = tracker._get_connection()
+        try:
+            item = conn.execute(
+                """
+                SELECT si.id, si.run_id, sr.agent_id
+                FROM syndication_items si
+                JOIN syndication_runs sr ON si.run_id = sr.id
+                WHERE si.id = ?
+                """,
+                (item_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+        
+        # Enforce owner/admin authorization (Issue #360)
+        if not request.is_admin and item["agent_id"] != request.agent["id"]:
+            return jsonify({"error": "Access denied: only item owner or admin can update"}), 403
+
         tracker.update_item_status(
             item_id=item_id,
             status=status,
@@ -256,7 +294,7 @@ def update_item(item_id):
             external_url=data.get("external_url"),
             error_message=data.get("error_message")
         )
-        
+
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -397,18 +435,29 @@ def list_active_runs():
 def daily_report():
     """
     Generate daily syndication report.
-    
+
     Query params:
         date (str): Date in YYYY-MM-DD format (default: today)
-    
+        scope (str): 'agent' (default) or 'network' (admin only)
+
     Response:
-        report (dict): Daily report data
+        report (dict): Daily report data (scoped to agent by default)
     """
     try:
         date_str = request.args.get("date")
-        generator = get_generator()
-        report = generator.generate_daily_report(date_str)
+        scope = request.args.get("scope", "agent")
         
+        # Network-wide scope requires admin
+        agent_id = None
+        if scope == "network":
+            if not request.is_admin:
+                return jsonify({"error": "Admin access required for network-wide scope"}), 403
+        else:
+            agent_id = request.agent["id"]
+        
+        generator = get_generator()
+        report = generator.generate_daily_report(date_str, agent_id=agent_id)
+
         return jsonify({"report": report})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -419,18 +468,29 @@ def daily_report():
 def weekly_report():
     """
     Generate weekly syndication report.
-    
+
     Query params:
         end_date (str): End date in YYYY-MM-DD format (default: today)
-    
+        scope (str): 'agent' (default) or 'network' (admin only)
+
     Response:
-        report (dict): Weekly report data
+        report (dict): Weekly report data (scoped to agent by default)
     """
     try:
         end_date = request.args.get("end_date")
-        generator = get_generator()
-        report = generator.generate_weekly_report(end_date)
+        scope = request.args.get("scope", "agent")
         
+        # Network-wide scope requires admin
+        agent_id = None
+        if scope == "network":
+            if not request.is_admin:
+                return jsonify({"error": "Admin access required for network-wide scope"}), 403
+        else:
+            agent_id = request.agent["id"]
+        
+        generator = get_generator()
+        report = generator.generate_weekly_report(end_date, agent_id=agent_id)
+
         return jsonify({"report": report})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -441,21 +501,35 @@ def weekly_report():
 def outbound_report():
     """
     Generate comprehensive outbound network report.
-    
+
     This is the primary report for issue #312, showing all outbound
     syndication activity across the unified network.
     
+    Issue #360: By default scoped to authenticated agent. Admin can
+    access network-wide data via ?scope=network.
+
     Query params:
         days (int): Number of days to include (default: 30)
-    
+        scope (str): 'agent' (default) or 'network' (admin only)
+
     Response:
-        report (dict): Outbound network report
+        report (dict): Outbound network report (scoped to agent by default)
     """
     try:
         days = int(request.args.get("days", 30))
-        generator = get_generator()
-        report = generator.generate_outbound_report(days=days)
+        scope = request.args.get("scope", "agent")
         
+        # Network-wide scope requires admin
+        agent_id = None
+        if scope == "network":
+            if not request.is_admin:
+                return jsonify({"error": "Admin access required for network-wide scope"}), 403
+        else:
+            agent_id = request.agent["id"]
+        
+        generator = get_generator()
+        report = generator.generate_outbound_report(days=days, agent_id=agent_id)
+
         return jsonify({"report": report})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -465,50 +539,52 @@ def outbound_report():
 @require_api_key
 def export_report():
     """
-    Export syndication report to JSON file.
+    Export syndication report to JSON.
     
+    Issue #360: Returns JSON directly without writing server files.
+
     Query params:
         type (str): Report type (daily, weekly, outbound) (default: outbound)
         days (int): Days for outbound report (default: 30)
         date (str): Date for daily report (YYYY-MM-DD)
         end_date (str): End date for weekly report (YYYY-MM-DD)
-    
+        scope (str): 'agent' (default) or 'network' (admin only)
+
     Response:
-        file_path (str): Path to generated file
-        report (dict): Report data
+        report (dict): Report data (returned inline, no file write)
     """
     try:
         report_type = request.args.get("type", "outbound")
-        generator = get_generator()
+        scope = request.args.get("scope", "agent")
         
-        kwargs = {}
+        # Network-wide scope requires admin
+        agent_id = None
+        if scope == "network":
+            if not request.is_admin:
+                return jsonify({"error": "Admin access required for network-wide scope"}), 403
+        else:
+            agent_id = request.agent["id"]
+
+        kwargs = {"agent_id": agent_id}
         if report_type == "daily":
             kwargs["date_str"] = request.args.get("date")
         elif report_type == "weekly":
             kwargs["end_date"] = request.args.get("end_date")
         else:
             kwargs["days"] = int(request.args.get("days", 30))
+
+        generator = get_generator()
         
-        # Generate output path in reports directory
-        reports_dir = Path(__file__).parent / "syndication_reports"
-        reports_dir.mkdir(exist_ok=True)
-        
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        output_path = str(reports_dir / f"syndication_{report_type}_{timestamp}.json")
-        
-        generator.export_report_json(
+        # Issue #360: Return report directly without writing file
+        report_data = generator.export_report_json(
             report_type=report_type,
-            output_path=output_path,
+            output_path=None,  # Return dict directly
             **kwargs
         )
-        
-        # Read back the report for response
-        with open(output_path) as f:
-            report_data = json.load(f)
-        
+
         return jsonify({
             "ok": True,
-            "file_path": output_path,
+            "scope": "network" if scope == "network" else "agent",
             "report": report_data
         })
     except Exception as e:

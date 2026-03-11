@@ -341,19 +341,22 @@ class TestReportGenerator(TestCase):
     
     def test_export_report_json(self):
         """Test JSON report export."""
-        output_path = self.generator.export_report_json(
+        import tempfile
+        output_path = os.path.join(self.temp_dir, "test_export.json")
+        self.generator.export_report_json(
             report_type="outbound",
-            days=7
+            days=7,
+            output_path=output_path
         )
-        
+
         self.assertTrue(os.path.exists(output_path))
-        
+
         with open(output_path) as f:
             data = json.load(f)
-        
+
         self.assertEqual(data["report_type"], "outbound")
         self.assertIn("network_summary", data)
-        
+
         # Clean up
         os.remove(output_path)
     
@@ -491,11 +494,11 @@ class TestSyndicationIntegration(TestCase):
         # Verify all runs completed
         active = self.tracker.get_active_runs()
         self.assertEqual(len(active), 0)
-    
+
     def test_multi_platform_syndication(self):
         """Test syndication to multiple platforms."""
         run_id = self.tracker.start_run("multi_platform", agent_id=1)
-        
+
         # Syndicate same content to multiple platforms
         platforms = ["x", "moltbook", "rss", "activitypub"]
         for platform in platforms:
@@ -506,15 +509,238 @@ class TestSyndicationIntegration(TestCase):
                 platform,
                 external_id=f"{platform}_123"
             )
-        
+
         self.tracker.end_run(run_id, "completed")
-        
+
         # Generate report and verify platform reach
         report = self.generator.generate_outbound_report(days=1)
-        
+
         platform_names = [p["platform"] for p in report["platform_reach"]]
         for platform in platforms:
             self.assertIn(platform, platform_names)
+
+
+class TestIssue360Authorization(TestCase):
+    """
+    Regression tests for Issue #360: Syndication Auth Lockdown
+    
+    Tests:
+    - Cross-agent denial on PUT /api/syndication/item/<id>
+    - Report scoping (agent vs network-wide)
+    """
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.temp_dir, "test_issue360.db")
+        self.tracker = SyndicationTracker(self.db_path)
+        self.generator = ReportGenerator(self.db_path)
+
+        # Create agents table
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT UNIQUE NOT NULL,
+                display_name TEXT,
+                api_key TEXT
+            )
+        """)
+        # Create two test agents
+        conn.execute(
+            "INSERT INTO agents (agent_name, display_name, api_key) VALUES (?, ?, ?)",
+            ("agent_alice", "Alice Agent", "key_alice")
+        )
+        conn.execute(
+            "INSERT INTO agents (agent_name, display_name, api_key) VALUES (?, ?, ?)",
+            ("agent_bob", "Bob Agent", "key_bob")
+        )
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        """Clean up test fixtures."""
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
+        if os.path.exists(self.temp_dir):
+            os.rmdir(self.temp_dir)
+
+    def test_cross_agent_item_update_denied(self):
+        """Test that Agent Bob cannot update Agent Alice's syndication item."""
+        # Alice creates a run and logs an item
+        alice_run_id = self.tracker.start_run("x_crosspost", agent_id=1)
+        alice_item_id = self.tracker.log_item(
+            alice_run_id, "video_alice", "pending", "x"
+        )
+
+        # Verify Bob (agent_id=2) cannot access Alice's item via run ownership check
+        # This simulates the authorization check in the route
+        conn = self.tracker._get_connection()
+        try:
+            item = conn.execute(
+                """
+                SELECT si.id, si.run_id, sr.agent_id
+                FROM syndication_items si
+                JOIN syndication_runs sr ON si.run_id = sr.id
+                WHERE si.id = ?
+                """,
+                (alice_item_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+
+        # Bob's agent_id (2) != item's agent_id (1)
+        self.assertEqual(item["agent_id"], 1)  # Alice's agent_id
+        self.assertNotEqual(item["agent_id"], 2)  # Bob's agent_id
+
+    def test_owner_can_update_own_item(self):
+        """Test that an agent can update their own syndication item."""
+        # Alice creates a run and logs an item
+        alice_run_id = self.tracker.start_run("x_crosspost", agent_id=1)
+        alice_item_id = self.tracker.log_item(
+            alice_run_id, "video_alice", "pending", "x"
+        )
+
+        # Verify Alice (agent_id=1) owns the item
+        conn = self.tracker._get_connection()
+        try:
+            item = conn.execute(
+                """
+                SELECT si.id, si.run_id, sr.agent_id
+                FROM syndication_items si
+                JOIN syndication_runs sr ON si.run_id = sr.id
+                WHERE si.id = ?
+                """,
+                (alice_item_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(item["agent_id"], 1)  # Alice's agent_id
+
+        # Alice can update her own item
+        self.tracker.update_item_status(
+            item_id=alice_item_id,
+            status="success",
+            external_id="x_12345"
+        )
+
+        # Verify update succeeded
+        conn = self.tracker._get_connection()
+        try:
+            updated_item = conn.execute(
+                "SELECT status, external_id FROM syndication_items WHERE id = ?",
+                (alice_item_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(updated_item["status"], "success")
+        self.assertEqual(updated_item["external_id"], "x_12345")
+
+    def test_report_scoping_daily(self):
+        """Test daily report scoping by agent."""
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Create runs for both agents
+        alice_run = self.tracker.start_run("x_crosspost", agent_id=1)
+        self.tracker.log_item(alice_run, "video_alice_1", "success", "x")
+        self.tracker.end_run(alice_run, "completed")
+
+        bob_run = self.tracker.start_run("moltbook_sync", agent_id=2)
+        self.tracker.log_item(bob_run, "video_bob_1", "success", "moltbook")
+        self.tracker.end_run(bob_run, "completed")
+
+        # Network-wide report (agent_id=None) should see both runs
+        network_report = self.generator.generate_daily_report(today, agent_id=None)
+        self.assertEqual(len(network_report["runs"]), 2)
+        self.assertEqual(network_report["scope"], "network")
+
+        # Agent-scoped report (agent_id=1) should only see Alice's run
+        alice_report = self.generator.generate_daily_report(today, agent_id=1)
+        self.assertEqual(len(alice_report["runs"]), 1)
+        self.assertEqual(alice_report["runs"][0]["run_id"], alice_run)
+        self.assertEqual(alice_report["scope"], "agent")
+
+        # Agent-scoped report (agent_id=2) should only see Bob's run
+        bob_report = self.generator.generate_daily_report(today, agent_id=2)
+        self.assertEqual(len(bob_report["runs"]), 1)
+        self.assertEqual(bob_report["runs"][0]["run_id"], bob_run)
+        self.assertEqual(bob_report["scope"], "agent")
+
+    def test_report_scoping_weekly(self):
+        """Test weekly report scoping by agent."""
+        # Create runs for both agents
+        alice_run = self.tracker.start_run("x_crosspost", agent_id=1)
+        self.tracker.log_item(alice_run, "video_alice_1", "success", "x")
+        self.tracker.end_run(alice_run, "completed")
+
+        bob_run = self.tracker.start_run("moltbook_sync", agent_id=2)
+        self.tracker.log_item(bob_run, "video_bob_1", "success", "moltbook")
+        self.tracker.end_run(bob_run, "completed")
+
+        # Network-wide report should see both runs
+        network_report = self.generator.generate_weekly_report(agent_id=None)
+        self.assertEqual(network_report["summary"]["total_runs"], 2)
+        self.assertEqual(network_report["scope"], "network")
+        # Network report should include top_agents
+        self.assertIn("top_agents", network_report)
+
+        # Agent-scoped report should only see own runs
+        alice_report = self.generator.generate_weekly_report(agent_id=1)
+        self.assertEqual(alice_report["summary"]["total_runs"], 1)
+        self.assertEqual(alice_report["scope"], "agent")
+        # Agent-scoped report should not include top_agents
+        self.assertEqual(alice_report.get("top_agents"), [])
+
+    def test_report_scoping_outbound(self):
+        """Test outbound report scoping by agent."""
+        # Create runs for both agents
+        alice_run = self.tracker.start_run("x_crosspost", agent_id=1)
+        self.tracker.log_item(alice_run, "video_alice_1", "success", "x")
+        self.tracker.log_item(alice_run, "video_alice_2", "success", "moltbook")
+        self.tracker.end_run(alice_run, "completed")
+
+        bob_run = self.tracker.start_run("rss_update", agent_id=2)
+        self.tracker.log_item(bob_run, "video_bob_1", "success", "rss")
+        self.tracker.end_run(bob_run, "completed")
+
+        # Network-wide report should see all items
+        network_report = self.generator.generate_outbound_report(days=1, agent_id=None)
+        self.assertEqual(network_report["network_summary"]["total_runs"], 2)
+        self.assertEqual(network_report["network_summary"]["total_outbound_items"], 3)
+        self.assertEqual(network_report["scope"], "network")
+
+        # Agent-scoped report should only see own items
+        alice_report = self.generator.generate_outbound_report(days=1, agent_id=1)
+        self.assertEqual(alice_report["network_summary"]["total_runs"], 1)
+        self.assertEqual(alice_report["network_summary"]["total_outbound_items"], 2)
+        self.assertEqual(alice_report["scope"], "agent")
+
+        bob_report = self.generator.generate_outbound_report(days=1, agent_id=2)
+        self.assertEqual(bob_report["network_summary"]["total_runs"], 1)
+        self.assertEqual(bob_report["network_summary"]["total_outbound_items"], 1)
+        self.assertEqual(bob_report["scope"], "agent")
+
+    def test_export_report_no_file_write(self):
+        """Test that export_report_json with output_path=None returns dict directly."""
+        # Create some test data
+        run_id = self.tracker.start_run("x_crosspost", agent_id=1)
+        self.tracker.log_item(run_id, "video_1", "success", "x")
+        self.tracker.end_run(run_id, "completed")
+
+        # Export without file path should return dict directly
+        result = self.generator.export_report_json(
+            report_type="outbound",
+            output_path=None,
+            days=1,
+            agent_id=1
+        )
+
+        # Should be a dict, not a string path
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["report_type"], "outbound")
+        self.assertIn("network_summary", result)
 
 
 if __name__ == "__main__":

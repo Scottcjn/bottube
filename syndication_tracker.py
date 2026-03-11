@@ -553,39 +553,45 @@ class ReportGenerator:
     
     def generate_daily_report(
         self,
-        date_str: Optional[str] = None
+        date_str: Optional[str] = None,
+        agent_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Generate a daily syndication report.
-        
+
         Args:
             date_str: Date in YYYY-MM-DD format (default: today)
-            
+            agent_id: Optional agent ID to scope report (default: all agents)
+
         Returns:
             Report dictionary with stats and details
         """
         if date_str is None:
             date_str = datetime.now().strftime("%Y-%m-%d")
-        
+
         summary = self.tracker.get_daily_summary(date_str)
-        
+
         conn = self._get_connection()
         try:
             # Get detailed run list for the day
             start_ts = datetime.strptime(date_str, "%Y-%m-%d").timestamp()
             end_ts = start_ts + 86400
-            
+
+            # Build query with optional agent scoping
+            agent_filter = "AND sr.agent_id = ?" if agent_id is not None else ""
+            agent_params = (agent_id,) if agent_id is not None else ()
+
             runs = conn.execute(
-                """
+                f"""
                 SELECT sr.*, a.agent_name
                 FROM syndication_runs sr
                 LEFT JOIN agents a ON sr.agent_id = a.id
-                WHERE sr.started_at >= ? AND sr.started_at < ?
+                WHERE sr.started_at >= ? AND sr.started_at < ? {agent_filter}
                 ORDER BY sr.started_at
                 """,
-                (start_ts, end_ts)
+                (start_ts, end_ts) + agent_params
             ).fetchall()
-            
+
             run_details = []
             for run in runs:
                 items = conn.execute(
@@ -614,11 +620,12 @@ class ReportGenerator:
                         for item in items
                     ]
                 })
-            
+
             return {
                 "report_type": "daily",
                 "date": date_str,
                 "generated_at": time.time(),
+                "scope": "agent" if agent_id is not None else "network",
                 "summary": summary or {
                     "total_runs": 0,
                     "completed_runs": 0,
@@ -635,88 +642,97 @@ class ReportGenerator:
     
     def generate_weekly_report(
         self,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
+        agent_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Generate a weekly syndication report (7 days).
-        
+
         Args:
             end_date: End date in YYYY-MM-DD format (default: today)
-            
+            agent_id: Optional agent ID to scope report (default: all agents)
+
         Returns:
             Report dictionary with aggregated stats
         """
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
-        
+
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         start_dt = end_dt - timedelta(days=6)
         start_date = start_dt.strftime("%Y-%m-%d")
-        
+
         conn = self._get_connection()
         try:
             start_ts = start_dt.timestamp()
             end_ts = end_dt.timestamp() + 86400
-            
+
+            # Build agent filter for queries
+            agent_filter = "AND sr.agent_id = ?" if agent_id is not None else ""
+            agent_params = (agent_id,) if agent_id is not None else ()
+
             # Overall stats
             stats = conn.execute(
-                """
-                SELECT 
+                f"""
+                SELECT
                     COUNT(*) as total_runs,
-                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_runs,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_runs,
-                    SUM(total_items) as total_items,
-                    SUM(successful_items) as successful_items,
-                    SUM(failed_items) as failed_items
-                FROM syndication_runs
-                WHERE started_at >= ? AND started_at < ?
+                    SUM(CASE WHEN sr.status = 'completed' THEN 1 ELSE 0 END) as completed_runs,
+                    SUM(CASE WHEN sr.status = 'failed' THEN 1 ELSE 0 END) as failed_runs,
+                    SUM(sr.total_items) as total_items,
+                    SUM(sr.successful_items) as successful_items,
+                    SUM(sr.failed_items) as failed_items
+                FROM syndication_runs sr
+                WHERE sr.started_at >= ? AND sr.started_at < ? {agent_filter}
                 """,
-                (start_ts, end_ts)
+                (start_ts, end_ts) + agent_params
             ).fetchone()
-            
+
             # Platform breakdown
             platform_stats = conn.execute(
-                """
+                f"""
                 SELECT si.target_platform,
                        COUNT(*) as count,
                        SUM(CASE WHEN si.status = 'success' THEN 1 ELSE 0 END) as successful
                 FROM syndication_items si
                 JOIN syndication_runs sr ON si.run_id = sr.id
-                WHERE sr.started_at >= ? AND sr.started_at < ?
+                WHERE sr.started_at >= ? AND sr.started_at < ? {agent_filter}
                 GROUP BY si.target_platform
                 """,
-                (start_ts, end_ts)
+                (start_ts, end_ts) + agent_params
             ).fetchall()
-            
+
             # Run type breakdown
             type_stats = conn.execute(
-                """
-                SELECT run_type,
+                f"""
+                SELECT sr.run_type,
                        COUNT(*) as count,
-                       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
-                FROM syndication_runs
-                WHERE started_at >= ? AND started_at < ?
-                GROUP BY run_type
-                """,
-                (start_ts, end_ts)
-            ).fetchall()
-            
-            # Top agents by syndication activity
-            agent_stats = conn.execute(
-                """
-                SELECT a.agent_name, a.display_name,
-                       COUNT(sr.id) as run_count,
-                       SUM(sr.successful_items) as total_success
+                       SUM(CASE WHEN sr.status = 'completed' THEN 1 ELSE 0 END) as completed
                 FROM syndication_runs sr
-                JOIN agents a ON sr.agent_id = a.id
-                WHERE sr.started_at >= ? AND sr.started_at < ?
-                GROUP BY sr.agent_id
-                ORDER BY total_success DESC
-                LIMIT 10
+                WHERE sr.started_at >= ? AND sr.started_at < ? {agent_filter}
+                GROUP BY sr.run_type
                 """,
-                (start_ts, end_ts)
+                (start_ts, end_ts) + agent_params
             ).fetchall()
-            
+
+            # Top agents by syndication activity (only show if network-wide)
+            if agent_id is None:
+                agent_stats = conn.execute(
+                    """
+                    SELECT a.agent_name, a.display_name,
+                           COUNT(sr.id) as run_count,
+                           SUM(sr.successful_items) as total_success
+                    FROM syndication_runs sr
+                    JOIN agents a ON sr.agent_id = a.id
+                    WHERE sr.started_at >= ? AND sr.started_at < ?
+                    GROUP BY sr.agent_id
+                    ORDER BY total_success DESC
+                    LIMIT 10
+                    """,
+                    (start_ts, end_ts)
+                ).fetchall()
+            else:
+                agent_stats = []
+
             # Daily breakdown
             daily_breakdown = conn.execute(
                 """
@@ -727,12 +743,13 @@ class ReportGenerator:
                 """,
                 (start_date, end_date)
             ).fetchall()
-            
+
             return {
                 "report_type": "weekly",
                 "start_date": start_date,
                 "end_date": end_date,
                 "generated_at": time.time(),
+                "scope": "agent" if agent_id is not None else "network",
                 "summary": {
                     "total_runs": stats["total_runs"] or 0,
                     "completed_runs": stats["completed_runs"] or 0,
@@ -782,119 +799,126 @@ class ReportGenerator:
     
     def generate_outbound_report(
         self,
-        days: int = 30
+        days: int = 30,
+        agent_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Generate comprehensive outbound report for unified network.
-        
+
         This is the primary report for issue #312, showing all outbound
         syndication activity across the network.
-        
+
         Args:
             days: Number of days to include (default: 30)
-            
+            agent_id: Optional agent ID to scope report (default: all agents)
+
         Returns:
             Comprehensive outbound report
         """
         cutoff = time.time() - (days * 86400)
-        
+
         conn = self._get_connection()
         try:
+            # Build agent filter for queries
+            agent_filter = "AND sr.agent_id = ?" if agent_id is not None else ""
+            agent_params = (agent_id,) if agent_id is not None else ()
+
             # Overall network stats
             network_stats = conn.execute(
-                """
-                SELECT 
+                f"""
+                SELECT
                     COUNT(DISTINCT sr.id) as total_runs,
                     COUNT(DISTINCT sr.agent_id) as active_agents,
                     SUM(sr.successful_items) as total_outbound,
                     SUM(sr.failed_items) as total_failures
                 FROM syndication_runs sr
-                WHERE sr.started_at >= ?
+                WHERE sr.started_at >= ? {agent_filter}
                 """,
-                (cutoff,)
+                (cutoff,) + agent_params
             ).fetchone()
-            
+
             # Platform reach
             platform_reach = conn.execute(
-                """
+                f"""
                 SELECT si.target_platform,
                        COUNT(DISTINCT si.content_id) as unique_content,
                        COUNT(*) as total_syndications,
                        SUM(CASE WHEN si.status = 'success' THEN 1 ELSE 0 END) as successful
                 FROM syndication_items si
                 JOIN syndication_runs sr ON si.run_id = sr.id
-                WHERE sr.started_at >= ?
+                WHERE sr.started_at >= ? {agent_filter}
                 GROUP BY si.target_platform
                 ORDER BY total_syndications DESC
                 """,
-                (cutoff,)
+                (cutoff,) + agent_params
             ).fetchall()
-            
+
             # Content distribution (top syndicated content)
             top_content = conn.execute(
-                """
+                f"""
                 SELECT content_id,
                        COUNT(DISTINCT target_platform) as platform_count,
                        COUNT(*) as total_syndications,
                        MAX(external_url) as latest_url
                 FROM syndication_items si
                 JOIN syndication_runs sr ON si.run_id = sr.id
-                WHERE sr.started_at >= ? AND si.status = 'success'
+                WHERE sr.started_at >= ? AND si.status = 'success' {agent_filter}
                 GROUP BY content_id
                 ORDER BY platform_count DESC, total_syndications DESC
                 LIMIT 20
                 """,
-                (cutoff,)
+                (cutoff,) + agent_params
             ).fetchall()
-            
+
             # Success rate trend (by day)
             trend = conn.execute(
-                """
-                SELECT DATE(datetime(started_at, 'unixepoch')) as date,
-                       SUM(successful_items) as successful,
-                       SUM(failed_items) as failed,
+                f"""
+                SELECT DATE(datetime(sr.started_at, 'unixepoch')) as date,
+                       SUM(sr.successful_items) as successful,
+                       SUM(sr.failed_items) as failed,
                        ROUND(
-                           100.0 * SUM(successful_items) / 
-                           NULLIF(SUM(total_items), 0), 2
+                           100.0 * SUM(sr.successful_items) /
+                           NULLIF(SUM(sr.total_items), 0), 2
                        ) as success_rate
-                FROM syndication_runs
-                WHERE started_at >= ?
-                GROUP BY DATE(datetime(started_at, 'unixepoch'))
+                FROM syndication_runs sr
+                WHERE sr.started_at >= ? {agent_filter}
+                GROUP BY DATE(datetime(sr.started_at, 'unixepoch'))
                 ORDER BY date DESC
                 LIMIT 30
                 """,
-                (cutoff,)
+                (cutoff,) + agent_params
             ).fetchall()
-            
+
             # Recent failed items for investigation
             recent_failures = conn.execute(
-                """
+                f"""
                 SELECT si.content_id, si.target_platform, si.error_message,
                        sr.run_type, a.agent_name, si.created_at
                 FROM syndication_items si
                 JOIN syndication_runs sr ON si.run_id = sr.id
                 LEFT JOIN agents a ON sr.agent_id = a.id
-                WHERE si.status = 'failed' AND si.created_at >= ?
+                WHERE si.status = 'failed' AND si.created_at >= ? {agent_filter}
                 ORDER BY si.created_at DESC
                 LIMIT 50
                 """,
-                (cutoff,)
+                (cutoff,) + agent_params
             ).fetchall()
-            
+
             return {
                 "report_type": "outbound",
                 "title": "Unified Network Outbound Syndication Report",
                 "period_days": days,
                 "generated_at": time.time(),
                 "generated_at_iso": datetime.now().isoformat(),
+                "scope": "agent" if agent_id is not None else "network",
                 "network_summary": {
                     "total_runs": network_stats["total_runs"] or 0,
                     "active_agents": network_stats["active_agents"] or 0,
                     "total_outbound_items": network_stats["total_outbound"] or 0,
                     "total_failures": network_stats["total_failures"] or 0,
                     "overall_success_rate": (
-                        (network_stats["total_outbound"] or 0) / 
-                        ((network_stats["total_outbound"] or 0) + 
+                        (network_stats["total_outbound"] or 0) /
+                        ((network_stats["total_outbound"] or 0) +
                          (network_stats["total_failures"] or 1))
                     ) * 100
                 },
@@ -949,17 +973,18 @@ class ReportGenerator:
         report_type: str = "outbound",
         output_path: Optional[str] = None,
         **kwargs
-    ) -> str:
+    ):
         """
         Export a report to JSON file.
-        
+
         Args:
             report_type: Type of report (daily, weekly, outbound)
-            output_path: Output file path (default: auto-generated)
-            **kwargs: Arguments passed to report generator
-            
+            output_path: Output file path (default: auto-generated).
+                         If None, returns the report dict directly (Issue #360).
+            **kwargs: Arguments passed to report generator (supports agent_id for scoping)
+
         Returns:
-            Path to generated file
+            Path to generated file, or report dict if output_path is None
         """
         if report_type == "daily":
             report = self.generate_daily_report(**kwargs)
@@ -967,12 +992,12 @@ class ReportGenerator:
             report = self.generate_weekly_report(**kwargs)
         else:
             report = self.generate_outbound_report(**kwargs)
-        
+
         if output_path is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = f"syndication_report_{report_type}_{timestamp}.json"
-        
+            # Issue #360: Return report directly without writing file
+            return report
+
         with open(output_path, "w") as f:
             json.dump(report, f, indent=2, default=str)
-        
+
         return output_path
