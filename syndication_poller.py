@@ -1,10 +1,63 @@
 #!/usr/bin/env python3
 """
-BoTTube syndication queue poller.
+BoTTube Syndication Queue Poller (Issue #310)
+
+Daemon service that polls for new video uploads and manages the syndication
+queue. Integrates with adapter interface, configuration management, and
+scheduling controls.
+
+Features:
+    - Polls bottube_server for new uploads at configurable intervals
+    - Automatically queues new videos for syndication to configured platforms
+    - Processes pending queue items with backoff and retry logic
+    - Graceful shutdown on SIGTERM/SIGINT
+    - Configuration via YAML/JSON file with environment overrides
+    - Cron-based scheduling with quiet hours support
+    - Rate limiting per platform and global
+    - Adapter-based platform integration
+
+Usage:
+    python3 syndication_poller.py
+
+Configuration:
+    Create syndication.yaml in project root or BOTTUBE_BASE_DIR:
+    
+    enabled: true
+    poll_interval: 60
+    platforms:
+      moltbook:
+        enabled: true
+        priority: 10
+        rate_limit: 30
+        config:
+          base_url: https://moltbook.com
+          api_key: ${MOLTBOOK_API_KEY}
+      twitter:
+        enabled: true
+        priority: 5
+        rate_limit: 60
+        config:
+          api_key: ${TWITTER_API_KEY}
+    schedule:
+      enabled: true
+      cron_expression: "*/5 * * * *"
+      quiet_hours_start: "22:00"
+      quiet_hours_end: "06:00"
+
+Environment Variables:
+    BOTTUBE_URL: Base URL for BoTTube API (default: http://localhost:8097)
+    BOTTUBE_API_KEY: API key for authentication (required)
+    BOTTUBE_DB_PATH: Path to SQLite database (default: ./bottube.db)
+    BOTTUBE_SYNDICATION_CONFIG: Path to config file (optional)
+    BOTTUBE_SYNDICATION_*: Override config values (see syndication_config.py)
+
+Systemd Service:
+    Copy syndication_poller.service to /etc/systemd/system/
+    systemctl enable syndication_poller
+    systemctl start syndication_poller
 """
 
-from __future__ import annotations
-
+import json
 import logging
 import os
 import random
@@ -12,27 +65,42 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
 
 import requests
 
+# Add project root to path
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from syndication_adapter import SyndicationPayload, get_adapter
+from syndication_queue import QueueState, SyndicationQueue, get_queue
 from syndication_config import (
-    AgentOverrideConfig,
-    PlatformConfig,
-    PlatformOverrideConfig,
     SyndicationConfig,
     SyndicationConfigManager,
+    PlatformConfig,
+    load_config,
+    get_config,
 )
-from syndication_queue import SyndicationQueue
-from syndication_scheduler import create_batch_processor, create_scheduler
+from syndication_scheduler import (
+    SyndicationScheduler,
+    BatchProcessor,
+    create_scheduler,
+    create_batch_processor,
+)
+from syndication_adapter import (
+    SyndicationAdapter,
+    SyndicationPayload,
+    get_adapter,
+    list_adapters,
+)
 
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 BOTTUBE_URL = os.environ.get("BOTTUBE_URL", "http://localhost:8097")
 BOTTUBE_API_KEY = os.environ.get("BOTTUBE_API_KEY", "")
@@ -41,26 +109,37 @@ BOTTUBE_DB_PATH = os.environ.get(
     os.environ.get("BOTTUBE_BASE_DIR", str(ROOT)) + "/bottube.db",
 )
 CONFIG_FILE = os.environ.get("BOTTUBE_SYNDICATION_CONFIG", "")
-LOG_LEVEL = os.environ.get(
-    "BOTTUBE_SYNDICATION_LOG_LEVEL",
-    os.environ.get("LOG_LEVEL", "INFO"),
-)
+LOG_LEVEL = os.environ.get("BOTTUBE_SYNDICATION_LOG_LEVEL", "INFO")
 
+# Backoff configuration
 INITIAL_BACKOFF_SEC = 5
-MAX_BACKOFF_SEC = 300
+MAX_BACKOFF_SEC = 300  # 5 minutes
 BACKOFF_MULTIPLIER = 2.0
 JITTER_FACTOR = 0.1
 
+# Processing timeout
+ITEM_PROCESSING_TIMEOUT_SEC = 600  # 10 minutes max per item
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
+    level=getattr(logging, LOG_LEVEL),
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("bottube-syndication-poller")
 
 
+# ---------------------------------------------------------------------------
+# Data Classes
+# ---------------------------------------------------------------------------
+
 @dataclass
 class VideoInfo:
+    """Information about a video from the API."""
     video_id: str
     title: str
     agent_id: int
@@ -68,8 +147,23 @@ class VideoInfo:
     created_at: float
 
 
+# ---------------------------------------------------------------------------
+# Syndication Poller
+# ---------------------------------------------------------------------------
+
 class SyndicationPoller:
-    """Poll BoTTube for new videos and push them through the syndication queue."""
+    """
+    Polls for new uploads and manages the syndication queue.
+
+    Integrates with:
+        - SyndicationConfigManager: Configuration management
+        - SyndicationScheduler: Cron scheduling and rate limiting
+        - SyndicationAdapter: Platform-specific syndication
+        - SyndicationQueue: Queue state management
+
+    Runs as a daemon, polling at regular intervals and processing
+    pending queue items.
+    """
 
     def __init__(
         self,
@@ -81,28 +175,65 @@ class SyndicationPoller:
         self.bottube_url = bottube_url.rstrip("/")
         self.api_key = api_key
         self.db_path = db_path
-        self.config_file = config_file or CONFIG_FILE or None
-        self.config_manager = SyndicationConfigManager(
-            config_dir=os.environ.get("BOTTUBE_BASE_DIR", str(ROOT))
-        )
-
+        
+        # Load configuration
+        config_path = config_file or CONFIG_FILE
+        self.config_manager = SyndicationConfigManager()
+        if config_path:
+            self.config = self.config_manager.load(config_path)
+        else:
+            self.config = self.config_manager.load()
+        
+        # Initialize scheduler and batch processor
+        self.scheduler = create_scheduler(self.config)
+        self.batch_processor = create_batch_processor(self.config)
+        
+        # Initialize queue
         self.queue = SyndicationQueue(db_path)
-        self.adapters: Dict[str, Any] = {}
+        
+        # Initialize adapters for enabled platforms
+        self.adapters: Dict[str, SyndicationAdapter] = {}
+        self._init_adapters()
+        
         self.running = False
         self.known_video_ids: set[str] = set()
-        self.last_poll_time = 0.0
-        self.backoff_until = 0.0
-        self.consecutive_failures = 0
-        self.config_reload_interval = 300
-        self._last_config_reload = time.time()
-
-        initial_config = self.config_manager.load(self.config_file)
-        self._apply_runtime_config(initial_config)
-
+        self.last_poll_time: float = 0.0
+        self.backoff_until: float = 0.0
+        self.consecutive_failures: int = 0
+        
+        # Track items being processed to avoid double-processing
+        self.processing_items: set[int] = set()
+        
+        # Setup signal handlers
         signal.signal(signal.SIGTERM, self._shutdown_handler)
         signal.signal(signal.SIGINT, self._shutdown_handler)
+        
+        log.info("Initialized poller with platforms: %s",
+                ", ".join(self.config.get_enabled_platforms()))
 
-    def _shutdown_handler(self, signum, frame) -> None:  # pragma: no cover
+    def _init_adapters(self):
+        """Initialize adapters for enabled platforms."""
+        for platform_name in self.config.get_enabled_platforms():
+            platform_config = self.config.get_platform(platform_name)
+            if platform_config:
+                try:
+                    adapter_config = platform_config.config.copy()
+                    # Inject common settings
+                    adapter_config.setdefault("timeout", platform_config.timeout)
+                    
+                    adapter = get_adapter(platform_name, adapter_config)
+                    if adapter.validate_config():
+                        self.adapters[platform_name] = adapter
+                        log.info("Initialized adapter for %s", platform_name)
+                    else:
+                        log.warning("Adapter config validation failed for %s",
+                                  platform_name)
+                except Exception as e:
+                    log.error("Failed to initialize adapter for %s: %s",
+                            platform_name, e)
+
+    def _shutdown_handler(self, signum, frame):
+        """Handle shutdown signals gracefully."""
         log.info("Shutdown signal received (%s), stopping...", signum)
         self.running = False
 
@@ -114,173 +245,79 @@ class SyndicationPoller:
         data: Optional[dict] = None,
         timeout: int = 30,
     ) -> Optional[requests.Response]:
+        """Make an authenticated API request."""
         url = f"{self.bottube_url}{endpoint}"
-        headers = {"X-API-Key": self.api_key} if self.api_key else {}
+        headers = {"X-API-Key": self.api_key}
+        
         try:
             if method == "GET":
                 return requests.get(url, headers=headers, params=params, timeout=timeout)
-            if method == "POST":
-                return requests.post(url, headers=headers, json=data, timeout=timeout)
-        except requests.RequestException as exc:
-            log.warning("API request failed: %s", exc)
+            elif method == "POST":
+                return requests.post(
+                    url, headers=headers, json=data, timeout=timeout
+                )
+        except requests.RequestException as e:
+            log.warning("API request failed: %s", e)
+        
         return None
 
-    def _apply_runtime_config(self, config: SyndicationConfig) -> None:
-        self.config = config
-        log.setLevel(getattr(logging, config.log_level.upper(), logging.INFO))
-        self.scheduler = create_scheduler(config)
-        self.batch_processor = create_batch_processor(config)
-        self._rebuild_adapters()
-
-    def _rebuild_adapters(self) -> None:
-        for adapter in self.adapters.values():
-            try:
-                adapter.close()
-            except Exception:
-                pass
-        self.adapters = {}
-        for platform_name in self.config.get_enabled_platforms():
-            platform_config = self.config.get_platform(platform_name)
-            if platform_config is None:
-                continue
-            try:
-                adapter_config = dict(platform_config.config)
-                adapter_config.setdefault("timeout", platform_config.timeout)
-                adapter = get_adapter(platform_name, adapter_config)
-            except ValueError:
-                continue
-            if adapter.validate_config():
-                self.adapters[platform_name] = adapter
-
-    def reload_runtime_config(self) -> bool:
-        config = self.config_manager.reload()
-        if config is self.config:
-            return False
-        self._apply_runtime_config(config)
-        return True
-
-    def _merge_platform_config(
-        self,
-        base: PlatformConfig,
-        override: Optional[PlatformOverrideConfig],
-    ) -> PlatformConfig:
-        merged = PlatformConfig(
-            enabled=base.enabled,
-            priority=base.priority,
-            rate_limit=base.rate_limit,
-            rate_limit_window=base.rate_limit_window,
-            retry_count=base.retry_count,
-            retry_backoff=base.retry_backoff,
-            timeout=base.timeout,
-            config=dict(base.config),
-        )
-        if override is None:
-            return merged
-        if override.enabled is not None:
-            merged.enabled = bool(override.enabled)
-        if override.priority is not None:
-            merged.priority = override.priority
-        if override.rate_limit is not None:
-            merged.rate_limit = override.rate_limit
-        if override.rate_limit_window is not None:
-            merged.rate_limit_window = override.rate_limit_window
-        if override.retry_count is not None:
-            merged.retry_count = override.retry_count
-        if override.retry_backoff is not None:
-            merged.retry_backoff = override.retry_backoff
-        if override.timeout is not None:
-            merged.timeout = override.timeout
-        if override.config:
-            merged.config.update(override.config)
-        return merged
-
-    def _get_agent_override(
-        self,
-        *,
-        agent_name: Optional[str],
-        agent_id: Optional[int],
-    ) -> Optional[AgentOverrideConfig]:
-        return self.config.get_agent_override(agent_name=agent_name, agent_id=agent_id)
-
-    def _resolve_platform_config(
-        self,
-        platform_name: str,
-        *,
-        agent_name: Optional[str] = None,
-        agent_id: Optional[int] = None,
-    ) -> Optional[PlatformConfig]:
-        base = self.config.get_platform(platform_name)
-        if base is None or not base.enabled:
-            return None
-        override = self._get_agent_override(agent_name=agent_name, agent_id=agent_id)
-        if override is not None and not override.enabled:
-            return None
-        platform_override = override.platforms.get(platform_name) if override else None
-        resolved = self._merge_platform_config(base, platform_override)
-        if not resolved.enabled:
-            return None
-        return resolved
-
-    def _get_jitter_seconds(self, *, agent_name: str, agent_id: int) -> int:
-        override = self._get_agent_override(agent_name=agent_name, agent_id=agent_id)
-        if override and override.jitter_seconds is not None:
-            return override.jitter_seconds
-        return self.config.schedule.jitter_seconds
-
     def fetch_new_videos(self, since: Optional[float] = None) -> List[VideoInfo]:
+        """
+        Fetch videos from the API, optionally filtered by creation time.
+        
+        Returns list of new videos not yet in known_video_ids.
+        """
         params = {"per_page": 50}
         if since:
             params["since"] = str(since)
+        
         response = self._api_request("/api/feed", params=params)
         if not response or response.status_code != 200:
-            log.warning("Failed to fetch videos: %s", response.status_code if response else "no response")
+            log.warning("Failed to fetch videos: %s", 
+                       response.status_code if response else "no response")
             return []
-
-        payload = response.json()
+        
+        videos_data = response.json().get("videos", [])
         new_videos = []
-        for item in payload.get("videos", []):
-            video_id = item.get("video_id")
-            if not video_id or video_id in self.known_video_ids:
-                continue
-            self.known_video_ids.add(video_id)
-            new_videos.append(
-                VideoInfo(
+        
+        for v in videos_data:
+            video_id = v.get("video_id")
+            if video_id and video_id not in self.known_video_ids:
+                self.known_video_ids.add(video_id)
+                new_videos.append(VideoInfo(
                     video_id=video_id,
-                    title=item.get("title", "Untitled"),
-                    agent_id=int(item.get("agent_id", 0) or 0),
-                    agent_name=item.get("agent_name", "unknown"),
-                    created_at=float(item.get("created_at", time.time()) or time.time()),
-                )
-            )
-        log.info("Fetched %d videos, %d new", len(payload.get("videos", [])), len(new_videos))
+                    title=v.get("title", "Untitled"),
+                    agent_id=v.get("agent_id", 0),
+                    agent_name=v.get("agent_name", "unknown"),
+                    created_at=v.get("created_at", time.time()),
+                ))
+        
+        log.info("Fetched %d videos, %d new", len(videos_data), len(new_videos))
         return new_videos
 
-    def _calculate_priority(self, video: VideoInfo, platform_config: PlatformConfig) -> int:
-        priority = platform_config.priority
-        age_hours = (time.time() - video.created_at) / 3600
-        if age_hours < 1:
-            priority += 20
-        elif age_hours < 6:
-            priority += 10
-        return priority
-
     def queue_new_videos(self, videos: List[VideoInfo]) -> int:
+        """
+        Queue new videos for syndication to all configured platforms.
+
+        Returns the number of items queued.
+        """
         queued_count = 0
+
         for video in videos:
-            for platform_name in self.config.platforms.keys():
-                platform_config = self._resolve_platform_config(
-                    platform_name,
-                    agent_name=video.agent_name,
-                    agent_id=video.agent_id,
-                )
-                if platform_config is None:
+            for platform_name in self.config.get_enabled_platforms():
+                platform_config = self.config.get_platform(platform_name)
+                if not platform_config or not platform_config.enabled:
                     continue
-                priority = self._calculate_priority(video, platform_config)
+                    
+                # Calculate priority based on platform config
+                priority = self._calculate_priority(platform_name, video, platform_config)
+
                 metadata = {
                     "queued_by": "syndication_poller",
                     "video_created_at": video.created_at,
                     "platform_priority": platform_config.priority,
                 }
+
                 self.queue.enqueue(
                     video_id=video.video_id,
                     video_title=video.title,
@@ -291,116 +328,214 @@ class SyndicationPoller:
                     metadata=metadata,
                 )
                 queued_count += 1
-                log.info("Queued '%s' for %s (priority=%d)", video.title, platform_name, priority)
+                log.info("Queued '%s' for %s (priority=%d)",
+                        video.title, platform_name, priority)
+
         return queued_count
 
-    def _get_video_details(self, video_id: str) -> Dict[str, Any]:
-        response = self._api_request(f"/api/videos/{video_id}")
-        if response and response.status_code == 200:
-            return response.json()
-        return {}
+    def _calculate_priority(
+        self,
+        platform: str,
+        video: VideoInfo,
+        platform_config: PlatformConfig,
+    ) -> int:
+        """
+        Calculate syndication priority for a video/platform combination.
 
-    def _build_payload(self, item) -> SyndicationPayload:
-        details = self._get_video_details(item.video_id)
-        watch_url = details.get("watch_url") or f"/watch/{item.video_id}"
-        thumbnail_url = details.get("thumbnail_url") or None
-        return SyndicationPayload(
-            video_id=item.video_id,
-            video_title=details.get("title", item.video_title),
-            video_description=details.get("description", ""),
-            video_url=urljoin(f"{self.bottube_url}/", watch_url.lstrip("/")),
-            thumbnail_url=urljoin(f"{self.bottube_url}/", thumbnail_url.lstrip("/")) if thumbnail_url else None,
-            agent_id=item.agent_id,
-            agent_name=item.agent_name,
-            tags=list(details.get("tags", [])),
-            metadata=dict(item.metadata),
-        )
+        Higher priority = processed first.
+        """
+        # Start with configured platform priority
+        base_priority = platform_config.priority
 
-    def _apply_item_jitter(self, item) -> None:
-        jitter_seconds = self._get_jitter_seconds(agent_name=item.agent_name, agent_id=item.agent_id)
-        if jitter_seconds <= 0:
-            return
-        delay = random.uniform(0, float(jitter_seconds))
-        if delay <= 0:
-            return
-        log.debug("Applying %.2fs syndication jitter for item %s", delay, item.id)
-        time.sleep(delay)
+        # Boost priority for recent uploads (last hour)
+        age_hours = (time.time() - video.created_at) / 3600
+        if age_hours < 1:
+            base_priority += 20
+        elif age_hours < 6:
+            base_priority += 10
 
-    def _process_item_legacy(self, item) -> bool:
-        handlers = {
-            "moltbook": self._syndicate_to_moltbook,
-            "twitter": self._syndicate_to_twitter,
-            "rss_feed": self._syndicate_to_rss_feed,
-        }
-        handler = handlers.get(item.target_platform)
-        if handler is None:
-            self.queue.mark_completed(item.id, metadata={"skipped": True, "reason": "no handler"})
-            return True
-        try:
-            result = handler(item)
-        except Exception as exc:
-            self.queue.mark_failed(item.id, str(exc))
-            return False
-        if result.get("success"):
-            self.queue.mark_completed(item.id, metadata=result)
-            return True
-        self.queue.mark_failed(item.id, result.get("error", "Unknown error"))
-        return False
-
-    def _process_item(self, item) -> bool:
-        platform_config = self._resolve_platform_config(
-            item.target_platform,
-            agent_name=item.agent_name,
-            agent_id=item.agent_id,
-        )
-        if platform_config is None:
-            self.queue.mark_completed(item.id, metadata={"skipped": True, "reason": "platform disabled"})
-            return True
-
-        self._apply_item_jitter(item)
-        adapter = self.adapters.get(item.target_platform)
-        if adapter is None:
-            return self._process_item_legacy(item)
-
-        payload = self._build_payload(item)
-        try:
-            result = adapter.syndicate(payload)
-        except Exception as exc:
-            self.queue.mark_failed(item.id, str(exc))
-            return False
-        if result.success:
-            self.queue.mark_completed(item.id, metadata=result.to_dict())
-            return True
-        self.queue.mark_failed(item.id, result.error_message or "Unknown error")
-        return False
+        return base_priority
 
     def process_pending_items(self) -> int:
-        if not self.scheduler.should_run():
-            return 0
+        """
+        Process pending items in the queue.
 
+        Returns the number of items processed.
+        """
         processed_count = 0
+
         for platform_name in self.config.get_enabled_platforms():
-            platform_config = self.config.get_platform(platform_name)
-            if platform_config is None:
+            # Check scheduler - should we run now?
+            if not self.scheduler.should_run():
+                next_run = self.scheduler.get_next_run_time()
+                log.debug("Scheduler says not to run, next run: %s", next_run)
                 continue
-            self.scheduler.sync_platform(platform_name, platform_config)
+
+            # Check rate limit
             if not self.scheduler.acquire_rate_limit(platform_name):
+                wait_time = self.scheduler.get_rate_limit_wait_time(platform_name)
+                log.debug("Rate limited for %s, wait %.1fs", platform_name, wait_time)
                 continue
+
+            # Check batch processing
             if not self.batch_processor.should_process():
                 self.batch_processor.wait_if_needed()
 
             item = self.queue.dequeue(target_platform=platform_name)
-            if item is None:
+            if not item:
                 continue
 
-            success = self._process_item(item)
-            if success:
-                self.batch_processor.record_processed()
-                processed_count += 1
+            if item.id in self.processing_items:
+                log.debug("Item %d already being processed, skipping", item.id)
+                continue
+
+            # Check for stale processing items (timeout)
+            if item.state == QueueState.PROCESSING:
+                if time.time() - item.updated_at > ITEM_PROCESSING_TIMEOUT_SEC:
+                    log.warning("Item %d stuck in processing, resetting", item.id)
+                    self.queue.update_state(
+                        item.id, QueueState.PENDING,
+                        error_message="Processing timeout, retrying"
+                    )
+                continue
+
+            self.processing_items.add(item.id)
+
+            try:
+                success = self._process_item(item)
+                if success:
+                    self.batch_processor.record_processed()
+                    processed_count += 1
+            except Exception as e:
+                log.error("Error processing item %d: %s", item.id, e)
+                self.queue.mark_failed(item.id, str(e))
+            finally:
+                self.processing_items.discard(item.id)
+
         return processed_count
 
+    def _process_item(self, item) -> bool:
+        """
+        Process a single syndication item using adapter.
+
+        Returns True if successful, False otherwise.
+        """
+        log.info("Processing syndication item %d: '%s' -> %s",
+                item.id, item.video_title, item.target_platform)
+
+        # Mark as processing
+        if not self.queue.mark_processing(item.id):
+            log.error("Failed to mark item %d as processing", item.id)
+            return False
+
+        # Get adapter for platform
+        adapter = self.adapters.get(item.target_platform)
+        if not adapter:
+            log.warning("No adapter for platform: %s", item.target_platform)
+            # Fall back to legacy handlers for backwards compatibility
+            return self._process_item_legacy(item)
+
+        # Build payload for adapter
+        payload = self._build_payload(item)
+
+        try:
+            result = adapter.syndicate(payload)
+            if result.success:
+                self.queue.mark_completed(item.id, metadata=result.to_dict())
+                log.info("Syndication successful for item %d via %s",
+                        item.id, item.target_platform)
+                return True
+            else:
+                self.queue.mark_failed(item.id, result.error_message or "Unknown error")
+                log.warning("Syndication failed for item %d: %s",
+                          item.id, result.error_message)
+                return False
+        except Exception as e:
+            self.queue.mark_failed(item.id, str(e))
+            log.error("Syndication exception for item %d: %s", item.id, e)
+            return False
+
+    def _build_payload(self, item) -> SyndicationPayload:
+        """Build syndication payload from queue item."""
+        # Fetch video details from API
+        video_data = self._get_video_details(item.video_id) or {}
+        
+        return SyndicationPayload(
+            video_id=item.video_id,
+            video_title=item.video_title,
+            video_description=video_data.get("description", ""),
+            video_url=f"{self.bottube_url}/videos/{item.video_id}",
+            thumbnail_url=video_data.get("thumbnail_url"),
+            agent_id=item.agent_id,
+            agent_name=item.agent_name,
+            tags=video_data.get("tags", []),
+            metadata=item.metadata,
+        )
+
+    def _get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch video details from API."""
+        response = self._api_request(f"/api/videos/{video_id}")
+        if response and response.status_code == 200:
+            return response.json()
+        return None
+
+    def _process_item_legacy(self, item) -> bool:
+        """
+        Legacy item processing for platforms without adapters.
+        Falls back to built-in handlers.
+        """
+        platform_handlers = {
+            "moltbook": self._syndicate_to_moltbook,
+            "twitter": self._syndicate_to_twitter,
+            "rss_feed": self._syndicate_to_rss_feed,
+        }
+
+        handler = platform_handlers.get(item.target_platform)
+        if not handler:
+            log.warning("No handler for platform: %s", item.target_platform)
+            self.queue.mark_completed(item.id, metadata={"skipped": True})
+            return True
+
+        try:
+            result = handler(item)
+            if result.get("success"):
+                self.queue.mark_completed(item.id, metadata=result)
+                log.info("Syndication successful for item %d", item.id)
+                return True
+            else:
+                error_msg = result.get("error", "Unknown error")
+                self.queue.mark_failed(item.id, error_msg)
+                log.warning("Syndication failed for item %d: %s", item.id, error_msg)
+                return False
+        except Exception as e:
+            self.queue.mark_failed(item.id, str(e))
+            log.error("Syndication exception for item %d: %s", item.id, e)
+            return False
+
     def _syndicate_to_moltbook(self, item) -> dict:
-        time.sleep(0.1)
+        """
+        Syndicate a video to Moltbook.
+        
+        Posts to Moltbook's API with video metadata.
+        """
+        # Placeholder implementation - integrate with actual Moltbook API
+        log.info("Syndicating '%s' to Moltbook", item.video_title)
+        
+        # Simulate API call (replace with actual integration)
+        # response = requests.post(
+        #     "https://moltbook.com/api/videos",
+        #     headers={"Authorization": f"Bearer {MOLTBOOK_TOKEN}"},
+        #     json={
+        #         "title": item.video_title,
+        #         "source": "bottube",
+        #         "video_id": item.video_id,
+        #     },
+        #     timeout=30,
+        # )
+        
+        # For now, simulate success
+        time.sleep(0.1)  # Simulate network delay
+        
         return {
             "success": True,
             "platform": "moltbook",
@@ -408,7 +543,18 @@ class SyndicationPoller:
         }
 
     def _syndicate_to_twitter(self, item) -> dict:
+        """
+        Syndicate a video to Twitter/X.
+        
+        Creates a tweet with video link.
+        """
+        log.info("Syndicating '%s' to Twitter", item.video_title)
+        
+        # Placeholder - integrate with Twitter API v2
+        # This would use tweepy or direct API calls
+        
         time.sleep(0.1)
+        
         return {
             "success": True,
             "platform": "twitter",
@@ -416,35 +562,41 @@ class SyndicationPoller:
         }
 
     def _syndicate_to_rss_feed(self, item) -> dict:
+        """
+        Syndicate to RSS feed.
+        
+        Updates the RSS feed with new video entry.
+        """
+        log.info("Adding '%s' to RSS feed", item.video_title)
+        
+        # RSS feed updates are typically file-based or cached
+        # This is a placeholder for the actual implementation
+        
         time.sleep(0.1)
+        
         return {
             "success": True,
             "platform": "rss_feed",
             "feed_entry_id": f"rss_{item.video_id}",
         }
 
-    def apply_backoff(self) -> None:
+    def apply_backoff(self):
+        """Apply exponential backoff after failures."""
         backoff_time = min(
             INITIAL_BACKOFF_SEC * (BACKOFF_MULTIPLIER ** self.consecutive_failures),
             MAX_BACKOFF_SEC,
         )
         jitter = backoff_time * JITTER_FACTOR * random.random()
         self.backoff_until = time.time() + backoff_time + jitter
-        log.info("Applying backoff: %.1f seconds (failures=%d)", backoff_time + jitter, self.consecutive_failures)
+        log.info("Applying backoff: %.1f seconds (failures=%d)",
+                backoff_time + jitter, self.consecutive_failures)
 
-    def _load_known_videos(self) -> None:
-        try:
-            response = self._api_request("/api/feed", params={"per_page": 100})
-            if response and response.status_code == 200:
-                for item in response.json().get("videos", []):
-                    video_id = item.get("video_id")
-                    if video_id:
-                        self.known_video_ids.add(video_id)
-                log.info("Loaded %d known video IDs", len(self.known_video_ids))
-        except Exception as exc:
-            log.warning("Could not load known videos: %s", exc)
+    def run(self):
+        """
+        Main poller loop.
 
-    def run(self) -> None:  # pragma: no cover
+        Continuously polls for new videos and processes the queue.
+        """
         if not self.api_key:
             log.error("BOTTUBE_API_KEY not set, exiting")
             return
@@ -454,24 +606,39 @@ class SyndicationPoller:
         log.info("  BoTTube URL: %s", self.bottube_url)
         log.info("  Database: %s", self.db_path)
         log.info("  Poll interval: %ds", self.config.poll_interval)
-        log.info("  Enabled platforms: %s", ", ".join(self.config.get_enabled_platforms()))
+        log.info("  Enabled platforms: %s",
+                ", ".join(self.config.get_enabled_platforms()))
         log.info("  Schedule: %s", self.config.schedule.cron_expression)
+        if self.config.schedule.quiet_hours_start:
+            log.info("  Quiet hours: %s - %s",
+                    self.config.schedule.quiet_hours_start,
+                    self.config.schedule.quiet_hours_end)
 
+        # Load existing videos to avoid re-queueing on restart
         self._load_known_videos()
+
+        last_config_reload = time.time()
+        config_reload_interval = 300  # Reload config every 5 minutes
 
         while self.running:
             try:
-                if time.time() - self._last_config_reload >= self.config_reload_interval:
-                    self.reload_runtime_config()
-                    self._last_config_reload = time.time()
+                # Reload configuration periodically
+                if time.time() - last_config_reload > config_reload_interval:
+                    self.config = self.config_manager.reload()
+                    last_config_reload = time.time()
+                    log.debug("Reloaded configuration")
 
+                # Check backoff
                 if time.time() < self.backoff_until:
-                    time.sleep(min(self.backoff_until - time.time(), 10))
+                    remaining = self.backoff_until - time.time()
+                    time.sleep(min(remaining, 10))
                     continue
 
+                # Poll for new videos
                 new_videos = self.fetch_new_videos(
                     since=self.last_poll_time if self.last_poll_time > 0 else None
                 )
+
                 if new_videos:
                     queued = self.queue_new_videos(new_videos)
                     log.info("Queued %d new syndication items", queued)
@@ -481,35 +648,55 @@ class SyndicationPoller:
 
                 self.last_poll_time = time.time()
 
+                # Process pending queue items
                 processed = self.process_pending_items()
-                if processed:
+                if processed > 0:
                     log.info("Processed %d queue items", processed)
 
-                if random.random() < 0.01:
+                # Cleanup old completed items periodically
+                if random.random() < 0.01:  # ~1% chance each cycle
                     deleted = self.queue.cleanup_old(days=30)
-                    if deleted:
+                    if deleted > 0:
                         log.info("Cleaned up %d old queue items", deleted)
 
+                # Sleep until next poll
+                sleep_time = self.config.poll_interval
                 if self.running:
-                    time.sleep(self.config.poll_interval)
+                    time.sleep(sleep_time)
+
             except KeyboardInterrupt:
+                log.info("Interrupted by user")
                 break
-            except Exception as exc:
-                log.error("Poller error: %s", exc)
+            except Exception as e:
+                log.error("Poller error: %s", e)
                 self.consecutive_failures += 1
                 self.apply_backoff()
 
-        for adapter in self.adapters.values():
-            try:
-                adapter.close()
-            except Exception:
-                pass
         log.info("Syndication poller stopped")
 
+    def _load_known_videos(self):
+        """Load existing video IDs to avoid duplicate queueing on restart."""
+        try:
+            response = self._api_request("/api/feed", params={"per_page": 100})
+            if response and response.status_code == 200:
+                videos = response.json().get("videos", [])
+                for v in videos:
+                    if "video_id" in v:
+                        self.known_video_ids.add(v["video_id"])
+                log.info("Loaded %d known video IDs", len(self.known_video_ids))
+        except Exception as e:
+            log.warning("Could not load known videos: %s", e)
 
-def main() -> None:  # pragma: no cover
-    SyndicationPoller().run()
+
+# ---------------------------------------------------------------------------
+# CLI Entry Point
+# ---------------------------------------------------------------------------
+
+def main():
+    """Main entry point for the syndication poller daemon."""
+    poller = SyndicationPoller()
+    poller.run()
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     main()
