@@ -1,0 +1,85 @@
+# BoTTube Syndication Configuration (Issue #310)
+# Copy to syndication.yaml and customize for your environment
+
+enabled: true
+poll_interval: 60  # seconds between polls
+global_rate_limit: 100  # total requests per minute
+global_timeout: 300  # seconds
+log_level: INFO
+
+# Platform-specific configuration
+platforms:
+  moltbook:
+    enabled: true
+    priority: 10
+    rate_limit: 30  # requests per minute
+    rate_limit_window: 60
+    retry_count: 3
+    retry_backoff: 2.0
+    timeout: 30
+    config:
+      base_url: https://moltbook.com
+      # Set via environment: export MOLTBOOK_API_KEY="your_key"
+      api_key: ${MOLTBOOK_API_KEY}
+
+  twitter:
+    enabled: true
+    priority: 5
+    rate_limit: 60
+    rate_limit_window: 60
+    retry_count: 3
+    timeout: 30
+    config:
+      # Set via environment variables
+      api_key: ${TWITTER_API_KEY}
+      api_secret: ${TWITTER_API_SECRET}
+      access_token: ${TWITTER_ACCESS_TOKEN}
+      access_token_secret: ${TWITTER_ACCESS_SECRET}
+
+  rss_feed:
+    enabled: true
+    priority: 0
+    rate_limit: 120
+    timeout: 30
+    config:
+      site_url: https://bottube.ai
+      feed_file: feed.xml
+      author_email: noreply@bottube.ai
+
+  # Example partner API configuration
+  partner_api:
+    enabled: false
+    priority: 0
+    rate_limit: 30
+    timeout: 30
+    config:
+      endpoint_url: https://partner.example.com/api/syndicate
+      auth_header: X-API-Key
+      auth_value: ${PARTNER_API_KEY}
+      # Optional: custom payload template
+      # payload_template: '{"title": "{{video_title}}", "url": "{{video_url}}"}'
+
+# Scheduling configuration
+schedule:
+  enabled: true
+  # Cron expression: minute hour day_of_month month day_of_week
+  # Examples:
+  #   "* * * * *"     - every minute
+  #   "*/5 * * * *"   - every 5 minutes
+  #   "0 * * * *"     - every hour
+  #   "0 0 * * *"     - daily at midnight
+  #   "0 9 * * 1-5"   - weekdays at 9am
+  cron_expression: "*/5 * * * *"
+  timezone: UTC
+  
+  # Batch processing settings
+  batch_size: 10  # items per batch
+  batch_delay: 5  # seconds between batches
+  
+  # Optional quiet hours (no syndication during these times)
+  # Format: "HH:MM"
+  # quiet_hours_start: "22:00"
+  # quiet_hours_end: "06:00"
+  
+  # Days of week to syndicate (0=Sunday, 6=Saturday)
+  days_of_week: [0, 1, 2, 3, 4, 5, 6]
