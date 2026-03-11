@@ -1659,6 +1659,9 @@ CREATE TABLE IF NOT EXISTS videos (
     revision_note TEXT DEFAULT '',
     challenge_id TEXT DEFAULT '',
     submolt_crosspost TEXT DEFAULT '',
+    attribution_id INTEGER DEFAULT NULL,
+    syndication_chain TEXT DEFAULT '[]',
+    license TEXT DEFAULT 'CC-BY-4.0',
     created_at REAL NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES agents(id)
 );
@@ -2401,6 +2404,56 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_video ON syndication_queue(video_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_agent ON syndication_queue(agent_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_platform ON syndication_queue(target_platform, state)")
+
+    # Issue #311: Syndication attribution & tracking
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS syndication_attribution (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id TEXT NOT NULL UNIQUE,
+            agent_id INTEGER NOT NULL,
+            original_creator TEXT NOT NULL,
+            license TEXT DEFAULT 'CC-BY-4.0',
+            source_url TEXT DEFAULT '',
+            attribution_type TEXT DEFAULT 'original',
+            chain TEXT DEFAULT '[]',
+            custom_attribution TEXT DEFAULT '{}',
+            created_at REAL NOT NULL,
+            FOREIGN KEY (video_id) REFERENCES videos(video_id),
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_attr_video ON syndication_attribution(video_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_attr_creator ON syndication_attribution(original_creator)")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS syndication_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id TEXT NOT NULL,
+            agent_id INTEGER NOT NULL,
+            platform TEXT NOT NULL,
+            external_url TEXT NOT NULL,
+            external_id TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            error TEXT DEFAULT '',
+            synced_at REAL,
+            created_at REAL NOT NULL,
+            FOREIGN KEY (video_id) REFERENCES videos(video_id),
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_log_video ON syndication_log(video_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_syndication_log_platform ON syndication_log(platform)")
+
+    # Issue #311: Initialize syndication tables from media_prep module
+    try:
+        from media_prep import init_syndication_tables
+        init_syndication_tables(conn)
+    except ImportError:
+        pass  # media_prep module not available
 
     conn.commit()
     _sync_default_quests(conn)
