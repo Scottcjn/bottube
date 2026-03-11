@@ -417,9 +417,82 @@ class TestVideoAttributionColumns:
         assert json.loads(row[1]) == [{"video_id": "parent123"}]
 
 
+class TestTranscodeCommand:
+    """Tests for ffmpeg transcode command generation."""
+
+    def test_transcode_uses_valid_scale_filter(self, temp_db, temp_dirs):
+        """Test that transcode uses -vf scale instead of invalid -max_width/-max_height."""
+        video_dir, thumb_dir = temp_dirs
+        pipeline = MediaPrepPipeline(
+            db=temp_db,
+            video_dir=video_dir,
+            thumb_dir=thumb_dir,
+            target_width=1280,
+            target_height=720,
+        )
+
+        # Create a fake input file for validation
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(b"fake video content")
+            input_path = tmp.name
+
+        try:
+            # Mock _get_duration to bypass validation
+            with patch.object(pipeline, '_get_duration', return_value=10.0):
+                cmd = pipeline._build_transcode_command(input_path, "test123")
+
+            # Assert no invalid arguments
+            assert "-max_width" not in cmd
+            assert "-max_height" not in cmd
+
+            # Assert valid scale filter is present
+            assert "-vf" in cmd
+            vf_index = cmd.index("-vf")
+            scale_filter = cmd[vf_index + 1]
+            assert "scale" in scale_filter
+            assert "min(1280,iw)" in scale_filter
+            assert "min(720,ih)" in scale_filter
+            assert "force_original_aspect_ratio=decrease" in scale_filter
+
+            # Assert output format remains MP4/H264
+            assert "-c:v" in cmd
+            assert "libx264" in cmd
+            assert "-c:a" in cmd
+            assert "aac" in cmd
+            assert str(cmd[-1]).endswith(".mp4")
+        finally:
+            os.unlink(input_path)
+
+    def test_transcode_custom_dimensions(self, temp_db, temp_dirs):
+        """Test scale filter uses custom target dimensions."""
+        video_dir, thumb_dir = temp_dirs
+        pipeline = MediaPrepPipeline(
+            db=temp_db,
+            video_dir=video_dir,
+            thumb_dir=thumb_dir,
+            target_width=1920,
+            target_height=1080,
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(b"fake video content")
+            input_path = tmp.name
+
+        try:
+            with patch.object(pipeline, '_get_duration', return_value=10.0):
+                cmd = pipeline._build_transcode_command(input_path, "test456")
+
+            vf_index = cmd.index("-vf")
+            scale_filter = cmd[vf_index + 1]
+            assert "min(1920,iw)" in scale_filter
+            assert "min(1080,ih)" in scale_filter
+        finally:
+            os.unlink(input_path)
+
+
 class TestPrepResult:
     """Tests for PrepResult dataclass."""
-    
+
     def test_result_to_dict(self):
         """Test PrepResult serialization."""
         result = PrepResult(

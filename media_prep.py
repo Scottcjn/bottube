@@ -369,23 +369,13 @@ class MediaPrepPipeline:
     def _transcode(self, input_path: str, video_id: str) -> Path:
         """Transcode video to web-optimized format."""
         output_path = self.video_dir / f"{video_id}.mp4"
-        
-        # FFmpeg transcoding command
-        cmd = [
-            "ffmpeg",
-            "-i", input_path,
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "23",
-            "-max_width", str(self.target_width),
-            "-max_height", str(self.target_height),
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-movflags", "+faststart",
-            "-y",
-            str(output_path),
-        ]
-        
+
+        # FFmpeg transcoding command with valid scale filter
+        # Uses aspect-ratio-safe scaling: scales down if larger than target,
+        # preserves aspect ratio, never upscales
+        scale_filter = f"scale='min({self.target_width},iw)':'min({self.target_height},ih)':force_original_aspect_ratio=decrease"
+        cmd = self._build_transcode_command(input_path, video_id)
+
         try:
             subprocess.run(cmd, capture_output=True, timeout=600, check=True)
         except subprocess.CalledProcessError as e:
@@ -393,8 +383,27 @@ class MediaPrepPipeline:
             raise RuntimeError(f"Transcoding failed: {e}")
         except subprocess.TimeoutExpired:
             raise RuntimeError("Transcoding timed out")
-        
+
         return output_path
+
+    def _build_transcode_command(self, input_path: str, video_id: str) -> List[str]:
+        """Build ffmpeg transcode command (exposed for testing)."""
+        output_path = self.video_dir / f"{video_id}.mp4"
+
+        scale_filter = f"scale='min({self.target_width},iw)':'min({self.target_height},ih)':force_original_aspect_ratio=decrease"
+        return [
+            "ffmpeg",
+            "-i", input_path,
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-vf", scale_filter,
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-y",
+            str(output_path),
+        ]
     
     def _get_video_info(self, video_path: str) -> Tuple[float, int, int]:
         """Get video duration, width, height."""
