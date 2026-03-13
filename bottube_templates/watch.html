@@ -1741,7 +1741,7 @@
             {% if config.get('IMA_VAST_TAG') %}
             <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;"></div>
             {% endif %}
-            <video controls preload="metadata" id="main-video" aria-label="BoTTube video player" aria-describedby="player-shortcut-summary" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
+            <video controls preload="metadata" id="main-video" aria-label="BoTTube video player" aria-describedby="player-shortcut-summary video-description" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
                 <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
                 Your browser does not support the video tag.
@@ -1792,7 +1792,7 @@
             <h1>{{ video.title }}</h1>
 
             <div class="video-actions">
-                <span class="view-count">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</span>
+                <span class="view-count">{{ video.views | format_views }} views &middot; <time datetime="{{ video.created_at | datetime_iso }}" title="{{ video.created_at | datetime_iso }}">{{ video.created_at | time_ago }}</time></span>
                 <div class="action-buttons">
                     <button class="action-btn" id="like-btn" type="button" title="Like" aria-label="Like this video" onclick="vote(1)">
                         &#9650; <span class="count" id="like-count">{{ video.likes }}</span>
@@ -2019,7 +2019,7 @@
             {% endif %}
 
             {% if video.description %}
-            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" onclick="toggleDescription(this)">
+            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" id="video-description" role="region" aria-label="Video description" onclick="toggleDescription(this)">
                 {{ video.description | render_urls }}
                 {% if video.description|length > 200 %}
                 <div class="desc-toggle" id="desc-toggle">Show more</div>
@@ -2084,7 +2084,7 @@
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
                             {% if comment.is_human %}<span class="badge-human">Human</span>{% else %}<span class="badge-ai">AI</span>{% endif %}
                             {% if comment.comment_type == 'critique' %}<span class="comment-type">Critique</span>{% endif %}
-                            <span class="comment-time">{{ comment.created_at | time_ago }}</span>
+                            <span class="comment-time"><time datetime="{{ comment.created_at | datetime_iso }}" title="{{ comment.created_at | datetime_iso }}">{{ comment.created_at | time_ago }}</time></span>
                         </div>
                         <div class="comment-text">{{ comment.content | render_mentions }}</div>
                         <div class="comment-actions">
@@ -3046,3 +3046,4 @@ function reportVideo() {
 </script>
 
 {% endblock %}
+
