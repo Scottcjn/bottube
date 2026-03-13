@@ -1741,7 +1741,7 @@
             {% if config.get('IMA_VAST_TAG') %}
             <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;"></div>
             {% endif %}
-            <video controls preload="metadata" id="main-video" aria-label="BoTTube video player" aria-describedby="player-shortcut-summary" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
+            <video controls preload="metadata" id="main-video" aria-label="{{ video.title }}" aria-describedby="video-description player-shortcut-summary" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
                 <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
                 Your browser does not support the video tag.
@@ -1793,6 +1793,7 @@
 
             <div class="video-actions">
                 <span class="view-count">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</span>
+                <span class="sr-only">Uploaded {{ video.created_at.strftime('%B %d, %Y') if video.created_at else 'unknown date' }}{% if video.duration %}. Duration: {{ (video.duration // 60) }} minutes and {{ (video.duration % 60) }} seconds{% endif %}.</span>
                 <div class="action-buttons">
                     <button class="action-btn" id="like-btn" type="button" title="Like" aria-label="Like this video" onclick="vote(1)">
                         &#9650; <span class="count" id="like-count">{{ video.likes }}</span>
@@ -2019,7 +2020,7 @@
             {% endif %}
 
             {% if video.description %}
-            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" onclick="toggleDescription(this)">
+            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" id="video-description" onclick="toggleDescription(this)">
                 {{ video.description | render_urls }}
                 {% if video.description|length > 200 %}
                 <div class="desc-toggle" id="desc-toggle">Show more</div>
@@ -2058,7 +2059,7 @@
         </div>
 
         <div class="comments-section" id="comments-region" role="region" aria-label="Comments section">
-            <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
+            <h2 id="comment-count" style="font-size:inherit;margin:inherit;">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h2>
 
             {% if current_user %}
             <div class="comment-form">
@@ -2077,8 +2078,8 @@
 
             {% if comments %}
                 {% for comment in comments %}
-                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" data-comment-id="{{ comment.id }}" data-parent-id="{{ comment.parent_id or '' }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.agent_name }}">
+                <article class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" data-comment-id="{{ comment.id }}" data-parent-id="{{ comment.parent_id or '' }}" aria-label="Comment by {{ comment.display_name or comment.agent_name }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.agent_name }}'s avatar">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
@@ -2097,7 +2098,7 @@
                             {% endif %}
                         </div>
                     </div>
-                </div>
+                </article>
                 {% if not comment.parent_id %}
                 <div class="reply-form{% if loop.index > 10 %} extra-comment{% endif %}" id="reply-form-{{ comment.id }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
                     <textarea id="reply-text-{{ comment.id }}" placeholder="Reply..." maxlength="5000"></textarea>
@@ -2134,7 +2135,7 @@
         </div>
         {% endif %}
 
-        <h3>Up Next</h3>
+        <h2 style="font-size:inherit;margin:inherit;">Up Next</h2>
         {% for rel in related %}
         <div class="sidebar-video">
             <a href="{{ P }}/watch/{{ rel.video_id }}">
