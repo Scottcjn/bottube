@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BoTTube Premiere Demo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+    }
+
+    header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+    }
+
+    header p {
+      opacity: 0.9;
+      font-size: 1.1rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    .card h2 {
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 1.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 1rem;
+      transition: border-color 0.3s;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      width: 100%;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .chat-container {
+      height: 400px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f8f9fa;
+    }
+
+    .message {
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+
+    .message.system {
+      background: #e3f2fd;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .message-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .message-author {
+      font-weight: 600;
+      color: #667eea;
+    }
+
+    .message-author.moderator {
+      color: #f59e0b;
+    }
+
+    .message-author.broadcaster {
+      color: #ef4444;
+    }
+
+    .message-time {
+      font-size: 0.75rem;
+      color: #999;
+    }
+
+    .message-text {
+      color: #333;
+      line-height: 1.4;
+    }
+
+    .chat-input {
+      display: flex;
+      gap: 10px;
+    }
+
+    .chat-input input {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+
+    .chat-input button {
+      padding: 10px 20px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .chat-input button:hover {
+      background: #5568d3;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    .status-indicator.connected {
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+    }
+
+    .status-indicator.disconnected {
+      background: #ef4444;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 0.9rem;
+    }
+
+    .premiere-info {
+      background: #f0f4ff;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .premiere-info h3 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+
+    .premiere-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .stat {
+      text-align: center;
+      padding: 10px;
+      background: white;
+      border-radius: 6px;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+
+    .badge-scheduled {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .badge-live {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .badge-completed {
+      background: #e0e7ff;
+      color: #3730a3;
+    }
+
+    .badge-cancelled {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .log {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 15px;
+    }
+
+    .log-entry {
+      margin-bottom: 5px;
+    }
+
+    .log-entry.info {
+      color: #60a5fa;
+    }
+
+    .log-entry.success {
+      color: #34d399;
+    }
+
+    .log-entry.error {
+      color: #f87171;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎬 BoTTube Premiere Demo</h1>
+      <p>Live Chat & Premiere Feature Showcase</p>
+    </header>
+
+    <div class="grid">
+      <!-- Premiere Scheduling Card -->
+      <div class="card">
+        <h2>📅 Schedule Premiere</h2>
+        
+        <div class="premiere-info" id="premiereInfo" style="display: none;">
+          <h3>Current Premiere</h3>
+          <div id="premiereDetails"></div>
+          <div class="premiere-stats">
+            <div class="stat">
+              <div class="stat-value" id="statViewers">0</div>
+              <div class="stat-label">Viewers</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="statMessages">0</div>
+              <div class="stat-label">Messages</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="statDuration">0:00</div>
+              <div class="stat-label">Duration</div>
+            </div>
+          </div>
+        </div>
+
+        <form id="scheduleForm">
+          <div class="form-group">
+            <label for="videoId">Video ID</label>
+            <input type="text" id="videoId" placeholder="Enter video ID" required>
+          </div>
+
+          <div class="form-group">
+            <label for="premiereTitle">Premiere Title</label>
+            <input type="text" id="premiereTitle" placeholder="Exclusive Premiere Event">
+          </div>
+
+          <div class="form-group">
+            <label for="premiereDescription">Description</label>
+            <textarea id="premiereDescription" placeholder="Join us for this exclusive premiere..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="scheduledTime">Scheduled Time</label>
+            <input type="datetime-local" id="scheduledTime" required>
+          </div>
+
+          <button type="submit" class="btn" id="scheduleBtn">
+            🚀 Schedule Premiere
+          </button>
+        </form>
+
+        <div class="log" id="activityLog">
+          <div class="log-entry info">Ready to schedule premiere...</div>
+        </div>
+      </div>
+
+      <!-- Live Chat Card -->
+      <div class="card">
+        <h2>💬 Live Chat</h2>
+
+        <div class="status-bar">
+          <span class="status-indicator disconnected" id="statusIndicator"></span>
+          <span id="statusText">Disconnected</span>
+        </div>
+
+        <div class="chat-container">
+          <div class="chat-messages" id="chatMessages">
+            <div class="message system">
+              Connect to a chat room to start messaging
+            </div>
+          </div>
+
+          <div class="chat-input">
+            <input 
+              type="text" 
+              id="chatInput" 
+              placeholder="Type a message..." 
+              disabled
+            >
+            <button id="sendBtn" disabled>Send</button>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 15px;">
+          <label for="chatRoomId">Chat Room / Premiere ID</label>
+          <input 
+            type="text" 
+            id="chatRoomId" 
+            placeholder="Enter room or premiere ID"
+          >
+        </div>
+
+        <button class="btn" id="connectBtn" style="margin-top: 10px;">
+          🔌 Connect to Chat
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Note: In a real application, you would import the BoTTube SDK
+    // For this demo, we'll simulate the functionality
+
+    // State
+    let isConnected = false;
+    let chatRoom = null;
+    let messageCount = 0;
+
+    // DOM Elements
+    const scheduleForm = document.getElementById('scheduleForm');
+    const scheduleBtn = document.getElementById('scheduleBtn');
+    const connectBtn = document.getElementById('connectBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const chatInput = document.getElementById('chatInput');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatRoomIdInput = document.getElementById('chatRoomId');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const activityLog = document.getElementById('activityLog');
+    const premiereInfo = document.getElementById('premiereInfo');
+    const premiereDetails = document.getElementById('premiereDetails');
+
+    // Utility Functions
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      activityLog.appendChild(entry);
+      activityLog.scrollTop = activityLog.scrollHeight;
+    }
+
+    function addChatMessage(author, text, isSystem = false, isModerator = false, isBroadcaster = false) {
+      const message = document.createElement('div');
+      message.className = `message ${isSystem ? 'system' : ''}`;
+      
+      if (isSystem) {
+        message.textContent = text;
+      } else {
+        const time = new Date().toLocaleTimeString();
+        let authorClass = '';
+        let badges = '';
+        
+        if (isModerator) {
+          authorClass = 'moderator';
+          badges += '<span class="badge badge-moderator">MOD</span>';
+        }
+        if (isBroadcaster) {
+          authorClass = 'broadcaster';
+          badges += '<span class="badge badge-broadcaster">HOST</span>';
+        }
+
+        message.innerHTML = `
+          <div class="message-header">
+            <span class="message-author ${authorClass}">${author}${badges}</span>
+            <span class="message-time">${time}</span>
+          </div>
+          <div class="message-text">${text}</div>
+        `;
+      }
+
+      chatMessages.appendChild(message);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      
+      if (!isSystem) {
+        messageCount++;
+        document.getElementById('statMessages').textContent = messageCount;
+      }
+    }
+
+    function updateStatus(connected) {
+      isConnected = connected;
+      statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+      statusText.textContent = connected ? 'Connected' : 'Disconnected';
+      chatInput.disabled = !connected;
+      sendBtn.disabled = !connected;
+      connectBtn.textContent = connected ? '🔌 Disconnect' : '🔌 Connect to Chat';
+    }
+
+    // Event Handlers
+    scheduleForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const videoId = document.getElementById('videoId').value;
+      const title = document.getElementById('premiereTitle').value || 'Untitled Premiere';
+      const description = document.getElementById('premiereDescription').value;
+      const scheduledTime = document.getElementById('scheduledTime').value;
+
+      log(`Scheduling premiere for video: ${videoId}`, 'info');
+      scheduleBtn.disabled = true;
+      scheduleBtn.textContent = '⏳ Scheduling...';
+
+      // Simulate API call
+      setTimeout(() => {
+        log(`Premiere scheduled successfully! ID: premiere-${Date.now()}`, 'success');
+        
+        premiereInfo.style.display = 'block';
+        premiereDetails.innerHTML = `
+          <p><strong>Title:</strong> ${title}</p>
+          <p><strong>Video:</strong> ${videoId}</p>
+          <p><strong>Scheduled:</strong> ${new Date(scheduledTime).toLocaleString()}</p>
+          <p><span class="badge badge-scheduled">SCHEDULED</span></p>
+        `;
+
+        chatRoomIdInput.value = `premiere-${Date.now()}`;
+        
+        scheduleBtn.disabled = false;
+        scheduleBtn.textContent = '🚀 Schedule Premiere';
+      }, 1500);
+    });
+
+    connectBtn.addEventListener('click', () => {
+      if (isConnected) {
+        // Disconnect
+        updateStatus(false);
+        addChatMessage('System', 'You have left the chat', true);
+        log('Disconnected from chat room', 'info');
+      } else {
+        // Connect
+        const roomId = chatRoomIdInput.value || 'demo-room';
+        
+        log(`Connecting to room: ${roomId}...`, 'info');
+        
+        // Simulate connection
+        setTimeout(() => {
+          updateStatus(true);
+          addChatMessage('System', 'You joined the chat', true);
+          log('Connected to chat room', 'success');
+          
+          // Simulate some chat activity
+          setTimeout(() => {
+            addChatMessage('User123', 'Hey everyone! 👋');
+          }, 1000);
+          
+          setTimeout(() => {
+            addChatMessage('ModUser', 'Welcome to the premiere!', false, true);
+          }, 2000);
+          
+          setTimeout(() => {
+            addChatMessage('Host', 'Starting in 5 minutes!', false, false, true);
+          }, 3000);
+        }, 1000);
+      }
+    });
+
+    sendBtn.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        sendMessage();
+      }
+    });
+
+    function sendMessage() {
+      const text = chatInput.value.trim();
+      if (!text || !isConnected) return;
+
+      addChatMessage('You', text);
+      log(`Message sent: ${text}`, 'info');
+      chatInput.value = '';
+
+      // Simulate response
+      setTimeout(() => {
+        const responses = [
+          'Nice!',
+          'Totally agree!',
+          '🔥🔥🔥',
+          'Can\'t wait!',
+          'This is awesome!'
+        ];
+        const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+        addChatMessage(`User${Math.floor(Math.random() * 1000)}`, randomResponse);
+      }, 2000);
+    }
+
+    // Initialize with current time + 1 hour
+    const now = new Date();
+    now.setHours(now.getHours() + 1);
+    now.setMinutes(0, 0, 0);
+    document.getElementById('scheduledTime').value = now.toISOString().slice(0, 16);
+
+    // Simulate viewer count updates
+    setInterval(() => {
+      if (premiereInfo.style.display === 'block') {
+        const currentViewers = parseInt(document.getElementById('statViewers').textContent);
+        const change = Math.floor(Math.random() * 5) - 2;
+        const newViewers = Math.max(0, currentViewers + change);
+        document.getElementById('statViewers').textContent = newViewers;
+      }
+    }, 3000);
+
+    log('Demo initialized', 'success');
+  </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "name": "bottube",
+  "version": "1.0.0",
+  "description": "Official JavaScript/TypeScript SDK for BoTTube API",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint .",
+    "prepublishOnly": "npm test && npm run lint"
+  },
+  "keywords": [
+    "bottube",
+    "video",
+    "api",
+    "sdk",
+    "rustchain",
+    "blockchain"
+  ],
+  "author": "RustChain Community <community@rustchain.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Scottcjn/rustchain-bounties"
+  },
+  "bugs": {
+    "url": "https://github.com/Scottcjn/rustchain-bounties/issues"
+  },
+  "homepage": "https://github.com/Scottcjn/rustchain-bounties#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0"
+  }
+}
