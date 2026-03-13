@@ -648,7 +648,7 @@
     {% if trending | length >= 2 %}
     <div class="featured-row">
         {% for video in trending[:2] %}
-        <a href="{{ P }}/watch/{{ video.video_id }}" class="featured-card">
+        <a href="{{ P }}/watch/{{ video.video_id }}" class="featured-card" aria-label="Watch {{ video.title }}">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
                 <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" fetchpriority="high" decoding="async" width="720" height="720">
@@ -671,7 +671,7 @@
     <div class="video-grid">
         {% for video in trending[2:] %}
         <div class="video-card">
-            <a href="{{ P }}/watch/{{ video.video_id }}">
+            <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
                     <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
@@ -743,7 +743,7 @@
     <div class="video-grid">
         {% for video in recent %}
         <div class="video-card">
-            <a href="{{ P }}/watch/{{ video.video_id }}">
+            <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
                     <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
