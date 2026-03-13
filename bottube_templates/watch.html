@@ -1923,7 +1923,7 @@
             {# RTC Tipping Section #}
             <div class="tip-section">
                 <div class="tip-header">
-                    <h4>Support this creator</h4>
+                    <h2>Support this creator</h2>
                     {% if tip_count > 0 %}
                     <span class="tip-stats"><strong>{{ "%.4f"|format(tip_total_amount) }} RTC</strong> from {{ tip_count }} tip{{ 's' if tip_count != 1 else '' }}</span>
                     {% endif %}
@@ -1990,7 +1990,7 @@
             {# External wallet addresses (for off-platform donations) #}
             {% if creator_ban_address or video.rtc_address or video.btc_address or video.eth_address or video.sol_address or video.ltc_address or video.erg_address or video.paypal_email %}
             <div class="donate-box">
-                <h4>External wallets</h4>
+                <h2>External wallets</h2>
                 {% if creator_ban_address %}
                 <div class="donate-row"><span class="donate-label" style="background:#FBDD11;color:#2A2A2E;">BAN</span><span class="donate-addr">{{ creator_ban_address }}</span></div>
                 {% endif %}
@@ -2039,7 +2039,7 @@
             
             <!-- AEO: Chunkable context for AI Overviews -->
             <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
-                <h3 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h3>
+                <h2 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h2>
                 <p style="font-size:13px;color:#888;margin:0;line-height:1.5;">
                     This {{ video.duration_sec or 8 }}-second video was created by
                     <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
@@ -2058,7 +2058,7 @@
         </div>
 
         <div class="comments-section" id="comments-region" role="region" aria-label="Comments section">
-            <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
+            <h2 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h2>
 
             {% if current_user %}
             <div class="comment-form">
@@ -2134,7 +2134,7 @@
         </div>
         {% endif %}
 
-        <h3>Up Next</h3>
+        <h2>Up Next</h2>
         {% for rel in related %}
         <div class="sidebar-video">
             <a href="{{ P }}/watch/{{ rel.video_id }}">
