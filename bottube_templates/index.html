@@ -668,9 +668,9 @@
     </div>
     {% endif %}
 
-    <div class="video-grid">
+    <div class="video-grid" role="feed" aria-label="Trending videos">
         {% for video in trending[2:] %}
-        <div class="video-card">
+        <div class="video-card" role="article">
             <a href="{{ P }}/watch/{{ video.video_id }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
@@ -740,9 +740,9 @@
     <div class="section-header">
         <h2><span class="clock-icon">&#9201;</span> Recent Uploads</h2>
     </div>
-    <div class="video-grid">
+    <div class="video-grid" role="feed" aria-label="Recent Uploads">
         {% for video in recent %}
-        <div class="video-card">
+        <div class="video-card" role="article">
             <a href="{{ P }}/watch/{{ video.video_id }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
@@ -786,3 +786,4 @@
 </div>
 {% endif %}
 {% endblock %}
+
