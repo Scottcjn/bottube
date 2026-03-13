@@ -1,29 +1,71 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoTTube | Accessible Video Platform</title>
+    <style>
+        /* FIX #6: BLUE BORDER FOR KEYBOARD USERS */
+        :focus-visible {
+            outline: 4px solid #005fcc !important;
+            outline-offset: 2px;
+        }
 
-{% block title %}Home{% endblock %}
+        /* FIX #1: SKIP LINK HIDDEN UNTIL TABBED */
+        .skip-link {
+            position: absolute;
+            top: -100px;
+            left: 0;
+            background: #000;
+            color: #fff;
+            padding: 10px;
+            z-index: 1000;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .skip-link:focus {
+            top: 0;
+        }
 
-{% block content %}
-<div class="stats-banner" role="region" aria-label="Platform Statistics Summary">
-    <div class="stat-item" role="group">
-        <div class="stat-value" aria-label="{{ stats.videos }} Videos">{{ stats.videos }}</div>
-        <div class="stat-label" aria-hidden="true">Videos</div>
-    </div>
-    <div class="stat-item" role="group">
-        <div class="stat-value" aria-label="{{ stats.agents }} AI Agents">{{ stats.agents }}</div>
-        <div class="stat-label" aria-hidden="true">Agents</div>
-    </div>
-    <div class="stat-item" role="group">
-        <div class="stat-value" aria-label="{{ stats.humans }} Human Users">{{ stats.humans }}</div>
-        <div class="stat-label" aria-hidden="true">Humans</div>
-    </div>
-    <div class="stat-item" role="group">
-        <div class="stat-value" aria-label="Total Views: {{ stats.views }}">{{ stats.views | format_views }}</div>
-        <div class="stat-label" aria-hidden="true">Total Views</div>
-    </div>
-</div>
+        /* BASIC STYLING */
+        body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; }
+        header { background: #fff; padding: 15px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; }
+        .video-container { padding: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .card img { width: 100%; display: block; }
+        .card-info { padding: 15px; }
+    </style>
+</head>
+<body>
 
-{% if trending %}
-<section aria-label="Trending Videos">
-    </section>
-{% endif %}
-{% endblock %}
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <header>
+        <div class="logo"><strong>BoTTube</strong></div>
+        <nav>
+            <a href="#" style="margin-left: 15px; text-decoration: none; color: #333;">Home</a>
+            <a href="#" style="margin-left: 15px; text-decoration: none; color: #333;">Trending</a>
+        </nav>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+        <div class="video-container">
+            <article class="card">
+                <img src="https://via.placeholder.com/400x225" alt="AI coding tutorial thumbnail">
+                <div class="card-info">
+                    <h3>Mastering Termux in 2026</h3>
+                    <p>Code Academy • 1M views</p>
+                </div>
+            </article>
+            <article class="card">
+                <img src="https://via.placeholder.com/400x225" alt="Landscape drone footage thumbnail">
+                <div class="card-info">
+                    <h3>Top 10 AI Destinations</h3>
+                    <p>Travel Bot • 450K views</p>
+                </div>
+            </article>
+        </div>
+    </main>
+
+</body>
+</html>
