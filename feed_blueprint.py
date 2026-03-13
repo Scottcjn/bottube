@@ -237,3 +237,84 @@ def atom_feed():
 
     lines.append("</feed>")
     return Response("\n".join(lines), mimetype="application/atom+xml")
+
+
+@feed_bp.route("/feed/rss/<agent_name>")
+def rss_feed_agent(agent_name):
+    """RSS 2.0 feed for a specific agent."""
+    limit = _parse_limit()
+    videos = _fetch_videos(agent=agent_name, limit=limit)
+    
+    now_rfc = format_datetime(datetime.datetime.now(datetime.timezone.utc))
+    
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8" ?>',
+        '<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:dc="http://purl.org/dc/elements/1.1/">',
+        "<channel>",
+        f"  <title>BoTTube - {escape_xml(agent_name)}</title>",
+        "  <link>https://bottube.ai</link>",
+        f"  <description>Latest videos from {escape_xml(agent_name)} on BoTTube</description>",
+        f"  <lastBuildDate>{now_rfc}</lastBuildDate>",
+    ]
+    
+    for vid in videos:
+        f = _vid_fields(vid)
+        lines += [
+            "  <item>",
+            f"    <title>{escape_xml(f['title'])}</title>",
+            f"    <link>{f['watch']}</link>",
+            f'    <guid isPermaLink="false">{escape_xml(f["id"])}</guid>',
+            f'    <description><![CDATA[<img src="{f["thumb"]}" /><p>{escape_xml(f["desc"])}</p>]]></description>',
+            f"    <pubDate>{_to_rfc2822(f['created_at'])}</pubDate>",
+            f"    <dc:creator>{escape_xml(f['author'])}</dc:creator>",
+            f"    <category>{escape_xml(f['category'])}</category>",
+            f'    <media:content url="{f["stream"]}" type="video/mp4" medium="video" />',
+            f'    <media:thumbnail url="{f["thumb"]}" />',
+            "  </item>",
+        ]
+    
+    lines += ["</channel>", "</rss>"]
+    return Response("\n".join(lines), mimetype="application/rss+xml")
+
+
+@feed_bp.route("/feed/atom/<agent_name>")
+def atom_feed_agent(agent_name):
+    """Atom 1.0 feed for a specific agent."""
+    limit = _parse_limit()
+    videos = _fetch_videos(agent=agent_name, limit=limit)
+    
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8" ?>',
+        '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">',
+        f"  <title>BoTTube - {escape_xml(agent_name)}</title>",
+        f'  <link href="https://bottube.ai" rel="alternate" />',
+        f'  <link href="https://bottube.ai/feed/atom/{escape_xml(agent_name)}" rel="self" />',
+        f"  <id>https://bottube.ai/feed/atom/{escape_xml(agent_name)}</id>",
+        f"  <updated>{now_iso}</updated>",
+        f"  <subtitle>Latest videos from {escape_xml(agent_name)} on BoTTube</subtitle>",
+        '  <generator uri="https://bottube.ai" version="1.0">BoTTube</generator>',
+    ]
+    
+    for vid in videos:
+        f = _vid_fields(vid)
+        updated = _to_iso8601(f["created_at"])
+        lines += [
+            "  <entry>",
+            f"    <title>{escape_xml(f['title'])}</title>",
+            f'    <link href="{f["watch"]}" rel="alternate" />',
+            f"    <id>urn:bottube:video:{escape_xml(f['id'])}</id>",
+            f"    <updated>{updated}</updated>",
+            f"    <published>{updated}</published>",
+            f"    <author><name>{escape_xml(f['author'])}</name></author>",
+            f"    <category term=\"{escape_xml(f['category'])}\" />",
+            f"    <summary>{escape_xml(f['desc'])}</summary>",
+            f'    <content type="html"><![CDATA[<img src="{f["thumb"]}" /><p>{escape_xml(f["desc"])}</p>]]></content>',
+            f'    <media:content url="{f["stream"]}" type="video/mp4" medium="video" />',
+            f'    <media:thumbnail url="{f["thumb"]}" />',
+            "  </entry>",
+        ]
+    
+    lines.append("</feed>")
+    return Response("\n".join(lines), mimetype="application/atom+xml")
