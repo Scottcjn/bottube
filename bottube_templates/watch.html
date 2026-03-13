@@ -2758,4 +2758,175 @@ function reportVideo() {
 })();
 </script>
 
+<!-- Keyboard shortcuts for video player (a11y) -->
+<style>
+.kb-help-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+.kb-help-overlay.active { display: flex; }
+.kb-help-box {
+    background: var(--bg-secondary, #1a1a1a);
+    color: var(--text-primary, #e0e0e0);
+    border-radius: 12px;
+    padding: 24px 32px;
+    max-width: 420px;
+    width: 90%;
+    font-family: inherit;
+}
+.kb-help-box h2 {
+    margin: 0 0 16px;
+    font-size: 18px;
+    color: var(--text-primary, #fff);
+}
+.kb-help-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.kb-help-row:last-child { border-bottom: none; }
+.kb-key {
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: monospace;
+    font-size: 13px;
+}
+.kb-help-close {
+    margin-top: 16px;
+    background: none;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: var(--text-primary, #e0e0e0);
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+.kb-help-close:hover { background: rgba(255,255,255,0.1); }
+</style>
+
+<div class="kb-help-overlay" id="kb-help-overlay" role="dialog" aria-label="Keyboard shortcuts">
+    <div class="kb-help-box">
+        <h2>Keyboard Shortcuts</h2>
+        <div class="kb-help-row"><span>Play / Pause</span><span><span class="kb-key">Space</span> or <span class="kb-key">K</span></span></div>
+        <div class="kb-help-row"><span>Rewind 10s</span><span class="kb-key">J</span></div>
+        <div class="kb-help-row"><span>Forward 10s</span><span class="kb-key">L</span></div>
+        <div class="kb-help-row"><span>Seek back 5s</span><span class="kb-key">&larr;</span></div>
+        <div class="kb-help-row"><span>Seek forward 5s</span><span class="kb-key">&rarr;</span></div>
+        <div class="kb-help-row"><span>Volume up</span><span class="kb-key">&uarr;</span></div>
+        <div class="kb-help-row"><span>Volume down</span><span class="kb-key">&darr;</span></div>
+        <div class="kb-help-row"><span>Mute / Unmute</span><span class="kb-key">M</span></div>
+        <div class="kb-help-row"><span>Fullscreen</span><span class="kb-key">F</span></div>
+        <div class="kb-help-row"><span>Exit fullscreen</span><span class="kb-key">Esc</span></div>
+        <div class="kb-help-row"><span>Show this help</span><span class="kb-key">?</span></div>
+        <button class="kb-help-close" onclick="document.getElementById('kb-help-overlay').classList.remove('active')">Close</button>
+    </div>
+</div>
+
+<script>
+(function() {
+    var vid = document.getElementById('main-video');
+    if (!vid) return;
+    var helpOverlay = document.getElementById('kb-help-overlay');
+
+    // Add aria-labels to player controls
+    vid.setAttribute('aria-label', '{{ video.title | e }} - Video player. Press ? for keyboard shortcuts.');
+
+    function isTyping(e) {
+        var tag = (e.target || e.srcElement).tagName;
+        var editable = (e.target || e.srcElement).isContentEditable;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || editable;
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (isTyping(e)) return;
+
+        var helpActive = helpOverlay.classList.contains('active');
+
+        // Escape always closes help overlay or exits fullscreen
+        if (e.key === 'Escape') {
+            if (helpActive) {
+                helpOverlay.classList.remove('active');
+                e.preventDefault();
+                return;
+            }
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+                e.preventDefault();
+            }
+            return;
+        }
+
+        // If help overlay is open, ignore other shortcuts
+        if (helpActive) return;
+
+        switch(e.key) {
+            case ' ':
+            case 'k':
+            case 'K':
+                e.preventDefault();
+                if (vid.paused) vid.play(); else vid.pause();
+                break;
+            case 'j':
+            case 'J':
+                e.preventDefault();
+                vid.currentTime = Math.max(0, vid.currentTime - 10);
+                break;
+            case 'l':
+            case 'L':
+                e.preventDefault();
+                vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 10);
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                vid.currentTime = Math.max(0, vid.currentTime - 5);
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 5);
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                vid.volume = Math.min(1, vid.volume + 0.05);
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                vid.volume = Math.max(0, vid.volume - 0.05);
+                break;
+            case 'f':
+            case 'F':
+                e.preventDefault();
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else if (vid.requestFullscreen) {
+                    vid.requestFullscreen();
+                } else if (vid.webkitRequestFullscreen) {
+                    vid.webkitRequestFullscreen();
+                }
+                break;
+            case 'm':
+            case 'M':
+                e.preventDefault();
+                vid.muted = !vid.muted;
+                break;
+            case '?':
+                e.preventDefault();
+                helpOverlay.classList.add('active');
+                break;
+        }
+    });
+
+    // Close help overlay on click outside box
+    helpOverlay.addEventListener('click', function(e) {
+        if (e.target === helpOverlay) helpOverlay.classList.remove('active');
+    });
+})();
+</script>
+
 {% endblock %}
