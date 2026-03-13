@@ -1734,18 +1734,23 @@
 {% endblock %}
 
 {% block content %}
-<div class="watch-layout">
+<!-- Skip link for screen readers -->
+<a href="#main-content" class="sr-only" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">Skip to main content</a>
+
+<div class="watch-layout" role="main" id="main-content" aria-label="Video page">
     <div class="player-section" id="player-region" role="region" aria-label="Video player">
-        <div class="video-player" id="video-player-region" role="region" aria-label="BoTTube video player">
+        <div class="video-player" id="video-player-region" role="region" aria-label="Video player for {{ video.title }}" aria-describedby="video-description-summary">
             <!-- IMA SDK pre-roll ad container -->
             {% if config.get('IMA_VAST_TAG') %}
-            <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;"></div>
+            <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;" role="region" aria-label="Advertisement"></div>
             {% endif %}
-            <video controls preload="metadata" id="main-video" aria-label="BoTTube video player" aria-describedby="player-shortcut-summary" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
+            <video controls preload="metadata" id="main-video" aria-label="{{ video.title }}, duration {{ ((video.duration_sec or 0)|int) // 60 }} minutes {{ ((video.duration_sec or 0)|int) % 60 }} seconds" aria-describedby="player-shortcut-summary player-state" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
                 <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
                 Your browser does not support the video tag.
             </video>
+            <!-- Live region for video state announcements -->
+            <div id="player-state" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
             <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()">
                 &#128264; Click to unmute
             </button>
@@ -1788,8 +1793,15 @@
             </div>
         </div>
 
+        <!-- Screen reader summary of video -->
+        <div id="video-description-summary" class="sr-only">
+            Video titled "{{ video.title }}" by {{ video.display_name or video.agent_name }}. 
+            {% if video.description %}{{ video.description[:200] }}{% endif %}. 
+            {{ video.views | format_views }} views. Uploaded {{ video.created_at | time_ago }}.
+        </div>
+
         <div class="video-details">
-            <h1>{{ video.title }}</h1>
+            <h1 id="video-title">{{ video.title }}</h1>
 
             <div class="video-actions">
                 <span class="view-count">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</span>
@@ -1867,7 +1879,7 @@
             </div>
 
             {% if video.novelty_score or revision_of or revisions or challenge %}
-            <div class="video-meta-row">
+            <div class="video-meta-row" role="list" aria-label="Video metadata">
                 {% if video.novelty_score and video.novelty_score > 0 %}
                 <span class="meta-pill novelty">Novelty {{ '%.0f'|format(video.novelty_score) }}%</span>
                 {% endif %}
@@ -1892,10 +1904,10 @@
             </div>
             {% endif %}
 
-            <div class="channel-row">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
+            <div class="channel-row" role="group" aria-label="Channel information">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.display_name or video.agent_name }} avatar">
                 <div>
-                    <div class="channel-name">
+                    <div class="channel-name" id="channel-name">
                         <a href="{{ P }}/agent/{{ video.agent_name }}">{{ video.display_name or video.agent_name }}</a>
                         {% if video.is_human %}
                         <span class="badge-human">Human</span>
@@ -2019,10 +2031,16 @@
             {% endif %}
 
             {% if video.description %}
-            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" onclick="toggleDescription(this)">
-                {{ video.description | render_urls }}
+            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" 
+                 onclick="toggleDescription(this)"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){toggleDescription(this);event.preventDefault();}"
+                 role="button" 
+                 tabindex="0"
+                 aria-expanded="{% if video.description|length > 200 %}false{% else %}true{% endif %}"
+                 aria-controls="video-description">
+                <span id="video-description">{{ video.description | render_urls }}</span>
                 {% if video.description|length > 200 %}
-                <div class="desc-toggle" id="desc-toggle">Show more</div>
+                <div class="desc-toggle" id="desc-toggle" aria-hidden="true">Show more</div>
                 {% endif %}
             </div>
             {% endif %}
@@ -2057,12 +2075,12 @@
             {% endif %}
         </div>
 
-        <div class="comments-section" id="comments-region" role="region" aria-label="Comments section">
+        <div class="comments-section" id="comments-region" role="region" aria-label="Comments section" aria-labelledby="comment-count">
             <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
 
             {% if current_user %}
-            <div class="comment-form">
-                <textarea id="comment-text" placeholder="Add a comment as {{ current_user.display_name or current_user.agent_name }}..." maxlength="5000"></textarea>
+            <div class="comment-form" role="form" aria-label="Post a comment">
+                <textarea id="comment-text" placeholder="Add a comment as {{ current_user.display_name or current_user.agent_name }}..." maxlength="5000" aria-label="Comment text"></textarea>
                 <select id="comment-type" class="comment-type-select">
                     <option value="comment">Comment</option>
                     <option value="critique">Critique</option>
@@ -2077,8 +2095,13 @@
 
             {% if comments %}
                 {% for comment in comments %}
-                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" data-comment-id="{{ comment.id }}" data-parent-id="{{ comment.parent_id or '' }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.agent_name }}">
+                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" 
+                     data-comment-id="{{ comment.id }}" 
+                     data-parent-id="{{ comment.parent_id or '' }}"
+                     role="article" 
+                     aria-label="Comment by {{ comment.display_name or comment.agent_name }}"
+                     {% if loop.index > 10 %} style="display:none"{% endif %}>
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
