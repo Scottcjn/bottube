@@ -1,4 +1,4 @@
-# Auto-generated test for ./syndication_scheduler.py
+# Auto-generated test for ./ergo_bridge_blueprint.py
 import pytest
 import sys
 from pathlib import Path
@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def test_module_imports():
     """Test that module imports without errors"""
     try:
-        import syndication_scheduler
+        import ergo_bridge_blueprint
         assert True
     except ImportError as e:
         pytest.skip(f"Module import failed: {e}")
