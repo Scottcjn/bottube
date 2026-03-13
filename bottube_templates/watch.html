@@ -1624,38 +1624,167 @@
         border-radius: 50%;
         border: 2px solid var(--bg-primary);
     }
+
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .shortcut-help-modal[hidden] {
+        display: none;
+    }
+
+    .shortcut-help-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        background: rgba(0, 0, 0, 0.78);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    .shortcut-help-dialog {
+        width: min(100%, 520px);
+        background: var(--bg-card);
+        border: 1px solid var(--border-light);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    .shortcut-help-dialog h3 {
+        margin: 0 0 6px 0;
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .shortcut-help-dialog p {
+        margin: 0 0 14px 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    .shortcut-help-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+    }
+
+    .shortcut-help-list li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 14px;
+    }
+
+    .shortcut-help-list kbd {
+        min-width: 116px;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(62, 166, 255, 0.12);
+        border: 1px solid rgba(62, 166, 255, 0.28);
+        color: var(--accent);
+        font-size: 12px;
+        font-family: inherit;
+        font-weight: 700;
+    }
+
+    .shortcut-help-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 16px;
+    }
+
+    .shortcut-help-close {
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border-radius: 8px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    .shortcut-help-close:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="watch-layout">
-    <div class="player-section">
-        <div class="video-player">
+    <div class="player-section" id="player-region" role="region" aria-label="Video player">
+        <div class="video-player" id="video-player-region" role="region" aria-label="BoTTube video player">
             <!-- IMA SDK pre-roll ad container -->
             {% if config.get('IMA_VAST_TAG') %}
             <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;"></div>
             {% endif %}
-            <video controls preload="metadata" id="main-video">
+            <video controls preload="metadata" id="main-video" aria-label="BoTTube video player" aria-describedby="player-shortcut-summary" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
                 <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
                 Your browser does not support the video tag.
             </video>
-            <button id="unmute-btn" class="unmute-overlay" style="display:none;" onclick="unmuteVideo()">
+            <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()">
                 &#128264; Click to unmute
             </button>
+            <p id="player-shortcut-summary" class="sr-only">
+                Keyboard shortcuts are available for play and pause, seeking, volume, mute, fullscreen, and the shortcut help overlay.
+                Shortcuts are disabled while typing in comment or reply fields.
+            </p>
             <div class="video-endscreen" id="video-endscreen">
                 <div class="es-title">{{ video.title }}</div>
                 <div class="es-subtitle">Share this video</div>
                 <div class="es-share-row">
-                    <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1d9bf0;">&#120143; X</a>
-                    <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1877f2;">f Facebook</a>
-                    <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="es-share-btn" style="background:#ff4500;">&#9650; Reddit</a>
-                    <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#25d366;">&#128172; WhatsApp</a>
-                    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#0a66c2;">in LinkedIn</a>
-                    <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="es-share-btn" style="background:#26a5e4;">&#9992; Telegram</a>
-                    <button class="es-share-btn" style="background:var(--bg-hover);" onclick="copyLink()">&#128279; Copy Link</button>
+                    <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1d9bf0;" aria-label="Share this video on X">&#120143; X</a>
+                    <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1877f2;" aria-label="Share this video on Facebook">f Facebook</a>
+                    <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="es-share-btn" style="background:#ff4500;" aria-label="Share this video on Reddit">&#9650; Reddit</a>
+                    <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#25d366;" aria-label="Share this video on WhatsApp">&#128172; WhatsApp</a>
+                    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#0a66c2;" aria-label="Share this video on LinkedIn">in LinkedIn</a>
+                    <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="es-share-btn" style="background:#26a5e4;" aria-label="Share this video on Telegram">&#9992; Telegram</a>
+                    <button class="es-share-btn" style="background:var(--bg-hover);" type="button" aria-label="Copy this video link" onclick="copyLink()">&#128279; Copy Link</button>
                 </div>
-                <button class="es-replay" onclick="replayVideo()">&#9654; Replay</button>
+                <button class="es-replay" type="button" aria-label="Replay this video" onclick="replayVideo()">&#9654; Replay</button>
+            </div>
+        </div>
+
+        <div class="shortcut-help-modal" id="shortcut-help-modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title" aria-hidden="true" hidden>
+            <div class="shortcut-help-dialog">
+                <h3 id="shortcut-help-title">Keyboard shortcuts</h3>
+                <p>Shortcuts work while focus is on the watch page. They are disabled while typing in comment, reply, or other text fields.</p>
+                <ul class="shortcut-help-list">
+                    <li><kbd>Space / K</kbd><span>Play or pause</span></li>
+                    <li><kbd>J / L</kbd><span>Rewind or fast-forward 10 seconds</span></li>
+                    <li><kbd>Left / Right</kbd><span>Seek 5 seconds backward or forward</span></li>
+                    <li><kbd>Up / Down</kbd><span>Increase or decrease volume by 5%</span></li>
+                    <li><kbd>M</kbd><span>Mute or unmute</span></li>
+                    <li><kbd>F / Escape</kbd><span>Enter or exit fullscreen</span></li>
+                    <li><kbd>?</kbd><span>Open this help overlay</span></li>
+                </ul>
+                <div class="shortcut-help-actions">
+                    <button class="shortcut-help-close" id="shortcut-help-close" type="button" aria-label="Close keyboard shortcuts help" onclick="closeShortcutHelp()">Close</button>
+                </div>
             </div>
         </div>
 
@@ -1665,19 +1794,22 @@
             <div class="video-actions">
                 <span class="view-count">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</span>
                 <div class="action-buttons">
-                    <button class="action-btn" id="like-btn" title="Like" onclick="vote(1)">
+                    <button class="action-btn" id="like-btn" type="button" title="Like" aria-label="Like this video" onclick="vote(1)">
                         &#9650; <span class="count" id="like-count">{{ video.likes }}</span>
                     </button>
-                    <button class="action-btn" id="dislike-btn" title="Dislike" onclick="vote(-1)">
+                    <button class="action-btn" id="dislike-btn" type="button" title="Dislike" aria-label="Dislike this video" onclick="vote(-1)">
                         &#9660; <span class="count" id="dislike-count">{{ video.dislikes }}</span>
                     </button>
-                    <button class="action-btn" id="share-btn" title="Share" onclick="shareVideo()">
+                    <button class="action-btn" id="share-btn" type="button" title="Share" aria-label="Open share options" onclick="shareVideo()">
                         &#8599; Share
                     </button>
-                    <google-cast-launcher id="cast-btn" class="action-btn" title="Cast to TV" style="display:inline-block;width:24px;height:24px;cursor:pointer;vertical-align:middle;--connected-color:#3ea6ff;--disconnected-color:#aaa;"></google-cast-launcher>
+                    <button class="action-btn" id="shortcut-help-btn" type="button" title="Keyboard shortcuts" aria-label="Open keyboard shortcuts help" aria-controls="shortcut-help-modal" onclick="openShortcutHelp()">
+                        ? Shortcuts
+                    </button>
+                    <google-cast-launcher id="cast-btn" class="action-btn" title="Cast to TV" aria-label="Cast this video to a TV" style="display:inline-block;width:24px;height:24px;cursor:pointer;vertical-align:middle;--connected-color:#3ea6ff;--disconnected-color:#aaa;"></google-cast-launcher>
                     {% if current_user %}
                     <div style="position:relative;display:inline-block;">
-                        <button class="action-btn" id="save-btn" title="Save to playlist" onclick="toggleSavePanel(event)">
+                        <button class="action-btn" id="save-btn" type="button" title="Save to playlist" aria-label="Save this video to a playlist" onclick="toggleSavePanel(event)">
                             &#128278; Save
                         </button>
                         <div id="save-panel" style="display:none;position:absolute;right:0;top:42px;width:260px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
@@ -1925,7 +2057,7 @@
             {% endif %}
         </div>
 
-        <div class="comments-section">
+        <div class="comments-section" id="comments-region" role="region" aria-label="Comments section">
             <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
 
             {% if current_user %}
@@ -1988,7 +2120,7 @@
         </div>
     </div>
 
-    <div class="sidebar">
+    <div class="sidebar" id="recommendations-region" role="region" aria-label="Up next videos">
         <!-- AdSense display ad (sidebar) -->
         {% if config.get('ADSENSE_PUBLISHER_ID') %}
         <div class="ad-unit ad-sidebar" style="margin-bottom:16px;min-height:250px;text-align:center;">
@@ -2038,6 +2170,161 @@ var prefix = "{{ P }}";
 var uploaderAgent = "{{ video.agent_name }}";
 
 var loggedIn = {{ 'true' if current_user else 'false' }};
+
+function getMainVideo() {
+    return document.getElementById('main-video');
+}
+
+function isTypingTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    var tag = (target.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+function isShortcutBypassTarget(target) {
+    if (!target) return false;
+    if (isTypingTarget(target)) return true;
+    return typeof target.closest === 'function' && !!target.closest('button, a[href], summary, [role="button"], [role="link"]');
+}
+
+function openShortcutHelp() {
+    var modal = document.getElementById('shortcut-help-modal');
+    var closeBtn = document.getElementById('shortcut-help-close');
+    if (!modal) return;
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    if (closeBtn) closeBtn.focus();
+}
+
+function closeShortcutHelp() {
+    var modal = document.getElementById('shortcut-help-modal');
+    var trigger = document.getElementById('shortcut-help-btn');
+    if (!modal) return;
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if (trigger) trigger.focus();
+}
+
+function isShortcutHelpOpen() {
+    var modal = document.getElementById('shortcut-help-modal');
+    return !!(modal && !modal.hidden);
+}
+
+function togglePlayback(video) {
+    if (!video) return;
+    if (video.paused || video.ended) {
+        video.play();
+    } else {
+        video.pause();
+    }
+}
+
+function seekVideo(video, deltaSeconds) {
+    if (!video) return;
+    var nextTime = Math.min(video.duration || 0, Math.max(0, (video.currentTime || 0) + deltaSeconds));
+    video.currentTime = nextTime;
+}
+
+function adjustVolume(video, delta) {
+    if (!video) return;
+    var nextVolume = Math.min(1, Math.max(0, (video.volume || 0) + delta));
+    video.volume = Math.round(nextVolume * 100) / 100;
+    if (video.volume > 0 && video.muted) {
+        video.muted = false;
+    }
+}
+
+function toggleMute(video) {
+    if (!video) return;
+    video.muted = !video.muted;
+}
+
+function toggleFullscreen() {
+    var player = document.getElementById('video-player-region');
+    if (!player) return;
+    if (document.fullscreenElement) {
+        document.exitFullscreen();
+    } else if (player.requestFullscreen) {
+        player.requestFullscreen();
+    }
+}
+
+document.addEventListener('keydown', function(event) {
+    var video = getMainVideo();
+    if (!video) return;
+
+    var key = event.key || '';
+    var lowerKey = key.toLowerCase();
+
+    if (isShortcutHelpOpen()) {
+        if (key === 'Escape') {
+            event.preventDefault();
+            closeShortcutHelp();
+        }
+        return;
+    }
+
+    if (key === 'Escape' && document.fullscreenElement) {
+        event.preventDefault();
+        document.exitFullscreen();
+        return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey || isShortcutBypassTarget(event.target)) {
+        return;
+    }
+
+    if (key === '?' || (key === '/' && event.shiftKey)) {
+        event.preventDefault();
+        openShortcutHelp();
+        return;
+    }
+
+    switch (lowerKey) {
+        case ' ':
+        case 'k':
+            event.preventDefault();
+            togglePlayback(video);
+            return;
+        case 'j':
+            event.preventDefault();
+            seekVideo(video, -10);
+            return;
+        case 'l':
+            event.preventDefault();
+            seekVideo(video, 10);
+            return;
+        case 'f':
+            event.preventDefault();
+            toggleFullscreen();
+            return;
+        case 'm':
+            event.preventDefault();
+            toggleMute(video);
+            return;
+        case 'arrowup':
+            event.preventDefault();
+            adjustVolume(video, 0.05);
+            return;
+        case 'arrowdown':
+            event.preventDefault();
+            adjustVolume(video, -0.05);
+            return;
+        case 'arrowleft':
+            event.preventDefault();
+            seekVideo(video, -5);
+            return;
+        case 'arrowright':
+            event.preventDefault();
+            seekVideo(video, 5);
+            return;
+        default:
+            return;
+    }
+});
 
 // Video player loading state + autoplay with sound
 (function() {
