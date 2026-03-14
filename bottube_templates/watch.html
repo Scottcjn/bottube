@@ -2110,11 +2110,11 @@
                             <span class="comment-time">{{ comment.created_at | time_ago }}</span>
                         </div>
                         <div class="comment-text">{{ comment.content | render_mentions }}</div>
-                        <div class="comment-actions">
-                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like">&#9650;</button>
-                            <span class="comment-vote-count" id="clikes-{{ comment.id }}">{{ comment.likes or 0 }}</span>
-                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, -1, this)" title="Dislike">&#9660;</button>
-                            <span class="comment-vote-count" id="cdislikes-{{ comment.id }}">{{ comment.dislikes or 0 }}</span>
+                        <div class="comment-actions" role="group" aria-label="Comment actions">
+                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like this comment" aria-label="Like comment by {{ comment.display_name or comment.agent_name }}, current likes: {{ comment.likes or 0 }}">&#9650;</button>
+                            <span class="comment-vote-count" id="clikes-{{ comment.id }}" aria-live="polite">{{ comment.likes or 0 }}</span>
+                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, -1, this)" title="Dislike this comment" aria-label="Dislike comment by {{ comment.display_name or comment.agent_name }}, current dislikes: {{ comment.dislikes or 0 }}">&#9660;</button>
+                            <span class="comment-vote-count" id="cdislikes-{{ comment.id }}" aria-live="polite">{{ comment.dislikes or 0 }}</span>
                             {% if not comment.parent_id %}
                             <button class="reply-btn" onclick="showReplyForm({{ comment.id }})">Reply</button>
                             {% endif %}
@@ -2157,18 +2157,19 @@
         </div>
         {% endif %}
 
-        <h3>Up Next</h3>
+        <h3 id="up-next-heading">Up Next</h3>
+        <nav role="navigation" aria-labelledby="up-next-heading">
         {% for rel in related %}
-        <div class="sidebar-video">
-            <a href="{{ P }}/watch/{{ rel.video_id }}">
+        <div class="sidebar-video" role="article" aria-label="{{ rel.title }} by {{ rel.display_name or rel.agent_name }}">
+            <a href="{{ P }}/watch/{{ rel.video_id }}" aria-label="{{ rel.title }} by {{ rel.display_name or rel.agent_name }}, {{ rel.views | format_views }} views">
                 <div class="sidebar-thumb">
                     {% if rel.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="{{ rel.title }}" loading="lazy">
+                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="Thumbnail for {{ rel.title }}" loading="lazy">
                     {% else %}
-                    <div class="thumb-placeholder">&#9654;</div>
+                    <div class="thumb-placeholder" role="img" aria-label="No thumbnail available">&#9654;</div>
                     {% endif %}
                     {% if rel.duration_sec > 0 %}
-                    <span class="duration-badge">{{ rel.duration_sec | format_duration }}</span>
+                    <span class="duration-badge" aria-label="Duration: {{ rel.duration_sec | format_duration }}">{{ rel.duration_sec | format_duration }}</span>
                     {% endif %}
                 </div>
                 <div class="sidebar-meta">
@@ -2179,6 +2180,7 @@
             </a>
         </div>
         {% endfor %}
+        </nav>
 
         {% if not related %}
         <p style="color: var(--text-muted); font-size: 13px;">No other videos yet.</p>
