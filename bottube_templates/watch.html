@@ -3068,4 +3068,162 @@ function reportVideo() {
 })();
 </script>
 
+<!-- Keyboard Shortcuts for Video Player (Bounty #364) -->
+<style>
+.keyboard-help-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+}
+.keyboard-help-overlay.active { display: flex; }
+.keyboard-help-content {
+    background: var(--bg-secondary, #1e1e1e);
+    border-radius: 12px;
+    padding: 24px 32px;
+    max-width: 420px;
+    width: 90%;
+    color: var(--text-primary, #fff);
+}
+.keyboard-help-content h2 {
+    margin: 0 0 16px; font-size: 18px;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.keyboard-help-content .close-btn {
+    background: none; border: none; color: var(--text-primary, #fff);
+    font-size: 24px; cursor: pointer; padding: 0;
+}
+.keyboard-help-content .close-btn:hover { opacity: 0.7; }
+.shortcut-row {
+    display: flex; justify-content: space-between;
+    padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.shortcut-row:last-child { border-bottom: none; }
+.shortcut-key {
+    background: rgba(255,255,255,0.15); border-radius: 4px;
+    padding: 2px 8px; font-family: monospace; font-size: 13px;
+}
+</style>
+
+<div class="keyboard-help-overlay" id="keyboard-help" role="dialog" aria-label="Keyboard shortcuts" aria-modal="true">
+    <div class="keyboard-help-content">
+        <h2>Keyboard Shortcuts <button class="close-btn" onclick="toggleHelp(false)" aria-label="Close keyboard shortcuts help">&times;</button></h2>
+        <div class="shortcut-row"><span>Play / Pause</span><span><span class="shortcut-key">Space</span> or <span class="shortcut-key">K</span></span></div>
+        <div class="shortcut-row"><span>Rewind 10s</span><span class="shortcut-key">J</span></div>
+        <div class="shortcut-row"><span>Forward 10s</span><span class="shortcut-key">L</span></div>
+        <div class="shortcut-row"><span>Seek back 5s</span><span class="shortcut-key">&larr;</span></div>
+        <div class="shortcut-row"><span>Seek forward 5s</span><span class="shortcut-key">&rarr;</span></div>
+        <div class="shortcut-row"><span>Volume up 5%</span><span class="shortcut-key">&uarr;</span></div>
+        <div class="shortcut-row"><span>Volume down 5%</span><span class="shortcut-key">&darr;</span></div>
+        <div class="shortcut-row"><span>Fullscreen</span><span class="shortcut-key">F</span></div>
+        <div class="shortcut-row"><span>Mute / Unmute</span><span class="shortcut-key">M</span></div>
+        <div class="shortcut-row"><span>Exit fullscreen</span><span class="shortcut-key">Esc</span></div>
+        <div class="shortcut-row"><span>Show this help</span><span class="shortcut-key">?</span></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var video = document.getElementById('main-video');
+    if (!video) return;
+
+    var helpOverlay = document.getElementById('keyboard-help');
+
+    function isTyping() {
+        var el = document.activeElement;
+        if (!el) return false;
+        var tag = el.tagName.toLowerCase();
+        return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+    }
+
+    window.toggleHelp = function(show) {
+        if (show === undefined) show = !helpOverlay.classList.contains('active');
+        helpOverlay.classList.toggle('active', show);
+        if (show) {
+            helpOverlay.querySelector('.close-btn').focus();
+        }
+    };
+
+    var playerState = document.getElementById('player-state');
+    function announce(msg) {
+        if (playerState) playerState.textContent = msg;
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (isTyping()) return;
+
+        var key = e.key;
+        var handled = true;
+
+        switch(key) {
+            case ' ':
+            case 'k':
+            case 'K':
+                if (video.paused) { video.play(); announce('Playing'); }
+                else { video.pause(); announce('Paused'); }
+                break;
+            case 'j':
+            case 'J':
+                video.currentTime = Math.max(0, video.currentTime - 10);
+                announce('Rewound 10 seconds');
+                break;
+            case 'l':
+            case 'L':
+                video.currentTime = Math.min(video.duration, video.currentTime + 10);
+                announce('Forward 10 seconds');
+                break;
+            case 'f':
+            case 'F':
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                    announce('Exited fullscreen');
+                } else {
+                    (video.requestFullscreen || video.webkitRequestFullscreen || video.msRequestFullscreen).call(video);
+                    announce('Entered fullscreen');
+                }
+                break;
+            case 'm':
+            case 'M':
+                video.muted = !video.muted;
+                announce(video.muted ? 'Muted' : 'Unmuted');
+                break;
+            case 'ArrowUp':
+                video.volume = Math.min(1, video.volume + 0.05);
+                announce('Volume ' + Math.round(video.volume * 100) + '%');
+                break;
+            case 'ArrowDown':
+                video.volume = Math.max(0, video.volume - 0.05);
+                announce('Volume ' + Math.round(video.volume * 100) + '%');
+                break;
+            case 'ArrowLeft':
+                video.currentTime = Math.max(0, video.currentTime - 5);
+                announce('Seek back 5 seconds');
+                break;
+            case 'ArrowRight':
+                video.currentTime = Math.min(video.duration, video.currentTime + 5);
+                announce('Seek forward 5 seconds');
+                break;
+            case 'Escape':
+                if (helpOverlay.classList.contains('active')) {
+                    toggleHelp(false);
+                } else if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                    announce('Exited fullscreen');
+                }
+                break;
+            case '?':
+                toggleHelp();
+                break;
+            default:
+                handled = false;
+        }
+
+        if (handled) e.preventDefault();
+    });
+})();
+</script>
+
 {% endblock %}
