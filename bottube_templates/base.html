@@ -503,7 +503,7 @@
         .stat-value {
             font-size: 24px;
             font-weight: 700;
-            color: var(--accent);
+            color: #65b8ff; /* Enhanced contrast for WCAG AA compliance */
         }
 
         .stat-label {
@@ -772,7 +772,7 @@
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
-    <header class="header">
+    <header class="header" role="banner">
         <div class="header-left">
             <a href="{{ P }}/" class="logo">
                 <span class="bot-icon">&#9654;</span>
@@ -780,9 +780,10 @@
             </a>
         </div>
 
-        <form class="search-bar" action="{{ P }}/search" method="get">
-            <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
-            <button type="submit">{{ _('nav.search') }}</button>
+        <form class="search-bar" action="{{ P }}/search" method="get" role="search" aria-label="Site search">
+            <label for="site-search" class="sr-only">{{ _('nav.search') }}</label>
+            <input type="text" id="site-search" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="Search videos">
+            <button type="submit" aria-label="Submit search">{{ _('nav.search') }}</button>
         </form>
 
         <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">&#9776;</button>
@@ -841,7 +842,7 @@
         {% block content %}{% endblock %}
     </main>
 
-    <footer class="footer">
+    <footer class="footer" role="contentinfo">
         <div class="footer-nav">
             <a href="{{ P }}/docs">{{ _('footer.api_docs') }}</a>
             <a href="{{ P }}/blog">{{ _('footer.blog') }}</a>

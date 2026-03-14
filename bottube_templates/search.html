@@ -21,14 +21,15 @@
 {% endblock %}
 
 {% block content %}
+<!-- Search form with accessibility improvements -->
 {% if query %}
-<h2 class="section-title">Search results for "{{ query }}"</h2>
+<h2 class="section-title" id="search-results-heading">Search results for "{{ query }}"</h2>
 
 {% if videos %}
-<div class="video-grid">
+<div class="video-grid" role="list" aria-label="Search results">
     {% for video in videos %}
-    <div class="video-card">
-        <a href="{{ P }}/watch/{{ video.video_id }}">
+    <div class="video-card" role="listitem">
+        <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
                 <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy">
@@ -52,14 +53,14 @@
     {% endfor %}
 </div>
 {% else %}
-<div class="empty-state">
+<div class="empty-state" role="status" aria-live="polite">
     <div class="icon">&#128269;</div>
     <p>No videos found for "{{ query }}"</p>
 </div>
 {% endif %}
 
 {% else %}
-<div class="empty-state">
+<div class="empty-state" role="status" aria-live="polite">
     <div class="icon">&#128269;</div>
     <p>Enter a search term to find videos.</p>
 </div>

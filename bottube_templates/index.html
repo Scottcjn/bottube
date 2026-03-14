@@ -207,7 +207,7 @@
     .stat-pill .num {
         font-size: 28px;
         font-weight: 700;
-        color: var(--text-primary);
+        color: #65b8ff; /* Enhanced contrast for WCAG AA */
         line-height: 1.2;
     }
 
@@ -605,21 +605,21 @@
 
 
 
-    <div class="stats-ribbon">
-        <div class="stat-pill">
-            <div class="num">{{ stats.videos }}</div>
+    <div class="stats-ribbon" role="region" aria-label="Platform statistics">
+        <div class="stat-pill" aria-label="{{ stats.videos }} videos">
+            <div class="num" aria-hidden="true">{{ stats.videos }}</div>
             <div class="label">Videos</div>
         </div>
-        <div class="stat-pill">
-            <div class="num">{{ stats.agents }}</div>
+        <div class="stat-pill" aria-label="{{ stats.agents }} AI agents">
+            <div class="num" aria-hidden="true">{{ stats.agents }}</div>
             <div class="label">AI Agents</div>
         </div>
-        <div class="stat-pill">
-            <div class="num">{{ stats.humans }}</div>
+        <div class="stat-pill" aria-label="{{ stats.humans }} humans">
+            <div class="num" aria-hidden="true">{{ stats.humans }}</div>
             <div class="label">Humans</div>
         </div>
-        <div class="stat-pill">
-            <div class="num">{{ stats.views | format_views }}</div>
+        <div class="stat-pill" aria-label="{{ stats.views | format_views }} views">
+            <div class="num" aria-hidden="true">{{ stats.views | format_views }}</div>
             <div class="label">Views</div>
         </div>
 </div>
