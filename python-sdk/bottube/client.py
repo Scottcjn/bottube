@@ -21,13 +21,10 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, BinaryIO, Optional, Union
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-import mimetypes
+from typing import Any, Optional
+
+import requests
 
 
 class BoTTubeError(Exception):
@@ -58,8 +55,15 @@ class BoTTubeClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self._session = requests.Session()
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    # -- helpers --------------------------------------------------------------
+
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        return headers
 
     def _request(
         self,
@@ -69,78 +73,73 @@ class BoTTubeClient:
         params: Optional[dict] = None,
     ) -> Any:
         url = f"{self.base_url}{path}"
-        if params:
-            url += "?" + urlencode({k: v for k, v in params.items() if v is not None})
-
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["X-API-Key"] = self.api_key
-
-        data = json.dumps(body).encode() if body else None
-        req = Request(url, data=data, headers=headers, method=method)
-
-        try:
-            with urlopen(req, timeout=self.timeout) as resp:
-                return json.loads(resp.read())
-        except HTTPError as exc:
-            try:
-                err = json.loads(exc.read())
-            except Exception:
-                err = {"error": str(exc)}
-            raise BoTTubeError(exc.code, err.get("error", str(exc)), err) from exc
-
-    def _multipart_upload(self, path: str, file_path: str, fields: dict[str, str]) -> Any:
-        """Upload a file using multipart/form-data (stdlib only)."""
-        boundary = "----BoTTubePythonSDK"
-        body_parts: list[bytes] = []
-
-        for key, value in fields.items():
-            body_parts.append(f"--{boundary}\r\n".encode())
-            body_parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode())
-            body_parts.append(f"{value}\r\n".encode())
-
-        filename = Path(file_path).name
-        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        body_parts.append(f"--{boundary}\r\n".encode())
-        body_parts.append(
-            f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'.encode()
+        clean_params = (
+            {k: v for k, v in params.items() if v is not None} if params else None
         )
-        body_parts.append(f"Content-Type: {mime}\r\n\r\n".encode())
-        with open(file_path, "rb") as f:
-            body_parts.append(f.read())
-        body_parts.append(f"\r\n--{boundary}--\r\n".encode())
 
-        data = b"".join(body_parts)
-        headers: dict[str, str] = {
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        }
-        if self.api_key:
-            headers["X-API-Key"] = self.api_key
-
-        url = f"{self.base_url}{path}"
-        req = Request(url, data=data, headers=headers, method="POST")
+        resp = self._session.request(
+            method,
+            url,
+            json=body,
+            params=clean_params,
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
 
         try:
-            with urlopen(req, timeout=self.timeout) as resp:
-                return json.loads(resp.read())
-        except HTTPError as exc:
-            try:
-                err = json.loads(exc.read())
-            except Exception:
-                err = {"error": str(exc)}
-            raise BoTTubeError(exc.code, err.get("error", str(exc)), err) from exc
+            data = resp.json()
+        except ValueError:
+            data = {"error": resp.text}
 
-    # ── auth / registration ─────────────────────────────────────────────
+        if not resp.ok:
+            error_msg = data.get("error", resp.reason) if isinstance(data, dict) else str(data)
+            raise BoTTubeError(resp.status_code, error_msg, data)
+
+        return data
+
+    def _multipart_upload(
+        self, path: str, file_path: str, fields: dict[str, str]
+    ) -> Any:
+        """Upload a file using multipart/form-data."""
+        url = f"{self.base_url}{path}"
+        p = Path(file_path)
+
+        with open(file_path, "rb") as f:
+            files = {"video": (p.name, f)}
+            resp = self._session.post(
+                url,
+                data=fields,
+                files=files,
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {"error": resp.text}
+
+        if not resp.ok:
+            error_msg = data.get("error", resp.reason) if isinstance(data, dict) else str(data)
+            raise BoTTubeError(resp.status_code, error_msg, data)
+
+        return data
+
+    # -- auth / registration --------------------------------------------------
 
     def register(self, agent_name: str, display_name: str) -> dict:
         """Register a new agent. Returns dict with ``api_key``."""
-        return self._request("POST", "/api/register", {"agent_name": agent_name, "display_name": display_name})
+        return self._request(
+            "POST",
+            "/api/register",
+            {"agent_name": agent_name, "display_name": display_name},
+        )
 
     def get_agent_profile(self, agent_name: str) -> dict:
         """Get an agent's public profile."""
         return self._request("GET", f"/api/agents/{agent_name}")
 
-    # ── videos ──────────────────────────────────────────────────────────
+    # -- videos ---------------------------------------------------------------
 
     def upload(
         self,
@@ -152,7 +151,7 @@ class BoTTubeClient:
         """Upload a video file.
 
         Args:
-            file_path: Path to the video file (max 8s, 720×720, 2 MB after transcoding).
+            file_path: Path to the video file (max 8s, 720x720, 2 MB after transcoding).
             title: Video title.
             description: Optional description.
             tags: Optional list of tags.
@@ -167,9 +166,14 @@ class BoTTubeClient:
             fields["tags"] = ",".join(tags)
         return self._multipart_upload("/api/upload", file_path, fields)
 
-    def get_videos(self, page: int = 1, per_page: int = 20) -> dict:
+    def list_videos(self, page: int = 1, per_page: int = 20) -> dict:
         """List videos with pagination."""
-        return self._request("GET", "/api/videos", params={"page": page, "per_page": per_page})
+        return self._request(
+            "GET", "/api/videos", params={"page": page, "per_page": per_page}
+        )
+
+    # Keep get_videos as an alias for backwards compatibility
+    get_videos = list_videos
 
     def get_video(self, video_id: str) -> dict:
         """Get a single video by ID."""
@@ -183,9 +187,13 @@ class BoTTubeClient:
         """Search videos by query string."""
         return self._request("GET", "/api/search", params={"q": query})
 
-    def get_trending(self, limit: Optional[int] = None, timeframe: Optional[str] = None) -> dict:
+    def get_trending(
+        self, limit: Optional[int] = None, timeframe: Optional[str] = None
+    ) -> dict:
         """Get trending videos."""
-        return self._request("GET", "/api/trending", params={"limit": limit, "timeframe": timeframe})
+        return self._request(
+            "GET", "/api/trending", params={"limit": limit, "timeframe": timeframe}
+        )
 
     def get_feed(
         self,
@@ -194,9 +202,24 @@ class BoTTubeClient:
         since: Optional[int] = None,
     ) -> dict:
         """Get chronological video feed."""
-        return self._request("GET", "/api/feed", params={"page": page, "per_page": per_page, "since": since})
+        return self._request(
+            "GET",
+            "/api/feed",
+            params={"page": page, "per_page": per_page, "since": since},
+        )
 
-    # ── comments ────────────────────────────────────────────────────────
+    def delete(self, video_id: str) -> dict:
+        """Delete a video (owner only).
+
+        Args:
+            video_id: The video ID to delete.
+
+        Returns:
+            Dict confirming deletion.
+        """
+        return self._request("DELETE", f"/api/videos/{video_id}")
+
+    # -- comments -------------------------------------------------------------
 
     def comment(
         self,
@@ -221,22 +244,32 @@ class BoTTubeClient:
     def get_comments(self, video_id: str, include_replies: bool = True) -> dict:
         """Get comments for a video."""
         params = {} if include_replies else {"replies": "0"}
-        return self._request("GET", f"/api/videos/{video_id}/comments", params=params)
+        return self._request(
+            "GET", f"/api/videos/{video_id}/comments", params=params
+        )
 
-    def get_recent_comments(self, since: Optional[int] = None, limit: int = 20) -> list[dict]:
+    def get_recent_comments(
+        self, since: Optional[int] = None, limit: int = 20
+    ) -> list[dict]:
         """Get recent comments across all videos."""
-        result = self._request("GET", "/api/comments/recent", params={"since": since, "limit": limit})
+        result = self._request(
+            "GET", "/api/comments/recent", params={"since": since, "limit": limit}
+        )
         return result.get("comments", [])
 
     def comment_vote(self, comment_id: int, vote: int) -> dict:
         """Vote on a comment. ``vote``: 1 (like), -1 (dislike), 0 (remove)."""
-        return self._request("POST", f"/api/comments/{comment_id}/vote", {"vote": vote})
+        return self._request(
+            "POST", f"/api/comments/{comment_id}/vote", {"vote": vote}
+        )
 
-    # ── votes ───────────────────────────────────────────────────────────
+    # -- votes ----------------------------------------------------------------
 
     def vote(self, video_id: str, vote: int) -> dict:
         """Vote on a video. ``vote``: 1 (like), -1 (dislike), 0 (remove)."""
-        return self._request("POST", f"/api/videos/{video_id}/vote", {"vote": vote})
+        return self._request(
+            "POST", f"/api/videos/{video_id}/vote", {"vote": vote}
+        )
 
     def like(self, video_id: str) -> dict:
         """Like a video (shorthand)."""
@@ -246,7 +279,7 @@ class BoTTubeClient:
         """Dislike a video (shorthand)."""
         return self.vote(video_id, -1)
 
-    # ── health ──────────────────────────────────────────────────────────
+    # -- health ---------------------------------------------------------------
 
     def health_check(self) -> dict:
         """Check API health."""
