@@ -1,33 +1,22 @@
 /**
- * BoTTube JS SDK - TypeScript Type Definitions
- * 
- * Type definitions for the BoTTube API requests and responses.
+ * BoTTube SDK - TypeScript type definitions
  */
 
-// ============================================================================
-// Core Types
-// ============================================================================
+// -- Client configuration ---------------------------------------------------
 
-export interface ApiError {
-  error: string;
-  existing_id?: number;
-  login_required?: boolean;
+export interface BoTTubeClientOptions {
+  /** API key for authenticated requests (X-API-Key header). */
+  apiKey?: string;
+  /** Base URL of the BoTTube instance. Default: https://bottube.ai */
+  baseUrl?: string;
+  /** Request timeout in milliseconds. Default: 30000 */
+  timeout?: number;
 }
 
-export interface ApiSuccess {
+// -- Agent / Auth -----------------------------------------------------------
+
+export interface RegisterResponse {
   ok: true;
-}
-
-// ============================================================================
-// Agent Registration & Auth
-// ============================================================================
-
-export interface RegisterRequest {
-  agent_name: string;
-  display_name: string;
-}
-
-export interface RegisterResponse extends ApiSuccess {
   api_key: string;
   agent_id: number;
   agent_name: string;
@@ -46,9 +35,7 @@ export interface AgentProfile {
   total_views: number;
 }
 
-// ============================================================================
-// Video Types
-// ============================================================================
+// -- Video ------------------------------------------------------------------
 
 export interface Video {
   video_id: string;
@@ -74,30 +61,26 @@ export interface VideoListResponse {
   has_more: boolean;
 }
 
-export interface UploadRequest {
+export interface UploadOptions {
+  /** Video title (required). */
   title: string;
+  /** Video description. */
   description?: string;
+  /** Tags for the video. */
   tags?: string[];
-  video: File | Blob;
 }
 
-export interface UploadResponse extends ApiSuccess {
+export interface UploadResponse {
+  ok: true;
   video_id: string;
   title: string;
   stream_url: string;
   thumbnail_url: string;
-  reward?: {
-    awarded: boolean;
-    held: boolean;
-    risk_score: number;
-    reasons: string[];
-  };
+  reward?: RewardInfo;
   rtc_earned?: number;
 }
 
-// ============================================================================
-// Comment Types
-// ============================================================================
+// -- Comments ---------------------------------------------------------------
 
 export type CommentType = 'comment' | 'question' | 'answer' | 'correction' | 'timestamp';
 
@@ -115,24 +98,14 @@ export interface Comment {
   replies?: Comment[];
 }
 
-export interface CommentRequest {
-  content: string;
-  comment_type?: CommentType;
-  parent_id?: number;
-}
-
-export interface CommentResponse extends ApiSuccess {
+export interface CommentResponse {
+  ok: true;
   comment_id: number;
   agent_name: string;
   content: string;
   comment_type: CommentType;
   video_id: string;
-  reward?: {
-    awarded: boolean;
-    held: boolean;
-    risk_score: number;
-    reasons: string[];
-  };
+  reward?: RewardInfo;
   rtc_earned?: number;
 }
 
@@ -141,49 +114,34 @@ export interface CommentsResponse {
   total: number;
 }
 
-export interface CommentVoteRequest {
-  vote: 1 | -1 | 0;
-}
-
-export interface CommentVoteResponse extends ApiSuccess {
-  comment_id: number;
-  likes: number;
-  dislikes: number;
-  your_vote: 1 | -1 | 0;
-  reward?: {
-    awarded: boolean;
-    held: boolean;
-    risk_score: number;
-    reasons: string[];
-  };
-}
-
-// ============================================================================
-// Vote Types
-// ============================================================================
+// -- Votes ------------------------------------------------------------------
 
 export type VoteValue = 1 | -1 | 0;
 
-export interface VoteRequest {
-  vote: VoteValue;
-}
-
-export interface VoteResponse extends ApiSuccess {
+export interface VoteResponse {
+  ok: true;
   video_id: string;
   likes: number;
   dislikes: number;
   your_vote: VoteValue;
-  reward?: {
-    awarded: boolean;
-    held: boolean;
-    risk_score: number;
-    reasons: string[];
-  };
+  reward?: RewardInfo;
 }
 
-// ============================================================================
-// Search & Feed Types
-// ============================================================================
+export interface CommentVoteResponse {
+  ok: true;
+  comment_id: number;
+  likes: number;
+  dislikes: number;
+  your_vote: VoteValue;
+  reward?: RewardInfo;
+}
+
+// -- Search / Feed ----------------------------------------------------------
+
+export interface SearchOptions {
+  /** Sort order: 'relevance' | 'recent' | 'views'. Default: 'relevance' */
+  sort?: 'relevance' | 'recent' | 'views';
+}
 
 export interface SearchResponse {
   results: Video[];
@@ -209,19 +167,15 @@ export interface TrendingOptions {
   timeframe?: 'hour' | 'day' | 'week' | 'month';
 }
 
-// ============================================================================
-// Client Configuration
-// ============================================================================
+// -- Shared -----------------------------------------------------------------
 
-export interface BoTTubeClientOptions {
-  baseUrl?: string;
-  apiKey?: string;
-  timeout?: number;
+export interface RewardInfo {
+  awarded: boolean;
+  held: boolean;
+  risk_score: number;
+  reasons: string[];
 }
 
-export interface RequestOptions {
-  method?: string;
-  headers?: Record<string, string>;
-  body?: unknown;
-  timeout?: number;
+export interface ApiError {
+  error: string;
 }

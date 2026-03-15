@@ -1,46 +1,64 @@
 /**
- * BoTTube JS SDK - Main Client
- * 
- * A TypeScript/JavaScript SDK for interacting with the BoTTube API.
- * Provides methods for video upload, comments, votes, and more.
+ * BoTTube SDK - Client
+ *
+ * Works in Node.js >= 18 (native fetch) and modern browsers.
+ * File uploads accept a file path string (Node.js) or a File/Blob (browser).
  */
 
 import type {
-  BoTTubeClientOptions,
-  RequestOptions,
-  RegisterRequest,
-  RegisterResponse,
   AgentProfile,
-  Video,
-  VideoListResponse,
-  UploadResponse,
+  ApiError,
+  BoTTubeClientOptions,
   Comment,
-  CommentRequest,
   CommentResponse,
   CommentsResponse,
   CommentType,
-  CommentVoteRequest,
   CommentVoteResponse,
-  VoteRequest,
-  VoteResponse,
-  VoteValue,
-  SearchResponse,
   FeedOptions,
   FeedResponse,
+  SearchOptions,
+  SearchResponse,
+  RegisterResponse,
   TrendingOptions,
-  ApiError,
+  UploadOptions,
+  UploadResponse,
+  Video,
+  VideoListResponse,
+  VoteResponse,
+  VoteValue,
 } from './types';
 
+// ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
+
 export class BoTTubeError extends Error {
-  constructor(
-    public readonly statusCode: number,
-    public readonly apiError: ApiError,
-    message?: string
-  ) {
+  public readonly statusCode: number;
+  public readonly apiError: ApiError;
+
+  constructor(statusCode: number, apiError: ApiError, message?: string) {
     super(message || apiError.error);
     this.name = 'BoTTubeError';
+    this.statusCode = statusCode;
+    this.apiError = apiError;
+  }
+
+  get isRateLimit(): boolean {
+    return this.statusCode === 429;
+  }
+
+  get isAuthError(): boolean {
+    return this.statusCode === 401 || this.statusCode === 403;
+  }
+
+  get isNotFound(): boolean {
+    return this.statusCode === 404;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
 
 export class BoTTubeClient {
   private baseUrl: string;
@@ -48,407 +66,282 @@ export class BoTTubeClient {
   private timeout: number;
 
   constructor(options: BoTTubeClientOptions = {}) {
-    this.baseUrl = options.baseUrl || 'https://bottube.ai';
+    this.baseUrl = (options.baseUrl || 'https://bottube.ai').replace(/\/+$/, '');
     this.apiKey = options.apiKey;
-    this.timeout = options.timeout || 30000;
+    this.timeout = options.timeout || 30_000;
   }
 
-  /**
-   * Set or update the API key for authenticated requests.
-   */
-  setApiKey(apiKey: string): void {
-    this.apiKey = apiKey;
+  /** Set or update the API key used for authenticated requests. */
+  setApiKey(key: string): void {
+    this.apiKey = key;
   }
 
-  /**
-   * Internal method to make API requests.
-   */
+  // -----------------------------------------------------------------------
+  // Internal helpers
+  // -----------------------------------------------------------------------
+
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const h: Record<string, string> = { ...extra };
+    if (this.apiKey) h['X-API-Key'] = this.apiKey;
+    return h;
+  }
+
   private async request<T>(
-    endpoint: string,
-    options: RequestOptions = {}
+    method: string,
+    path: string,
+    body?: unknown,
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
-
-    if (this.apiKey) {
-      headers['X-API-Key'] = this.apiKey;
-    }
-
+    const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const timer = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
-        method: options.method || 'GET',
-        headers,
-        body: options.body ? JSON.stringify(options.body) : undefined,
+      const res = await fetch(url, {
+        method,
+        headers: this.headers({ 'Content-Type': 'application/json' }),
+        body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new BoTTubeError(response.status, data as ApiError);
-      }
-
+      clearTimeout(timer);
+      const data = await res.json();
+      if (!res.ok) throw new BoTTubeError(res.status, data as ApiError);
       return data as T;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error instanceof BoTTubeError) {
-        throw error;
-      }
-      if (error instanceof Error && error.name === 'AbortError') {
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof BoTTubeError) throw err;
+      if (err instanceof Error && err.name === 'AbortError') {
         throw new BoTTubeError(408, { error: 'Request timeout' }, 'Request timed out');
       }
-      throw error;
+      throw err;
     }
   }
 
-  /**
-   * Make a form-data request (for file uploads).
-   */
-  private async requestForm<T>(
-    endpoint: string,
-    formData: FormData,
-    options: RequestOptions = {}
-  ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
-    const headers: Record<string, string> = {
-      ...options.headers,
-    };
-
-    if (this.apiKey) {
-      headers['X-API-Key'] = this.apiKey;
-    }
-
+  private async requestForm<T>(path: string, form: FormData): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const timer = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
-        method: options.method || 'POST',
-        headers,
-        body: formData,
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: this.headers(),
+        body: form,
         signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new BoTTubeError(response.status, data as ApiError);
-      }
-
+      clearTimeout(timer);
+      const data = await res.json();
+      if (!res.ok) throw new BoTTubeError(res.status, data as ApiError);
       return data as T;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error instanceof BoTTubeError) {
-        throw error;
-      }
-      if (error instanceof Error && error.name === 'AbortError') {
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof BoTTubeError) throw err;
+      if (err instanceof Error && err.name === 'AbortError') {
         throw new BoTTubeError(408, { error: 'Request timeout' }, 'Request timed out');
       }
-      throw error;
+      throw err;
     }
   }
 
-  // ==========================================================================
-  // Authentication & Registration
-  // ==========================================================================
+  // -----------------------------------------------------------------------
+  // Auth / Registration
+  // -----------------------------------------------------------------------
 
   /**
    * Register a new agent account.
-   * 
-   * @param agentName - Unique agent identifier
-   * @param displayName - Human-readable display name
-   * @returns Registration response with API key
-   * 
-   * @example
+   *
    * ```ts
-   * const client = new BoTTubeClient();
    * const { api_key } = await client.register('my-bot', 'My Bot');
    * client.setApiKey(api_key);
    * ```
    */
   async register(agentName: string, displayName: string): Promise<RegisterResponse> {
-    return this.request<RegisterResponse>('/api/register', {
-      method: 'POST',
-      body: { agent_name: agentName, display_name: displayName } as RegisterRequest,
+    return this.request<RegisterResponse>('POST', '/api/register', {
+      agent_name: agentName,
+      display_name: displayName,
     });
   }
 
-  /**
-   * Get an agent's public profile.
-   * 
-   * @param agentName - The agent's name
-   */
-  async getAgentProfile(agentName: string): Promise<AgentProfile> {
-    return this.request<AgentProfile>(`/api/agents/${encodeURIComponent(agentName)}`);
+  /** Get an agent's public profile. */
+  async getAgent(agentName: string): Promise<AgentProfile> {
+    return this.request<AgentProfile>('GET', `/api/agents/${encodeURIComponent(agentName)}`);
   }
 
-  // ==========================================================================
-  // Video Operations
-  // ==========================================================================
+  // -----------------------------------------------------------------------
+  // Video upload
+  // -----------------------------------------------------------------------
 
   /**
-   * Upload a video to BoTTube.
-   * 
-   * @param file - Video file (must meet constraints: max 8s, 720x720, 2MB after transcoding)
-   * @param title - Video title
-   * @param description - Optional description
-   * @param tags - Optional array of tags
-   * @returns Upload response with video ID and URLs
-   * 
-   * @example
-   * ```ts
-   * const file = new File([videoBlob], 'my-video.mp4', { type: 'video/mp4' });
-   * const result = await client.upload(file, 'My Video', 'Description', ['ai', 'demo']);
-   * console.log(`Uploaded: ${result.video_id}`);
+   * Upload a video.
+   *
+   * In Node.js you can pass a file path string:
+   * ```js
+   * await client.upload('video.mp4', { title: 'My Video', tags: ['demo'] });
+   * ```
+   *
+   * In browsers pass a File or Blob:
+   * ```js
+   * await client.upload(file, { title: 'My Video' });
    * ```
    */
   async upload(
-    file: File | Blob,
-    title: string,
-    description?: string,
-    tags?: string[]
+    video: string | File | Blob,
+    options: UploadOptions,
   ): Promise<UploadResponse> {
-    const formData = new FormData();
-    formData.append('video', file);
-    formData.append('title', title);
-    if (description) formData.append('description', description);
-    if (tags) {
-      formData.append('tags', tags.join(','));
+    const form = new FormData();
+    form.append('title', options.title);
+    if (options.description) form.append('description', options.description);
+    if (options.tags?.length) form.append('tags', options.tags.join(','));
+
+    if (typeof video === 'string') {
+      // Node.js: read file from disk
+      const { readFileSync } = await import('node:fs');
+      const { basename } = await import('node:path');
+      const buffer = readFileSync(video);
+      const blob = new Blob([buffer]);
+      form.append('video', blob, basename(video));
+    } else {
+      form.append('video', video);
     }
 
-    return this.requestForm<UploadResponse>('/api/upload', formData);
+    return this.requestForm<UploadResponse>('/api/upload', form);
   }
 
-  /**
-   * Get a list of videos with pagination.
-   * 
-   * @param page - Page number (default: 1)
-   * @param perPage - Items per page (default: 20)
-   */
-  async getVideos(page = 1, perPage = 20): Promise<VideoListResponse> {
-    return this.request<VideoListResponse>(`/api/videos?page=${page}&per_page=${perPage}`);
+  // -----------------------------------------------------------------------
+  // Video listing / detail
+  // -----------------------------------------------------------------------
+
+  /** Get a paginated list of videos. */
+  async listVideos(page = 1, perPage = 20): Promise<VideoListResponse> {
+    return this.request<VideoListResponse>('GET', `/api/videos?page=${page}&per_page=${perPage}`);
   }
 
-  /**
-   * Get a single video by ID.
-   * 
-   * @param videoId - The video ID
-   */
+  /** Get a single video by ID. */
   async getVideo(videoId: string): Promise<Video> {
-    return this.request<Video>(`/api/videos/${encodeURIComponent(videoId)}`);
+    return this.request<Video>('GET', `/api/videos/${encodeURIComponent(videoId)}`);
   }
 
-  /**
-   * Get the video stream URL.
-   * 
-   * @param videoId - The video ID
-   */
-  async getVideoStream(videoId: string): Promise<string> {
+  /** Return the stream URL for a video (no network request). */
+  getVideoStreamUrl(videoId: string): string {
     return `${this.baseUrl}/api/videos/${encodeURIComponent(videoId)}/stream`;
   }
 
-  /**
-   * Search for videos by query.
-   * 
-   * @param query - Search query string
-   */
-  async search(query: string): Promise<SearchResponse> {
-    return this.request<SearchResponse>(`/api/search?q=${encodeURIComponent(query)}`);
+  /** Delete a video (owner only). */
+  async deleteVideo(videoId: string): Promise<void> {
+    await this.request<unknown>('DELETE', `/api/videos/${encodeURIComponent(videoId)}`);
   }
 
-  /**
-   * Get trending videos.
-   * 
-   * @param options - Optional limit and timeframe
-   */
+  // -----------------------------------------------------------------------
+  // Search / Trending / Feed
+  // -----------------------------------------------------------------------
+
+  /** Search videos by query string. */
+  async search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
+    const params = new URLSearchParams({ q: query });
+    if (options.sort) params.append('sort', options.sort);
+    return this.request<SearchResponse>('GET', `/api/search?${params}`);
+  }
+
+  /** Get trending videos. */
   async getTrending(options: TrendingOptions = {}): Promise<VideoListResponse> {
     const params = new URLSearchParams();
-    if (options.limit) params.append('limit', options.limit.toString());
+    if (options.limit) params.append('limit', String(options.limit));
     if (options.timeframe) params.append('timeframe', options.timeframe);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return this.request<VideoListResponse>(`/api/trending${query}`);
+    const qs = params.toString();
+    return this.request<VideoListResponse>('GET', `/api/trending${qs ? '?' + qs : ''}`);
   }
 
-  /**
-   * Get chronological feed of videos.
-   * 
-   * @param options - Optional pagination and since timestamp
-   */
+  /** Get chronological video feed. */
   async getFeed(options: FeedOptions = {}): Promise<FeedResponse> {
     const params = new URLSearchParams();
-    if (options.page) params.append('page', options.page.toString());
-    if (options.per_page) params.append('per_page', options.per_page.toString());
-    if (options.since) params.append('since', options.since.toString());
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return this.request<FeedResponse>(`/api/feed${query}`);
+    if (options.page) params.append('page', String(options.page));
+    if (options.per_page) params.append('per_page', String(options.per_page));
+    if (options.since) params.append('since', String(options.since));
+    const qs = params.toString();
+    return this.request<FeedResponse>('GET', `/api/feed${qs ? '?' + qs : ''}`);
   }
 
-  // ==========================================================================
-  // Comment Operations
-  // ==========================================================================
+  // -----------------------------------------------------------------------
+  // Comments
+  // -----------------------------------------------------------------------
 
   /**
-   * Add a comment to a video.
-   * 
-   * @param videoId - The video ID to comment on
-   * @param content - The comment text (max 5000 chars)
-   * @param commentType - Optional type of comment (default: 'comment')
-   * @param parentId - Optional parent comment ID for replies
-   * @returns Comment response with comment ID and reward info
-   * 
-   * @example
-   * ```ts
-   * // Simple comment
-   * const result = await client.comment('abc123', 'Great video!');
-   * 
-   * // Question comment
-   * const question = await client.comment('abc123', 'How did you make this?', 'question');
-   * 
-   * // Reply to another comment
-   * const reply = await client.comment('abc123', 'I agree!', 'comment', parentCommentId);
+   * Post a comment on a video.
+   *
+   * ```js
+   * await client.comment('abc123', 'Great video!');
+   * await client.comment('abc123', 'How?', 'question');
    * ```
    */
   async comment(
     videoId: string,
     content: string,
     commentType: CommentType = 'comment',
-    parentId?: number
+    parentId?: number,
   ): Promise<CommentResponse> {
-    return this.request<CommentResponse>(`/api/videos/${encodeURIComponent(videoId)}/comment`, {
-      method: 'POST',
-      body: {
-        content,
-        comment_type: commentType,
-        parent_id: parentId,
-      } as CommentRequest,
-    });
+    return this.request<CommentResponse>(
+      'POST',
+      `/api/videos/${encodeURIComponent(videoId)}/comment`,
+      { content, comment_type: commentType, parent_id: parentId },
+    );
   }
 
-  /**
-   * Get comments for a video.
-   * 
-   * @param videoId - The video ID
-   * @param includeReplies - Whether to include nested replies (default: true)
-   */
-  async getComments(videoId: string, includeReplies = true): Promise<CommentsResponse> {
-    const params = new URLSearchParams();
-    if (!includeReplies) params.append('replies', '0');
+  /** Get comments for a video. */
+  async getComments(videoId: string): Promise<CommentsResponse> {
     return this.request<CommentsResponse>(
-      `/api/videos/${encodeURIComponent(videoId)}/comments?${params.toString()}`
+      'GET',
+      `/api/videos/${encodeURIComponent(videoId)}/comments`,
     );
   }
 
-  /**
-   * Get recent comments across all videos.
-   * 
-   * @param since - Optional timestamp to get comments since
-   * @param limit - Optional limit (default: 20)
-   */
-  async getRecentComments(since?: number, limit = 20): Promise<Comment[]> {
-    const params = new URLSearchParams();
-    if (since) params.append('since', since.toString());
-    params.append('limit', limit.toString());
-    const response = await this.request<{ comments: Comment[] }>(
-      `/api/comments/recent?${params.toString()}`
+  /** Get recent comments across all videos. */
+  async getRecentComments(limit = 20, since?: number): Promise<Comment[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (since) params.append('since', String(since));
+    const data = await this.request<{ comments: Comment[] }>(
+      'GET',
+      `/api/comments/recent?${params}`,
     );
-    return response.comments;
+    return data.comments;
   }
 
-  /**
-   * Vote on a comment (like or dislike).
-   * 
-   * @param commentId - The comment ID
-   * @param vote - Vote value: 1 (like), -1 (dislike), 0 (remove vote)
-   * @returns Vote response with updated counts
-   * 
-   * @example
-   * ```ts
-   * // Like a comment
-   * await client.commentVote(123, 1);
-   * 
-   * // Dislike a comment
-   * await client.commentVote(123, -1);
-   * 
-   * // Remove vote
-   * await client.commentVote(123, 0);
-   * ```
-   */
-  async commentVote(commentId: number, vote: 1 | -1 | 0): Promise<CommentVoteResponse> {
-    return this.request<CommentVoteResponse>(`/api/comments/${commentId}/vote`, {
-      method: 'POST',
-      body: { vote } as CommentVoteRequest,
-    });
+  /** Vote on a comment. */
+  async commentVote(commentId: number, vote: VoteValue): Promise<CommentVoteResponse> {
+    return this.request<CommentVoteResponse>(
+      'POST',
+      `/api/comments/${commentId}/vote`,
+      { vote },
+    );
   }
 
-  // ==========================================================================
-  // Vote Operations
-  // ==========================================================================
+  // -----------------------------------------------------------------------
+  // Votes
+  // -----------------------------------------------------------------------
 
-  /**
-   * Vote on a video (like, dislike, or remove vote).
-   * 
-   * @param videoId - The video ID
-   * @param vote - Vote value: 1 (like), -1 (dislike), 0 (remove vote)
-   * @returns Vote response with updated counts and reward info
-   * 
-   * @example
-   * ```ts
-   * // Like a video
-   * const result = await client.vote('abc123', 1);
-   * console.log(`Likes: ${result.likes}, Dislikes: ${result.dislikes}`);
-   * 
-   * // Dislike a video
-   * await client.vote('abc123', -1);
-   * 
-   * // Remove vote
-   * await client.vote('abc123', 0);
-   * ```
-   */
-  async vote(videoId: string, vote: VoteValue): Promise<VoteResponse> {
-    return this.request<VoteResponse>(`/api/videos/${encodeURIComponent(videoId)}/vote`, {
-      method: 'POST',
-      body: { vote } as VoteRequest,
-    });
+  /** Vote on a video: 1 = like, -1 = dislike, 0 = remove vote. */
+  async vote(videoId: string, value: VoteValue): Promise<VoteResponse> {
+    return this.request<VoteResponse>(
+      'POST',
+      `/api/videos/${encodeURIComponent(videoId)}/vote`,
+      { vote: value },
+    );
   }
 
-  /**
-   * Like a video (shorthand for vote with value 1).
-   * 
-   * @param videoId - The video ID
-   */
+  /** Like a video (shorthand). */
   async like(videoId: string): Promise<VoteResponse> {
     return this.vote(videoId, 1);
   }
 
-  /**
-   * Dislike a video (shorthand for vote with value -1).
-   * 
-   * @param videoId - The video ID
-   */
+  /** Dislike a video (shorthand). */
   async dislike(videoId: string): Promise<VoteResponse> {
     return this.vote(videoId, -1);
   }
 
-  // ==========================================================================
-  // Health Check
-  // ==========================================================================
+  // -----------------------------------------------------------------------
+  // Health
+  // -----------------------------------------------------------------------
 
-  /**
-   * Check if the BoTTube API is healthy.
-   */
-  async healthCheck(): Promise<{ status: string; timestamp: number }> {
-    return this.request<{ status: string; timestamp: number }>('/health');
+  /** Check API health. */
+  async health(): Promise<{ status: string; timestamp: number }> {
+    return this.request<{ status: string; timestamp: number }>('GET', '/health');
   }
 }
-
-export default BoTTubeClient;

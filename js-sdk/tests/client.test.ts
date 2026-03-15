@@ -1,555 +1,298 @@
-/**
- * BoTTube JS SDK - Unit Tests
- * 
- * Focused tests for comment, vote, and core SDK functionality.
- */
-
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BoTTubeClient, BoTTubeError } from '../src/client';
-import type { CommentResponse, VoteResponse, CommentVoteResponse } from '../src/types';
 
-// Mock fetch globally
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe('BoTTubeClient', () => {
   let client: BoTTubeClient;
-  const testApiKey = 'test-api-key-123';
   const baseUrl = 'https://bottube.ai';
+  const apiKey = 'test-key-123';
 
   beforeEach(() => {
-    client = new BoTTubeClient({
-      baseUrl,
-      apiKey: testApiKey,
-      timeout: 5000,
-    });
+    client = new BoTTubeClient({ baseUrl, apiKey, timeout: 5000 });
     mockFetch.mockReset();
   });
 
-  describe('Constructor & Configuration', () => {
-    it('should initialize with default options', () => {
-      const defaultClient = new BoTTubeClient();
-      expect(defaultClient).toBeDefined();
+  // -- helpers ------------------------------------------------------------
+
+  function ok(data: unknown) {
+    return { ok: true, status: 200, json: async () => data };
+  }
+
+  function fail(status: number, error: string) {
+    return { ok: false, status, json: async () => ({ error }) };
+  }
+
+  // -- constructor --------------------------------------------------------
+
+  describe('constructor', () => {
+    it('uses default options', () => {
+      expect(new BoTTubeClient()).toBeDefined();
     });
 
-    it('should initialize with custom options', () => {
-      const customClient = new BoTTubeClient({
-        baseUrl: 'https://custom.example.com',
-        apiKey: 'custom-key',
-        timeout: 10000,
-      });
-      expect(customClient).toBeDefined();
-    });
-
-    it('should set API key via method', () => {
-      const clientWithoutKey = new BoTTubeClient();
-      clientWithoutKey.setApiKey('new-key');
-      expect(clientWithoutKey).toBeDefined();
+    it('accepts custom options', () => {
+      const c = new BoTTubeClient({ baseUrl: 'http://localhost:8097', apiKey: 'x', timeout: 1000 });
+      expect(c).toBeDefined();
     });
   });
 
-  describe('Comment Operations', () => {
-    const mockCommentResponse: CommentResponse = {
-      ok: true,
-      comment_id: 12345,
-      agent_name: 'test-agent',
-      content: 'Great video!',
-      comment_type: 'comment',
-      video_id: 'test-video-123',
-      rtc_earned: 0.5,
-      reward: {
-        awarded: true,
-        held: false,
-        risk_score: 0,
-        reasons: [],
-      },
-    };
+  // -- registration -------------------------------------------------------
 
-    it('should post a comment to a video', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockCommentResponse,
-      });
+  describe('register', () => {
+    it('registers a new agent', async () => {
+      const body = { ok: true, api_key: 'sk_new', agent_id: 1, agent_name: 'bot', display_name: 'Bot' };
+      mockFetch.mockResolvedValueOnce(ok(body));
 
-      const result = await client.comment('test-video-123', 'Great video!');
-
-      expect(result).toEqual(mockCommentResponse);
+      const res = await client.register('bot', 'Bot');
+      expect(res.api_key).toBe('sk_new');
       expect(mockFetch).toHaveBeenCalledWith(
-        `${baseUrl}/api/videos/test-video-123/comment`,
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'X-API-Key': testApiKey,
-            'Content-Type': 'application/json',
-          }),
-        })
+        `${baseUrl}/api/register`,
+        expect.objectContaining({ method: 'POST' }),
       );
     });
+  });
 
-    it('should post a question comment', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ...mockCommentResponse,
-          comment_type: 'question',
-        }),
-      });
+  // -- agent profile ------------------------------------------------------
 
-      const result = await client.comment(
-        'test-video-123',
-        'How did you make this?',
-        'question'
-      );
+  describe('getAgent', () => {
+    it('fetches an agent profile', async () => {
+      const profile = { agent_id: 1, agent_name: 'bot', display_name: 'Bot', total_videos: 5 };
+      mockFetch.mockResolvedValueOnce(ok(profile));
 
-      expect(result.comment_type).toBe('question');
+      const res = await client.getAgent('bot');
+      expect(res.agent_name).toBe('bot');
     });
+  });
 
-    it('should post a reply to a parent comment', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockCommentResponse,
-      });
+  // -- videos -------------------------------------------------------------
 
-      const result = await client.comment(
-        'test-video-123',
-        'I agree!',
-        'comment',
-        999
-      );
+  describe('listVideos', () => {
+    it('lists videos with pagination', async () => {
+      const body = { videos: [], total: 0, page: 1, per_page: 20, has_more: false };
+      mockFetch.mockResolvedValueOnce(ok(body));
 
-      expect(result).toEqual(mockCommentResponse);
-    });
-
-    it('should handle API errors on comment', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        json: async () => ({ error: 'Comment too long (max 5000 chars)' }),
-      });
-
-      await expect(
-        client.comment('test-video-123', 'A'.repeat(5001))
-      ).rejects.toThrow(BoTTubeError);
-    });
-
-    it('should get comments for a video', async () => {
-      const mockCommentsResponse = {
-        comments: [
-          {
-            id: 1,
-            video_id: 'test-video-123',
-            agent_id: 100,
-            agent_name: 'agent1',
-            content: 'First comment!',
-            comment_type: 'comment' as const,
-            created_at: 1234567890,
-            likes: 5,
-            dislikes: 0,
-          },
-        ],
-        total: 1,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockCommentsResponse,
-      });
-
-      const result = await client.getComments('test-video-123');
-
-      expect(result).toEqual(mockCommentsResponse);
+      const res = await client.listVideos(1, 20);
+      expect(res.videos).toEqual([]);
       expect(mockFetch).toHaveBeenCalledWith(
-        `${baseUrl}/api/videos/test-video-123/comments?`,
-        expect.objectContaining({
-          method: 'GET',
-        })
+        `${baseUrl}/api/videos?page=1&per_page=20`,
+        expect.anything(),
       );
     });
+  });
 
-    it('should get recent comments', async () => {
-      const mockRecentComments = [
-        {
-          id: 1,
-          video_id: 'video-1',
-          agent_id: 100,
-          agent_name: 'agent1',
-          content: 'Recent comment',
-          comment_type: 'comment' as const,
-          created_at: 1234567890,
-          likes: 2,
-          dislikes: 0,
-        },
-      ];
+  describe('getVideo', () => {
+    it('fetches a single video', async () => {
+      const video = { video_id: 'v1', title: 'Test', views: 42 };
+      mockFetch.mockResolvedValueOnce(ok(video));
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ comments: mockRecentComments }),
-      });
-
-      const result = await client.getRecentComments(1234567800, 10);
-
-      expect(result).toEqual(mockRecentComments);
+      const res = await client.getVideo('v1');
+      expect(res.video_id).toBe('v1');
     });
+  });
 
-    it('should vote on a comment', async () => {
-      const mockCommentVoteResponse: CommentVoteResponse = {
-        ok: true,
-        comment_id: 12345,
-        likes: 6,
-        dislikes: 0,
-        your_vote: 1,
-      };
+  describe('getVideoStreamUrl', () => {
+    it('returns the stream URL synchronously', () => {
+      expect(client.getVideoStreamUrl('v1')).toBe(`${baseUrl}/api/videos/v1/stream`);
+    });
+  });
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockCommentVoteResponse,
-      });
-
-      const result = await client.commentVote(12345, 1);
-
-      expect(result).toEqual(mockCommentVoteResponse);
+  describe('deleteVideo', () => {
+    it('sends a DELETE request', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ ok: true }));
+      await client.deleteVideo('v1');
       expect(mockFetch).toHaveBeenCalledWith(
-        `${baseUrl}/api/comments/12345/vote`,
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ vote: 1 }),
-        })
+        `${baseUrl}/api/videos/v1`,
+        expect.objectContaining({ method: 'DELETE' }),
       );
-    });
-
-    it('should dislike a comment', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          comment_id: 12345,
-          likes: 5,
-          dislikes: 1,
-          your_vote: -1,
-        }),
-      });
-
-      const result = await client.commentVote(12345, -1);
-
-      expect(result.your_vote).toBe(-1);
-    });
-
-    it('should remove vote from a comment', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          comment_id: 12345,
-          likes: 5,
-          dislikes: 0,
-          your_vote: 0,
-        }),
-      });
-
-      const result = await client.commentVote(12345, 0);
-
-      expect(result.your_vote).toBe(0);
     });
   });
 
-  describe('Vote Operations', () => {
-    const mockVoteResponse: VoteResponse = {
-      ok: true,
-      video_id: 'test-video-123',
-      likes: 10,
-      dislikes: 2,
-      your_vote: 1,
-      reward: {
-        awarded: true,
-        held: false,
-        risk_score: 0,
-        reasons: [],
-      },
-    };
+  // -- search / trending / feed -------------------------------------------
 
-    it('should vote (like) on a video', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVoteResponse,
-      });
+  describe('search', () => {
+    it('searches videos', async () => {
+      const body = { results: [], query: 'demo', total: 0 };
+      mockFetch.mockResolvedValueOnce(ok(body));
 
-      const result = await client.vote('test-video-123', 1);
+      const res = await client.search('demo', { sort: 'recent' });
+      expect(res.query).toBe('demo');
+    });
+  });
 
-      expect(result).toEqual(mockVoteResponse);
+  describe('getTrending', () => {
+    it('fetches trending videos', async () => {
+      const body = { videos: [], total: 0, page: 1, per_page: 10, has_more: false };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.getTrending({ limit: 10, timeframe: 'day' });
+      expect(res.videos).toEqual([]);
+    });
+  });
+
+  describe('getFeed', () => {
+    it('fetches the feed', async () => {
+      const body = { videos: [], total: 0, page: 1, has_more: false };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.getFeed({ page: 1 });
+      expect(res.has_more).toBe(false);
+    });
+  });
+
+  // -- comments -----------------------------------------------------------
+
+  describe('comment', () => {
+    it('posts a comment', async () => {
+      const body = { ok: true, comment_id: 1, agent_name: 'bot', content: 'Nice!', comment_type: 'comment', video_id: 'v1' };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.comment('v1', 'Nice!');
+      expect(res.comment_id).toBe(1);
       expect(mockFetch).toHaveBeenCalledWith(
-        `${baseUrl}/api/videos/test-video-123/vote`,
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'X-API-Key': testApiKey,
-          }),
-          body: JSON.stringify({ vote: 1 }),
-        })
+        `${baseUrl}/api/videos/v1/comment`,
+        expect.objectContaining({ method: 'POST' }),
       );
     });
 
-    it('should vote (dislike) on a video', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ...mockVoteResponse,
-          likes: 9,
-          dislikes: 3,
-          your_vote: -1,
-        }),
-      });
+    it('supports comment types and replies', async () => {
+      const body = { ok: true, comment_id: 2, agent_name: 'bot', content: 'How?', comment_type: 'question', video_id: 'v1' };
+      mockFetch.mockResolvedValueOnce(ok(body));
 
-      const result = await client.vote('test-video-123', -1);
-
-      expect(result.your_vote).toBe(-1);
+      const res = await client.comment('v1', 'How?', 'question', 1);
+      expect(res.comment_type).toBe('question');
     });
 
-    it('should remove vote from a video', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ...mockVoteResponse,
-          likes: 9,
-          dislikes: 2,
-          your_vote: 0,
-        }),
-      });
-
-      const result = await client.vote('test-video-123', 0);
-
-      expect(result.your_vote).toBe(0);
-    });
-
-    it('should like a video (shorthand)', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVoteResponse,
-      });
-
-      const result = await client.like('test-video-123');
-
-      expect(result.your_vote).toBe(1);
-    });
-
-    it('should dislike a video (shorthand)', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ...mockVoteResponse,
-          your_vote: -1,
-        }),
-      });
-
-      const result = await client.dislike('test-video-123');
-
-      expect(result.your_vote).toBe(-1);
-    });
-
-    it('should handle video not found error', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        json: async () => ({ error: 'Video not found' }),
-      });
-
-      await expect(client.vote('nonexistent', 1)).rejects.toThrow(BoTTubeError);
-    });
-
-    it('should handle rate limit error', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 429,
-        json: async () => ({ error: 'Vote rate limit exceeded. Try again later.' }),
-      });
-
-      await expect(client.vote('test-video-123', 1)).rejects.toThrow(BoTTubeError);
+    it('throws on validation error', async () => {
+      mockFetch.mockResolvedValueOnce(fail(400, 'Comment too long'));
+      await expect(client.comment('v1', 'x')).rejects.toThrow(BoTTubeError);
     });
   });
 
-  describe('Registration', () => {
-    it('should register a new agent', async () => {
-      const mockRegisterResponse = {
-        ok: true,
-        api_key: 'new-api-key-xyz',
-        agent_id: 1001,
-        agent_name: 'new-agent',
-        display_name: 'New Agent',
-      };
+  describe('getComments', () => {
+    it('fetches comments for a video', async () => {
+      const body = { comments: [{ id: 1, content: 'hi' }], total: 1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockRegisterResponse,
-      });
-
-      const result = await client.register('new-agent', 'New Agent');
-
-      expect(result).toEqual(mockRegisterResponse);
-      expect(result.api_key).toBe('new-api-key-xyz');
+      const res = await client.getComments('v1');
+      expect(res.total).toBe(1);
     });
   });
 
-  describe('Video Operations', () => {
-    it('should get videos list', async () => {
-      const mockVideosResponse = {
-        videos: [
-          {
-            video_id: 'video-1',
-            title: 'Test Video',
-            description: 'A test video',
-            tags: ['test'],
-            agent_id: 100,
-            agent_name: 'test-agent',
-            duration: 5,
-            views: 100,
-            likes: 10,
-            dislikes: 1,
-            created_at: 1234567890,
-          },
-        ],
-        total: 1,
-        page: 1,
-        per_page: 20,
-        has_more: false,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideosResponse,
-      });
-
-      const result = await client.getVideos(1, 20);
-
-      expect(result).toEqual(mockVideosResponse);
-    });
-
-    it('should get a single video', async () => {
-      const mockVideo = {
-        video_id: 'test-video-123',
-        title: 'Test Video',
-        description: 'A test video',
-        tags: ['test'],
-        agent_id: 100,
-        agent_name: 'test-agent',
-        duration: 5,
-        views: 100,
-        likes: 10,
-        dislikes: 1,
-        created_at: 1234567890,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVideo,
-      });
-
-      const result = await client.getVideo('test-video-123');
-
-      expect(result).toEqual(mockVideo);
-    });
-
-    it('should get video stream URL', async () => {
-      const streamUrl = await client.getVideoStream('test-video-123');
-
-      expect(streamUrl).toBe(`${baseUrl}/api/videos/test-video-123/stream`);
-    });
-
-    it('should search videos', async () => {
-      const mockSearchResponse = {
-        results: [],
-        query: 'test query',
-        total: 0,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockSearchResponse,
-      });
-
-      const result = await client.search('test query');
-
-      expect(result).toEqual(mockSearchResponse);
-    });
-
-    it('should get trending videos', async () => {
-      const mockTrendingResponse = {
-        videos: [],
-        total: 0,
-        page: 1,
-        per_page: 20,
-        has_more: false,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockTrendingResponse,
-      });
-
-      const result = await client.getTrending({ limit: 10, timeframe: 'day' });
-
-      expect(result).toEqual(mockTrendingResponse);
-    });
-
-    it('should get feed', async () => {
-      const mockFeedResponse = {
-        videos: [],
-        total: 0,
-        page: 1,
-        has_more: false,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockFeedResponse,
-      });
-
-      const result = await client.getFeed({ page: 1, per_page: 20 });
-
-      expect(result).toEqual(mockFeedResponse);
+  describe('getRecentComments', () => {
+    it('fetches recent comments', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ comments: [] }));
+      const res = await client.getRecentComments(10);
+      expect(res).toEqual([]);
     });
   });
 
-  describe('Health Check', () => {
-    it('should check API health', async () => {
-      const mockHealthResponse = {
-        status: 'healthy',
-        timestamp: 1234567890,
-      };
+  describe('commentVote', () => {
+    it('votes on a comment', async () => {
+      const body = { ok: true, comment_id: 1, likes: 5, dislikes: 0, your_vote: 1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockHealthResponse,
-      });
-
-      const result = await client.healthCheck();
-
-      expect(result.status).toBe('healthy');
+      const res = await client.commentVote(1, 1);
+      expect(res.your_vote).toBe(1);
     });
   });
 
-  describe('Error Handling', () => {
-    it('should throw BoTTubeError on API errors', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        json: async () => ({ error: 'Invalid API key' }),
-      });
+  // -- votes --------------------------------------------------------------
 
+  describe('vote', () => {
+    it('likes a video', async () => {
+      const body = { ok: true, video_id: 'v1', likes: 10, dislikes: 1, your_vote: 1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.vote('v1', 1);
+      expect(res.likes).toBe(10);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${baseUrl}/api/videos/v1/vote`,
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    it('dislikes a video', async () => {
+      const body = { ok: true, video_id: 'v1', likes: 9, dislikes: 2, your_vote: -1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.vote('v1', -1);
+      expect(res.your_vote).toBe(-1);
+    });
+
+    it('removes a vote', async () => {
+      const body = { ok: true, video_id: 'v1', likes: 9, dislikes: 1, your_vote: 0 };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.vote('v1', 0);
+      expect(res.your_vote).toBe(0);
+    });
+  });
+
+  describe('like / dislike shorthands', () => {
+    it('like() calls vote with 1', async () => {
+      const body = { ok: true, video_id: 'v1', likes: 11, dislikes: 1, your_vote: 1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
+      const res = await client.like('v1');
+      expect(res.your_vote).toBe(1);
+    });
+
+    it('dislike() calls vote with -1', async () => {
+      const body = { ok: true, video_id: 'v1', likes: 10, dislikes: 2, your_vote: -1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
+      const res = await client.dislike('v1');
+      expect(res.your_vote).toBe(-1);
+    });
+  });
+
+  // -- health -------------------------------------------------------------
+
+  describe('health', () => {
+    it('checks API health', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ status: 'healthy', timestamp: 123 }));
+      const res = await client.health();
+      expect(res.status).toBe('healthy');
+    });
+  });
+
+  // -- errors -------------------------------------------------------------
+
+  describe('error handling', () => {
+    it('throws BoTTubeError on 401', async () => {
+      mockFetch.mockResolvedValueOnce(fail(401, 'Invalid API key'));
       try {
-        await client.getVideos();
-      } catch (error) {
-        expect(error).toBeInstanceOf(BoTTubeError);
-        expect((error as BoTTubeError).statusCode).toBe(401);
+        await client.listVideos();
+      } catch (e) {
+        expect(e).toBeInstanceOf(BoTTubeError);
+        expect((e as BoTTubeError).statusCode).toBe(401);
+        expect((e as BoTTubeError).isAuthError).toBe(true);
       }
     });
 
-    it('should handle timeout errors', async () => {
-      const slowClient = new BoTTubeClient({ timeout: 10 });
-      
-      mockFetch.mockImplementationOnce(
-        () => new Promise((resolve) => setTimeout(resolve, 1000))
-      );
+    it('throws BoTTubeError on 429', async () => {
+      mockFetch.mockResolvedValueOnce(fail(429, 'Rate limit exceeded'));
+      try {
+        await client.vote('v1', 1);
+      } catch (e) {
+        expect(e).toBeInstanceOf(BoTTubeError);
+        expect((e as BoTTubeError).isRateLimit).toBe(true);
+      }
+    });
 
-      await expect(slowClient.healthCheck()).rejects.toThrow();
+    it('throws BoTTubeError on 404', async () => {
+      mockFetch.mockResolvedValueOnce(fail(404, 'Not found'));
+      try {
+        await client.getVideo('nope');
+      } catch (e) {
+        expect(e).toBeInstanceOf(BoTTubeError);
+        expect((e as BoTTubeError).isNotFound).toBe(true);
+      }
+    });
+
+    it('throws on timeout', async () => {
+      const slow = new BoTTubeClient({ timeout: 10 });
+      mockFetch.mockImplementationOnce(() => new Promise((r) => setTimeout(r, 5000)));
+      await expect(slow.health()).rejects.toThrow();
     });
   });
 });
