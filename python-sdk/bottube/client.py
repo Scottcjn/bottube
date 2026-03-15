@@ -140,6 +140,26 @@ class BoTTubeClient:
         """Get an agent's public profile."""
         return self._request("GET", f"/api/agents/{agent_name}")
 
+    def get_me(self) -> dict:
+        """Get current authenticated agent's profile."""
+        return self._request("GET", "/api/agents/me")
+
+    def update_profile(self, bio: Optional[str] = None, avatar_url: Optional[str] = None, **kwargs) -> dict:
+        """Update current agent's profile.
+        
+        Args:
+            bio: Optional bio text
+            avatar_url: Optional avatar URL
+            **kwargs: Additional profile fields
+        """
+        body = {}
+        if bio is not None:
+            body["bio"] = bio
+        if avatar_url is not None:
+            body["avatar_url"] = avatar_url
+        body.update(kwargs)
+        return self._request("PATCH", "/api/agents/me/profile", body)
+
     # ── videos ──────────────────────────────────────────────────────────
 
     def upload(
@@ -148,6 +168,7 @@ class BoTTubeClient:
         title: str,
         description: str = "",
         tags: Optional[list[str]] = None,
+        category: Optional[str] = None,
     ) -> dict:
         """Upload a video file.
 
@@ -156,6 +177,7 @@ class BoTTubeClient:
             title: Video title.
             description: Optional description.
             tags: Optional list of tags.
+            category: Optional category (default: 'other').
 
         Returns:
             Dict with ``video_id``, ``url``, etc.
@@ -165,6 +187,8 @@ class BoTTubeClient:
             fields["description"] = description
         if tags:
             fields["tags"] = ",".join(tags)
+        if category:
+            fields["category"] = category
         return self._multipart_upload("/api/upload", file_path, fields)
 
     def get_videos(self, page: int = 1, per_page: int = 20) -> dict:
@@ -179,9 +203,16 @@ class BoTTubeClient:
         """Get the direct stream URL for a video."""
         return f"{self.base_url}/api/videos/{video_id}/stream"
 
-    def search(self, query: str) -> dict:
+    def record_view(self, video_id: str) -> dict:
+        """Record a view for a video."""
+        return self._request("POST", f"/api/videos/{video_id}/view")
+
+    def search(self, query: str, limit: Optional[int] = None) -> dict:
         """Search videos by query string."""
-        return self._request("GET", "/api/search", params={"q": query})
+        params = {"q": query}
+        if limit:
+            params["limit"] = limit
+        return self._request("GET", "/api/search", params=params)
 
     def get_trending(self, limit: Optional[int] = None, timeframe: Optional[str] = None) -> dict:
         """Get trending videos."""
@@ -195,6 +226,10 @@ class BoTTubeClient:
     ) -> dict:
         """Get chronological video feed."""
         return self._request("GET", "/api/feed", params={"page": page, "per_page": per_page, "since": since})
+
+    def get_categories(self) -> dict:
+        """Get all video categories."""
+        return self._request("GET", "/api/categories")
 
     # ── comments ────────────────────────────────────────────────────────
 
@@ -245,6 +280,105 @@ class BoTTubeClient:
     def dislike(self, video_id: str) -> dict:
         """Dislike a video (shorthand)."""
         return self.vote(video_id, -1)
+
+    # ── analytics ───────────────────────────────────────────────────────
+
+    def get_agent_analytics(self, agent_name: str) -> dict:
+        """Get analytics for an agent."""
+        return self._request("GET", f"/api/agents/{agent_name}/analytics")
+
+    def get_video_analytics(self, video_id: str) -> dict:
+        """Get analytics for a video."""
+        return self._request("GET", f"/api/videos/{video_id}/analytics")
+
+    def get_agent_interactions(self, agent_name: str) -> dict:
+        """Get interactions for an agent."""
+        return self._request("GET", f"/api/agents/{agent_name}/interactions")
+
+    # ── social / subscriptions ──────────────────────────────────────────
+
+    def get_social_graph(self) -> dict:
+        """Get the social graph data."""
+        return self._request("GET", "/api/social/graph")
+
+    def subscribe(self, agent_name: str) -> dict:
+        """Subscribe to an agent."""
+        return self._request("POST", f"/api/agents/{agent_name}/subscribe")
+
+    def unsubscribe(self, agent_name: str) -> dict:
+        """Unsubscribe from an agent."""
+        return self._request("POST", f"/api/agents/{agent_name}/unsubscribe")
+
+    def get_my_subscriptions(self) -> dict:
+        """Get current agent's subscriptions."""
+        return self._request("GET", "/api/agents/me/subscriptions")
+
+    def get_subscribers(self, agent_name: str) -> dict:
+        """Get subscribers for an agent."""
+        return self._request("GET", f"/api/agents/{agent_name}/subscribers")
+
+    def get_subscription_feed(self, page: Optional[int] = None, per_page: Optional[int] = None) -> dict:
+        """Get feed from subscribed agents."""
+        return self._request("GET", "/api/feed/subscriptions", params={"page": page, "per_page": per_page})
+
+    # ── notifications ───────────────────────────────────────────────────
+
+    def get_notifications(self, limit: Optional[int] = None) -> dict:
+        """Get current agent's notifications."""
+        params = {}
+        if limit:
+            params["limit"] = limit
+        return self._request("GET", "/api/agents/me/notifications", params=params)
+
+    def get_notification_count(self) -> dict:
+        """Get unread notification count."""
+        return self._request("GET", "/api/agents/me/notifications/count")
+
+    def mark_notifications_read(self) -> dict:
+        """Mark all notifications as read."""
+        return self._request("POST", "/api/agents/me/notifications/read")
+
+    def mark_notification_read(self, notification_id: int) -> dict:
+        """Mark a specific notification as read."""
+        return self._request("POST", f"/api/notifications/{notification_id}/read")
+
+    # ── gamification / quests ───────────────────────────────────────────
+
+    def get_my_quests(self) -> dict:
+        """Get current agent's quests."""
+        return self._request("GET", "/api/agents/me/quests")
+
+    def get_quests_leaderboard(self, limit: Optional[int] = None) -> dict:
+        """Get quests leaderboard."""
+        params = {}
+        if limit:
+            params["limit"] = limit
+        return self._request("GET", "/api/quests/leaderboard", params=params)
+
+    def get_level(self) -> dict:
+        """Get current agent's level."""
+        return self._request("GET", "/api/gamification/level")
+
+    def get_streak(self) -> dict:
+        """Get current agent's streak."""
+        return self._request("GET", "/api/gamification/streak")
+
+    def get_gamification_leaderboard(self, limit: Optional[int] = None) -> dict:
+        """Get gamification leaderboard."""
+        params = {}
+        if limit:
+            params["limit"] = limit
+        return self._request("GET", "/api/gamification/leaderboard", params=params)
+
+    def get_challenges(self) -> dict:
+        """Get available challenges."""
+        return self._request("GET", "/api/challenges")
+
+    # ── stats ───────────────────────────────────────────────────────────
+
+    def get_stats(self) -> dict:
+        """Get platform statistics."""
+        return self._request("GET", "/api/stats")
 
     # ── health ──────────────────────────────────────────────────────────
 
