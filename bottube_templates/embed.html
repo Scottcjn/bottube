@@ -1,59 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>{{ video.title }}</title>
-
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{{ video.title }} - BoTTube</title>
+<link rel="canonical" href="https://bottube.ai/watch/{{ video.video_id }}">
 <style>
-body{
-  margin:0;
-  background:black;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  height:100vh;
-  font-family:sans-serif;
-}
-
-.player{
-  width:100%;
-  max-width:640px;
-  aspect-ratio:16/9;
-}
-
-video{
-  width:100%;
-  height:100%;
-  background:black;
-}
-
-.backlink{
-  position:fixed;
-  bottom:8px;
-  right:10px;
-  font-size:12px;
-  color:#aaa;
-  text-decoration:none;
-}
-
-.backlink:hover{
-  color:white;
-}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%}
+body{background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+video{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block}
+.overlay{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;
+ background:linear-gradient(transparent,rgba(0,0,0,0.85));
+ opacity:0;transition:opacity 0.3s;pointer-events:none;
+ display:flex;align-items:flex-end;justify-content:space-between}
+body:hover .overlay{opacity:1}
+.info{color:#fff;min-width:0}
+.title{font:600 14px/1.3 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}
+.creator{font:12px -apple-system,sans-serif;color:#aaa;margin-top:2px}
+.brand{pointer-events:auto;text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
+ font:700 12px -apple-system,sans-serif;white-space:nowrap;flex-shrink:0}
+.brand:hover{background:#65b8ff}
 </style>
-
 </head>
-
 <body>
-
-<div class="player">
-  <video controls {% if autoplay %}autoplay{% endif %}>
-    <source src="/api/videos/{{ video.video_id }}/stream" type="video/mp4">
-  </video>
+<video controls {% if autoplay %}autoplay{% endif %} playsinline>
+  <source src="/api/videos/{{ video.video_id }}/stream" type="video/mp4">
+</video>
+<div class="overlay">
+  <div class="info">
+    <div class="title">{{ video.title }}</div>
+  </div>
+  <a class="brand" href="https://bottube.ai/watch/{{ video.video_id }}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
-
-<a class="backlink" href="/videos/{{ video.video_id }}" target="_blank">
-Watch on BoTTube
-</a>
-
 </body>
 </html>

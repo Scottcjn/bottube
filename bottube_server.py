@@ -10331,6 +10331,9 @@ def embed(video_id):
     if not video:
         abort(404)
 
+    autoplay = request.args.get("autoplay", "0") == "1"
+    autoplay_attr = "autoplay " if autoplay else ""
+
     title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
 
@@ -10339,11 +10342,13 @@ def embed(video_id):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<title>{title_esc} - BoTTube</title>
 <link rel="canonical" href="https://bottube.ai/watch/{video_id}">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:#000;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
-video{{max-width:100%;max-height:100%;object-fit:contain;display:block}}
+html,body{{width:100%;height:100%}}
+body{{background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
+video{{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block}}
 .overlay{{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;background:linear-gradient(transparent,rgba(0,0,0,0.85));
  opacity:0;transition:opacity 0.3s;pointer-events:none;display:flex;align-items:flex-end;justify-content:space-between}}
 body:hover .overlay{{opacity:1}}
@@ -10355,12 +10360,12 @@ body:hover .overlay{{opacity:1}}
 .brand:hover{{background:#65b8ff}}
 </style>
 </head><body>
-<video controls autoplay playsinline>
+<video controls {autoplay_attr}playsinline>
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
 <div class="overlay">
 <div class="info"><div class="title">{title_esc}</div><div class="creator">{creator_esc}</div></div>
-<a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank">BoTTube</a>
+<a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
 </body></html>"""
     resp = Response(html, mimetype="text/html")
@@ -10376,8 +10381,8 @@ def oembed():
     url = request.args.get("url", "")
     fmt = request.args.get("format", "json")
 
-    if fmt != "json":
-        return jsonify({"error": "Only JSON format supported"}), 501
+    if fmt not in ("json", "xml"):
+        return jsonify({"error": "Unsupported format. Use json or xml."}), 501
 
     # Extract video_id from URL
     match = re.search(r"/watch/([A-Za-z0-9_-]{11})", url)
@@ -10400,7 +10405,10 @@ def oembed():
     w = min(w, 1920)
     h = min(h, 1080)
 
-    return jsonify({
+    thumb_url = f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video.get("thumbnail") else ""
+    embed_html = f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>'
+
+    data = {
         "version": "1.0",
         "type": "video",
         "provider_name": "BoTTube",
@@ -10410,11 +10418,22 @@ def oembed():
         "author_url": f"https://bottube.ai/agent/{video['agent_name']}",
         "width": w,
         "height": h,
-        "html": f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>',
-        "thumbnail_url": f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video["thumbnail"] else "",
+        "html": embed_html,
+        "thumbnail_url": thumb_url,
         "thumbnail_width": 320,
         "thumbnail_height": 180,
-    })
+    }
+
+    if fmt == "xml":
+        def _xml_escape(s):
+            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        xml_parts = ['<?xml version="1.0" encoding="utf-8"?>', "<oembed>"]
+        for k, v in data.items():
+            xml_parts.append(f"<{k}>{_xml_escape(v)}</{k}>")
+        xml_parts.append("</oembed>")
+        return Response("\n".join(xml_parts), mimetype="text/xml")
+
+    return jsonify(data)
 
 
 @app.route("/agents")
@@ -14460,25 +14479,6 @@ def embed_guide_page():
 @app.route("/beacon")
 def beacon_landing_page():
     return render_template("beacon.html")
-
-@app.route("/embed/<video_id>")
-def embed_video(video_id):
-    autoplay = request.args.get("autoplay") == "1"
-
-    conn = get_db()
-    video = conn.execute(
-        "SELECT * FROM videos WHERE video_id = ?",
-        (video_id,)
-    ).fetchone()
-
-    if not video:
-        abort(404)
-
-    return render_template(
-        "embed.html",
-        video=video,
-        autoplay=autoplay
-    )
 
 if __name__ == "__main__":
     init_db()
