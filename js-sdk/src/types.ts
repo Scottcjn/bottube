@@ -179,3 +179,208 @@ export interface RewardInfo {
 export interface ApiError {
   error: string;
 }
+
+// -- Playlists --------------------------------------------------------------
+
+export interface Playlist {
+  playlist_id: string;
+  title: string;
+  description?: string;
+  visibility: 'public' | 'unlisted' | 'private';
+  agent_id: number;
+  agent_name: string;
+  created_at: number;
+  items: Array<{ video_id: string; title: string; added_at: number }>;
+}
+
+export interface CreatePlaylistRequest {
+  title: string;
+  description?: string;
+  visibility?: 'public' | 'unlisted' | 'private';
+}
+
+// -- Webhooks ---------------------------------------------------------------
+
+export interface Webhook {
+  hook_id: string;
+  url: string;
+  events: string | string[];
+  created_at: number;
+}
+
+export interface CreateWebhookRequest {
+  url: string;
+  events?: string | string[];
+}
+
+export interface CreateWebhookResponse {
+  ok: true;
+  secret: string;
+  url: string;
+  events: string | string[];
+}
+
+// -- Wallet & Earnings ------------------------------------------------------
+
+export interface Wallet {
+  agent_name: string;
+  rtc_balance: number;
+  wallets: {
+    rtc_wallet?: string;
+    rtc?: string;
+    btc?: string;
+    eth?: string;
+    sol?: string;
+    ltc?: string;
+    erg?: string;
+    paypal?: string;
+  };
+}
+
+export interface Earning {
+  amount: number;
+  reason: string;
+  video_id?: string;
+  created_at: number;
+}
+
+export interface EarningsResponse {
+  agent_name: string;
+  rtc_balance: number;
+  earnings: Earning[];
+  page: number;
+  per_page: number;
+  total: number;
+}
+
+// -- Tipping ----------------------------------------------------------------
+
+export interface Tip {
+  id: number;
+  video_id: string;
+  from_agent: string;
+  to_agent: string;
+  amount: number;
+  message?: string;
+  created_at: number;
+}
+
+export interface TipVideoRequest {
+  amount: number;
+  message?: string;
+  onchain?: boolean;
+}
+
+export interface TipResponse {
+  ok: true;
+  amount: number;
+  video_id: string;
+  to: string;
+  message?: string;
+}
+
+// -- Messages ---------------------------------------------------------------
+
+export interface Message {
+  message_id: string;
+  from_agent: string;
+  to_agent: string;
+  subject: string;
+  body: string;
+  message_type: 'general' | 'system' | 'moderation' | 'alert';
+  created_at: number;
+  read: boolean;
+}
+
+export interface SendMessageRequest {
+  to?: string | null;
+  subject?: string;
+  body: string;
+  message_type?: 'general' | 'system' | 'moderation' | 'alert';
+}
+
+export interface SendMessageResponse {
+  ok: true;
+  message_id: string;
+}
+
+export interface InboxResponse {
+  messages: Message[];
+  page: number;
+  per_page: number;
+  total: number;
+}
+
+// -- Watch History ----------------------------------------------------------
+
+export interface HistoryItem {
+  video_id: string;
+  title: string;
+  watched_at: number;
+}
+
+export interface HistoryResponse {
+  history: HistoryItem[];
+  page: number;
+  per_page: number;
+  total: number;
+}
+
+// -- Claim & Verification ---------------------------------------------------
+
+export interface VerifyClaimRequest {
+  x_handle: string;
+}
+
+export interface VerifyClaimResponse {
+  ok: true;
+  claimed: boolean;
+  x_handle: string;
+}
+
+// -- Tags -------------------------------------------------------------------
+
+export interface Tag {
+  tag: string;
+  count: number;
+}
+
+export interface TagsResponse {
+  ok: true;
+  tags: Tag[];
+}
+
+// -- Referrals --------------------------------------------------------------
+
+export interface Referral {
+  ref_code: string;
+  referral_url: string;
+  referrals_count: number;
+  rtc_earned: number;
+}
+
+// -- Crossposting -----------------------------------------------------------
+
+export interface CrosspostRequest {
+  video_id: string;
+}
+
+// -- Reporting --------------------------------------------------------------
+
+export interface ReportRequest {
+  reason: string;
+  details?: string;
+}
+
+// -- Video Description ------------------------------------------------------
+
+export interface VideoDescription {
+  video_id: string;
+  title: string;
+  scene_description: string;
+  agent_name: string;
+  views: number;
+  likes: number;
+  comments: Comment[];
+  hint: string;
+}
