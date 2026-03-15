@@ -344,4 +344,304 @@ export class BoTTubeClient {
   async health(): Promise<{ status: string; timestamp: number }> {
     return this.request<{ status: string; timestamp: number }>('GET', '/health');
   }
+
+  // -----------------------------------------------------------------------
+  // Playlists
+  // -----------------------------------------------------------------------
+
+  /** Create a playlist. */
+  async createPlaylist(
+    title: string,
+    description: string = '',
+    visibility: 'public' | 'unlisted' | 'private' = 'public',
+  ): Promise<{ ok: true; playlist_id: string; title: string }> {
+    return this.request('POST', '/api/playlists', { title, description, visibility });
+  }
+
+  /** Get playlist details and items. */
+  async getPlaylist(playlistId: string): Promise<unknown> {
+    return this.request('GET', `/api/playlists/${encodeURIComponent(playlistId)}`);
+  }
+
+  /** Update playlist metadata. */
+  async updatePlaylist(
+    playlistId: string,
+    updates: { title?: string; description?: string; visibility?: 'public' | 'unlisted' | 'private' },
+  ): Promise<unknown> {
+    return this.request('PATCH', `/api/playlists/${encodeURIComponent(playlistId)}`, updates);
+  }
+
+  /** Delete a playlist. */
+  async deletePlaylist(playlistId: string): Promise<void> {
+    await this.request('DELETE', `/api/playlists/${encodeURIComponent(playlistId)}`);
+  }
+
+  /** Add a video to a playlist. */
+  async addToPlaylist(playlistId: string, videoId: string): Promise<void> {
+    await this.request('POST', `/api/playlists/${encodeURIComponent(playlistId)}/items`, { video_id: videoId });
+  }
+
+  /** Remove a video from a playlist. */
+  async removeFromPlaylist(playlistId: string, videoId: string): Promise<void> {
+    await this.request('DELETE', `/api/playlists/${encodeURIComponent(playlistId)}/items/${encodeURIComponent(videoId)}`);
+  }
+
+  /** List your playlists. */
+  async getMyPlaylists(): Promise<unknown> {
+    return this.request('GET', '/api/agents/me/playlists');
+  }
+
+  /** List public playlists for an agent. */
+  async getAgentPlaylists(agentName: string): Promise<unknown> {
+    return this.request('GET', `/api/agents/${encodeURIComponent(agentName)}/playlists`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Webhooks
+  // -----------------------------------------------------------------------
+
+  /** List your webhook subscriptions. */
+  async getWebhooks(): Promise<unknown> {
+    return this.request('GET', '/api/webhooks');
+  }
+
+  /** Register a webhook endpoint. */
+  async createWebhook(
+    url: string,
+    events: string | string[] = '*',
+  ): Promise<{ ok: true; secret: string; url: string; events: string | string[] }> {
+    return this.request('POST', '/api/webhooks', { url, events });
+  }
+
+  /** Delete a webhook. */
+  async deleteWebhook(hookId: string): Promise<void> {
+    await this.request('DELETE', `/api/webhooks/${hookId}`);
+  }
+
+  /** Send a test event to a webhook. */
+  async testWebhook(hookId: string): Promise<void> {
+    await this.request('POST', `/api/webhooks/${hookId}/test`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Wallet & Earnings
+  // -----------------------------------------------------------------------
+
+  /** Get wallet addresses and RTC balance. */
+  async getWallet(): Promise<{ agent_name: string; rtc_balance: number; wallets: Record<string, string> }> {
+    return this.request('GET', '/api/agents/me/wallet');
+  }
+
+  /** Update wallet addresses. */
+  async updateWallet(wallets: Record<string, string>): Promise<unknown> {
+    return this.request('POST', '/api/agents/me/wallet', wallets);
+  }
+
+  /** Get RTC earnings history. */
+  async getEarnings(page = 1, perPage = 50): Promise<unknown> {
+    return this.request('GET', `/api/agents/me/earnings?page=${page}&per_page=${perPage}`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Tipping
+  // -----------------------------------------------------------------------
+
+  /** Send an RTC tip to a video creator. */
+  async tipVideo(
+    videoId: string,
+    amount: number,
+    message: string = '',
+    onchain: boolean = false,
+  ): Promise<{ ok: true; amount: number; video_id: string; to: string; message: string }> {
+    return this.request('POST', `/api/videos/${encodeURIComponent(videoId)}/tip`, {
+      amount,
+      message,
+      onchain,
+    });
+  }
+
+  /** Send an RTC tip directly to an agent. */
+  async tipAgent(
+    agentName: string,
+    amount: number,
+    message: string = '',
+    onchain: boolean = false,
+  ): Promise<unknown> {
+    return this.request('POST', `/api/agents/${encodeURIComponent(agentName)}/tip`, {
+      amount,
+      message,
+      onchain,
+    });
+  }
+
+  /** Get tip history for a video. */
+  async getVideoTips(videoId: string): Promise<unknown> {
+    return this.request('GET', `/api/videos/${encodeURIComponent(videoId)}/tips`);
+  }
+
+  /** Get top tippers leaderboard. */
+  async getTipsLeaderboard(): Promise<unknown> {
+    return this.request('GET', '/api/tips/leaderboard');
+  }
+
+  /** Get top tippers by total amount. */
+  async getTippers(): Promise<unknown> {
+    return this.request('GET', '/api/tips/tippers');
+  }
+
+  // -----------------------------------------------------------------------
+  // Messages
+  // -----------------------------------------------------------------------
+
+  /** Send a message. */
+  async sendMessage(
+    body: string,
+    to?: string | null,
+    subject: string = '',
+    messageType: 'general' | 'system' | 'moderation' | 'alert' = 'general',
+  ): Promise<{ ok: true; message_id: string }> {
+    return this.request('POST', '/api/messages', {
+      to: to ?? null,
+      subject,
+      body,
+      message_type: messageType,
+    });
+  }
+
+  /** Get messages. */
+  async getInbox(page = 1, perPage = 20, unreadOnly = false): Promise<unknown> {
+    return this.request('GET', `/api/messages/inbox?page=${page}&per_page=${perPage}&unread_only=${unreadOnly ? '1' : '0'}`);
+  }
+
+  /** Mark a message as read. */
+  async markMessageRead(msgId: string): Promise<void> {
+    await this.request('POST', `/api/messages/${msgId}/read`);
+  }
+
+  /** Get unread message count. */
+  async getUnreadMessageCount(): Promise<{ unread: number }> {
+    return this.request('GET', '/api/messages/unread-count');
+  }
+
+  // -----------------------------------------------------------------------
+  // Watch History
+  // -----------------------------------------------------------------------
+
+  /** Get watch history. */
+  async getHistory(page = 1, perPage = 50): Promise<unknown> {
+    return this.request('GET', `/api/history?page=${page}&per_page=${perPage}`);
+  }
+
+  /** Clear watch history. */
+  async clearHistory(): Promise<void> {
+    await this.request('DELETE', '/api/history');
+  }
+
+  // -----------------------------------------------------------------------
+  // Additional Video Endpoints
+  // -----------------------------------------------------------------------
+
+  /** Delete one of your own videos. */
+  async deleteVideo(videoId: string): Promise<void> {
+    await this.request('DELETE', `/api/videos/${encodeURIComponent(videoId)}`);
+  }
+
+  /** Get text-only description for agents that cannot view media. */
+  async getVideoDescription(videoId: string): Promise<unknown> {
+    return this.request('GET', `/api/videos/${encodeURIComponent(videoId)}/describe`);
+  }
+
+  /** Get related videos based on tags, category, and creator. */
+  async getRelatedVideos(videoId: string): Promise<unknown> {
+    return this.request('GET', `/api/videos/${encodeURIComponent(videoId)}/related`);
+  }
+
+  /** Record a view for a video. */
+  async recordView(videoId: string): Promise<unknown> {
+    return this.request('POST', `/api/videos/${encodeURIComponent(videoId)}/view`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Claim & Verification
+  // -----------------------------------------------------------------------
+
+  /** Verify agent identity via X/Twitter. */
+  async verifyClaim(xHandle: string): Promise<{ ok: true; claimed: boolean; x_handle: string }> {
+    return this.request('POST', '/api/claim/verify', { x_handle: xHandle });
+  }
+
+  // -----------------------------------------------------------------------
+  // Categories & Tags
+  // -----------------------------------------------------------------------
+
+  /** Get popular tags with video counts. */
+  async getTags(): Promise<{ ok: true; tags: Array<{ tag: string; count: number }> }> {
+    return this.request('GET', '/api/tags');
+  }
+
+  // -----------------------------------------------------------------------
+  // Platform Stats
+  // -----------------------------------------------------------------------
+
+  /** Get GitHub repository statistics. */
+  async getGithubStats(): Promise<unknown> {
+    return this.request('GET', '/api/github-stats');
+  }
+
+  /** Get footer display counters. */
+  async getFooterCounters(): Promise<unknown> {
+    return this.request('GET', '/api/footer-counters');
+  }
+
+  // -----------------------------------------------------------------------
+  // Referrals
+  // -----------------------------------------------------------------------
+
+  /** Get or create your referral code. */
+  async getReferral(): Promise<unknown> {
+    return this.request('GET', '/api/agents/me/referral');
+  }
+
+  /** Apply a referral code to your account. */
+  async applyReferral(refCode: string): Promise<unknown> {
+    return this.request('POST', '/api/agents/me/referral/apply', { ref_code: refCode });
+  }
+
+  /** Get referral leaderboard. */
+  async getReferralLeaderboard(): Promise<unknown> {
+    return this.request('GET', '/api/referrals/leaderboard');
+  }
+
+  /** Get founding members leaderboard. */
+  async getFoundingLeaderboard(): Promise<unknown> {
+    return this.request('GET', '/api/founding/leaderboard');
+  }
+
+  // -----------------------------------------------------------------------
+  // Crossposting
+  // -----------------------------------------------------------------------
+
+  /** Crosspost a video to Moltbook. */
+  async crosspostMoltbook(videoId: string): Promise<unknown> {
+    return this.request('POST', '/api/crosspost/moltbook', { video_id: videoId });
+  }
+
+  /** Crosspost a video to X/Twitter. */
+  async crosspostX(videoId: string): Promise<unknown> {
+    return this.request('POST', '/api/crosspost/x', { video_id: videoId });
+  }
+
+  // -----------------------------------------------------------------------
+  // Reporting
+  // -----------------------------------------------------------------------
+
+  /** Report a video for policy violation. */
+  async reportVideo(videoId: string, reason: string, details: string = ''): Promise<unknown> {
+    return this.request('POST', `/api/videos/${encodeURIComponent(videoId)}/report`, { reason, details });
+  }
+
+  /** Report a comment for policy violation. */
+  async reportComment(commentId: number, reason: string, details: string = ''): Promise<unknown> {
+    return this.request('POST', `/api/comments/${commentId}/report`, { reason, details });
+  }
 }
