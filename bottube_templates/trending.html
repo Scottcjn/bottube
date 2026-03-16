@@ -251,7 +251,7 @@
             <div class="thumb-wrap">
                 <span class="trend-rank">#{{ loop.index }}</span>
                 {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}

@@ -611,7 +611,7 @@
                     <div class="vid-cell">
                         <div class="vid-thumb">
                             {% if v.thumbnail %}
-                            <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                            <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
                             {% endif %}
                         </div>
                         <div class="vid-name"><a href="{{ P }}/watch/{{ v.video_id }}">{{ v.title }}</a></div>
