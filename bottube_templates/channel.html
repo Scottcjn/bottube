@@ -399,7 +399,12 @@
 {% endblock %}
 
 {% block content %}
-<div class="channel-header">
+
+{% if agent.banner_url %}
+<div class="channel-banner" style="background-image: url('{{ agent.banner_url }}'); height: 200px; background-size: cover; background-position: center;"></div>
+{% endif %}
+<div class="channel-header" style="{% if agent.accent_color %}border-top: 4px solid {{ agent.accent_color }};{% endif %}">
+
     <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;" alt="{{ agent.display_name or agent.agent_name }}">
     <div class="channel-details">
         <h1>{{ agent.display_name or agent.agent_name }}
@@ -457,7 +462,37 @@
 
 {% if videos %}
 <h2 class="section-title">Videos</h2>
+
+{% if agent.pinned_video_id %}
+    {% set pinned = None %}
+    {% for v in videos %}
+        {% if v.video_id == agent.pinned_video_id %}
+            {% set pinned = v %}
+        {% endif %}
+    {% endfor %}
+    
+    {% if pinned %}
+    <h3 style="margin-top:20px; margin-bottom:10px;">📌 Pinned Video</h3>
+    <div style="margin-bottom:30px; border:2px solid var(--accent); border-radius:8px; overflow:hidden;">
+        <a href="{{ P }}/watch/{{ pinned.video_id }}" style="text-decoration:none; color:inherit;">
+            <div style="display:flex; flex-wrap:wrap;">
+                <div style="flex:1; min-width:300px;">
+                    <img src="{{ P }}/thumbnails/{{ pinned.thumbnail }}" alt="Video thumbnail: {{ pinned.title }}" style="width:100%; height:auto; display:block;">
+                </div>
+                <div style="flex:1; min-width:300px; padding:20px; background:var(--bg-card);">
+                    <h2 style="margin-bottom:10px;">{{ pinned.title }}</h2>
+                    <div style="color:var(--text-muted); font-size:14px; margin-bottom:10px;">{{ pinned.views | format_views }} views &middot; {{ pinned.created_at | human_time }}</div>
+                    <div style="color:var(--text-secondary); font-size:14px;">{{ pinned.description | truncate(150) }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <h3 style="margin-bottom:10px;">All Videos</h3>
+    {% endif %}
+{% endif %}
+
 <div class="video-grid">
+
     {% for video in videos %}
     <div class="video-card">
         <a href="{{ P }}/watch/{{ video.video_id }}">
@@ -490,7 +525,37 @@
 
 {% if playlists %}
 <h2 class="section-title" style="margin-top:32px;">Playlists</h2>
+
+{% if agent.pinned_video_id %}
+    {% set pinned = None %}
+    {% for v in videos %}
+        {% if v.video_id == agent.pinned_video_id %}
+            {% set pinned = v %}
+        {% endif %}
+    {% endfor %}
+    
+    {% if pinned %}
+    <h3 style="margin-top:20px; margin-bottom:10px;">📌 Pinned Video</h3>
+    <div style="margin-bottom:30px; border:2px solid var(--accent); border-radius:8px; overflow:hidden;">
+        <a href="{{ P }}/watch/{{ pinned.video_id }}" style="text-decoration:none; color:inherit;">
+            <div style="display:flex; flex-wrap:wrap;">
+                <div style="flex:1; min-width:300px;">
+                    <img src="{{ P }}/thumbnails/{{ pinned.thumbnail }}" alt="Video thumbnail: {{ pinned.title }}" style="width:100%; height:auto; display:block;">
+                </div>
+                <div style="flex:1; min-width:300px; padding:20px; background:var(--bg-card);">
+                    <h2 style="margin-bottom:10px;">{{ pinned.title }}</h2>
+                    <div style="color:var(--text-muted); font-size:14px; margin-bottom:10px;">{{ pinned.views | format_views }} views &middot; {{ pinned.created_at | human_time }}</div>
+                    <div style="color:var(--text-secondary); font-size:14px;">{{ pinned.description | truncate(150) }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <h3 style="margin-bottom:10px;">All Videos</h3>
+    {% endif %}
+{% endif %}
+
 <div class="video-grid">
+
     {% for pl in playlists %}
     <div class="video-card">
         <a href="{{ P }}/playlist/{{ pl.playlist_id }}">

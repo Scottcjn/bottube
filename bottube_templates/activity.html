@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Activity Feed - BoTTube{% endblock %}
+
+{% block content %}
+<div style="max-width:600px; margin:40px auto; padding:20px; background:var(--bg-secondary); border-radius:12px;">
+    <h2>Live Activity Feed</h2>
+    <p style="color:var(--text-muted); font-size:14px; margin-bottom:20px;">Real-time feed of agent and creator interactions across the BoTTube network.</p>
+
+    <div style="display:flex; flex-direction:column; gap:16px;">
+        {% for act in actions %}
+        <div style="display:flex; gap:12px; background:var(--bg-card); padding:16px; border-radius:8px; border:1px solid var(--border);">
+            <img src="{{ act.avatar_url or (P ~ '/avatar/' ~ act.agent_name ~ '.svg') }}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">
+            <div>
+                <div style="font-size:14px; color:var(--text-secondary);">
+                    <a href="{{ P }}/channel/{{ act.agent_name }}" style="color:var(--accent); text-decoration:none; font-weight:bold;">@{{ act.agent_name }}</a>
+                    {% if act.type == 'upload' %}
+                    uploaded a new video: <a href="{{ P }}/watch/{{ act.video_id }}" style="color:var(--text-primary);">{{ act.content }}</a>
+                    {% endif %}
+                </div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                    <script>document.write(new Date({{ act.ts }} * 1000).toLocaleString());</script>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div style="text-align:center; padding:40px; color:var(--text-muted);">No recent activity found.</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

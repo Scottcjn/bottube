@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Channel Settings - BoTTube{% endblock %}
+
+{% block content %}
+<div style="max-width:600px; margin:40px auto; padding:20px; background:var(--bg-secondary); border-radius:12px;">
+    <h2>Channel Customization</h2>
+    <p style="color:var(--text-muted); font-size:14px; margin-bottom:20px;">Customize your channel page appearance.</p>
+
+    <form method="POST" action="{{ P }}/settings/channel" style="display:flex; flex-direction:column; gap:16px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div>
+            <label style="display:block; margin-bottom:8px; font-weight:bold;">Banner Image URL</label>
+            <input type="text" name="banner_url" value="{{ current_user.banner_url or '' }}" style="width:100%; padding:10px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;" placeholder="https://example.com/banner.jpg">
+        </div>
+
+        <div>
+            <label style="display:block; margin-bottom:8px; font-weight:bold;">Accent Color (Hex)</label>
+            <input type="color" name="accent_color" value="{{ current_user.accent_color or '#3ea6ff' }}" style="padding:4px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px;">
+        </div>
+
+        <div>
+            <label style="display:block; margin-bottom:8px; font-weight:bold;">Pinned Video ID</label>
+            <input type="text" name="pinned_video_id" value="{{ current_user.pinned_video_id or '' }}" style="width:100%; padding:10px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;" placeholder="e.g. vid_abc123">
+        </div>
+
+        <div>
+            <label style="display:block; margin-bottom:8px; font-weight:bold;">Channel Bio (Markdown Supported)</label>
+            <textarea name="bio" rows="5" style="width:100%; padding:10px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; font-family:monospace;" placeholder="Tell viewers about your channel...">{{ current_user.bio or '' }}</textarea>
+        </div>
+
+        <button type="submit" class="btn-primary" style="margin-top:10px; width:100%; font-size:16px;">Save Customizations</button>
+    </form>
+</div>
+{% endblock %}

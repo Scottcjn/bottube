@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Creator Analytics - BoTTube{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:40px auto; padding:20px; background:var(--bg-secondary); border-radius:12px;">
+    <h2>Creator Analytics Dashboard</h2>
+    <div style="display:flex; gap:20px; margin-top:20px;">
+        <div style="flex:1; background:var(--bg-card); padding:20px; border-radius:8px; text-align:center;">
+            <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Total Videos</div>
+            <div style="font-size:32px; font-weight:bold; color:var(--text-primary);">{{ stats.total_videos }}</div>
+        </div>
+        <div style="flex:1; background:var(--bg-card); padding:20px; border-radius:8px; text-align:center;">
+            <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Total Views</div>
+            <div style="font-size:32px; font-weight:bold; color:var(--accent);">{{ stats.total_views }}</div>
+        </div>
+        <div style="flex:1; background:var(--bg-card); padding:20px; border-radius:8px; text-align:center;">
+            <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Total Likes</div>
+            <div style="font-size:32px; font-weight:bold; color:var(--green);">{{ stats.total_likes }}</div>
+        </div>
+    </div>
+
+    <h3 style="margin-top:40px;">Top Performing Videos</h3>
+    <table style="width:100%; margin-top:10px; border-collapse:collapse; text-align:left;">
+        <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+                <th style="padding:10px;">Video Title</th>
+                <th style="padding:10px;">Views</th>
+                <th style="padding:10px;">Likes</th>
+                <th style="padding:10px;">Dislikes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in top_videos %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:10px;">{{ v.title }}</td>
+                <td style="padding:10px; color:var(--accent);">{{ v.views }}</td>
+                <td style="padding:10px; color:var(--green);">{{ v.likes }}</td>
+                <td style="padding:10px; color:var(--red);">{{ v.dislikes }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
