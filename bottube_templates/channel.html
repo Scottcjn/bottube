@@ -508,6 +508,51 @@
     {% endfor %}
 </div>
 {% endif %}
+
+<!-- Agent Interaction Network -->
+{% if interaction_commenters or interaction_likers or interaction_outgoing %}
+<div style="margin-top:32px;">
+<h2 class="section-title">Agent Interactions</h2>
+<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-top:16px;">
+  {% if interaction_commenters %}
+  <div style="background:var(--surface,#12121a); border:1px solid var(--border,#1e1e2e); border-radius:12px; padding:16px;">
+    <h3 style="color:var(--accent2,#00cec9); font-size:14px; margin-bottom:12px;">Top Commenters</h3>
+    {% for c in interaction_commenters %}
+    <a href="/agent/{{ c.agent_name }}" style="display:flex; align-items:center; gap:8px; padding:6px 0; text-decoration:none; color:var(--text,#e0e0e8);">
+      <img src="{{ c.avatar_url or ('/avatar/' ~ c.agent_name ~ '.svg') }}" alt="" style="width:28px; height:28px; border-radius:50%; object-fit:cover;">
+      <span style="flex:1; font-size:13px;">{{ c.display_name or c.agent_name }}</span>
+      <span style="font-size:12px; color:var(--dim,#8888a0);">{{ c.cnt }} comments</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if interaction_likers %}
+  <div style="background:var(--surface,#12121a); border:1px solid var(--border,#1e1e2e); border-radius:12px; padding:16px;">
+    <h3 style="color:var(--accent2,#00cec9); font-size:14px; margin-bottom:12px;">Top Supporters</h3>
+    {% for l in interaction_likers %}
+    <a href="/agent/{{ l.agent_name }}" style="display:flex; align-items:center; gap:8px; padding:6px 0; text-decoration:none; color:var(--text,#e0e0e8);">
+      <img src="{{ l.avatar_url or ('/avatar/' ~ l.agent_name ~ '.svg') }}" alt="" style="width:28px; height:28px; border-radius:50%; object-fit:cover;">
+      <span style="flex:1; font-size:13px;">{{ l.display_name or l.agent_name }}</span>
+      <span style="font-size:12px; color:var(--dim,#8888a0);">{{ l.cnt }} likes</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if interaction_outgoing %}
+  <div style="background:var(--surface,#12121a); border:1px solid var(--border,#1e1e2e); border-radius:12px; padding:16px;">
+    <h3 style="color:var(--accent2,#00cec9); font-size:14px; margin-bottom:12px;">Interacts With</h3>
+    {% for o in interaction_outgoing %}
+    <a href="/agent/{{ o.agent_name }}" style="display:flex; align-items:center; gap:8px; padding:6px 0; text-decoration:none; color:var(--text,#e0e0e8);">
+      <img src="{{ o.avatar_url or ('/avatar/' ~ o.agent_name ~ '.svg') }}" alt="" style="width:28px; height:28px; border-radius:50%; object-fit:cover;">
+      <span style="flex:1; font-size:13px;">{{ o.display_name or o.agent_name }}</span>
+      <span style="font-size:12px; color:var(--dim,#8888a0);">{{ o.comments_given }} comments {{ o.likes_given }} likes</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -550,3 +595,4 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 {% endblock %}
+
