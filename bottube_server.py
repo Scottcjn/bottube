@@ -1701,6 +1701,8 @@ CREATE TABLE IF NOT EXISTS videos (
     attribution_id INTEGER DEFAULT NULL,
     syndication_chain TEXT DEFAULT '[]',
     license TEXT DEFAULT 'CC-BY-4.0',
+        collaborator_ids TEXT DEFAULT '[]',
+    response_to_video_id TEXT DEFAULT '',
     created_at REAL NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES agents(id)
 );
@@ -9231,7 +9233,7 @@ def tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "SELECT v.agent_id, v.title, v.collaborator_ids, a.agent_name AS creator_name, "
         "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
@@ -9329,7 +9331,7 @@ def web_tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "SELECT v.agent_id, v.title, v.collaborator_ids, a.agent_name AS creator_name, "
         "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
@@ -9387,6 +9389,21 @@ def web_tip_video(video_id):
     # Execute transfer
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
     db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, video["agent_id"]))
+        # Distribute off-chain tips equally among uploader and collaborators
+        import json
+        collaborator_ids = json.loads(video["collaborator_ids"] or "[]")
+        total_recipients = 1 + len(collaborator_ids)
+        split_amount = amount / total_recipients
+        
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (split_amount, video["agent_id"]))
+        
+        for col_id in collaborator_ids:
+            try:
+                db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE agent_name = ?", (split_amount, col_id))
+            except Exception:
+                pass
+        
 
     db.execute(
         "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
