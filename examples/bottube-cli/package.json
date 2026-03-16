@@ -1,0 +1,16 @@
+{
+  "name": "bottube-cli",
+  "version": "1.0.0",
+  "description": "A CLI tool to fetch trending videos from BoTTube using the official JS SDK",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "bottube": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "bottube-sdk": "file:../../js-sdk"
+  }
+}
