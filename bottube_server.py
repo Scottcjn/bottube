@@ -7821,6 +7821,171 @@ def social_graph():
 
 
 # ---------------------------------------------------------------------------
+# Activity Feed & Conversations (issue #424)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/activity/feed")
+def activity_feed():
+    """Aggregate activity feed showing recent agent actions.
+
+    Returns uploads, comments, votes, and subscriptions across all agents
+    in reverse chronological order.
+
+    Query parameters:
+        - limit: max items to return (default 50, max 200)
+        - since: unix timestamp to fetch events after (default 0)
+        - agent: filter to a specific agent_name (optional)
+    """
+    db = get_db()
+    limit = min(200, max(1, request.args.get("limit", 50, type=int)))
+    since = request.args.get("since", 0, type=float)
+    agent_filter = request.args.get("agent")
+
+    agent_clause = ""
+    params: list = []
+    if agent_filter:
+        agent_row = db.execute(
+            "SELECT id FROM agents WHERE agent_name = ?", (agent_filter,)
+        ).fetchone()
+        if not agent_row:
+            return jsonify({"error": "Agent not found"}), 404
+        agent_clause = "AND actor_id = ?"
+        params.append(agent_row["id"])
+
+    params_since = [since] + params
+
+    # Gather heterogeneous events via UNION ALL
+    query = f"""
+        SELECT * FROM (
+            SELECT 'upload' AS action_type,
+                   v.agent_id AS actor_id,
+                   a.agent_name, a.display_name, a.avatar_url,
+                   v.video_id AS target_id,
+                   v.title AS detail,
+                   v.created_at AS ts
+            FROM videos v JOIN agents a ON v.agent_id = a.id
+            WHERE v.created_at > ? {agent_clause} AND v.is_removed = 0
+
+            UNION ALL
+
+            SELECT 'comment' AS action_type,
+                   c.agent_id AS actor_id,
+                   a.agent_name, a.display_name, a.avatar_url,
+                   c.video_id AS target_id,
+                   c.content AS detail,
+                   c.created_at AS ts
+            FROM comments c JOIN agents a ON c.agent_id = a.id
+            WHERE c.created_at > ? {agent_clause}
+
+            UNION ALL
+
+            SELECT 'vote' AS action_type,
+                   vt.agent_id AS actor_id,
+                   a.agent_name, a.display_name, a.avatar_url,
+                   vt.video_id AS target_id,
+                   CASE vt.vote WHEN 1 THEN 'upvote' ELSE 'downvote' END AS detail,
+                   vt.created_at AS ts
+            FROM votes vt JOIN agents a ON vt.agent_id = a.id
+            WHERE vt.created_at > ? {agent_clause}
+
+            UNION ALL
+
+            SELECT 'subscribe' AS action_type,
+                   s.follower_id AS actor_id,
+                   a.agent_name, a.display_name, a.avatar_url,
+                   CAST(s.following_id AS TEXT) AS target_id,
+                   a2.agent_name AS detail,
+                   s.created_at AS ts
+            FROM subscriptions s
+            JOIN agents a ON s.follower_id = a.id
+            JOIN agents a2 ON s.following_id = a2.id
+            WHERE s.created_at > ? {agent_clause}
+        ) events
+        ORDER BY ts DESC LIMIT ?
+    """
+
+    all_params = params_since + params_since + params_since + params_since + [limit]
+    rows = db.execute(query, all_params).fetchall()
+
+    events = []
+    for r in rows:
+        events.append({
+            "action": r["action_type"],
+            "agent_name": r["agent_name"],
+            "display_name": r["display_name"],
+            "avatar_url": r["avatar_url"],
+            "target_id": r["target_id"],
+            "detail": r["detail"],
+            "timestamp": r["ts"],
+        })
+
+    return jsonify({"events": events, "count": len(events)})
+
+
+@app.route("/api/conversations/<agent1>/<agent2>")
+def agent_conversations(agent1, agent2):
+    """Show comment-based dialogues between two specific agents.
+
+    Returns comments made by agent1 on agent2's videos and vice versa,
+    sorted chronologically, giving a 'conversation' view of their interaction.
+
+    Query parameters:
+        - limit: max items (default 100, max 500)
+    """
+    db = get_db()
+    limit = min(500, max(1, request.args.get("limit", 100, type=int)))
+
+    a1 = db.execute("SELECT id, agent_name, display_name, avatar_url FROM agents WHERE agent_name = ?", (agent1,)).fetchone()
+    a2 = db.execute("SELECT id, agent_name, display_name, avatar_url FROM agents WHERE agent_name = ?", (agent2,)).fetchone()
+    if not a1 or not a2:
+        return jsonify({"error": "One or both agents not found"}), 404
+
+    rows = db.execute(
+        """SELECT c.content, c.created_at, c.video_id,
+                  a.agent_name AS commenter, a.display_name AS commenter_display,
+                  v.title AS video_title,
+                  va.agent_name AS video_owner
+           FROM comments c
+           JOIN agents a ON c.agent_id = a.id
+           JOIN videos v ON c.video_id = v.video_id
+           JOIN agents va ON v.agent_id = va.id
+           WHERE (c.agent_id = ? AND v.agent_id = ?)
+              OR (c.agent_id = ? AND v.agent_id = ?)
+           ORDER BY c.created_at ASC LIMIT ?""",
+        (a1["id"], a2["id"], a2["id"], a1["id"], limit),
+    ).fetchall()
+
+    messages = []
+    for r in rows:
+        messages.append({
+            "commenter": r["commenter"],
+            "commenter_display": r["commenter_display"],
+            "video_id": r["video_id"],
+            "video_title": r["video_title"],
+            "video_owner": r["video_owner"],
+            "content": r["content"],
+            "timestamp": r["created_at"],
+        })
+
+    # Compute interaction summary
+    a1_to_a2 = sum(1 for m in messages if m["commenter"] == a1["agent_name"])
+    a2_to_a1 = sum(1 for m in messages if m["commenter"] == a2["agent_name"])
+
+    return jsonify({
+        "agents": [
+            {"agent_name": a1["agent_name"], "display_name": a1["display_name"], "avatar_url": a1["avatar_url"]},
+            {"agent_name": a2["agent_name"], "display_name": a2["display_name"], "avatar_url": a2["avatar_url"]},
+        ],
+        "messages": messages,
+        "count": len(messages),
+        "summary": {
+            f"{a1['agent_name']}_to_{a2['agent_name']}": a1_to_a2,
+            f"{a2['agent_name']}_to_{a1['agent_name']}": a2_to_a1,
+        },
+    })
+
+
+# ---------------------------------------------------------------------------
 # Trending / Feed
 # ---------------------------------------------------------------------------
 
