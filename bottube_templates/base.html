@@ -728,22 +728,235 @@
             .footer { padding-bottom: 70px; } /* Add space for nav */
             .header-right { display: none !important; } /* Hide top nav links entirely */
             .main { padding-bottom: 80px; }
-            
+
             /* Responsive Grid */
             .video-grid { grid-template-columns: 1fr !important; gap: 16px; }
-            
+
             /* Touch targets */
             button, .btn-primary, .btn-secondary, select, input {
                 min-height: 44px;
             }
         }
-        
+
         @media (min-width: 641px) and (max-width: 1024px) {
             .video-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
-        
+
         @media (min-width: 1025px) {
             .video-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           MOBILE RESPONSIVE POLISH - Issue #2160
+           ═══════════════════════════════════════════════════════════════ */
+
+        /* Tablet responsive - better nav spacing */
+        @media (max-width: 1024px) {
+            .header-right a {
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .header-right {
+                gap: 4px;
+            }
+
+            .header-right a {
+                padding: 6px 8px;
+                font-size: 12px;
+            }
+
+            .btn-api {
+                padding: 6px 12px !important;
+                font-size: 12px !important;
+            }
+
+            .stats-banner {
+                padding: 12px 16px;
+                gap: 16px;
+            }
+
+            .stat-value {
+                font-size: 20px;
+            }
+        }
+
+        /* Mobile menu toggle - improved touch target */
+        .mobile-menu-btn {
+            min-width: 44px;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Mobile - 640px breakpoint */
+        @media (max-width: 640px) {
+            .header {
+                padding: 0 8px;
+            }
+
+            .logo {
+                font-size: 18px;
+                gap: 4px;
+            }
+
+            .logo .bot-icon {
+                font-size: 20px;
+            }
+
+            .search-bar {
+                max-width: 160px;
+            }
+
+            .search-bar input {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+
+            .search-bar button {
+                padding: 8px 12px;
+                min-width: 44px;
+            }
+
+            .mobile-menu-btn {
+                display: flex;
+            }
+
+            .header-right {
+                display: none;
+                position: absolute;
+                top: 56px;
+                right: 0;
+                left: 0;
+                background: var(--bg-secondary);
+                border-bottom: 1px solid var(--border);
+                flex-direction: column;
+                padding: 8px 0;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+                max-height: calc(100vh - 56px);
+                overflow-y: auto;
+            }
+
+            .header-right.open {
+                display: flex;
+            }
+
+            .header-right a {
+                padding: 12px 24px;
+                border-radius: 0;
+                font-size: 15px;
+                min-height: 48px;
+                display: flex;
+                align-items: center;
+            }
+
+            .header-right .btn-api {
+                margin: 8px 24px !important;
+                text-align: center !important;
+            }
+
+            /* Prevent overflow in stats banner */
+            .stats-banner {
+                flex-wrap: wrap;
+                gap: 12px;
+                padding: 12px 16px;
+            }
+
+            .stat-item {
+                min-width: 80px;
+            }
+
+            .stat-value {
+                font-size: 18px;
+            }
+
+            .stat-label {
+                font-size: 10px;
+            }
+        }
+
+        /* Small mobile - 480px breakpoint */
+        @media (max-width: 480px) {
+            .header {
+                padding: 0 6px;
+            }
+
+            .search-bar {
+                max-width: 120px;
+            }
+
+            .video-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .main {
+                padding: 12px 8px;
+            }
+
+            /* Touch-friendly improvements */
+            button, .btn-primary, .btn-secondary, select, input,
+            .footer-badges a, .stat-item {
+                min-height: 44px;
+                min-width: 44px;
+            }
+
+            .footer-badges {
+                gap: 8px;
+            }
+
+            .footer-badges a {
+                padding: 6px 10px;
+                font-size: 11px;
+            }
+        }
+
+        /* Landscape mobile optimization */
+        @media (max-width: 736px) and (orientation: landscape) {
+            .header {
+                height: 48px;
+            }
+
+            .main {
+                padding-top: 12px;
+            }
+
+            .mobile-bottom-nav {
+                padding-bottom: env(safe-area-inset-bottom, 0);
+            }
+
+            .stats-banner {
+                padding: 8px 12px;
+            }
+
+            .stat-value {
+                font-size: 16px;
+            }
+
+            .stat-label {
+                font-size: 9px;
+            }
+        }
+
+        /* Prevent horizontal overflow globally */
+        body {
+            overflow-x: hidden;
+        }
+
+        .main, .header, .footer {
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* Touch-friendly nav items on coarse pointer devices */
+        @media (pointer: coarse) {
+            .header-right a,
+            .mobile-nav-item,
+            .footer-nav a {
+                min-height: 48px;
+            }
         }
 
     </style>

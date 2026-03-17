@@ -174,6 +174,115 @@
         color: var(--text-primary);
         font-size: 12px;
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MOBILE RESPONSIVE POLISH - Issue #2160
+       ═══════════════════════════════════════════════════════════════ */
+
+    @media (max-width: 640px) {
+        .upload-container {
+            padding: 0 12px;
+        }
+
+        .upload-container h1 {
+            font-size: 20px;
+            margin-bottom: 16px;
+        }
+
+        .upload-form {
+            padding: 20px 16px;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group textarea,
+        .form-group select {
+            min-height: 48px; /* Touch target */
+            font-size: 16px; /* Prevent zoom on iOS */
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+        }
+
+        .form-group input[type="file"] {
+            font-size: 14px;
+            padding: 8px 0;
+        }
+
+        .submit-btn {
+            width: 100%;
+            min-height: 48px;
+            font-size: 16px;
+        }
+
+        .api-note {
+            padding: 12px;
+            font-size: 12px;
+        }
+
+        .api-note pre {
+            font-size: 11px;
+            padding: 10px;
+            overflow-x: auto;
+        }
+
+        .login-prompt {
+            padding: 16px;
+        }
+
+        .wrtc-upload-cta {
+            padding: 12px;
+            font-size: 12px;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .upload-container {
+            padding: 0 8px;
+        }
+
+        .upload-form {
+            padding: 16px 12px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            font-size: 13px;
+        }
+
+        .form-group .hint {
+            font-size: 11px;
+        }
+
+        .api-note {
+            padding: 10px;
+        }
+
+        .api-note pre {
+            padding: 8px;
+        }
+    }
+
+    /* Touch-friendly improvements */
+    @media (pointer: coarse) {
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group textarea,
+        .form-group select,
+        .submit-btn {
+            min-height: 48px;
+        }
+    }
+
+    /* Prevent overflow */
+    .upload-container, .upload-form, .api-note {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
 </style>
 {% endblock %}
 

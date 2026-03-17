@@ -556,7 +556,269 @@
         scroll-behavior: smooth;
     }
 
-    /* ── Responsive ── */
+    /* ═══════════════════════════════════════════════════════════════
+       MOBILE RESPONSIVE POLISH - Issue #2160
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* Tablet breakpoint - 900px */
+    @media (max-width: 900px) {
+        .how-steps {
+            gap: 16px;
+        }
+
+        .how-step {
+            padding: 20px 16px;
+        }
+
+        .featured-row {
+            gap: 12px;
+        }
+    }
+
+    /* Mobile breakpoint - 768px */
+    @media (max-width: 768px) {
+        .hero {
+            padding: 40px 16px 32px;
+        }
+
+        .hero-logo {
+            font-size: 40px;
+        }
+
+        .hero-logo .play-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+        }
+
+        .hero-logo .play-icon::after {
+            border-width: 7px 0 7px 13px;
+        }
+
+        .hero-tagline {
+            font-size: 17px;
+        }
+
+        .hero-sub {
+            font-size: 14px;
+            padding: 0 8px;
+        }
+
+        .hero-actions {
+            gap: 10px;
+        }
+
+        .btn-hero {
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+
+        .stats-ribbon {
+            gap: 24px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .stat-pill .num {
+            font-size: 22px;
+        }
+
+        .how-steps {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        .how-section {
+            padding: 0 16px;
+        }
+
+        .featured-row {
+            grid-template-columns: 1fr;
+        }
+
+        .cta-banner {
+            padding: 28px 20px;
+        }
+
+        .pip-banner {
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
+        .section-header h2 {
+            font-size: 18px;
+        }
+    }
+
+    /* Small mobile breakpoint - 480px */
+    @media (max-width: 480px) {
+        .hero {
+            padding: 32px 12px 24px;
+        }
+
+        .hero-logo {
+            font-size: 32px;
+        }
+
+        .hero-logo .play-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+        }
+
+        .hero-logo .play-icon::after {
+            border-width: 6px 0 6px 10px;
+        }
+
+        .hero-tagline {
+            font-size: 15px;
+        }
+
+        .hero-sub {
+            font-size: 13px;
+        }
+
+        .hero-actions {
+            flex-direction: column;
+            width: 100%;
+            max-width: 280px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .btn-hero {
+            width: 100%;
+            padding: 12px 20px;
+            min-height: 48px; /* Touch target */
+            text-align: center;
+        }
+
+        .pip-banner {
+            font-size: 13px;
+            padding: 8px 14px;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        .stats-ribbon {
+            gap: 16px;
+            padding: 0 12px;
+        }
+
+        .stat-pill {
+            min-width: 70px;
+        }
+
+        .stat-pill .num {
+            font-size: 18px;
+        }
+
+        .stat-pill .label {
+            font-size: 10px;
+        }
+
+        .how-title {
+            font-size: 20px;
+        }
+
+        .how-step {
+            padding: 20px 16px;
+        }
+
+        .step-code {
+            font-size: 11px;
+            padding: 6px 10px;
+        }
+
+        .cta-banner {
+            padding: 24px 16px;
+        }
+
+        .cta-banner h3 {
+            font-size: 20px;
+        }
+
+        .cta-banner p {
+            font-size: 14px;
+        }
+
+        .section-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .section-header a {
+            font-size: 14px;
+        }
+
+        .video-grid {
+            gap: 12px;
+        }
+
+        /* Category browse - mobile */
+        nav[aria-label="Browse videos by category"] {
+            padding-bottom: 12px;
+        }
+
+        nav[aria-label="Browse videos by category"] a {
+            padding: 6px 12px;
+            font-size: 12px;
+            min-height: 36px;
+        }
+    }
+
+    /* Landscape mobile */
+    @media (max-width: 736px) and (orientation: landscape) {
+        .hero {
+            padding: 24px 16px 16px;
+        }
+
+        .hero-logo {
+            font-size: 36px;
+        }
+
+        .hero-actions {
+            flex-wrap: nowrap;
+            justify-content: center;
+        }
+
+        .btn-hero {
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+
+        .stats-ribbon {
+            gap: 12px;
+        }
+
+        .stat-pill .num {
+            font-size: 16px;
+        }
+
+        .stat-pill .label {
+            font-size: 9px;
+        }
+    }
+
+    /* Touch-friendly improvements */
+    @media (pointer: coarse) {
+        .btn-hero,
+        .pip-banner,
+        .how-step,
+        .featured-card,
+        .video-card {
+            min-height: 48px;
+        }
+    }
+
+    /* Prevent overflow */
+    .hero, .how-section, .video-section, .cta-banner {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    /* ── Original Responsive (kept for fallback) ── */
     @media (max-width: 768px) {
         .hero { padding: 40px 16px 32px; }
         .hero-logo { font-size: 40px; }

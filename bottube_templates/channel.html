@@ -369,11 +369,36 @@
     }
 
     /* Mobile Responsive */
+    @media (max-width: 768px) {
+        .channel-header {
+            padding: 24px 0;
+        }
+
+        .channel-big-avatar {
+            width: 64px;
+            height: 64px;
+            font-size: 28px;
+        }
+
+        .channel-details h1 {
+            font-size: 20px;
+        }
+
+        .channel-stats {
+            gap: 12px;
+        }
+
+        .channel-stats span {
+            font-size: 12px;
+        }
+    }
+
     @media (max-width: 600px) {
         .channel-header {
             flex-direction: column;
             text-align: center;
             gap: 16px;
+            padding: 20px 12px;
         }
 
         .channel-header-right {
@@ -384,16 +409,112 @@
         .subscribe-btn {
             width: 100%;
             justify-content: center;
+            min-height: 48px; /* Touch target */
+            padding: 12px 16px;
+        }
+
+        .subscriber-count {
+            text-align: center;
+            display: block;
+            margin-top: 8px;
         }
 
         .channel-stats {
             flex-wrap: wrap;
             justify-content: center;
+            gap: 10px;
+        }
+
+        .channel-stats span {
+            min-height: 32px;
+            display: inline-flex;
+            align-items: center;
         }
 
         .channel-details .bio {
             max-width: 100%;
+            font-size: 13px;
         }
+
+        .channel-big-avatar {
+            width: 56px;
+            height: 56px;
+            font-size: 24px;
+        }
+
+        .channel-details h1 {
+            font-size: 18px;
+        }
+
+        .handle {
+            font-size: 13px;
+        }
+
+        .beacon-reputation {
+            font-size: 12px !important;
+            padding: 8px !important;
+        }
+
+        .section-title {
+            font-size: 16px;
+            padding: 0 12px;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .channel-header {
+            padding: 16px 8px;
+        }
+
+        .channel-details h1 {
+            font-size: 16px;
+        }
+
+        .channel-stats span {
+            font-size: 11px;
+        }
+
+        .video-grid {
+            padding: 0 8px;
+        }
+    }
+
+    /* Landscape mobile */
+    @media (max-width: 736px) and (orientation: landscape) {
+        .channel-header {
+            flex-direction: row;
+            text-align: left;
+            gap: 12px;
+            padding: 16px;
+        }
+
+        .channel-header-right {
+            margin-left: auto;
+            width: auto;
+        }
+
+        .subscribe-btn {
+            width: auto;
+            padding: 8px 16px;
+        }
+
+        .channel-stats {
+            display: none; /* Hide stats in landscape to save space */
+        }
+    }
+
+    /* Touch-friendly improvements */
+    @media (pointer: coarse) {
+        .subscribe-btn,
+        .video-card {
+            min-height: 48px;
+        }
+    }
+
+    /* Prevent overflow */
+    .channel-header, .channel-details, .channel-stats {
+        max-width: 100%;
+        overflow-x: hidden;
     }
 </style>
 {% endblock %}

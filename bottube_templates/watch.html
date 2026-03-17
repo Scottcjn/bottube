@@ -1345,64 +1345,338 @@
         color: #3498db;
     }
 
-    /* Mobile Improvements */
-    @media (max-width: 600px) {
+    /* ═══════════════════════════════════════════════════════════════
+       MOBILE RESPONSIVE POLISH - Issue #2160
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* Tablet breakpoint - 900px */
+    @media (max-width: 900px) {
+        .watch-layout {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        .sidebar {
+            border-top: 1px solid var(--border);
+            padding-top: 20px;
+        }
+    }
+
+    /* Mobile breakpoint - 768px */
+    @media (max-width: 768px) {
+        .watch-layout {
+            gap: 12px;
+        }
+
+        .video-details h1 {
+            font-size: 18px;
+            line-height: 1.4;
+        }
+
+        .video-details {
+            padding: 12px 0;
+        }
+
+        .channel-avatar {
+            width: 40px;
+            height: 40px;
+            font-size: 18px;
+        }
+
+        .sidebar-thumb {
+            width: 140px;
+            min-width: 140px;
+        }
+    }
+
+    /* Mobile breakpoint - 640px */
+    @media (max-width: 640px) {
+        .watch-layout {
+            padding: 0;
+        }
+
+        /* Full-width video player on mobile */
+        .video-player {
+            width: 100vw;
+            margin-left: calc(var(--main-padding-neg, -16px));
+            margin-right: calc(var(--main-padding-neg, -16px));
+            border-radius: 0;
+            aspect-ratio: 16 / 9;
+        }
+
+        .video-details {
+            padding: 12px;
+        }
+
         .video-details h1 {
             font-size: 16px;
         }
 
+        /* Stack action buttons vertically with proper tap targets */
         .video-actions {
             flex-direction: column;
             align-items: flex-start;
+            gap: 12px;
+            padding: 12px 0;
         }
 
         .action-buttons {
             width: 100%;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
         }
 
         .action-btn {
-            padding: 10px 16px;
+            padding: 10px 12px;
             font-size: 13px;
-            min-height: 44px;
-            display: inline-flex;
-            align-items: center;
+            min-height: 48px; /* Touch target: 48px minimum */
+            justify-content: center;
+            white-space: nowrap;
         }
 
+        .action-btn .count {
+            font-size: 12px;
+        }
+
+        /* Channel row - stack on mobile */
         .channel-row {
             flex-wrap: wrap;
+            padding: 12px;
+            gap: 12px;
         }
 
         .channel-row-right {
             width: 100%;
-            margin-left: 60px;
+            margin-left: 52px;
             margin-top: 8px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
         }
 
+        .watch-sub-btn {
+            width: 100%;
+            text-align: center;
+            padding: 12px 16px;
+            min-height: 48px;
+        }
+
+        .watch-sub-count {
+            text-align: center;
+            display: block;
+            margin-top: 4px;
+        }
+
+        /* Tip section - mobile optimized */
         .tip-section {
             padding: 12px;
+            margin: 12px;
+        }
+
+        .tip-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .tip-btn {
+            width: 100%;
+            justify-content: center;
+            min-height: 48px;
         }
 
         .tip-amounts {
             justify-content: center;
+            gap: 6px;
+        }
+
+        .tip-amount-btn {
+            padding: 8px 12px;
+            min-height: 44px;
+            font-size: 13px;
+        }
+
+        .tip-custom {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .tip-custom input {
+            width: 100%;
+            min-height: 44px;
+        }
+
+        /* Comments - mobile optimized */
+        .comments-section {
+            padding: 12px;
         }
 
         .comment {
-            padding: 8px 0;
+            padding: 12px 0;
+            gap: 10px;
         }
 
         .comment .channel-avatar {
-            width: 28px;
-            height: 28px;
+            width: 32px;
+            height: 32px;
+            font-size: 14px;
         }
 
-        .comment.reply-indent {
-            margin-left: 28px;
+        .comment-text {
+            font-size: 14px;
+        }
+
+        .comment-vote-btn {
+            min-height: 44px;
+            min-width: 44px;
+            padding: 8px;
+        }
+
+        .reply-indent {
+            margin-left: 32px;
+            padding-left: 12px;
+        }
+
+        .reply-form {
+            margin-left: 42px;
+        }
+
+        .comment-form textarea {
+            min-height: 80px;
+            font-size: 14px;
+        }
+
+        .comment-form button {
+            min-height: 48px;
+            padding: 10px 24px;
+        }
+
+        /* Share panel - mobile */
+        .share-panel {
+            margin: 12px;
+            padding: 12px;
+        }
+
+        .share-links {
+            justify-content: center;
+        }
+
+        .share-link {
+            min-height: 44px;
+            padding: 8px 12px;
+        }
+
+        /* Sidebar - mobile optimized */
+        .sidebar {
+            padding: 0 12px 12px;
+        }
+
+        .sidebar-video {
+            gap: 10px;
         }
 
         .sidebar-thumb {
-            width: 120px;
-            min-width: 120px;
+            width: 140px;
+            min-width: 140px;
+        }
+
+        /* Description box - mobile */
+        .description-box {
+            margin: 12px;
+            padding: 12px;
+        }
+
+        /* Tags - mobile */
+        .tags {
+            justify-content: center;
+        }
+
+        .tag {
+            min-height: 32px;
+            padding: 6px 12px;
+        }
+
+        /* Donation box - mobile */
+        .donate-box {
+            margin: 12px;
+            padding: 12px;
+        }
+
+        /* Video meta pills - mobile */
+        .video-meta-row {
+            justify-content: center;
+        }
+
+        .meta-pill {
+            min-height: 32px;
+            display: inline-flex;
+            align-items: center;
+        }
+    }
+
+    /* Small mobile breakpoint - 480px */
+    @media (max-width: 480px) {
+        .video-details h1 {
+            font-size: 15px;
+        }
+
+        .action-buttons {
+            grid-template-columns: 1fr;
+        }
+
+        .action-btn {
+            width: 100%;
+        }
+
+        .channel-row-right {
+            margin-left: 44px;
+        }
+
+        .sidebar-thumb {
+            width: 100%;
+            min-width: 100%;
+        }
+
+        .sidebar-video {
+            flex-direction: column;
+        }
+
+        .reply-indent {
+            margin-left: 24px;
+        }
+
+        .reply-form {
+            margin-left: 34px;
+        }
+    }
+
+    /* Landscape mobile */
+    @media (max-width: 736px) and (orientation: landscape) {
+        .video-player {
+            max-height: 50vh;
+        }
+
+        .watch-layout {
+            gap: 8px;
+        }
+    }
+
+    /* Touch-friendly improvements */
+    @media (pointer: coarse) {
+        .action-btn,
+        .watch-sub-btn,
+        .tip-btn,
+        .tip-amount-btn,
+        .comment-vote-btn,
+        .share-link,
+        .tag {
+            min-height: 48px;
+        }
+
+        .video-card,
+        .sidebar-video {
+            min-height: 48px;
         }
     }
 

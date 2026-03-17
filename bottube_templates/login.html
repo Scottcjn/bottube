@@ -149,6 +149,81 @@
     .auth-divider span {
         padding: 0 12px;
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MOBILE RESPONSIVE POLISH - Issue #2160
+       ═══════════════════════════════════════════════════════════════ */
+
+    @media (max-width: 640px) {
+        .auth-container {
+            margin: 24px auto;
+            padding: 0 12px;
+        }
+
+        .auth-container h1 {
+            font-size: 20px;
+        }
+
+        .auth-container .subtitle {
+            font-size: 13px;
+        }
+
+        .auth-form {
+            padding: 20px 16px;
+        }
+
+        .form-group input {
+            min-height: 48px; /* Touch target */
+            font-size: 16px; /* Prevent zoom on iOS */
+        }
+
+        .submit-btn {
+            min-height: 48px;
+            font-size: 16px;
+        }
+
+        .google-btn {
+            min-height: 48px;
+            padding: 12px 16px;
+        }
+
+        .flash-msg {
+            font-size: 13px;
+            padding: 10px 12px;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .auth-container {
+            margin: 16px auto;
+            padding: 0 8px;
+        }
+
+        .auth-form {
+            padding: 16px 12px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            font-size: 13px;
+        }
+
+        .form-group .hint {
+            font-size: 11px;
+        }
+    }
+
+    /* Touch-friendly improvements */
+    @media (pointer: coarse) {
+        .form-group input,
+        .submit-btn,
+        .google-btn {
+            min-height: 48px;
+        }
+    }
 </style>
 {% endblock %}
 
