@@ -1871,6 +1871,49 @@
         outline-offset: 2px;
     }
 
+    /* ═══════════════════════════════════════════════════════════════
+       VIDEO PLAYER CONTROLS - KEYBOARD ACCESSIBILITY (Issue #420)
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* Unmute button - visible focus */
+    .unmute-overlay:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+        background: rgba(0, 0, 0, 0.95);
+    }
+
+    /* End-screen share buttons - visible focus */
+    .es-share-btn:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(62, 166, 255, 0.3);
+    }
+
+    /* End-screen replay button - visible focus */
+    .es-replay:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(62, 166, 255, 0.3);
+    }
+
+    /* Video player region - focus indicator when controls are shown */
+    .video-player-region:focus-within {
+        box-shadow: 0 0 0 3px rgba(62, 166, 255, 0.4);
+    }
+
+    /* Screen reader live region for state changes */
+    .player-state-live {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
     /* Link Underline Animation */
     .channel-name a,
     .comment-author a {
@@ -2141,7 +2184,7 @@
             </video>
             <!-- Live region for video state announcements -->
             <div id="player-state" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
-            <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()">
+            <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()" onkeydown="handleUnmuteKeydown(event)">
                 &#128264; Click to unmute
             </button>
             <p id="player-shortcut-summary" class="sr-only">
@@ -2631,6 +2674,14 @@ function getMainVideo() {
     return document.getElementById('main-video');
 }
 
+function announcePlayerState(message) {
+    var liveRegion = document.getElementById('player-state');
+    if (liveRegion) {
+        liveRegion.textContent = message;
+        setTimeout(function() { liveRegion.textContent = ''; }, 1000);
+    }
+}
+
 function isTypingTarget(target) {
     if (!target) return false;
     if (target.isContentEditable) return true;
@@ -2673,8 +2724,10 @@ function togglePlayback(video) {
     if (!video) return;
     if (video.paused || video.ended) {
         video.play();
+        announcePlayerState('Playing');
     } else {
         video.pause();
+        announcePlayerState('Paused');
     }
 }
 
@@ -2682,6 +2735,9 @@ function seekVideo(video, deltaSeconds) {
     if (!video) return;
     var nextTime = Math.min(video.duration || 0, Math.max(0, (video.currentTime || 0) + deltaSeconds));
     video.currentTime = nextTime;
+    var direction = deltaSeconds > 0 ? 'forward' : 'backward';
+    var seconds = Math.abs(deltaSeconds);
+    announcePlayerState('Seeked ' + seconds + ' seconds ' + direction);
 }
 
 function adjustVolume(video, delta) {
@@ -2691,22 +2747,36 @@ function adjustVolume(video, delta) {
     if (video.volume > 0 && video.muted) {
         video.muted = false;
     }
+    var volumePercent = Math.round(video.volume * 100);
+    announcePlayerState('Volume ' + volumePercent + '%');
 }
 
 function toggleMute(video) {
     if (!video) return;
     video.muted = !video.muted;
+    announcePlayerState(video.muted ? 'Muted' : 'Unmuted');
 }
 
 function toggleCaptions(video) {
     if (!video) return;
     var tracks = video.textTracks;
-    if (!tracks || tracks.length === 0) return;
+    if (!tracks || tracks.length === 0) {
+        announcePlayerState('No captions available');
+        return;
+    }
+    var captionsEnabled = false;
     for (var i = 0; i < tracks.length; i++) {
         if (tracks[i].kind === 'captions' || tracks[i].kind === 'subtitles') {
-            tracks[i].mode = tracks[i].mode === 'showing' ? 'hidden' : 'showing';
+            if (tracks[i].mode === 'showing') {
+                tracks[i].mode = 'hidden';
+                captionsEnabled = false;
+            } else {
+                tracks[i].mode = 'showing';
+                captionsEnabled = true;
+            }
         }
     }
+    announcePlayerState(captionsEnabled ? 'Captions enabled' : 'Captions disabled');
 }
 
 function toggleFullscreen() {
@@ -2714,8 +2784,10 @@ function toggleFullscreen() {
     if (!player) return;
     if (document.fullscreenElement) {
         document.exitFullscreen();
+        announcePlayerState('Exited fullscreen');
     } else if (player.requestFullscreen) {
         player.requestFullscreen();
+        announcePlayerState('Entered fullscreen');
     }
 }
 
@@ -2837,6 +2909,14 @@ function unmuteVideo() {
     if (video) {
         video.muted = false;
         if (btn) btn.style.display = 'none';
+        announcePlayerState('Audio unmuted');
+    }
+}
+
+function handleUnmuteKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        unmuteVideo();
     }
 }
 
@@ -3221,7 +3301,7 @@ function replayVideo() {
     var vid = document.getElementById('main-video');
     var es = document.getElementById('video-endscreen');
     if (es) es.classList.remove('active');
-    if (vid) { vid.currentTime = 0; vid.play(); }
+    if (vid) { vid.currentTime = 0; vid.play(); announcePlayerState('Replaying video'); }
 }
 
 function shareVideo() {
