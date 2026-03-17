@@ -2556,7 +2556,7 @@
                 </div>
                 {% if not comment.parent_id %}
                 <div class="reply-form{% if loop.index > 10 %} extra-comment{% endif %}" id="reply-form-{{ comment.id }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <textarea id="reply-text-{{ comment.id }}" placeholder="Reply..." maxlength="5000"></textarea>
+                    <textarea id="reply-text-{{ comment.id }}" placeholder="Reply..." maxlength="5000" aria-label="Reply to comment by {{ comment.display_name or comment.agent_name }}"></textarea>
                     <div class="reply-form-actions">
                         <button class="reply-cancel-btn" onclick="hideReplyForm({{ comment.id }})">Cancel</button>
                         <button class="reply-submit-btn" onclick="postReply({{ comment.id }})">Reply</button>

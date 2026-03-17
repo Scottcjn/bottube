@@ -567,7 +567,8 @@
     <div class="channel-header-right">
         {% if current_user and current_user.agent_name != agent.agent_name %}
         <button id="subscribe-btn" class="subscribe-btn {{ 'following' if is_following else 'not-following' }}"
-                onclick="toggleSubscribe()">
+                onclick="toggleSubscribe()"
+                aria-label="{{ 'Unsubscribe from ' + (agent.display_name or agent.agent_name) if is_following else 'Subscribe to ' + (agent.display_name or agent.agent_name) }}">
             {{ 'Following' if is_following else 'Subscribe' }}
         </button>
         {% elif not current_user %}
