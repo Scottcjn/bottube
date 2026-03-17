@@ -193,6 +193,41 @@
         border-color: #fff;
     }
 
+    /* Keyboard shortcut indicator overlay - Issue #2140 */
+    .shortcut-indicator {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.85);
+        color: #fff;
+        border-radius: 12px;
+        padding: 20px 30px;
+        font-size: 24px;
+        font-weight: 600;
+        z-index: 100;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease-in-out;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .shortcut-indicator.show {
+        opacity: 1;
+    }
+    .shortcut-indicator kbd {
+        background: rgba(255,255,255,0.2);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-family: monospace;
+        font-size: 20px;
+    }
+    .shortcut-indicator .action-text {
+        font-size: 18px;
+        opacity: 0.9;
+    }
+
     .video-details {
         padding: 16px 0;
     }
@@ -2144,6 +2179,11 @@
             <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()">
                 &#128264; Click to unmute
             </button>
+            <!-- Keyboard shortcut indicator overlay - Issue #2140 -->
+            <div id="shortcut-indicator" class="shortcut-indicator" aria-hidden="true">
+                <kbd id="shortcut-key">K</kbd>
+                <span class="action-text" id="shortcut-action">Play/Pause</span>
+            </div>
             <p id="player-shortcut-summary" class="sr-only">
                 Keyboard shortcuts are available for play and pause, seeking, volume, mute, fullscreen, captions toggle, and the shortcut help overlay.
                 Shortcuts are disabled while typing in comment or reply fields.
@@ -2719,6 +2759,29 @@ function toggleFullscreen() {
     }
 }
 
+// Keyboard shortcut indicator - Issue #2140
+var shortcutIndicatorTimeout = null;
+function showShortcutIndicator(key, action) {
+    var indicator = document.getElementById('shortcut-indicator');
+    var keyEl = document.getElementById('shortcut-key');
+    var actionEl = document.getElementById('shortcut-action');
+    if (!indicator || !keyEl || !actionEl) return;
+    
+    keyEl.textContent = key;
+    actionEl.textContent = action;
+    indicator.classList.add('show');
+    
+    // Clear existing timeout
+    if (shortcutIndicatorTimeout) {
+        clearTimeout(shortcutIndicatorTimeout);
+    }
+    
+    // Hide after 800ms
+    shortcutIndicatorTimeout = setTimeout(function() {
+        indicator.classList.remove('show');
+    }, 800);
+}
+
 document.addEventListener('keydown', function(event) {
     var video = getMainVideo();
     if (!video) return;
@@ -2755,42 +2818,52 @@ document.addEventListener('keydown', function(event) {
         case 'k':
             event.preventDefault();
             togglePlayback(video);
+            showShortcutIndicator('K', 'Play/Pause');
             return;
         case 'j':
             event.preventDefault();
             seekVideo(video, -10);
+            showShortcutIndicator('J', '-10s');
             return;
         case 'l':
             event.preventDefault();
             seekVideo(video, 10);
+            showShortcutIndicator('L', '+10s');
             return;
         case 'f':
             event.preventDefault();
             toggleFullscreen();
+            showShortcutIndicator('F', 'Fullscreen');
             return;
         case 'm':
             event.preventDefault();
             toggleMute(video);
+            showShortcutIndicator('M', 'Mute');
             return;
         case 'c':
             event.preventDefault();
             toggleCaptions(video);
+            showShortcutIndicator('C', 'Captions');
             return;
         case 'arrowup':
             event.preventDefault();
             adjustVolume(video, 0.05);
+            showShortcutIndicator('↑', 'Volume +');
             return;
         case 'arrowdown':
             event.preventDefault();
             adjustVolume(video, -0.05);
+            showShortcutIndicator('↓', 'Volume -');
             return;
         case 'arrowleft':
             event.preventDefault();
             seekVideo(video, -5);
+            showShortcutIndicator('←', '-5s');
             return;
         case 'arrowright':
             event.preventDefault();
             seekVideo(video, 5);
+            showShortcutIndicator('→', '+5s');
             return;
         default:
             return;
