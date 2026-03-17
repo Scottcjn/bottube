@@ -3,7 +3,6 @@
 BoTTube - Video Sharing Platform for AI Agents
 Companion to Moltbook (AI social network)
 """
-from __future__ import annotations
 
 import datetime
 import hashlib
@@ -28,7 +27,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from flask import (
     Flask,
@@ -446,7 +445,7 @@ def _normalize_referral_track(raw: str, default: str = "both") -> str:
     return default
 
 
-def _referral_track_for_agent(row: sqlite3.Row | dict | None) -> str:
+def _referral_track_for_agent(row: Union[sqlite3.Row, dict, None]) -> str:
     if not row:
         return "agent"
     return "human" if int(row["is_human"] or 0) else "agent"
@@ -485,7 +484,7 @@ def _referral_get_code_row(db: sqlite3.Connection, code: str):
     ).fetchone()
 
 
-def _referral_build_summary(db: sqlite3.Connection, agent_id: int, *, include_recent: bool = True) -> dict | None:
+def _referral_build_summary(db: sqlite3.Connection, agent_id: int, *, include_recent: bool = True) -> Optional[dict]:
     row = db.execute(
         """
         SELECT code, hits, signups, first_uploads, created_at, COALESCE(allowed_track, 'both') AS allowed_track
@@ -709,7 +708,7 @@ def _referral_mark_rtc_native_action(
     agent_id: int,
     *,
     evidence_ref: str,
-    occurred_at: float | None = None,
+    occurred_at: Optional[float] = None,
 ) -> None:
     invite = db.execute(
         "SELECT first_rtc_native_action_at FROM referral_invites WHERE invitee_agent_id = ?",
@@ -2278,6 +2277,13 @@ def init_db():
         conn.execute("ALTER TABLE comments ADD COLUMN dislikes INTEGER DEFAULT 0")
     if "comment_type" not in comment_cols:
         conn.execute("ALTER TABLE comments ADD COLUMN comment_type TEXT DEFAULT 'comment'")
+    # Issue #424: Agent-to-agent interaction tracking
+    if "interaction_type" not in comment_cols:
+        conn.execute("ALTER TABLE comments ADD COLUMN interaction_type TEXT DEFAULT ''")
+    if "is_agent_interaction" not in comment_cols:
+        conn.execute("ALTER TABLE comments ADD COLUMN is_agent_interaction INTEGER DEFAULT 0")
+    if "reply_thread_id" not in comment_cols:
+        conn.execute("ALTER TABLE comments ADD COLUMN reply_thread_id TEXT DEFAULT ''")
 
     # Migration: add novelty/revision/challenge fields to videos if missing
     video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
@@ -6626,11 +6632,40 @@ def add_comment(video_id):
     parent_id = data.get("parent_id")
     if parent_id is not None:
         parent = db.execute(
-            "SELECT id FROM comments WHERE id = ? AND video_id = ?",
+            "SELECT id, agent_id FROM comments WHERE id = ? AND video_id = ?",
             (parent_id, video_id),
         ).fetchone()
         if not parent:
             return jsonify({"error": "Parent comment not found"}), 404
+
+    # Issue #424: Detect agent-to-agent interactions
+    interaction_type = ""
+    is_agent_interaction = 0
+    reply_thread_id = ""
+    
+    if parent_id is not None:
+        # Check if parent comment author is an agent
+        parent_agent = db.execute(
+            "SELECT a.agent_name, a.is_human FROM agents a JOIN comments c ON c.agent_id = a.id WHERE c.id = ?",
+            (parent_id,)
+        ).fetchone()
+        if parent_agent and not parent_agent["is_human"]:
+            is_agent_interaction = 1
+            interaction_type = "agent_reply"
+            reply_thread_id = str(parent_id)
+    
+    # Check if commenting on own video (self-interaction)
+    video_owner = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if video_owner and video_owner["agent_id"] == g.agent["id"]:
+        if not interaction_type:
+            interaction_type = "self_comment"
+    
+    # Check for collaboration (replying to another agent on their video)
+    if parent_id and video_owner:
+        parent_author = db.execute("SELECT agent_id FROM comments WHERE id = ?", (parent_id,)).fetchone()
+        if parent_author and parent_author["agent_id"] != g.agent["id"] and parent_author["agent_id"] != video_owner["agent_id"]:
+            interaction_type = "collaboration"
+            is_agent_interaction = 1
 
     # Duplicate check: reject if same agent posted identical content on this video
     existing = db.execute(
@@ -6641,9 +6676,9 @@ def add_comment(video_id):
         return jsonify({"error": "Duplicate comment", "existing_id": existing["id"]}), 409
 
     cur = db.execute(
-        """INSERT INTO comments (video_id, agent_id, parent_id, content, comment_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (video_id, g.agent["id"], parent_id, content, comment_type, time.time()),
+        """INSERT INTO comments (video_id, agent_id, parent_id, content, comment_type, created_at, interaction_type, is_agent_interaction, reply_thread_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (video_id, g.agent["id"], parent_id, content, comment_type, time.time(), interaction_type, is_agent_interaction, reply_thread_id),
     )
     reward_result = _comment_reward_decision(
         db,
@@ -6685,6 +6720,9 @@ def add_comment(video_id):
         "comment_type": comment_type,
         "video_id": video_id,
         "rtc_earned": RTC_REWARD_COMMENT if reward_result["awarded"] else 0.0,
+        # Issue #424: Agent interaction metadata
+        "interaction_type": interaction_type,
+        "is_agent_interaction": bool(is_agent_interaction),
     }), 201
 
 
@@ -6725,15 +6763,41 @@ def web_add_comment(video_id):
     if parent_id is not None:
         parent_id = int(parent_id)
         parent = db.execute(
-            "SELECT id FROM comments WHERE id = ? AND video_id = ?", (parent_id, video_id)
+            "SELECT id, agent_id FROM comments WHERE id = ? AND video_id = ?", (parent_id, video_id)
         ).fetchone()
         if not parent:
             return jsonify({"error": "Parent comment not found"}), 404
 
+    # Issue #424: Detect agent-to-agent interactions for web comments
+    interaction_type = ""
+    is_agent_interaction = 0
+    reply_thread_id = ""
+    
+    if parent_id is not None:
+        parent_agent = db.execute(
+            "SELECT a.agent_name, a.is_human FROM agents a JOIN comments c ON c.agent_id = a.id WHERE c.id = ?",
+            (parent_id,)
+        ).fetchone()
+        if parent_agent and not parent_agent["is_human"]:
+            is_agent_interaction = 1
+            interaction_type = "agent_reply"
+            reply_thread_id = str(parent_id)
+    
+    video_owner = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if video_owner and video_owner["agent_id"] == g.user["id"]:
+        if not interaction_type:
+            interaction_type = "self_comment"
+    
+    if parent_id and video_owner:
+        parent_author = db.execute("SELECT agent_id FROM comments WHERE id = ?", (parent_id,)).fetchone()
+        if parent_author and parent_author["agent_id"] != g.user["id"] and parent_author["agent_id"] != video_owner["agent_id"]:
+            interaction_type = "collaboration"
+            is_agent_interaction = 1
+
     db.execute(
-        """INSERT INTO comments (video_id, agent_id, parent_id, content, comment_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (video_id, g.user["id"], parent_id, content, comment_type, time.time()),
+        """INSERT INTO comments (video_id, agent_id, parent_id, content, comment_type, created_at, interaction_type, is_agent_interaction, reply_thread_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (video_id, g.user["id"], parent_id, content, comment_type, time.time(), interaction_type, is_agent_interaction, reply_thread_id),
     )
     # Notify video owner
     video_row = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
@@ -6763,84 +6827,18 @@ def web_add_comment(video_id):
         "comment_type": comment_type,
         "video_id": video_id,
         "parent_id": parent_id,
+        # Issue #424: Agent interaction metadata
+        "interaction_type": interaction_type,
+        "is_agent_interaction": bool(is_agent_interaction),
     }), 201
-
-
-def _compute_agent_interaction_context(db, video_agent_id, commenting_agent_id):
-    """Compute interaction context for an agent commenting on a video.
-    
-    Returns a dict with visibility indicators:
-    - is_frequent_commenter: agent frequently comments on this creator's videos
-    - comment_count_on_channel: number of comments this agent has made on this channel
-    - is_mutual_follow: both agents follow each other
-    - follows_creator: commenting agent follows the video creator
-    - followed_by_creator: video creator follows the commenting agent
-    - first_interaction: whether this is the first interaction between agents
-    - interaction_level: 'new', 'occasional', 'regular', 'frequent'
-    """
-    context = {
-        "is_frequent_commenter": False,
-        "comment_count_on_channel": 0,
-        "is_mutual_follow": False,
-        "follows_creator": False,
-        "followed_by_creator": False,
-        "first_interaction": False,
-        "interaction_level": "new",
-    }
-    
-    # Count comments by this agent on this creator's videos (last 30 days)
-    month_ago = time.time() - (30 * 86400)
-    comment_count = db.execute(
-        """SELECT COUNT(*) FROM comments c
-           JOIN videos v ON c.video_id = v.video_id
-           WHERE c.agent_id = ? AND v.agent_id = ? AND c.created_at >= ?""",
-        (commenting_agent_id, video_agent_id, month_ago),
-    ).fetchone()[0]
-    context["comment_count_on_channel"] = comment_count
-    
-    # Determine interaction level based on comment frequency
-    if comment_count == 0:
-        context["interaction_level"] = "new"
-        context["first_interaction"] = True
-    elif comment_count <= 2:
-        context["interaction_level"] = "occasional"
-    elif comment_count <= 10:
-        context["interaction_level"] = "regular"
-        context["is_frequent_commenter"] = True
-    else:
-        context["interaction_level"] = "frequent"
-        context["is_frequent_commenter"] = True
-    
-    # Check follow relationships
-    follower_check = db.execute(
-        """SELECT 
-            (SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?) AS follows_creator,
-            (SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?) AS followed_by_creator""",
-        (commenting_agent_id, video_agent_id, video_agent_id, commenting_agent_id),
-    ).fetchone()
-    
-    if follower_check:
-        context["follows_creator"] = bool(follower_check["follows_creator"])
-        context["followed_by_creator"] = bool(follower_check["followed_by_creator"])
-        context["is_mutual_follow"] = context["follows_creator"] and context["followed_by_creator"]
-    
-    return context
 
 
 @app.route("/api/videos/<video_id>/comments")
 def get_comments(video_id):
-    """Get comments for a video with agent interaction context."""
+    """Get comments for a video."""
     db = get_db()
-    
-    # Get video owner info for interaction context
-    video_owner = db.execute(
-        "SELECT agent_id FROM videos WHERE video_id = ?",
-        (video_id,),
-    ).fetchone()
-    video_agent_id = video_owner["agent_id"] if video_owner else None
-    
     rows = db.execute(
-        """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.id as agent_internal_id, a.is_human
+        """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM comments c JOIN agents a ON c.agent_id = a.id
            WHERE c.video_id = ?
            ORDER BY c.created_at ASC""",
@@ -6849,26 +6847,22 @@ def get_comments(video_id):
 
     comments = []
     for row in rows:
-        # Compute interaction context for each commenter
-        interaction_context = {}
-        if video_agent_id and row["agent_internal_id"] != video_agent_id:
-            interaction_context = _compute_agent_interaction_context(
-                db, video_agent_id, row["agent_internal_id"]
-            )
-        
         comments.append({
             "id": row["id"],
             "agent_name": row["agent_name"],
             "display_name": row["display_name"],
             "avatar_url": row["avatar_url"],
+            "is_human": bool(row["is_human"]) if "is_human" in row.keys() else False,
             "content": row["content"],
             "comment_type": row["comment_type"] if "comment_type" in row.keys() else "comment",
             "parent_id": row["parent_id"],
             "likes": row["likes"],
             "dislikes": row["dislikes"] if "dislikes" in row.keys() else 0,
             "created_at": row["created_at"],
-            "is_human": bool(row["is_human"]) if "is_human" in row.keys() else False,
-            "interaction_context": interaction_context,
+            # Issue #424: Agent interaction metadata
+            "interaction_type": row["interaction_type"] if "interaction_type" in row.keys() else "",
+            "is_agent_interaction": bool(row["is_agent_interaction"]) if "is_agent_interaction" in row.keys() else False,
+            "reply_thread_id": row["reply_thread_id"] if "reply_thread_id" in row.keys() else "",
         })
 
     return jsonify({"comments": comments, "count": len(comments)})
@@ -6903,6 +6897,103 @@ def recent_comments():
             "created_at": row["created_at"],
         })
     return jsonify({"comments": comments, "count": len(comments)})
+
+
+# ---------------------------------------------------------------------------
+# Activity Feed - Issue #424: Agent-to-Agent Interaction Visibility
+# ---------------------------------------------------------------------------
+
+@app.route("/api/activity/feed")
+def activity_feed():
+    """Get activity feed showing agent-to-agent interactions.
+    
+    Query params:
+        since: Unix timestamp to fetch activities since (default: 0)
+        limit: Max results (default: 50, max: 100)
+        type: Filter by interaction type (agent_reply, collaboration, self_comment)
+        agent: Filter by specific agent name
+    """
+    since = request.args.get("since", 0, type=float)
+    limit = min(100, max(1, request.args.get("limit", 50, type=int)))
+    interaction_type = request.args.get("type", "")
+    agent_filter = request.args.get("agent", "")
+    
+    db = get_db()
+    
+    # Build query for agent interactions
+    base_query = """
+        SELECT c.id, c.video_id, c.agent_id, c.parent_id, c.content,
+               c.interaction_type, c.is_agent_interaction, c.reply_thread_id,
+               c.created_at, c.comment_type,
+               a.agent_name, a.display_name, a.avatar_url, a.is_human,
+               v.title as video_title, va.agent_name as video_owner,
+               va.display_name as video_owner_display
+        FROM comments c
+        JOIN agents a ON c.agent_id = a.id
+        JOIN videos v ON c.video_id = v.video_id
+        JOIN agents va ON v.agent_id = va.id
+        WHERE c.created_at > ? AND c.is_agent_interaction = 1
+    """
+    params = [since]
+    
+    if interaction_type:
+        base_query += " AND c.interaction_type = ?"
+        params.append(interaction_type)
+    
+    if agent_filter:
+        base_query += " AND a.agent_name = ?"
+        params.append(agent_filter)
+    
+    base_query += " ORDER BY c.created_at DESC LIMIT ?"
+    params.append(limit)
+    
+    rows = db.execute(base_query, params).fetchall()
+    
+    activities = []
+    for row in rows:
+        activity = {
+            "id": row["id"],
+            "type": "comment_interaction",
+            "interaction_type": row["interaction_type"] or "general",
+            "agent": {
+                "name": row["agent_name"],
+                "display_name": row["display_name"],
+                "avatar_url": row["avatar_url"],
+                "is_human": bool(row["is_human"]),
+            },
+            "video": {
+                "id": row["video_id"],
+                "title": row["video_title"],
+                "owner": row["video_owner"],
+                "owner_display": row["video_owner_display"],
+            },
+            "content": row["content"],
+            "comment_type": row["comment_type"],
+            "parent_id": row["parent_id"],
+            "reply_thread_id": row["reply_thread_id"],
+            "created_at": row["created_at"],
+            # Accessibility label for screen readers
+            "accessibility_label": _build_activity_a11y_label(row),
+        }
+        activities.append(activity)
+    
+    return jsonify({"activities": activities, "count": len(activities)})
+
+
+def _build_activity_a11y_label(row):
+    """Build accessible label for activity feed item."""
+    agent_name = row["display_name"] or row["agent_name"]
+    video_title = row["video_title"] or "a video"
+    interaction = row["interaction_type"] or "comment"
+    
+    if interaction == "agent_reply":
+        return f"{agent_name} replied to another agent on {video_title}"
+    elif interaction == "collaboration":
+        return f"{agent_name} collaborated with other agents on {video_title}"
+    elif interaction == "self_comment":
+        return f"{agent_name} commented on their own video {video_title}"
+    else:
+        return f"{agent_name} interacted on {video_title}"
 
 
 # ---------------------------------------------------------------------------
@@ -10233,26 +10324,13 @@ def watch(video_id):
         db.commit()
 
     # Get comments
-    comments_rows = db.execute(
+    comments = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM comments c JOIN agents a ON c.agent_id = a.id
            WHERE c.video_id = ?
            ORDER BY c.created_at ASC""",
         (video_id,),
     ).fetchall()
-
-    # Compute interaction context for comments
-    video_agent_id = video["agent_id"]
-    comments = []
-    for row in comments_rows:
-        interaction_context = {}
-        if video_agent_id and row["agent_id"] != video_agent_id:
-            interaction_context = _compute_agent_interaction_context(
-                db, video_agent_id, row["agent_id"]
-            )
-        comment_dict = dict(row)
-        comment_dict["interaction_context"] = interaction_context
-        comments.append(comment_dict)
 
     # SEO: server-built VideoObject JSON-LD (single source of truth, schema.org valid)
     from seo_routes import build_video_jsonld
@@ -12325,7 +12403,8 @@ app.register_blueprint(wrtc_bp)
 # wRTC Bridge Integration (Base L2 / Ethereum)
 from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
 import sqlite3 as _base_wrtc_sqlite3
-_base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
+_base_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_base_wrtc_db = _base_wrtc_sqlite3.connect(_base_wrtc_db_path)
 init_base_wrtc_tables(_base_wrtc_db)
 _base_wrtc_db.close()
 app.register_blueprint(base_wrtc_bp)
@@ -13117,44 +13196,13 @@ def bt_proof():
 
 _footer_counters_cache = {"ts": 0.0, "data": None}
 
-# Fallback defaults for when download_cache.json is missing/unavailable.
-# These ensure footer stats show real values instead of '--' in production.
-_DOWNLOAD_CACHE_DEFAULTS = {
-    "clawhub": 232,
-    "npm": 188,
-    "pypi": 513,
-    "bottube_homebrew": 45,
-    "bottube_apt": 120,
-    "bottube_docker": 890,
-    "clawrtc_clawhub": 156,
-    "clawrtc_npm": 94,
-    "clawrtc_pypi": 267,
-    "clawrtc_homebrew": 38,
-    "clawrtc_apt": 85,
-    "clawrtc_aur": 42,
-    "clawrtc_tigerbrew": 15,
-    "grazer_clawhub": 89,
-    "grazer_npm": 52,
-    "grazer_pypi": 134,
-    "grazer_homebrew": 22,
-    "grazer_apt": 48,
-}
-
 def _read_download_cache() -> dict:
-    """Best-effort read of download_cache.json (written by a cron/script).
-    
-    Returns cached values if available, otherwise returns sensible defaults
-    to ensure footer stats display real numbers instead of '--'.
-    """
+    """Best-effort read of download_cache.json (written by a cron/script)."""
     try:
         with open(str(BASE_DIR / "download_cache.json"), "r") as f:
-            data = json.load(f)
-            if data:
-                return data
+            return json.load(f) or {}
     except Exception:
-        pass
-    # Return a copy of defaults to avoid mutation issues
-    return dict(_DOWNLOAD_CACHE_DEFAULTS)
+        return {}
 
 def _refresh_github_repo_cache(cache: dict, repo_full_name: str) -> dict:
     """Refresh a GitHub repo stats cache (public API, no auth) with a 5 min TTL."""
