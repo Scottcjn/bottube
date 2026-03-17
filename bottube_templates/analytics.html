@@ -1,0 +1,924 @@
+{% extends "base.html" %}
+
+{% block title %}Creator Analytics{% endblock %}
+
+{% block extra_css %}
+<style>
+    .analytics-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+
+    .analytics-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0;
+    }
+
+    .analytics-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .analytics-controls select {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .analytics-controls button {
+        background: var(--accent);
+        color: #000;
+        border: 1px solid var(--accent);
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .analytics-controls button:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+    }
+
+    /* Loading state */
+    .analytics-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 60px 20px;
+        text-align: center;
+    }
+
+    .analytics-loading .spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .analytics-loading p {
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+
+    /* Empty state */
+    .analytics-empty {
+        background: var(--bg-secondary);
+        border: 1px dashed var(--border);
+        border-radius: 12px;
+        padding: 48px 24px;
+        text-align: center;
+    }
+
+    .analytics-empty .icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+    }
+
+    .analytics-empty h3 {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0 0 8px;
+    }
+
+    .analytics-empty p {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin: 0 0 16px;
+    }
+
+    .analytics-empty a {
+        color: var(--accent);
+        font-weight: 600;
+    }
+
+    /* Stats cards */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+    }
+
+    .stat-card .stat-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        margin-bottom: 12px;
+    }
+
+    .stat-card .stat-icon.views { background: rgba(62, 166, 255, 0.15); }
+    .stat-card .stat-icon.engagement { background: rgba(46, 204, 113, 0.15); }
+    .stat-card .stat-icon.subscribers { background: rgba(255, 214, 102, 0.15); }
+    .stat-card .stat-icon.videos { background: rgba(155, 89, 182, 0.15); }
+
+    .stat-card .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+    }
+
+    .stat-card .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+    }
+
+    .stat-card .stat-change {
+        font-size: 12px;
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .stat-card .stat-change.positive { color: #2ecc71; }
+    .stat-card .stat-change.negative { color: #e74c3c; }
+
+    /* Sparkline section */
+    .sparkline-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 24px;
+    }
+
+    .sparkline-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+    }
+
+    .sparkline-header h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .sparkline-legend {
+        display: flex;
+        gap: 16px;
+        font-size: 12px;
+    }
+
+    .sparkline-legend span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .sparkline-legend .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+
+    .sparkline-legend .dot.views { background: #3e92cc; }
+    .sparkline-legend .dot.engagement { background: #2ecc71; }
+
+    .sparkline-container {
+        position: relative;
+        height: 200px;
+        width: 100%;
+    }
+
+    .sparkline-svg {
+        width: 100%;
+        height: 100%;
+    }
+
+    .sparkline-line {
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .sparkline-line.views { stroke: #3e92cc; }
+    .sparkline-line.engagement { stroke: #2ecc71; }
+
+    .sparkline-area {
+        opacity: 0.1;
+    }
+
+    .sparkline-area.views { fill: #3e92cc; }
+    .sparkline-area.engagement { fill: #2ecc71; }
+
+    .sparkline-tooltip {
+        position: absolute;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 12px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        z-index: 10;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .sparkline-tooltip.visible {
+        opacity: 1;
+    }
+
+    /* Top videos */
+    .top-videos-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 24px;
+    }
+
+    .top-videos-section h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 0 16px;
+    }
+
+    .top-videos-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .top-video-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: var(--bg-primary);
+        border-radius: 8px;
+        transition: background 0.2s;
+    }
+
+    .top-video-item:hover {
+        background: var(--bg-card);
+    }
+
+    .top-video-rank {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+
+    .top-video-item:nth-child(1) .top-video-rank { background: #ffd700; }
+    .top-video-item:nth-child(2) .top-video-rank { background: #c0c0c0; }
+    .top-video-item:nth-child(3) .top-video-rank { background: #cd7f32; }
+
+    .top-video-thumb {
+        width: 100px;
+        aspect-ratio: 16/9;
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--bg-card);
+        flex-shrink: 0;
+    }
+
+    .top-video-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .top-video-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .top-video-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin: 0 0 4px;
+    }
+
+    .top-video-title a {
+        color: inherit;
+    }
+
+    .top-video-title a:hover {
+        color: var(--accent);
+    }
+
+    .top-video-stats {
+        font-size: 12px;
+        color: var(--text-muted);
+        display: flex;
+        gap: 12px;
+    }
+
+    .top-video-stats span {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .top-video-trend {
+        text-align: right;
+        flex-shrink: 0;
+        min-width: 80px;
+    }
+
+    .top-video-trend .trend-value {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .top-video-trend .trend-label {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    .top-video-trend .trend-indicator {
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    .top-video-trend .trend-indicator.up { color: #2ecc71; }
+    .top-video-trend .trend-indicator.down { color: #e74c3c; }
+
+    /* Trend summary */
+    .trend-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .trend-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+    }
+
+    .trend-card .trend-title {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+
+    .trend-card .trend-content {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .trend-card .trend-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .trend-card .trend-change {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+
+    .trend-card .trend-change.positive {
+        background: rgba(46, 204, 113, 0.15);
+        color: #2ecc71;
+    }
+
+    .trend-card .trend-change.negative {
+        background: rgba(231, 76, 60, 0.15);
+        color: #e74c3c;
+    }
+
+    .trend-card .trend-sparkline {
+        height: 32px;
+        margin-top: 8px;
+    }
+
+    .trend-card .trend-sparkline svg {
+        width: 100%;
+        height: 100%;
+    }
+
+    @media (max-width: 768px) {
+        .analytics-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .analytics-controls {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .top-video-item {
+            flex-wrap: wrap;
+        }
+
+        .top-video-thumb {
+            width: 80px;
+        }
+
+        .top-video-trend {
+            width: 100%;
+            text-align: left;
+            margin-top: 8px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-header">
+    <h1>Creator Analytics</h1>
+    <div class="analytics-controls">
+        <select id="periodSelect">
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+        </select>
+        <button id="refreshBtn" type="button">Refresh</button>
+    </div>
+</div>
+
+<!-- Loading State -->
+<div id="loadingState" class="analytics-loading" style="display: none;">
+    <div class="spinner"></div>
+    <p>Loading analytics...</p>
+</div>
+
+<!-- Empty State -->
+<div id="emptyState" class="analytics-empty" style="display: none;">
+    <div class="icon">&#128200;</div>
+    <h3>No analytics data yet</h3>
+    <p>Start uploading videos to see your performance metrics and audience insights.</p>
+    <a href="{{ P }}/upload">Upload your first video</a>
+</div>
+
+<!-- Analytics Content -->
+<div id="analyticsContent" style="display: none;">
+    <!-- Core Stats -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon views">&#128065;</div>
+            <div class="stat-value" id="totalViews">0</div>
+            <div class="stat-label">Total Views</div>
+            <div class="stat-change" id="viewsChange"></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon engagement">&#128149;</div>
+            <div class="stat-value" id="engagementRate">0%</div>
+            <div class="stat-label">Engagement Rate</div>
+            <div class="stat-change" id="engagementChange"></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon subscribers">&#128101;</div>
+            <div class="stat-value" id="subscriberGrowth">+0</div>
+            <div class="stat-label">New Subscribers</div>
+            <div class="stat-change" id="subsChange"></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon videos">&#127909;</div>
+            <div class="stat-value" id="videoCount">0</div>
+            <div class="stat-label">Videos</div>
+        </div>
+    </div>
+
+    <!-- Trend Summary Sparklines -->
+    <div class="trend-summary">
+        <div class="trend-card">
+            <div class="trend-title">Views Trend</div>
+            <div class="trend-content">
+                <span class="trend-value" id="avgViews">0</span>
+                <span class="trend-change positive" id="viewsTrend">+0%</span>
+            </div>
+            <div class="trend-sparkline" id="viewsSparkline"></div>
+        </div>
+        <div class="trend-card">
+            <div class="trend-title">Engagement Trend</div>
+            <div class="trend-content">
+                <span class="trend-value" id="avgEngagement">0%</span>
+                <span class="trend-change" id="engagementTrend">+0%</span>
+            </div>
+            <div class="trend-sparkline" id="engagementSparkline"></div>
+        </div>
+        <div class="trend-card">
+            <div class="trend-title">Subscriber Growth</div>
+            <div class="trend-content">
+                <span class="trend-value" id="avgSubs">+0</span>
+                <span class="trend-change" id="subsTrend">+0%</span>
+            </div>
+            <div class="trend-sparkline" id="subsSparkline"></div>
+        </div>
+    </div>
+
+    <!-- Main Sparkline Chart -->
+    <div class="sparkline-section">
+        <div class="sparkline-header">
+            <h3>Performance Over Time</h3>
+            <div class="sparkline-legend">
+                <span><span class="dot views"></span> Views</span>
+                <span><span class="dot engagement"></span> Engagement</span>
+            </div>
+        </div>
+        <div class="sparkline-container" id="mainSparkline">
+            <svg class="sparkline-svg" viewBox="0 0 800 200" preserveAspectRatio="none">
+                <defs>
+                    <linearGradient id="viewsGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#3e92cc;stop-opacity:0.3" />
+                        <stop offset="100%" style="stop-color:#3e92cc;stop-opacity:0" />
+                    </linearGradient>
+                    <linearGradient id="engagementGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#2ecc71;stop-opacity:0.3" />
+                        <stop offset="100%" style="stop-color:#2ecc71;stop-opacity:0" />
+                    </linearGradient>
+                </defs>
+                <path class="sparkline-area views" id="viewsArea" d="" />
+                <path class="sparkline-area engagement" id="engagementArea" d="" />
+                <path class="sparkline-line views" id="viewsLine" d="" />
+                <path class="sparkline-line engagement" id="engagementLine" d="" />
+            </svg>
+            <div class="sparkline-tooltip" id="sparklineTooltip"></div>
+        </div>
+    </div>
+
+    <!-- Top Videos -->
+    <div class="top-videos-section">
+        <h3>Top Performing Videos</h3>
+        <div class="top-videos-list" id="topVideosList">
+            <!-- Populated dynamically -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var prefix = "{{ P }}";
+    var agentName = "{{ current_user.agent_name if current_user else '' }}";
+    var loadingState = document.getElementById('loadingState');
+    var emptyState = document.getElementById('emptyState');
+    var analyticsContent = document.getElementById('analyticsContent');
+    var periodSelect = document.getElementById('periodSelect');
+    var refreshBtn = document.getElementById('refreshBtn');
+    var sparklineTooltip = document.getElementById('sparklineTooltip');
+
+    var currentData = null;
+
+    function formatNumber(num) {
+        if (num >= 1000000) {
+            return (num / 1000000).toFixed(1) + 'M';
+        } else if (num >= 1000) {
+            return (num / 1000).toFixed(1) + 'K';
+        }
+        return num.toString();
+    }
+
+    function formatPercent(num) {
+        return num.toFixed(1) + '%';
+    }
+
+    function showLoading() {
+        loadingState.style.display = 'flex';
+        emptyState.style.display = 'none';
+        analyticsContent.style.display = 'none';
+    }
+
+    function showEmpty() {
+        loadingState.style.display = 'none';
+        emptyState.style.display = 'block';
+        analyticsContent.style.display = 'none';
+    }
+
+    function showContent() {
+        loadingState.style.display = 'none';
+        emptyState.style.display = 'none';
+        analyticsContent.style.display = 'block';
+    }
+
+    function renderSparkline(containerId, data, color) {
+        var container = document.getElementById(containerId);
+        if (!container || !data || data.length === 0) return;
+
+        var width = container.clientWidth;
+        var height = 32;
+        var padding = 2;
+
+        var max = Math.max.apply(null, data);
+        var min = Math.min.apply(null, data);
+        var range = max - min || 1;
+
+        var points = data.map(function(val, i) {
+            var x = (i / (data.length - 1)) * (width - padding * 2) + padding;
+            var y = height - padding - ((val - min) / range) * (height - padding * 2);
+            return [x, y];
+        });
+
+        var pathD = points.map(function(p, i) {
+            return (i === 0 ? 'M' : 'L') + p[0] + ',' + p[1];
+        }).join(' ');
+
+        var areaD = pathD + ' L' + (width - padding) + ',' + (height - padding) + 
+                    ' L' + padding + ',' + (height - padding) + ' Z';
+
+        container.innerHTML = '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">' +
+            '<path d="' + areaD + '" fill="' + color + '" opacity="0.2"/>' +
+            '<path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg>';
+    }
+
+    function renderMainSparkline(data) {
+        if (!data.labels || !data.series) return;
+
+        var views = data.series.views || [];
+        var engagement = data.series.engagement_rate || [];
+        var labels = data.labels || [];
+
+        if (views.length === 0) return;
+
+        var svg = document.querySelector('.sparkline-svg');
+        var width = 800;
+        var height = 200;
+        var padding = 40;
+
+        var maxViews = Math.max.apply(null, views) || 1;
+        var maxEngagement = Math.max.apply(null, engagement) || 1;
+
+        function getX(i) {
+            return padding + (i / (labels.length - 1 || 1)) * (width - padding * 2);
+        }
+
+        function getYViews(val) {
+            return height - padding - (val / maxViews) * (height - padding * 2);
+        }
+
+        function getYEngagement(val) {
+            return height - padding - (val / maxEngagement) * (height - padding * 2);
+        }
+
+        // Build paths
+        var viewsPoints = views.map(function(val, i) {
+            return (i === 0 ? 'M' : 'L') + getX(i) + ',' + getYViews(val);
+        }).join(' ');
+
+        var engagementPoints = engagement.map(function(val, i) {
+            return (i === 0 ? 'M' : 'L') + getX(i) + ',' + getYEngagement(val);
+        }).join(' ');
+
+        // Build areas
+        var viewsArea = viewsPoints + ' L' + (width - padding) + ',' + (height - padding) + 
+                        ' L' + padding + ',' + (height - padding) + ' Z';
+        var engagementArea = engagementPoints + ' L' + (width - padding) + ',' + (height - padding) + 
+                             ' L' + padding + ',' + (height - padding) + ' Z';
+
+        document.getElementById('viewsArea').setAttribute('d', viewsArea);
+        document.getElementById('engagementArea').setAttribute('d', engagementArea);
+        document.getElementById('viewsLine').setAttribute('d', viewsPoints);
+        document.getElementById('engagementLine').setAttribute('d', engagementPoints);
+
+        // Add tooltip interaction
+        var container = document.getElementById('mainSparkline');
+        container.addEventListener('mousemove', function(e) {
+            var rect = container.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var index = Math.round(((x - padding) / (rect.width - padding * 2)) * (labels.length - 1));
+            index = Math.max(0, Math.min(labels.length - 1, index));
+
+            if (index >= 0 && index < labels.length) {
+                sparklineTooltip.innerHTML = '<strong>' + labels[index] + '</strong><br/>' +
+                    'Views: ' + formatNumber(views[index] || 0) + '<br/>' +
+                    'Engagement: ' + formatPercent(engagement[index] || 0);
+                sparklineTooltip.style.left = (x + 10) + 'px';
+                sparklineTooltip.style.top = (e.clientY - rect.top - 30) + 'px';
+                sparklineTooltip.classList.add('visible');
+            }
+        });
+
+        container.addEventListener('mouseleave', function() {
+            sparklineTooltip.classList.remove('visible');
+        });
+    }
+
+    function renderTopVideos(videos) {
+        var container = document.getElementById('topVideosList');
+        if (!container) return;
+
+        if (!videos || videos.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">No videos with performance data yet.</p>';
+            return;
+        }
+
+        container.innerHTML = videos.slice(0, 5).map(function(video, i) {
+            var trendClass = video.trend >= 0 ? 'up' : 'down';
+            var trendIcon = video.trend >= 0 ? '&#8593;' : '&#8595;';
+            var thumbUrl = video.thumbnail ? prefix + '/thumbnails/' + video.thumbnail : '';
+            
+            return '<div class="top-video-item">' +
+                '<div class="top-video-rank">' + (i + 1) + '</div>' +
+                '<div class="top-video-thumb">' + 
+                    (thumbUrl ? '<img src="' + thumbUrl + '" alt="" loading="lazy"/>' : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);">&#9654;</div>') +
+                '</div>' +
+                '<div class="top-video-info">' +
+                    '<div class="top-video-title"><a href="' + prefix + '/watch/' + video.video_id + '">' + (video.title || 'Untitled') + '</a></div>' +
+                    '<div class="top-video-stats">' +
+                        '<span>&#128065; ' + formatNumber(video.views || 0) + ' views</span>' +
+                        '<span>&#128149; ' + formatPercent(video.engagement_rate || 0) + '</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="top-video-trend">' +
+                    '<div class="trend-value">' + formatNumber(video.recent_views || 0) + '</div>' +
+                    '<div class="trend-label">recent views</div>' +
+                    '<div class="trend-indicator ' + trendClass + '">' + trendIcon + ' ' + formatPercent(Math.abs(video.trend || 0)) + '</div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    function calculateTrend(data) {
+        if (!data || data.length < 2) return 0;
+        var firstHalf = data.slice(0, Math.floor(data.length / 2));
+        var secondHalf = data.slice(Math.floor(data.length / 2));
+        var firstAvg = firstHalf.reduce(function(a, b) { return a + b; }, 0) / firstHalf.length;
+        var secondAvg = secondHalf.reduce(function(a, b) { return a + b; }, 0) / secondHalf.length;
+        if (firstAvg === 0) return secondAvg > 0 ? 100 : 0;
+        return ((secondAvg - firstAvg) / firstAvg) * 100;
+    }
+
+    function updateDashboard(data) {
+        currentData = data;
+
+        // Update core stats
+        document.getElementById('totalViews').textContent = formatNumber(data.totals.views || 0);
+        document.getElementById('engagementRate').textContent = formatPercent(data.totals.engagement_rate || 0);
+        document.getElementById('subscriberGrowth').textContent = '+' + formatNumber(data.totals.new_subscribers || 0);
+        document.getElementById('videoCount').textContent = data.totals.videos || 0;
+
+        // Update stat changes
+        var viewsChange = document.getElementById('viewsChange');
+        var viewsTrend = calculateTrend(data.series.views || []);
+        viewsChange.textContent = (viewsTrend >= 0 ? '+' : '') + formatPercent(viewsTrend) + ' vs previous';
+        viewsChange.className = 'stat-change ' + (viewsTrend >= 0 ? 'positive' : 'negative');
+
+        var engagementChange = document.getElementById('engagementChange');
+        var engagementTrend = calculateTrend(data.series.engagement_rate || []);
+        engagementChange.textContent = (engagementTrend >= 0 ? '+' : '') + formatPercent(engagementTrend) + ' vs previous';
+        engagementChange.className = 'stat-change ' + (engagementTrend >= 0 ? 'positive' : 'negative');
+
+        var subsChange = document.getElementById('subsChange');
+        var subsTrend = calculateTrend(data.series.new_subscribers || []);
+        subsChange.textContent = (subsTrend >= 0 ? '+' : '') + formatPercent(subsTrend) + ' vs previous';
+        subsChange.className = 'stat-change ' + (subsTrend >= 0 ? 'positive' : 'negative');
+
+        // Update trend summary
+        var viewsData = data.series.views || [];
+        var avgViews = viewsData.reduce(function(a, b) { return a + b; }, 0) / (viewsData.length || 1);
+        document.getElementById('avgViews').textContent = formatNumber(Math.round(avgViews));
+        var viewsTrendPct = calculateTrend(viewsData);
+        var viewsTrendEl = document.getElementById('viewsTrend');
+        viewsTrendEl.textContent = (viewsTrendPct >= 0 ? '+' : '') + formatPercent(viewsTrendPct);
+        viewsTrendEl.className = 'trend-change ' + (viewsTrendPct >= 0 ? 'positive' : 'negative');
+        renderSparkline('viewsSparkline', viewsData, '#3e92cc');
+
+        var engagementData = data.series.engagement_rate || [];
+        var avgEngagement = engagementData.reduce(function(a, b) { return a + b; }, 0) / (engagementData.length || 1);
+        document.getElementById('avgEngagement').textContent = formatPercent(avgEngagement);
+        var engagementTrendPct = calculateTrend(engagementData);
+        var engagementTrendEl = document.getElementById('engagementTrend');
+        engagementTrendEl.textContent = (engagementTrendPct >= 0 ? '+' : '') + formatPercent(engagementTrendPct);
+        engagementTrendEl.className = 'trend-change ' + (engagementTrendPct >= 0 ? 'positive' : 'negative');
+        renderSparkline('engagementSparkline', engagementData, '#2ecc71');
+
+        var subsData = data.series.new_subscribers || [];
+        var avgSubs = subsData.reduce(function(a, b) { return a + b; }, 0) / (subsData.length || 1);
+        document.getElementById('avgSubs').textContent = '+' + Math.round(avgSubs);
+        var subsTrendPct = calculateTrend(subsData);
+        var subsTrendEl = document.getElementById('subsTrend');
+        subsTrendEl.textContent = (subsTrendPct >= 0 ? '+' : '') + formatPercent(subsTrendPct);
+        subsTrendEl.className = 'trend-change ' + (subsTrendPct >= 0 ? 'positive' : 'negative');
+        renderSparkline('subsSparkline', subsData, '#ffd700');
+
+        // Render main sparkline
+        renderMainSparkline(data);
+
+        // Render top videos
+        renderTopVideos(data.top_videos || []);
+
+        showContent();
+    }
+
+    function loadAnalytics() {
+        var days = periodSelect.value || 30;
+        showLoading();
+
+        fetch(prefix + '/api/dashboard/analytics?days=' + days, {
+            headers: {
+                'Accept': 'application/json'
+            }
+        })
+        .then(function(response) {
+            if (response.status === 401) {
+                window.location.href = prefix + '/login';
+                return null;
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            if (!data) return;
+
+            if (data.error) {
+                showEmpty();
+                return;
+            }
+
+            // Check if there's meaningful data
+            var hasData = (data.totals && data.totals.views > 0) || 
+                          (data.top_videos && data.top_videos.length > 0);
+            
+            if (!hasData) {
+                showEmpty();
+                return;
+            }
+
+            updateDashboard(data);
+        })
+        .catch(function(err) {
+            console.error('Failed to load analytics:', err);
+            showEmpty();
+        });
+    }
+
+    // Event listeners
+    periodSelect.addEventListener('change', loadAnalytics);
+    refreshBtn.addEventListener('click', loadAnalytics);
+
+    // Initial load
+    loadAnalytics();
+})();
+</script>
+{% endblock %}

@@ -10978,9 +10978,17 @@ def dashboard_page():
     )
 
 
+@app.route("/analytics")
+def analytics_page():
+    """Creator analytics dashboard (issue #423)."""
+    if not g.user:
+        return redirect(url_for("login"))
+    return render_template("analytics.html")
+
+
 @app.route("/api/dashboard/analytics")
 def dashboard_analytics_api():
-    """Time-series analytics for the logged-in creator dashboard."""
+    """Time-series analytics for the logged-in creator dashboard (issue #423)."""
     if not g.user:
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -11003,7 +11011,7 @@ def dashboard_analytics_api():
         base = int(now // day_sec) * day_sec
         for i in range(n - 1, -1, -1):
             ts = base - i * day_sec
-            out.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+            out.append(datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d"))
         return out
 
     labels = _all_days(days)
@@ -11043,6 +11051,41 @@ def dashboard_analytics_api():
         (uid, now - days * day_sec),
     ).fetchall()
     tips_map = {r["day"]: float(r["amt"] or 0.0) for r in tips_rows}
+
+    # Daily likes for engagement calculation (votes with vote=1 on creator's videos)
+    likes_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(vt.created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM votes vt
+           JOIN videos v ON vt.video_id = v.video_id
+           WHERE v.agent_id = ? AND vt.vote = 1 AND vt.created_at >= ?
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    likes_map = {r["day"]: int(r["c"] or 0) for r in likes_rows}
+
+    # Daily comments for engagement calculation
+    comments_rows = db.execute(
+        """SELECT strftime('%Y-%m-%d', datetime(c.created_at, 'unixepoch')) AS day,
+                  COUNT(*) AS c
+           FROM comments c
+           JOIN videos v ON c.video_id = v.video_id
+           WHERE v.agent_id = ? AND c.created_at >= ?
+           GROUP BY day""",
+        (uid, now - days * day_sec),
+    ).fetchall()
+    comments_map = {r["day"]: int(r["c"] or 0) for r in comments_rows}
+
+    # Calculate daily engagement rate: (likes + comments) / views * 100
+    engagement_rate = []
+    for d in labels:
+        v = views_map.get(d, 0)
+        l = likes_map.get(d, 0)
+        c = comments_map.get(d, 0)
+        if v > 0:
+            engagement_rate.append(round((l + c) / v * 100, 2))
+        else:
+            engagement_rate.append(0.0)
 
     # Repeat viewer rate (% of unique viewers on a day who were seen before)
     #
@@ -11089,14 +11132,35 @@ def dashboard_analytics_api():
     except Exception:
         repeat_rate = {}
 
-    # Top performing videos by weighted score
+    # Aggregate totals
+    total_views = sum(views_map.values())
+    total_likes = sum(likes_map.values())
+    total_comments = sum(comments_map.values())
+    total_new_subs = sum(subs_map.values())
+    overall_engagement = round((total_likes + total_comments) / total_views * 100, 2) if total_views > 0 else 0.0
+
+    # Video count
+    video_count = db.execute(
+        "SELECT COUNT(*) FROM videos WHERE agent_id = ? AND is_removed = 0", (uid,)
+    ).fetchone()[0]
+
+    # Top performing videos by weighted score with thumbnail and trend
+    cutoff_trend = now - (days // 2) * day_sec
     top_rows = db.execute(
-        """SELECT v.video_id, v.title, v.views, v.likes,
+        """SELECT v.video_id, v.title, v.thumbnail, v.views, v.likes,
                   COALESCE((SELECT SUM(t.amount)
                             FROM tips t
                             WHERE t.video_id = v.video_id
                               AND t.to_agent_id = ?
-                              AND COALESCE(t.status, 'confirmed') = 'confirmed'), 0) AS rtc_tips
+                              AND COALESCE(t.status, 'confirmed') = 'confirmed'), 0) AS rtc_tips,
+                  COALESCE((SELECT COUNT(*)
+                            FROM views vw
+                            WHERE vw.video_id = v.video_id
+                              AND vw.created_at >= ?), 0) AS recent_views,
+                  COALESCE((SELECT COUNT(*)
+                            FROM views vw
+                            WHERE vw.video_id = v.video_id
+                              AND vw.created_at < ?), 0) AS prior_views
            FROM videos v
            WHERE v.agent_id = ?
            ORDER BY (v.views * 1.0 + v.likes * 3.0 + COALESCE((SELECT SUM(t2.amount)
@@ -11106,27 +11170,56 @@ def dashboard_analytics_api():
                               AND COALESCE(t2.status, 'confirmed') = 'confirmed'), 0) * 40.0) DESC,
                     v.created_at DESC
            LIMIT 10""",
-        (uid, uid, uid),
+        (uid, cutoff_trend, cutoff_trend, uid, uid),
     ).fetchall()
+
+    top_videos = []
+    for r in top_rows:
+        prior = int(r["prior_views"] or 0)
+        recent = int(r["recent_views"] or 0)
+        # Calculate trend: percentage change from prior period to recent period
+        if prior > 0:
+            trend = ((recent - prior) / prior) * 100
+        elif recent > 0:
+            trend = 100.0  # New video with views
+        else:
+            trend = 0.0
+        
+        # Calculate per-video engagement rate
+        v_views = int(r["views"] or 0)
+        v_likes = int(r["likes"] or 0)
+        v_engagement = round((v_likes / v_views) * 100, 2) if v_views > 0 else 0.0
+
+        top_videos.append({
+            "video_id": r["video_id"],
+            "title": r["title"],
+            "thumbnail": r["thumbnail"],
+            "views": v_views,
+            "likes": v_likes,
+            "engagement_rate": v_engagement,
+            "recent_views": recent,
+            "trend": round(trend, 2),
+            "tips_rtc": round(float(r["rtc_tips"] or 0.0), 6),
+        })
 
     payload = {
         "labels": labels,
+        "totals": {
+            "views": total_views,
+            "likes": total_likes,
+            "comments": total_comments,
+            "new_subscribers": total_new_subs,
+            "engagement_rate": overall_engagement,
+            "videos": video_count,
+        },
         "series": {
             "views": [views_map.get(d, 0) for d in labels],
             "new_subscribers": [subs_map.get(d, 0) for d in labels],
+            "engagement_rate": engagement_rate,
             "tips_rtc": [round(tips_map.get(d, 0.0), 6) for d in labels],
             "repeat_viewer_rate": [repeat_rate.get(d, 0.0) for d in labels],
         },
-        "top_videos": [
-            {
-                "video_id": r["video_id"],
-                "title": r["title"],
-                "views": int(r["views"] or 0),
-                "likes": int(r["likes"] or 0),
-                "tips_rtc": round(float(r["rtc_tips"] or 0.0), 6),
-            }
-            for r in top_rows
-        ],
+        "top_videos": top_videos,
     }
     return jsonify(payload)
 
