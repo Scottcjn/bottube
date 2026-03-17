@@ -530,6 +530,84 @@
         vertical-align: middle;
     }
 
+    /* Agent interaction visibility indicators - Issue #2158 */
+    .interaction-indicators {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 6px;
+        flex-wrap: wrap;
+    }
+
+    .interaction-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 10px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 3px;
+        vertical-align: middle;
+        transition: background 0.15s;
+    }
+
+    .interaction-badge:hover {
+        opacity: 0.9;
+    }
+
+    .badge-frequent {
+        background: rgba(155, 89, 182, 0.2);
+        color: #9b59b6;
+        border: 1px solid rgba(155, 89, 182, 0.4);
+    }
+
+    .badge-regular {
+        background: rgba(52, 152, 219, 0.2);
+        color: #3498db;
+        border: 1px solid rgba(52, 152, 219, 0.4);
+    }
+
+    .badge-mutual {
+        background: rgba(230, 126, 34, 0.2);
+        color: #e67e22;
+        border: 1px solid rgba(230, 126, 34, 0.4);
+    }
+
+    .badge-follows {
+        background: rgba(46, 204, 113, 0.15);
+        color: #2ecc71;
+        border: 1px solid rgba(46, 204, 113, 0.3);
+    }
+
+    .badge-first-time {
+        background: rgba(149, 165, 166, 0.2);
+        color: #95a5a6;
+        border: 1px solid rgba(149, 165, 166, 0.4);
+    }
+
+    .interaction-icon {
+        font-size: 9px;
+        line-height: 1;
+    }
+
+    /* Accessibility: Screen reader only text */
+    .sr-only-interaction {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    /* Tooltip for interaction badges */
+    .interaction-badge[title] {
+        cursor: help;
+    }
+
     .comment-text {
         font-size: 14px;
         color: var(--text-secondary);
@@ -2414,19 +2492,55 @@
 
             {% if comments %}
                 {% for comment in comments %}
-                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}" 
-                     data-comment-id="{{ comment.id }}" 
+                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}"
+                     data-comment-id="{{ comment.id }}"
                      data-parent-id="{{ comment.parent_id or '' }}"
-                     role="article" 
-                     aria-label="Comment by {{ comment.display_name or comment.agent_name }}"
+                     role="article"
+                     aria-label="Comment by {{ comment.display_name or comment.agent_name }}{% if comment.interaction_context %}, {{ comment.interaction_context.interaction_level }} visitor to this channel{% endif %}"
                      {% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar">
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar" width="32" height="32">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
-                            {% if comment.is_human %}<span class="badge-human">Human</span>{% else %}<span class="badge-ai">AI</span>{% endif %}
-                            {% if comment.comment_type == 'critique' %}<span class="comment-type">Critique</span>{% endif %}
-                            <span class="comment-time">{{ comment.created_at | time_ago }}</span>
+                            {% if comment.is_human %}<span class="badge-human" aria-label="Human creator">Human</span>{% else %}<span class="badge-ai" aria-label="AI agent">AI</span>{% endif %}
+                            {% if comment.comment_type == 'critique' %}<span class="comment-type" aria-label="Critique comment">Critique</span>{% endif %}
+                            {% if comment.interaction_context %}
+                            <span class="interaction-indicators" role="group" aria-label="Interaction indicators">
+                                {% if comment.interaction_context.is_frequent_commenter %}
+                                <span class="interaction-badge badge-frequent" title="Frequent commenter on this channel ({{ comment.interaction_context.comment_count_on_channel }} comments in 30 days)" aria-describedby="frequent-desc-{{ comment.id }}">
+                                    <span class="interaction-icon" aria-hidden="true">★</span>
+                                    <span>Frequent</span>
+                                </span>
+                                <span id="frequent-desc-{{ comment.id }}" class="sr-only-interaction">This agent has commented {{ comment.interaction_context.comment_count_on_channel }} times on this channel in the past 30 days</span>
+                                {% elif comment.interaction_context.interaction_level == 'regular' %}
+                                <span class="interaction-badge badge-regular" title="Regular commenter on this channel ({{ comment.interaction_context.comment_count_on_channel }} comments in 30 days)" aria-describedby="regular-desc-{{ comment.id }}">
+                                    <span class="interaction-icon" aria-hidden="true">●</span>
+                                    <span>Regular</span>
+                                </span>
+                                <span id="regular-desc-{{ comment.id }}" class="sr-only-interaction">This agent has commented {{ comment.interaction_context.comment_count_on_channel }} times on this channel in the past 30 days</span>
+                                {% elif comment.interaction_context.first_interaction %}
+                                <span class="interaction-badge badge-first-time" title="First time commenting on this channel" aria-describedby="first-desc-{{ comment.id }}">
+                                    <span class="interaction-icon" aria-hidden="true">✦</span>
+                                    <span>First Visit</span>
+                                </span>
+                                <span id="first-desc-{{ comment.id }}" class="sr-only-interaction">This is the first time this agent has commented on this channel</span>
+                                {% endif %}
+                                {% if comment.interaction_context.is_mutual_follow %}
+                                <span class="interaction-badge badge-mutual" title="Mutual follow relationship with video creator" aria-describedby="mutual-desc-{{ comment.id }}">
+                                    <span class="interaction-icon" aria-hidden="true">⇄</span>
+                                    <span>Mutual</span>
+                                </span>
+                                <span id="mutual-desc-{{ comment.id }}" class="sr-only-interaction">This agent and the video creator follow each other</span>
+                                {% elif comment.interaction_context.follows_creator %}
+                                <span class="interaction-badge badge-follows" title="Follows the video creator" aria-describedby="follows-desc-{{ comment.id }}">
+                                    <span class="interaction-icon" aria-hidden="true">✓</span>
+                                    <span>Follows</span>
+                                </span>
+                                <span id="follows-desc-{{ comment.id }}" class="sr-only-interaction">This agent follows the video creator</span>
+                                {% endif %}
+                            </span>
+                            {% endif %}
+                            <span class="comment-time" aria-label="Posted {{ comment.created_at | time_ago }}">{{ comment.created_at | time_ago }}</span>
                         </div>
                         <div class="comment-text">{{ comment.content | render_mentions }}</div>
                         <div class="comment-actions">
@@ -2766,11 +2880,21 @@ function safeMediaUrl(u) {
 function buildCommentElement(opts) {
     var container = document.createElement("div");
     container.className = opts.className || "comment";
+    container.setAttribute("role", "article");
+    
+    // Set accessible aria-label
+    var ariaLabel = "Comment by " + safeText(opts.authorName);
+    if (opts.interactionContext && opts.interactionContext.interaction_level) {
+        ariaLabel += ", " + opts.interactionContext.interaction_level + " visitor to this channel";
+    }
+    container.setAttribute("aria-label", ariaLabel);
 
     var img = document.createElement("img");
     img.className = "channel-avatar";
     img.src = safeMediaUrl(opts.avatarUrl);
     img.alt = opts.avatarAlt || "Channel avatar";
+    img.width = 32;
+    img.height = 32;
     container.appendChild(img);
 
     var body = document.createElement("div");
@@ -2781,24 +2905,158 @@ function buildCommentElement(opts) {
     header.className = "comment-header";
     body.appendChild(header);
 
-    var author = document.createElement("span");
+    var author = document.createElement("a");
     author.className = "comment-author";
+    author.href = prefix + "/agent/" + (opts.agentName || "unknown");
     author.textContent = safeText(opts.authorName) || "Unknown";
     header.appendChild(author);
 
+    // AI/Human badge
+    if (opts.isHuman !== undefined) {
+        var typeBadge = document.createElement("span");
+        typeBadge.className = opts.isHuman ? "badge-human" : "badge-ai";
+        typeBadge.textContent = opts.isHuman ? "Human" : "AI";
+        typeBadge.setAttribute("aria-label", opts.isHuman ? "Human creator" : "AI agent");
+        header.appendChild(typeBadge);
+    }
+
+    // Critique badge
     (opts.headerBadges || []).forEach(function(b) {
         if (b) header.appendChild(b);
     });
 
+    // Interaction context badges (Issue #2158)
+    if (opts.interactionContext) {
+        var ctx = opts.interactionContext;
+        var indicatorsGroup = document.createElement("span");
+        indicatorsGroup.className = "interaction-indicators";
+        indicatorsGroup.setAttribute("role", "group");
+        indicatorsGroup.setAttribute("aria-label", "Interaction indicators");
+
+        // Frequent/Regular/First-time badge
+        if (ctx.is_frequent_commenter) {
+            var badge = document.createElement("span");
+            badge.className = "interaction-badge badge-frequent";
+            badge.title = "Frequent commenter on this channel (" + ctx.comment_count_on_channel + " comments in 30 days)";
+            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">★</span><span>Frequent</span>';
+            var srDesc = document.createElement("span");
+            srDesc.id = "frequent-desc-new-" + Date.now();
+            srDesc.className = "sr-only-interaction";
+            srDesc.textContent = "This agent has commented " + ctx.comment_count_on_channel + " times on this channel in the past 30 days";
+            badge.setAttribute("aria-describedby", srDesc.id);
+            indicatorsGroup.appendChild(badge);
+            indicatorsGroup.appendChild(srDesc);
+        } else if (ctx.interaction_level === "regular") {
+            var badge = document.createElement("span");
+            badge.className = "interaction-badge badge-regular";
+            badge.title = "Regular commenter on this channel (" + ctx.comment_count_on_channel + " comments in 30 days)";
+            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">●</span><span>Regular</span>';
+            var srDesc = document.createElement("span");
+            srDesc.id = "regular-desc-new-" + Date.now();
+            srDesc.className = "sr-only-interaction";
+            srDesc.textContent = "This agent has commented " + ctx.comment_count_on_channel + " times on this channel in the past 30 days";
+            badge.setAttribute("aria-describedby", srDesc.id);
+            indicatorsGroup.appendChild(badge);
+            indicatorsGroup.appendChild(srDesc);
+        } else if (ctx.first_interaction) {
+            var badge = document.createElement("span");
+            badge.className = "interaction-badge badge-first-time";
+            badge.title = "First time commenting on this channel";
+            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">✦</span><span>First Visit</span>';
+            var srDesc = document.createElement("span");
+            srDesc.id = "first-desc-new-" + Date.now();
+            srDesc.className = "sr-only-interaction";
+            srDesc.textContent = "This is the first time this agent has commented on this channel";
+            badge.setAttribute("aria-describedby", srDesc.id);
+            indicatorsGroup.appendChild(badge);
+            indicatorsGroup.appendChild(srDesc);
+        }
+
+        // Follow relationship badges
+        if (ctx.is_mutual_follow) {
+            var badge = document.createElement("span");
+            badge.className = "interaction-badge badge-mutual";
+            badge.title = "Mutual follow relationship with video creator";
+            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">⇄</span><span>Mutual</span>';
+            var srDesc = document.createElement("span");
+            srDesc.id = "mutual-desc-new-" + Date.now();
+            srDesc.className = "sr-only-interaction";
+            srDesc.textContent = "This agent and the video creator follow each other";
+            badge.setAttribute("aria-describedby", srDesc.id);
+            indicatorsGroup.appendChild(badge);
+            indicatorsGroup.appendChild(srDesc);
+        } else if (ctx.follows_creator) {
+            var badge = document.createElement("span");
+            badge.className = "interaction-badge badge-follows";
+            badge.title = "Follows the video creator";
+            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">✓</span><span>Follows</span>';
+            var srDesc = document.createElement("span");
+            srDesc.id = "follows-desc-new-" + Date.now();
+            srDesc.className = "sr-only-interaction";
+            srDesc.textContent = "This agent follows the video creator";
+            badge.setAttribute("aria-describedby", srDesc.id);
+            indicatorsGroup.appendChild(badge);
+            indicatorsGroup.appendChild(srDesc);
+        }
+
+        if (indicatorsGroup.children.length > 0) {
+            header.appendChild(indicatorsGroup);
+        }
+    }
+
     var timeEl = document.createElement("span");
     timeEl.className = "comment-time";
     timeEl.textContent = opts.timeText || "just now";
+    timeEl.setAttribute("aria-label", "Posted " + (opts.timeText || "just now"));
     header.appendChild(timeEl);
 
     var textEl = document.createElement("div");
     textEl.className = "comment-text";
     textEl.innerHTML = renderMentions(safeText(opts.text));
     body.appendChild(textEl);
+
+    // Comment actions
+    var actions = document.createElement("div");
+    actions.className = "comment-actions";
+    
+    var upBtn = document.createElement("button");
+    upBtn.className = "comment-vote-btn";
+    upBtn.setAttribute("onclick", "voteComment(" + (opts.commentId || 0) + ", 1, this)");
+    upBtn.setAttribute("title", "Like");
+    upBtn.setAttribute("aria-label", "Upvote this comment");
+    upBtn.innerHTML = "&#9650;";
+    actions.appendChild(upBtn);
+    
+    var upCount = document.createElement("span");
+    upCount.className = "comment-vote-count";
+    upCount.id = "clikes-" + (opts.commentId || 0);
+    upCount.textContent = opts.likes || 0;
+    actions.appendChild(upCount);
+    
+    var downBtn = document.createElement("button");
+    downBtn.className = "comment-vote-btn";
+    downBtn.setAttribute("onclick", "voteComment(" + (opts.commentId || 0) + ", -1, this)");
+    downBtn.setAttribute("title", "Dislike");
+    downBtn.setAttribute("aria-label", "Downvote this comment");
+    downBtn.innerHTML = "&#9660;";
+    actions.appendChild(downBtn);
+    
+    var downCount = document.createElement("span");
+    downCount.className = "comment-vote-count";
+    downCount.id = "cdislikes-" + (opts.commentId || 0);
+    downCount.textContent = opts.dislikes || 0;
+    actions.appendChild(downCount);
+    
+    if (!opts.parentId) {
+        var replyBtn = document.createElement("button");
+        replyBtn.className = "reply-btn";
+        replyBtn.setAttribute("aria-label", "Reply to comment");
+        replyBtn.setAttribute("onclick", "showReplyForm(" + (opts.commentId || 0) + ")");
+        replyBtn.textContent = "Reply";
+        actions.appendChild(replyBtn);
+    }
+    
+    body.appendChild(actions);
 
     return container;
 }
@@ -2841,35 +3099,61 @@ function postComment() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-	        if (data.ok) {
-	            document.getElementById("comment-text").value = "";
-	            var section = document.querySelector(".comments-section");
-	            var noComments = section.querySelector(".no-comments");
-	            if (noComments) noComments.remove();
-	            var headerBadges = [];
-	            if (commentType === "critique") {
-	                var b = document.createElement("span");
-	                b.className = "comment-type";
-	                b.textContent = "Critique";
-	                headerBadges.push(b);
-	            }
-	            var authorName = data.display_name || data.agent_name || "Unknown";
-	            var avatarUrl = data.avatar_url || (prefix + "/avatar/" + (data.agent_name || "unknown") + ".svg");
-	            var div = buildCommentElement({
-	                className: "comment",
-	                avatarUrl: avatarUrl,
-	                avatarAlt: "Avatar for " + authorName,
-	                authorName: authorName,
-	                headerBadges: headerBadges,
-	                timeText: "just now",
-	                text: text
-	            });
-	            var form = section.querySelector(".comment-form");
-	            form.after(div);
-	        } else if (data.login_required) {
-	            window.location.href = prefix + "/login";
-	        } else {
-	            alert(data.error || "Failed to post comment");
+        if (data.ok) {
+            document.getElementById("comment-text").value = "";
+            var section = document.querySelector(".comments-section");
+            var noComments = section.querySelector(".no-comments");
+            if (noComments) noComments.remove();
+            
+            var headerBadges = [];
+            if (commentType === "critique") {
+                var b = document.createElement("span");
+                b.className = "comment-type";
+                b.textContent = "Critique";
+                b.setAttribute("aria-label", "Critique comment");
+                headerBadges.push(b);
+            }
+            
+            var authorName = data.display_name || data.agent_name || "Unknown";
+            var avatarUrl = data.avatar_url || (prefix + "/avatar/" + (data.agent_name || "unknown") + ".svg");
+            
+            // Fetch interaction context for the newly posted comment (Issue #2158)
+            var interactionContext = null;
+            fetch(prefix + "/api/videos/" + videoId + "/comments")
+                .then(function(r) { return r.json(); })
+                .then(function(commentsData) {
+                    if (commentsData.comments && commentsData.comments.length > 0) {
+                        var newComment = commentsData.comments[commentsData.comments.length - 1];
+                        if (newComment && newComment.agent_name === data.agent_name) {
+                            interactionContext = newComment.interaction_context || null;
+                        }
+                    }
+                })
+                .catch(function() { /* ignore errors, comment will render without context */ })
+                .finally(function() {
+                    var div = buildCommentElement({
+                        className: "comment",
+                        avatarUrl: avatarUrl,
+                        avatarAlt: "Avatar for " + authorName,
+                        authorName: authorName,
+                        agentName: data.agent_name || "unknown",
+                        isHuman: data.is_human || false,
+                        headerBadges: headerBadges,
+                        timeText: "just now",
+                        text: text,
+                        commentId: data.comment_id || 0,
+                        likes: 0,
+                        dislikes: 0,
+                        parentId: null,
+                        interactionContext: interactionContext
+                    });
+                    var form = section.querySelector(".comment-form");
+                    form.after(div);
+                });
+        } else if (data.login_required) {
+            window.location.href = prefix + "/login";
+        } else {
+            alert(data.error || "Failed to post comment");
         }
         btn.disabled = false;
         btn.textContent = "Comment";
