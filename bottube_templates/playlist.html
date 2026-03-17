@@ -238,7 +238,7 @@
         <a href="{{ P }}/watch/{{ item.video_id }}">
             <div class="pl-thumb">
                 {% if item.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="{{ item.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="Video thumbnail: {{ item.title }}" loading="lazy">
                 {% endif %}
                 {% if item.duration_sec > 0 %}
                 <span class="duration-badge">{{ item.duration_sec | format_duration }}</span>

@@ -147,7 +147,7 @@
         <a href="{{ P }}/watch/{{ v.video_id }}">
             <div class="thumb-wrap">
                 {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}

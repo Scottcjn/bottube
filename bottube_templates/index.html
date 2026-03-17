@@ -651,7 +651,7 @@
         <a href="{{ P }}/watch/{{ video.video_id }}" class="featured-card" aria-label="Watch {{ video.title }}">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" fetchpriority="high" decoding="async" width="720" height="720">
+                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" fetchpriority="high" decoding="async" width="720" height="720">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -674,7 +674,7 @@
             <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
+                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}
@@ -746,7 +746,7 @@
             <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
+                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}

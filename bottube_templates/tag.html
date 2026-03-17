@@ -54,7 +54,7 @@
             <div style="background:var(--bg-card); border-radius:var(--radius); overflow:hidden; transition:transform 0.2s;">
                 <div style="position:relative; padding-top:56.25%; background:#1a1a1a;">
                     {% if v.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy"
+                    <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy"
                          style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover;">
                     {% else %}
                     <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:2rem; color:#555;">&#9654;</div>

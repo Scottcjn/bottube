@@ -32,7 +32,7 @@
         <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}

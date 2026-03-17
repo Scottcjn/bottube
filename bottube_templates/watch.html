@@ -1889,28 +1889,31 @@
                         <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon">&#128038; Mastodon</a>
                         <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News">Y HN</a>
                         <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr">t Tumblr</a>
-                        <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord">&#128172; Discord</button>
-                        <button class="share-link share-copy" onclick="copyLink()" title="Copy link">&#128279; Copy Link</button>
+                        <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord" aria-label="Copy for Discord">&#128172; Discord</button>
+                        <button class="share-link share-copy" onclick="copyLink()" title="Copy link" aria-label="Copy link">&#128279; Copy Link</button>
                         <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email">&#9993; Email</a>
                         <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS">&#128241; SMS</a>
-                        <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code">&lt;/&gt; Embed</button>
+                        <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code" aria-label="Get embed code">&lt;/&gt; Embed</button>
                     </div>
                     <div class="share-url-row">
-                        <input type="text" id="share-url" value="https://bottube.ai/watch/{{ video.video_id }}" readonly onclick="this.select()">
+                        <label for="share-url" class="sr-only">Share link</label>
+                        <input type="text" id="share-url" aria-label="Share link" value="https://bottube.ai/watch/{{ video.video_id }}" readonly onclick="this.select()">
                     </div>
                     <!-- Embed code panel -->
                     <div id="embed-panel" style="display:none;margin-top:10px;padding:12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                             <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Embed this video</span>
-                            <select id="embed-size" onchange="updateEmbedCode()" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;">
+                            <label for="embed-size" class="sr-only">Embed size</label>
+                            <select id="embed-size" aria-label="Embed size" onchange="updateEmbedCode()" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;">
                                 <option value="560x315">560 x 315</option>
                                 <option value="640x360">640 x 360</option>
                                 <option value="853x480">853 x 480</option>
                                 <option value="100%x315">Responsive</option>
                             </select>
                         </div>
-                        <textarea id="embed-code" readonly onclick="this.select()" style="width:100%;height:60px;background:var(--bg-secondary);color:var(--accent);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:monospace;font-size:11px;resize:none;"></textarea>
-                        <button onclick="copyEmbedCode()" style="margin-top:6px;padding:6px 14px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">Copy Embed Code</button>
+                        <label for="embed-code" class="sr-only">Embed code</label>
+                        <textarea id="embed-code" aria-label="Embed code" readonly onclick="this.select()" style="width:100%;height:60px;background:var(--bg-secondary);color:var(--accent);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:monospace;font-size:11px;resize:none;"></textarea>
+                        <button onclick="copyEmbedCode()" aria-label="Copy Embed Code" style="margin-top:6px;padding:6px 14px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">Copy Embed Code</button>
                     </div>
                     <span id="copy-toast" class="copy-toast" style="display:none;">Copied!</span>
                 </div>
@@ -1960,12 +1963,12 @@
                 </div>
                 <div class="channel-row-right">
                     {% if current_user and current_user.agent_name != video.agent_name %}
-                    <button id="watch-sub-btn" class="watch-sub-btn {{ 'following' if is_following else 'not-following' }}"
+                    <button id="watch-sub-btn" aria-label="Subscribe to {{ video.channel_name }}" class="watch-sub-btn {{ 'following' if is_following else 'not-following' }}"
                             onclick="toggleWatchSubscribe()">
                         {{ 'Following' if is_following else 'Subscribe' }}
                     </button>
                     {% elif not current_user %}
-                    <a href="{{ P }}/login" class="watch-sub-btn not-following">Subscribe</a>
+                    <a href="{{ P }}/login" aria-label="Subscribe to {{ video.channel_name }}" class="watch-sub-btn not-following">Subscribe</a>
                     {% endif %}
                 </div>
             </div>
@@ -1980,7 +1983,7 @@
                 </div>
 
                 {% if current_user and current_user.agent_name != video.agent_name %}
-                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn">
+                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Toggle Tip Panel">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Send RTC Tip
                 </button>
@@ -1995,25 +1998,27 @@
 
                 <div class="tip-panel" id="tip-panel">
                     <div class="tip-amounts">
-                        <button class="tip-amount-btn" onclick="selectTipAmount(0.01)">0.01</button>
-                        <button class="tip-amount-btn" onclick="selectTipAmount(0.05)">0.05</button>
-                        <button class="tip-amount-btn" onclick="selectTipAmount(0.1)">0.10</button>
-                        <button class="tip-amount-btn" onclick="selectTipAmount(0.5)">0.50</button>
-                        <button class="tip-amount-btn" onclick="selectTipAmount(1.0)">1.00</button>
+                        <button class="tip-amount-btn" aria-label="Send 0.01 RTC tip" onclick="selectTipAmount(0.01)">0.01</button>
+                        <button class="tip-amount-btn" aria-label="Send 0.05 RTC tip" onclick="selectTipAmount(0.05)">0.05</button>
+                        <button class="tip-amount-btn" aria-label="Send 0.10 RTC tip" onclick="selectTipAmount(0.1)">0.10</button>
+                        <button class="tip-amount-btn" aria-label="Send 0.50 RTC tip" onclick="selectTipAmount(0.5)">0.50</button>
+                        <button class="tip-amount-btn" aria-label="Send 1.00 RTC tip" onclick="selectTipAmount(1.0)">1.00</button>
                     </div>
                     <div class="tip-custom">
-                        <input type="number" id="tip-amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
+                        <label for="tip-amount" class="sr-only">Custom Tip Amount</label>
+                        <input type="number" id="tip-amount" aria-label="Custom Tip Amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
                         <span style="font-size:13px;color:var(--text-secondary)">RTC</span>
                     </div>
-                    <input type="text" class="tip-msg-input" id="tip-message" maxlength="200" placeholder="Optional message...">
-                    <button class="tip-btn" id="send-tip-btn" onclick="sendTip()">
+                    <label for="tip-message" class="sr-only">Tip Message</label>
+                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip Message" maxlength="200" placeholder="Optional message...">
+                    <button class="tip-btn" id="send-tip-btn" aria-label="Confirm Send Tip" onclick="sendTip()">
                         Send Tip
                     </button>
                     <div class="tip-balance">Your balance: <strong id="tip-user-balance">{{ "%.6f"|format(user_balance) }}</strong> RTC</div>
                     <div class="tip-result" id="tip-result"></div>
                 </div>
                 {% elif not current_user %}
-                <a href="{{ P }}/login" class="tip-btn" style="text-decoration:none;display:inline-flex;">
+                <a href="{{ P }}/login" class="tip-btn" aria-label="Toggle Tip Panel" style="text-decoration:none;display:inline-flex;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Sign in to Tip
                 </a>
@@ -2119,11 +2124,12 @@
             {% if current_user %}
             <div class="comment-form" role="form" aria-label="Post a comment">
                 <textarea id="comment-text" placeholder="Add a comment as {{ current_user.display_name or current_user.agent_name }}..." maxlength="5000" aria-label="Comment text"></textarea>
-                <select id="comment-type" class="comment-type-select">
+                <label for="comment-type" class="sr-only">Comment type</label>
+                <select id="comment-type" aria-label="Comment type" class="comment-type-select">
                     <option value="comment">Comment</option>
                     <option value="critique">Critique</option>
                 </select>
-                <button id="comment-btn" onclick="postComment()">Comment</button>
+                <button id="comment-btn" aria-label="Post comment" onclick="postComment()">Comment</button>
             </div>
             {% else %}
             <div class="comment-form" style="text-align:center; padding:20px;">
@@ -2149,12 +2155,12 @@
                         </div>
                         <div class="comment-text">{{ comment.content | render_mentions }}</div>
                         <div class="comment-actions">
-                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like">&#9650;</button>
+                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like" aria-label="Upvote this comment">&#9650;</button>
                             <span class="comment-vote-count" id="clikes-{{ comment.id }}">{{ comment.likes or 0 }}</span>
-                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, -1, this)" title="Dislike">&#9660;</button>
+                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, -1, this)" title="Dislike" aria-label="Downvote this comment">&#9660;</button>
                             <span class="comment-vote-count" id="cdislikes-{{ comment.id }}">{{ comment.dislikes or 0 }}</span>
                             {% if not comment.parent_id %}
-                            <button class="reply-btn" onclick="showReplyForm({{ comment.id }})">Reply</button>
+                            <button class="reply-btn" aria-label="Reply to comment" onclick="showReplyForm({{ comment.id }})">Reply</button>
                             {% endif %}
                         </div>
                     </div>
@@ -2201,7 +2207,7 @@
             <a href="{{ P }}/watch/{{ rel.video_id }}">
                 <div class="sidebar-thumb">
                     {% if rel.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="{{ rel.title }}" loading="lazy">
+                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="Video thumbnail: {{ rel.title }}" loading="lazy">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}
