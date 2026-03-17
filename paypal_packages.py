@@ -284,7 +284,7 @@ def _to_rtc(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
-def _extract_capture_details(payload: dict) -> tuple[str, Decimal | None]:
+def _extract_capture_details(payload: dict):
     capture_id = ""
     amount_usd = None
     for purchase_unit in payload.get("purchase_units", []):
@@ -306,7 +306,7 @@ def _record_store_transaction(
     db,
     *,
     order_id: str,
-    agent_id: int | None,
+    agent_id=None,
     package_id: str,
     amount_usd: Decimal,
     rtc_credited: Decimal,
@@ -377,7 +377,7 @@ def debit_rtc_from_agent(db, agent_id: int, amount: Decimal, reason: str) -> Non
     )
 
 
-def _complete_order(db, order, *, capture_id: str, capture_amount_usd: Decimal | None):
+def _complete_order(db, order, *, capture_id: str, capture_amount_usd=None):
     order_amount = _to_usd(order["amount_usd"])
     rtc_amount = _to_rtc(order["rtc_amount"])
     if capture_amount_usd is not None and capture_amount_usd != order_amount:

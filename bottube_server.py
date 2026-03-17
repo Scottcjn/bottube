@@ -446,7 +446,7 @@ def _normalize_referral_track(raw: str, default: str = "both") -> str:
     return default
 
 
-def _referral_track_for_agent(row: sqlite3.Row | dict | None) -> str:
+def _referral_track_for_agent(row) -> str:
     if not row:
         return "agent"
     return "human" if int(row["is_human"] or 0) else "agent"
@@ -485,7 +485,7 @@ def _referral_get_code_row(db: sqlite3.Connection, code: str):
     ).fetchone()
 
 
-def _referral_build_summary(db: sqlite3.Connection, agent_id: int, *, include_recent: bool = True) -> dict | None:
+def _referral_build_summary(db: sqlite3.Connection, agent_id: int, *, include_recent: bool = True):
     row = db.execute(
         """
         SELECT code, hits, signups, first_uploads, created_at, COALESCE(allowed_track, 'both') AS allowed_track
@@ -709,8 +709,8 @@ def _referral_mark_rtc_native_action(
     agent_id: int,
     *,
     evidence_ref: str,
-    occurred_at: float | None = None,
-) -> None:
+    occurred_at=None,
+):
     invite = db.execute(
         "SELECT first_rtc_native_action_at FROM referral_invites WHERE invitee_agent_id = ?",
         (agent_id,),
@@ -2006,6 +2006,100 @@ CREATE TABLE IF NOT EXISTS agent_badges (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_badges_agent ON agent_badges(agent_id, is_active, awarded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_badges_key ON agent_badges(badge_key, is_active, awarded_at DESC);
+
+-- Creator Collaboration Tables (Issue #427)
+-- Supports duets, co-uploads, remixes, and shared playlist collaboration
+
+CREATE TABLE IF NOT EXISTS collaborations (
+    id INTEGER PRIMARY KEY,
+    collaboration_id TEXT UNIQUE NOT NULL,
+    owner_agent_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    collaboration_type TEXT DEFAULT 'duet',  -- duet, co-upload, remix
+    status TEXT DEFAULT 'active',  -- active, closed
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    closed_at REAL DEFAULT NULL,
+    FOREIGN KEY (owner_agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collaborations_owner ON collaborations(owner_agent_id);
+CREATE INDEX IF NOT EXISTS idx_collaborations_status ON collaborations(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS collaboration_invites (
+    id INTEGER PRIMARY KEY,
+    invite_id TEXT UNIQUE NOT NULL,
+    collaboration_id INTEGER NOT NULL,
+    inviter_agent_id INTEGER NOT NULL,
+    invitee_agent_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',  -- pending, accepted, declined, expired
+    message TEXT DEFAULT '',
+    created_at REAL NOT NULL,
+    responded_at REAL DEFAULT NULL,
+    expires_at REAL NOT NULL,
+    FOREIGN KEY (collaboration_id) REFERENCES collaborations(id) ON DELETE CASCADE,
+    FOREIGN KEY (inviter_agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (invitee_agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collab_invites_collab ON collaboration_invites(collaboration_id, status);
+CREATE INDEX IF NOT EXISTS idx_collab_invites_invitee ON collaboration_invites(invitee_agent_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collab_invites_unique ON collaboration_invites(collaboration_id, invitee_agent_id) WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS collaboration_participants (
+    id INTEGER PRIMARY KEY,
+    collaboration_id INTEGER NOT NULL,
+    agent_id INTEGER NOT NULL,
+    role TEXT DEFAULT 'contributor',  -- owner, contributor
+    status TEXT DEFAULT 'accepted',  -- accepted, removed
+    joined_at REAL NOT NULL,
+    video_id TEXT DEFAULT '',  -- The video contributed by this participant
+    FOREIGN KEY (collaboration_id) REFERENCES collaborations(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collab_participants_collab ON collaboration_participants(collaboration_id, status);
+CREATE INDEX IF NOT EXISTS idx_collab_participants_agent ON collaboration_participants(agent_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collab_participants_unique ON collaboration_participants(collaboration_id, agent_id);
+
+CREATE TABLE IF NOT EXISTS collaboration_videos (
+    id INTEGER PRIMARY KEY,
+    collaboration_id INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    contributor_agent_id INTEGER NOT NULL,
+    added_at REAL NOT NULL,
+    FOREIGN KEY (collaboration_id) REFERENCES collaborations(id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos(video_id) ON DELETE CASCADE,
+    FOREIGN KEY (contributor_agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collab_videos_collab ON collaboration_videos(collaboration_id, added_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collab_videos_unique ON collaboration_videos(collaboration_id, video_id);
+
+-- Collaborative Playlists (shared playlists for collaborations)
+CREATE TABLE IF NOT EXISTS collab_playlists (
+    id INTEGER PRIMARY KEY,
+    playlist_id TEXT UNIQUE NOT NULL,
+    collaboration_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    visibility TEXT DEFAULT 'public',  -- public, collaborators-only
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (collaboration_id) REFERENCES collaborations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collab_playlists_collab ON collab_playlists(collaboration_id);
+
+CREATE TABLE IF NOT EXISTS collab_playlist_items (
+    id INTEGER PRIMARY KEY,
+    playlist_id INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    added_by_agent_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    added_at REAL NOT NULL,
+    FOREIGN KEY (playlist_id) REFERENCES collab_playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos(video_id) ON DELETE CASCADE,
+    FOREIGN KEY (added_by_agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collab_playlist_items_pl ON collab_playlist_items(playlist_id, position);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collab_playlist_items_uniq ON collab_playlist_items(playlist_id, video_id);
 """
 
 
@@ -2025,6 +2119,48 @@ def close_db(exc):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+# Template filters for time formatting
+@app.template_filter("format_time_ago")
+def format_time_ago(timestamp):
+    """Format a timestamp as 'X hours ago'."""
+    if not timestamp:
+        return "recently"
+    delta = int(time.time() - timestamp)
+    if delta < 60:
+        return "just now"
+    elif delta < 3600:
+        mins = delta // 60
+        return f"{mins} minute{'s' if mins != 1 else ''} ago"
+    elif delta < 86400:
+        hours = delta // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    elif delta < 604800:
+        days = delta // 86400
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    else:
+        weeks = delta // 604800
+        return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+
+
+@app.template_filter("format_time_until")
+def format_time_until(timestamp):
+    """Format time until a timestamp."""
+    if not timestamp:
+        return "unknown"
+    delta = int(timestamp - time.time())
+    if delta <= 0:
+        return "expired"
+    elif delta < 3600:
+        mins = delta // 60
+        return f"{mins} minute{'s' if mins != 1 else ''}"
+    elif delta < 86400:
+        hours = delta // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    else:
+        days = delta // 86400
+        return f"{days} day{'s' if days != 1 else ''}"
 
 
 def init_db():
@@ -9133,6 +9269,1129 @@ def web_remove_from_playlist(playlist_id):
 
 
 # ---------------------------------------------------------------------------
+# Creator Collaboration API (Issue #427)
+# Supports duets, co-uploads, remixes, and shared playlist collaboration
+# ---------------------------------------------------------------------------
+
+VALID_COLLAB_TYPES = {"duet", "co-upload", "remix"}
+COLLAB_INVITE_EXPIRY_HOURS = 72  # Invites expire after 72 hours
+
+
+def _gen_collab_id():
+    """Generate a unique collaboration ID."""
+    return f"collab_{secrets.token_urlsafe(12)}"
+
+
+def _gen_invite_id():
+    """Generate a unique collaboration invite ID."""
+    return f"inv_{secrets.token_urlsafe(10)}"
+
+
+@app.route("/api/collaborations", methods=["POST"])
+@require_api_key
+def api_create_collaboration():
+    """Create a new collaboration (duet, co-upload, or remix)."""
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Title is required"}), 400
+    
+    collab_type = data.get("type", "duet")
+    if collab_type not in VALID_COLLAB_TYPES:
+        collab_type = "duet"  # Default to duet for backward compatibility
+    
+    description = (data.get("description") or "").strip()[:2000]
+    
+    collab_id = _gen_collab_id()
+    now = time.time()
+    
+    db.execute(
+        """INSERT INTO collaborations 
+           (collaboration_id, owner_agent_id, title, description, collaboration_type, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+        (collab_id, g.agent["id"], title, description, collab_type, now, now),
+    )
+    
+    # Add owner as first participant
+    db.execute(
+        """INSERT INTO collaboration_participants 
+           (collaboration_id, agent_id, role, status, joined_at)
+           VALUES (?, ?, 'owner', 'accepted', ?)""",
+        (collab_id, g.agent["id"], now),
+    )
+    
+    db.commit()
+    
+    # Handle initial participants if provided
+    initial_participants = data.get("participants", [])
+    for p in initial_participants:
+        agent_name = p.get("agent_name", "").strip()
+        if agent_name:
+            invitee = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+            if invitee and invitee["id"] != g.agent["id"]:
+                # Send invite instead of auto-adding for security
+                _create_collab_invite(db, collab_id, g.agent["id"], invitee["id"], p.get("message", ""))
+    
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "collaboration_id": collab_id,
+        "title": title,
+        "type": collab_type,
+        "description": description
+    }), 201
+
+
+def _create_collab_invite(db, collab_id, inviter_id, invitee_id, message=""):
+    """Helper to create a collaboration invite."""
+    now = time.time()
+    expires = now + (COLLAB_INVITE_EXPIRY_HOURS * 3600)
+    invite_id = _gen_invite_id()
+    
+    # Check for existing pending invite
+    existing = db.execute(
+        """SELECT id FROM collaboration_invites 
+           WHERE collaboration_id = ? AND invitee_agent_id = ? AND status = 'pending'""",
+        (collab_id, invitee_id),
+    ).fetchone()
+    
+    if existing:
+        return None  # Already has pending invite
+    
+    db.execute(
+        """INSERT INTO collaboration_invites 
+           (invite_id, collaboration_id, inviter_agent_id, invitee_agent_id, status, message, created_at, expires_at)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)""",
+        (invite_id, collab_id, inviter_id, invitee_id, message, now, expires),
+    )
+    
+    return invite_id
+
+
+@app.route("/api/collaborations/<collab_id>", methods=["GET"])
+@require_api_key
+def api_get_collaboration(collab_id):
+    """Get collaboration details."""
+    db = get_db()
+    
+    collab = db.execute(
+        """SELECT c.*, a.agent_name as owner_name, a.display_name as owner_display, a.avatar_url as owner_avatar
+           FROM collaborations c
+           JOIN agents a ON c.owner_agent_id = a.id
+           WHERE c.collaboration_id = ?""",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    # Get participants
+    participants = db.execute(
+        """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
+           FROM collaboration_participants p
+           JOIN agents a ON p.agent_id = a.id
+           WHERE p.collaboration_id = ? AND p.status = 'accepted'
+           ORDER BY p.joined_at ASC""",
+        (collab["id"],),
+    ).fetchall()
+    
+    # Get videos
+    videos = db.execute(
+        """SELECT cv.*, v.title, v.thumbnail, v.views, v.duration_sec,
+                  a.agent_name, a.display_name
+           FROM collaboration_videos cv
+           JOIN videos v ON cv.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE cv.collaboration_id = ?
+           ORDER BY cv.added_at DESC""",
+        (collab["id"],),
+    ).fetchall()
+    
+    return jsonify({
+        "collaboration_id": collab["collaboration_id"],
+        "title": collab["title"],
+        "description": collab["description"],
+        "type": collab["collaboration_type"],
+        "status": collab["status"],
+        "owner": {
+            "agent_name": collab["owner_name"],
+            "display_name": collab["owner_display"],
+            "avatar_url": collab["owner_avatar"],
+        },
+        "participants": [
+            {
+                "agent_name": p["agent_name"],
+                "display_name": p["display_name"],
+                "avatar_url": p["avatar_url"],
+                "role": p["role"],
+                "status": p["status"],
+                "video_id": p["video_id"],
+                "joined_at": p["joined_at"],
+            }
+            for p in participants
+        ],
+        "videos": [
+            {
+                "video_id": v["video_id"],
+                "title": v["title"],
+                "thumbnail": v["thumbnail"],
+                "views": v["views"],
+                "duration_sec": v["duration_sec"],
+                "contributor": {
+                    "agent_name": v["agent_name"],
+                    "display_name": v["display_name"],
+                },
+                "added_at": v["added_at"],
+            }
+            for v in videos
+        ],
+        "participant_count": len(participants),
+        "video_count": len(videos),
+        "created_at": collab["created_at"],
+        "updated_at": collab["updated_at"],
+    })
+
+
+@app.route("/api/collaborations/<collab_id>", methods=["PATCH"])
+@require_api_key
+def api_update_collaboration(collab_id):
+    """Update collaboration details (owner only)."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ? AND owner_agent_id = ?",
+        (collab_id, g.agent["id"]),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found or not yours"}), 404
+    
+    data = request.get_json(silent=True) or {}
+    sets = []
+    vals = []
+    
+    if "title" in data:
+        title = (data["title"] or "").strip()
+        if title:
+            sets.append("title = ?")
+            vals.append(title[:200])
+    
+    if "description" in data:
+        sets.append("description = ?")
+        vals.append((data["description"] or "").strip()[:2000])
+    
+    if "status" in data and data["status"] in ("active", "closed"):
+        sets.append("status = ?")
+        vals.append(data["status"])
+        if data["status"] == "closed":
+            sets.append("closed_at = ?")
+            vals.append(time.time())
+    
+    if sets:
+        sets.append("updated_at = ?")
+        vals.append(time.time())
+        vals.append(collab["id"])
+        db.execute(f"UPDATE collaborations SET {', '.join(sets)} WHERE id = ?", vals)
+        db.commit()
+    
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collaborations/<collab_id>", methods=["DELETE"])
+@require_api_key
+def api_delete_collaboration(collab_id):
+    """Delete a collaboration (owner only)."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT id FROM collaborations WHERE collaboration_id = ? AND owner_agent_id = ?",
+        (collab_id, g.agent["id"]),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found or not yours"}), 404
+    
+    db.execute("DELETE FROM collaboration_videos WHERE collaboration_id = ?", (collab["id"],))
+    db.execute("DELETE FROM collaboration_participants WHERE collaboration_id = ?", (collab["id"],))
+    db.execute("DELETE FROM collaboration_invites WHERE collaboration_id = ?", (collab["id"],))
+    db.execute("DELETE FROM collaborations WHERE id = ?", (collab["id"],))
+    db.commit()
+    
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collaborations/<collab_id>/invite", methods=["POST"])
+@require_api_key
+def api_invite_to_collaboration(collab_id):
+    """Invite an agent to join a collaboration."""
+    db = get_db()
+    
+    # Verify ownership or participant status
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ?",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    is_owner = collab["owner_agent_id"] == g.agent["id"]
+    is_participant = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (collab["id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not is_owner and not is_participant:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    agent_name = (data.get("agent_name") or "").strip()
+    
+    if not agent_name:
+        return jsonify({"error": "agent_name is required"}), 400
+    
+    if agent_name == g.agent.get("agent_name", ""):
+        return jsonify({"error": "Cannot invite yourself"}), 400
+    
+    invitee = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    if not invitee:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    # Check if already a participant
+    existing = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ?",
+        (collab["id"], invitee["id"]),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "Already a participant"}), 409
+    
+    message = (data.get("message") or "").strip()[:500]
+    invite_id = _create_collab_invite(db, collab["id"], g.agent["id"], invitee["id"], message)
+    
+    if not invite_id:
+        return jsonify({"error": "Pending invite already exists"}), 409
+    
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "invite_id": invite_id,
+        "collab_title": collab["title"],
+    })
+
+
+@app.route("/api/collaborations/invites", methods=["GET"])
+@require_api_key
+def api_get_collab_invites():
+    """Get pending collaboration invites for current agent."""
+    db = get_db()
+    now = time.time()
+    
+    # Expire old invites
+    db.execute(
+        "UPDATE collaboration_invites SET status = 'expired' WHERE expires_at < ? AND status = 'pending'",
+        (now,),
+    )
+    db.commit()
+    
+    invites = db.execute(
+        """SELECT ci.*, c.title as collab_title, c.collaboration_type,
+                  a.agent_name as inviter_name, a.display_name as inviter_display
+           FROM collaboration_invites ci
+           JOIN collaborations c ON ci.collaboration_id = c.id
+           JOIN agents a ON ci.inviter_agent_id = a.id
+           WHERE ci.invitee_agent_id = ? AND ci.status = 'pending'
+           ORDER BY ci.created_at DESC""",
+        (g.agent["id"],),
+    ).fetchall()
+    
+    return jsonify({
+        "invites": [
+            {
+                "invite_id": inv["invite_id"],
+                "collaboration_id": inv["collaboration_id"],
+                "collab_title": inv["collab_title"],
+                "collab_type": inv["collaboration_type"],
+                "inviter": {
+                    "agent_name": inv["inviter_name"],
+                    "display_name": inv["inviter_display"],
+                },
+                "message": inv["message"],
+                "created_at": inv["created_at"],
+                "expires_at": inv["expires_at"],
+            }
+            for inv in invites
+        ],
+        "count": len(invites),
+    })
+
+
+@app.route("/api/collaborations/invites/<invite_id>", methods=["POST"])
+@require_api_key
+def api_respond_to_collab_invite(invite_id):
+    """Accept or decline a collaboration invite."""
+    db = get_db()
+    
+    invite = db.execute(
+        """SELECT * FROM collaboration_invites 
+           WHERE invite_id = ? AND invitee_agent_id = ? AND status = 'pending'""",
+        (invite_id, g.agent["id"]),
+    ).fetchone()
+    
+    if not invite:
+        return jsonify({"error": "Invite not found or already responded"}), 404
+    
+    data = request.get_json(silent=True) or {}
+    action = data.get("action", "").lower()
+    
+    if action not in ("accept", "decline"):
+        return jsonify({"error": "Action must be 'accept' or 'decline'"}), 400
+    
+    now = time.time()
+    status = "accepted" if action == "accept" else "declined"
+    
+    db.execute(
+        "UPDATE collaboration_invites SET status = ?, responded_at = ? WHERE id = ?",
+        (status, now, invite["id"]),
+    )
+    
+    if action == "accept":
+        # Add as participant
+        db.execute(
+            """INSERT INTO collaboration_participants 
+               (collaboration_id, agent_id, role, status, joined_at)
+               VALUES (?, ?, 'contributor', 'accepted', ?)""",
+            (invite["collaboration_id"], g.agent["id"], now),
+        )
+    
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "action": action,
+        "collaboration_id": invite["collaboration_id"],
+    })
+
+
+@app.route("/api/collaborations/<collab_id>/participants/<agent_name>", methods=["DELETE"])
+@require_api_key
+def api_remove_collab_participant(collab_id, agent_name):
+    """Remove a participant from a collaboration (owner only)."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ? AND owner_agent_id = ?",
+        (collab_id, g.agent["id"]),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found or not yours"}), 404
+    
+    participant = db.execute(
+        "SELECT id FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = (SELECT id FROM agents WHERE agent_name = ?)",
+        (collab["id"], agent_name),
+    ).fetchone()
+    
+    if not participant:
+        return jsonify({"error": "Participant not found"}), 404
+    
+    db.execute(
+        "UPDATE collaboration_participants SET status = 'removed' WHERE id = ?",
+        (participant["id"],),
+    )
+    db.commit()
+    
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collaborations/<collab_id>/leave", methods=["POST"])
+@require_api_key
+def api_leave_collaboration(collab_id):
+    """Leave a collaboration (participants only, not owner)."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ?",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    if collab["owner_agent_id"] == g.agent["id"]:
+        return jsonify({"error": "Owner cannot leave. Transfer ownership or delete the collaboration."}), 400
+    
+    participant = db.execute(
+        "SELECT id FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (collab["id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not participant:
+        return jsonify({"error": "Not a participant"}), 404
+    
+    db.execute(
+        "UPDATE collaboration_participants SET status = 'removed' WHERE id = ?",
+        (participant["id"],),
+    )
+    db.commit()
+    
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collaborations/<collab_id>/videos", methods=["POST"])
+@require_api_key
+def api_add_video_to_collaboration(collab_id):
+    """Add a video to a collaboration."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ?",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    # Check if participant
+    participant = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (collab["id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not participant:
+        return jsonify({"error": "Not a participant"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    video_id = data.get("video_id", "")
+    
+    if not video_id:
+        return jsonify({"error": "video_id is required"}), 400
+    
+    # Verify video ownership
+    video = db.execute(
+        "SELECT * FROM videos WHERE video_id = ? AND agent_id = ?",
+        (video_id, g.agent["id"]),
+    ).fetchone()
+    
+    if not video:
+        return jsonify({"error": "Video not found or not yours"}), 404
+    
+    # Check if already added
+    existing = db.execute(
+        "SELECT 1 FROM collaboration_videos WHERE collaboration_id = ? AND video_id = ?",
+        (collab["id"], video_id),
+    ).fetchone()
+    
+    if existing:
+        return jsonify({"error": "Video already in collaboration"}), 409
+    
+    now = time.time()
+    db.execute(
+        """INSERT INTO collaboration_videos 
+           (collaboration_id, video_id, contributor_agent_id, added_at)
+           VALUES (?, ?, ?, ?)""",
+        (collab["id"], video_id, g.agent["id"], now),
+    )
+    
+    # Update participant's video reference
+    db.execute(
+        "UPDATE collaboration_participants SET video_id = ? WHERE collaboration_id = ? AND agent_id = ?",
+        (video_id, collab["id"], g.agent["id"]),
+    )
+    
+    db.execute("UPDATE collaborations SET updated_at = ? WHERE id = ?", (now, collab["id"]))
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+    })
+
+
+@app.route("/api/collaborations/<collab_id>/videos/<video_id>", methods=["DELETE"])
+@require_api_key
+def api_remove_video_from_collaboration(collab_id, video_id):
+    """Remove a video from a collaboration."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ?",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    # Check if owner or participant
+    is_owner = collab["owner_agent_id"] == g.agent["id"]
+    is_participant = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (collab["id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not is_owner and not is_participant:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    removed = db.execute(
+        "DELETE FROM collaboration_videos WHERE collaboration_id = ? AND video_id = ?",
+        (collab["id"], video_id),
+    ).rowcount
+    
+    db.execute("UPDATE collaborations SET updated_at = ? WHERE id = ?", (time.time(), collab["id"]))
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "removed": removed > 0,
+    })
+
+
+@app.route("/api/collaborations/me", methods=["GET"])
+@require_api_key
+def api_my_collaborations():
+    """Get current agent's collaborations."""
+    db = get_db()
+    
+    collabs = db.execute(
+        """SELECT DISTINCT c.*, 
+                  (SELECT COUNT(*) FROM collaboration_participants WHERE collaboration_id = c.id AND status = 'accepted') as participant_count,
+                  (SELECT COUNT(*) FROM collaboration_videos WHERE collaboration_id = c.id) as video_count
+           FROM collaborations c
+           JOIN collaboration_participants p ON c.id = p.collaboration_id
+           WHERE p.agent_id = ? AND p.status = 'accepted'
+           ORDER BY c.updated_at DESC""",
+        (g.agent["id"],),
+    ).fetchall()
+    
+    return jsonify({
+        "collaborations": [
+            {
+                "collaboration_id": c["collaboration_id"],
+                "title": c["title"],
+                "description": c["description"],
+                "type": c["collaboration_type"],
+                "status": c["status"],
+                "participant_count": c["participant_count"],
+                "video_count": c["video_count"],
+                "created_at": c["created_at"],
+                "updated_at": c["updated_at"],
+            }
+            for c in collabs
+        ],
+        "count": len(collabs),
+    })
+
+
+@app.route("/api/collaborations/notifications", methods=["GET"])
+@require_api_key
+def api_collab_notifications():
+    """Get collaboration-related notifications (pending invites)."""
+    db = get_db()
+    now = time.time()
+    
+    notifications = db.execute(
+        """SELECT ci.*, c.title as collab_title, c.collaboration_type,
+                  a.agent_name as inviter_name, a.display_name as inviter_display
+           FROM collaboration_invites ci
+           JOIN collaborations c ON ci.collaboration_id = c.id
+           JOIN agents a ON ci.inviter_agent_id = a.id
+           WHERE ci.invitee_agent_id = ? AND ci.status = 'pending'
+           ORDER BY ci.created_at DESC""",
+        (g.agent["id"],),
+    ).fetchall()
+    
+    return jsonify({
+        "notifications": [
+            {
+                "type": "collaboration_invite",
+                "invite_id": n["invite_id"],
+                "collaboration_id": n["collaboration_id"],
+                "collab_title": n["collab_title"],
+                "collab_type": n["collaboration_type"],
+                "from": {
+                    "agent_name": n["inviter_name"],
+                    "display_name": n["inviter_display"],
+                },
+                "message": n["message"],
+                "created_at": n["created_at"],
+                "read": False,
+            }
+            for n in notifications
+        ],
+        "unread_count": len(notifications),
+    })
+
+
+@app.route("/api/collaborations/notifications/mark-read", methods=["POST"])
+@require_api_key
+def api_mark_collab_notifications_read():
+    """Mark collaboration notifications as read."""
+    # For now, this is a no-op as we don't track read status separately
+    # Invites are "read" when fetched, and responded to when accepted/declined
+    return jsonify({"ok": True})
+
+
+# Collaborative Playlists API
+
+
+@app.route("/api/collaborations/<collab_id>/playlists", methods=["POST"])
+@require_api_key
+def api_create_collab_playlist(collab_id):
+    """Create a collaborative playlist within a collaboration."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ?",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    # Check if participant
+    participant = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (collab["id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not participant:
+        return jsonify({"error": "Not a participant"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    
+    if not title:
+        return jsonify({"error": "Title is required"}), 400
+    
+    description = (data.get("description") or "").strip()[:2000]
+    visibility = data.get("visibility", "public")
+    if visibility not in ("public", "collaborators-only"):
+        visibility = "public"
+    
+    playlist_id = _gen_collab_id()
+    now = time.time()
+    
+    db.execute(
+        """INSERT INTO collab_playlists 
+           (playlist_id, collaboration_id, title, description, visibility, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (playlist_id, collab["id"], title, description, visibility, now, now),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "playlist_id": playlist_id,
+        "title": title,
+    }), 201
+
+
+@app.route("/api/collaborations/<collab_id>/playlists", methods=["GET"])
+@require_api_key
+def api_get_collab_playlists(collab_id):
+    """Get all playlists for a collaboration."""
+    db = get_db()
+    
+    collab = db.execute(
+        "SELECT * FROM collaborations WHERE collaboration_id = ?",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    
+    playlists = db.execute(
+        """SELECT cp.*, 
+                  (SELECT COUNT(*) FROM collab_playlist_items WHERE playlist_id = cp.id) as item_count
+           FROM collab_playlists cp
+           WHERE cp.collaboration_id = ?
+           ORDER BY cp.created_at DESC""",
+        (collab["id"],),
+    ).fetchall()
+    
+    return jsonify({
+        "playlists": [
+            {
+                "playlist_id": p["playlist_id"],
+                "title": p["title"],
+                "description": p["description"],
+                "visibility": p["visibility"],
+                "item_count": p["item_count"],
+                "created_at": p["created_at"],
+                "updated_at": p["updated_at"],
+            }
+            for p in playlists
+        ],
+        "count": len(playlists),
+    })
+
+
+@app.route("/api/collaborations/playlists/<playlist_id>", methods=["GET"])
+@require_api_key
+def api_get_collab_playlist(playlist_id):
+    """Get a collaborative playlist's details and items."""
+    db = get_db()
+    
+    pl = db.execute(
+        """SELECT cp.*, c.collaboration_id, c.title as collab_title
+           FROM collab_playlists cp
+           JOIN collaborations c ON cp.collaboration_id = c.id
+           WHERE cp.playlist_id = ?""",
+        (playlist_id,),
+    ).fetchone()
+    
+    if not pl:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    # Check visibility
+    if pl["visibility"] == "collaborators-only":
+        participant = db.execute(
+            "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+            (pl["collaboration_id"], g.agent["id"]),
+        ).fetchone()
+        if not participant:
+            return jsonify({"error": "Not authorized"}), 403
+    
+    items = db.execute(
+        """SELECT cpi.*, v.title, v.thumbnail, v.duration_sec, v.views,
+                  a.agent_name, a.display_name
+           FROM collab_playlist_items cpi
+           JOIN videos v ON cpi.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE cpi.playlist_id = ?
+           ORDER BY cpi.position ASC""",
+        (pl["id"],),
+    ).fetchall()
+    
+    return jsonify({
+        "playlist_id": pl["playlist_id"],
+        "title": pl["title"],
+        "description": pl["description"],
+        "visibility": pl["visibility"],
+        "collaboration_id": pl["collaboration_id"],
+        "collab_title": pl["collab_title"],
+        "items": [
+            {
+                "video_id": i["video_id"],
+                "title": i["title"],
+                "thumbnail": i["thumbnail"],
+                "duration_sec": i["duration_sec"],
+                "views": i["views"],
+                "added_by": {
+                    "agent_name": i["agent_name"],
+                    "display_name": i["display_name"],
+                },
+                "position": i["position"],
+                "added_at": i["added_at"],
+            }
+            for i in items
+        ],
+        "item_count": len(items),
+    })
+
+
+@app.route("/api/collaborations/playlists/<playlist_id>/items", methods=["POST"])
+@require_api_key
+def api_add_collab_playlist_item(playlist_id):
+    """Add a video to a collaborative playlist."""
+    db = get_db()
+    
+    pl = db.execute(
+        """SELECT cp.*, c.collaboration_id
+           FROM collab_playlists cp
+           JOIN collaborations c ON cp.collaboration_id = c.id
+           WHERE cp.playlist_id = ?""",
+        (playlist_id,),
+    ).fetchone()
+    
+    if not pl:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    # Check if participant
+    participant = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (pl["collaboration_id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not participant:
+        return jsonify({"error": "Not a participant"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    video_id = data.get("video_id", "")
+    
+    if not video_id:
+        return jsonify({"error": "video_id is required"}), 400
+    
+    # Verify video exists
+    if not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone():
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Check duplicate
+    if db.execute("SELECT 1 FROM collab_playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], video_id)).fetchone():
+        return jsonify({"error": "Video already in playlist"}), 409
+    
+    # Get next position
+    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM collab_playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
+    now = time.time()
+    
+    db.execute(
+        """INSERT INTO collab_playlist_items 
+           (playlist_id, video_id, added_by_agent_id, position, added_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (pl["id"], video_id, g.agent["id"], max_pos + 1, now),
+    )
+    db.execute("UPDATE collab_playlists SET updated_at = ? WHERE id = ?", (now, pl["id"]))
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "position": max_pos + 1,
+    }), 201
+
+
+@app.route("/api/collaborations/playlists/<playlist_id>/items/<video_id>", methods=["DELETE"])
+@require_api_key
+def api_remove_collab_playlist_item(playlist_id, video_id):
+    """Remove a video from a collaborative playlist."""
+    db = get_db()
+    
+    pl = db.execute(
+        """SELECT cp.*, c.collaboration_id
+           FROM collab_playlists cp
+           JOIN collaborations c ON cp.collaboration_id = c.id
+           WHERE cp.playlist_id = ?""",
+        (playlist_id,),
+    ).fetchone()
+    
+    if not pl:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    # Check if participant
+    participant = db.execute(
+        "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+        (pl["collaboration_id"], g.agent["id"]),
+    ).fetchone()
+    
+    if not participant:
+        return jsonify({"error": "Not a participant"}), 403
+    
+    removed = db.execute(
+        "DELETE FROM collab_playlist_items WHERE playlist_id = ? AND video_id = ?",
+        (pl["id"], video_id),
+    ).rowcount
+    
+    db.execute("UPDATE collab_playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "removed": removed > 0,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Collaboration Web Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/collaboration/<collab_id>")
+def collaboration_page(collab_id):
+    """View a collaboration page."""
+    db = get_db()
+    
+    collab = db.execute(
+        """SELECT c.*, a.agent_name as owner_name, a.display_name as owner_display
+           FROM collaborations c
+           JOIN agents a ON c.owner_agent_id = a.id
+           WHERE c.collaboration_id = ?""",
+        (collab_id,),
+    ).fetchone()
+    
+    if not collab:
+        abort(404)
+    
+    # Get participants
+    participants = db.execute(
+        """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
+           FROM collaboration_participants p
+           JOIN agents a ON p.agent_id = a.id
+           WHERE p.collaboration_id = ? AND p.status = 'accepted'
+           ORDER BY p.joined_at ASC""",
+        (collab["id"],),
+    ).fetchall()
+    
+    # Get videos
+    videos = db.execute(
+        """SELECT cv.*, v.title, v.thumbnail, v.views, v.duration_sec,
+                  a.agent_name, a.display_name
+           FROM collaboration_videos cv
+           JOIN videos v ON cv.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE cv.collaboration_id = ?
+           ORDER BY cv.added_at DESC""",
+        (collab["id"],),
+    ).fetchall()
+    
+    # Determine user's relationship to collaboration
+    is_owner = False
+    is_participant = False
+    can_invite = False
+    
+    if g.user:
+        is_owner = collab["owner_agent_id"] == g.user["id"]
+        is_participant = db.execute(
+            "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+            (collab["id"], g.user["id"]),
+        ).fetchone() is not None
+        can_invite = is_owner or is_participant
+    elif hasattr(g, "agent") and g.agent:
+        is_owner = collab["owner_agent_id"] == g.agent["id"]
+        is_participant = db.execute(
+            "SELECT 1 FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ? AND status = 'accepted'",
+            (collab["id"], g.agent["id"]),
+        ).fetchone() is not None
+        can_invite = is_owner or is_participant
+    
+    return render_template(
+        "collaboration.html",
+        collab=collab,
+        participants=participants,
+        videos=videos,
+        is_owner=is_owner,
+        is_participant=is_participant,
+        can_invite=can_invite,
+    )
+
+
+@app.route("/collaborations/new", methods=["GET", "POST"])
+def new_collaboration():
+    """Create a new collaboration (web form)."""
+    if not g.user:
+        return redirect(url_for("login"))
+    
+    if request.method == "GET":
+        return render_template("collaboration_new.html")
+    
+    _verify_csrf()
+    
+    title = request.form.get("title", "").strip()[:200]
+    if not title:
+        flash("Title is required.", "error")
+        return render_template("collaboration_new.html")
+    
+    description = request.form.get("description", "").strip()[:2000]
+    collab_type = request.form.get("type", "duet")
+    if collab_type not in VALID_COLLAB_TYPES:
+        collab_type = "duet"
+    
+    collab_id = _gen_collab_id()
+    now = time.time()
+    
+    db = get_db()
+    db.execute(
+        """INSERT INTO collaborations 
+           (collaboration_id, owner_agent_id, title, description, collaboration_type, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+        (collab_id, g.user["id"], title, description, collab_type, now, now),
+    )
+    
+    db.execute(
+        """INSERT INTO collaboration_participants 
+           (collaboration_id, agent_id, role, status, joined_at)
+           VALUES (?, ?, 'owner', 'accepted', ?)""",
+        (collab_id, g.user["id"], now),
+    )
+    db.commit()
+    
+    return redirect(f"/collaboration/{collab_id}")
+
+
+@app.route("/collaborations")
+def collaborations_index():
+    """List collaborations for current user."""
+    if not g.user and not (hasattr(g, "agent") and g.agent):
+        return redirect(url_for("login"))
+    
+    db = get_db()
+    user_id = g.user["id"] if g.user else g.agent["id"]
+    
+    collabs = db.execute(
+        """SELECT DISTINCT c.*, 
+                  (SELECT COUNT(*) FROM collaboration_participants WHERE collaboration_id = c.id AND status = 'accepted') as participant_count,
+                  (SELECT COUNT(*) FROM collaboration_videos WHERE collaboration_id = c.id) as video_count
+           FROM collaborations c
+           JOIN collaboration_participants p ON c.id = p.collaboration_id
+           WHERE p.agent_id = ? AND p.status = 'accepted'
+           ORDER BY c.updated_at DESC""",
+        (user_id,),
+    ).fetchall()
+    
+    # Get pending invites count
+    pending_invites = db.execute(
+        "SELECT COUNT(*) FROM collaboration_invites WHERE invitee_agent_id = ? AND status = 'pending'",
+        (user_id,),
+    ).fetchone()[0]
+    
+    return render_template(
+        "collaboration_invites.html",
+        collaborations=collabs,
+        pending_invites=pending_invites,
+    )
+
+
+@app.route("/collaborations/invites")
+def collaboration_invites_page():
+    """View pending collaboration invites."""
+    if not g.user and not (hasattr(g, "agent") and g.agent):
+        return redirect(url_for("login"))
+    
+    db = get_db()
+    user_id = g.user["id"] if g.user else g.agent["id"]
+    now = time.time()
+    
+    # Expire old invites first
+    db.execute(
+        "UPDATE collaboration_invites SET status = 'expired' WHERE expires_at < ? AND status = 'pending'",
+        (now,),
+    )
+    db.commit()
+    
+    invites = db.execute(
+        """SELECT ci.*, c.title as collab_title, c.collaboration_type,
+                  a.agent_name as inviter_name, a.display_name as inviter_display
+           FROM collaboration_invites ci
+           JOIN collaborations c ON ci.collaboration_id = c.id
+           JOIN agents a ON ci.inviter_agent_id = a.id
+           WHERE ci.invitee_agent_id = ? AND ci.status = 'pending'
+           ORDER BY ci.created_at DESC""",
+        (user_id,),
+    ).fetchall()
+    
+    # Format invites for template
+    formatted_invites = []
+    for inv in invites:
+        formatted_invites.append({
+            "invite_id": inv["invite_id"],
+            "collaboration_id": inv["collaboration_id"],
+            "collab_title": inv["collab_title"],
+            "collab_type": inv["collaboration_type"],
+            "inviter_name": inv["inviter_name"],
+            "inviter_display": inv["inviter_display"],
+            "message": inv["message"],
+            "created_at": inv["created_at"],
+            "expires_at": inv["expires_at"],
+            "is_expired": inv["expires_at"] < now,
+        })
+    
+    return render_template(
+        "collaboration_pending_invites.html",
+        invites=formatted_invites,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Webhooks (API only - for bot agents)
 # ---------------------------------------------------------------------------
 
@@ -12559,33 +13818,46 @@ app.register_blueprint(gpu_bp)
 # PayPal Package Store (Fiat → RTC Credits)
 # ---------------------------------------------------------------------------
 from paypal_packages import store_bp, init_store_db
-init_store_db()  # Create store tables if needed
+# Initialize store DB (silently skip if DB path not accessible)
+try:
+    init_store_db()
+except Exception:
+    pass  # Will be initialized properly when app runs
 app.register_blueprint(store_bp)
 
 # USDC Payment Integration (Base Chain)
 from usdc_blueprint import usdc_bp, init_usdc_tables
 import sqlite3 as _usdc_sqlite3
-_usdc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
-_usdc_db = _usdc_sqlite3.connect(_usdc_db_path)
-init_usdc_tables(_usdc_db)
-_usdc_db.close()
+try:
+    _usdc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+    _usdc_db = _usdc_sqlite3.connect(_usdc_db_path)
+    init_usdc_tables(_usdc_db)
+    _usdc_db.close()
+except Exception:
+    pass  # Will be initialized properly when app runs
 app.register_blueprint(usdc_bp)
 
 # wRTC Bridge Integration (Solana)
 from wrtc_bridge_blueprint import wrtc_bp, init_wrtc_tables
 import sqlite3 as _wrtc_sqlite3
-_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
-_wrtc_db = _wrtc_sqlite3.connect(_wrtc_db_path)
-init_wrtc_tables(_wrtc_db)
-_wrtc_db.close()
+try:
+    _wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+    _wrtc_db = _wrtc_sqlite3.connect(_wrtc_db_path)
+    init_wrtc_tables(_wrtc_db)
+    _wrtc_db.close()
+except Exception:
+    pass  # Will be initialized properly when app runs
 app.register_blueprint(wrtc_bp)
 
 # wRTC Bridge Integration (Base L2 / Ethereum)
 from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
 import sqlite3 as _base_wrtc_sqlite3
-_base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
-init_base_wrtc_tables(_base_wrtc_db)
-_base_wrtc_db.close()
+try:
+    _base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
+    init_base_wrtc_tables(_base_wrtc_db)
+    _base_wrtc_db.close()
+except Exception:
+    pass  # Will be initialized properly when app runs
 app.register_blueprint(base_wrtc_bp)
 
 # ---------------------------------------------------------------------------
@@ -12618,7 +13890,10 @@ except ImportError:
 # ---------------------------------------------------------------------------
 try:
     from banano_blueprint import ban_bp, init_ban_tables, award_ban_upload, check_view_milestones, award_ban_video_gen
-    init_ban_tables()
+    try:
+        init_ban_tables()
+    except Exception:
+        pass  # Will be initialized properly when app runs
     app.register_blueprint(ban_bp)
     BANANO_ENABLED = True
 except ImportError:
@@ -12640,7 +13915,10 @@ try:
         generate_captions_async,
         init_captions_tables,
     )
-    init_captions_tables()
+    try:
+        init_captions_tables()
+    except Exception:
+        pass  # Will be initialized properly when app runs
     app.register_blueprint(captions_bp)
     CAPTIONS_ENABLED = True
 except ImportError:

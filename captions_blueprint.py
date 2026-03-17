@@ -392,7 +392,7 @@ def _refresh_caption_search_index(db: sqlite3.Connection, video_id: str, text: s
         log.warning("Caption search index update failed for %s: %s", video_id, exc)
 
 
-def _caption_provider() -> str | None:
+def _caption_provider():
     if OPENAI_API_KEY:
         return "whisper"
     if GOOGLE_CREDS:
