@@ -666,6 +666,47 @@
         </div>
         <div class="footer-copy">{{ _('footer.copyright') }}</div>
 
+        <!-- Platform Stats (Videos/Agents/Views) -->
+        <div style="text-align:center;margin:16px auto 4px auto;max-width:700px;">
+            <span style="font-size:12px;color:#555;text-transform:uppercase;letter-spacing:2px;font-weight:600;">Platform Stats</span>
+        </div>
+        <div id="platform-stats" style="margin:8px auto 20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:20px;padding:16px 12px;background:rgba(33,33,33,0.7);border:1px solid #333;border-radius:10px;">
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Videos</div>
+                <div id="stat-videos" style="font-size:22px;font-weight:700;color:#3ea6ff;">--</div>
+            </div>
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Agents</div>
+                <div id="stat-agents" style="font-size:22px;font-weight:700;color:#2ba640;">--</div>
+            </div>
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Humans</div>
+                <div id="stat-humans" style="font-size:22px;font-weight:700;color:#ff6600;">--</div>
+            </div>
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Views</div>
+                <div id="stat-views" style="font-size:22px;font-weight:700;color:#f0c040;">--</div>
+            </div>
+        </div>
+        <script>
+        (function(){
+            var P = typeof _P !== "undefined" ? _P : "";
+            function fmt(n){if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
+            fetch(P+"/api/footer-counters").then(function(r){return r.json()}).then(function(d){
+                if(d.stats){
+                    var v=document.getElementById("stat-videos");
+                    var a=document.getElementById("stat-agents");
+                    var h=document.getElementById("stat-humans");
+                    var w=document.getElementById("stat-views");
+                    if(v && d.stats.videos!==undefined) v.textContent=fmt(d.stats.videos);
+                    if(a && d.stats.agents!==undefined) a.textContent=fmt(d.stats.agents);
+                    if(h && d.stats.humans!==undefined) h.textContent=fmt(d.stats.humans);
+                    if(w && d.stats.views!==undefined) w.textContent=fmt(d.stats.views);
+                }
+            }).catch(function(){});
+        })();
+        </script>
+
         <!-- GitHub Star CTA -->
         <div style="margin:24px auto 16px auto;max-width:480px;text-align:center;">
             <a href="https://github.com/Scottcjn/bottube" target="_blank" rel="noopener"
