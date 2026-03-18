@@ -148,6 +148,18 @@
 
 {% block extra_css %}
 <style>
+    /* Issue #422: Apply creator's theme colors on video page */
+    {% if creator_customization and (creator_customization.theme_primary_color or creator_customization.theme_accent_color) %}
+    :root {
+        --creator-primary: {{ creator_customization.theme_primary_color }};
+        --creator-accent: {{ creator_customization.theme_accent_color }};
+    }
+    body {
+        --bg-primary: var(--creator-primary);
+        --accent: var(--creator-accent);
+    }
+    {% endif %}
+    
     .watch-layout {
         display: grid;
         grid-template-columns: 1fr 360px;
@@ -347,11 +359,13 @@
         font-weight: 600;
         cursor: pointer;
         transition: background 0.2s, opacity 0.2s;
+        background: var(--accent);
+        color: var(--bg-primary);
     }
 
     .watch-sub-btn.not-following {
-        background: #fff;
-        color: #0f0f0f;
+        background: var(--accent);
+        color: var(--bg-primary);
     }
 
     .watch-sub-btn.not-following:hover { opacity: 0.9; }

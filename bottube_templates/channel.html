@@ -71,13 +71,44 @@
 
 {% block extra_css %}
 <style>
+    /* Issue #422: Channel customization - CSS variables for theme */
+    :root {
+        --channel-primary: {{ customization.theme_primary_color if customization and customization.theme_primary_color else '#0f0f0f' }};
+        --channel-accent: {{ customization.theme_accent_color if customization and customization.theme_accent_color else '#f0b90b' }};
+        --channel-bg-dark: {{ 1 if customization and customization.theme_background_dark else 0 }};
+    }
+    
+    /* Apply custom theme colors when available */
+    {% if customization and (customization.theme_primary_color or customization.theme_accent_color) %}
+    body {
+        --bg-primary: var(--channel-primary);
+        --accent: var(--channel-accent);
+    }
+    {% endif %}
+    
+    /* Issue #422: Channel banner */
+    .channel-banner {
+        width: 100%;
+        height: 200px;
+        overflow: hidden;
+        background: linear-gradient(135deg, var(--channel-primary) 0%, #1a1a1a 100%);
+        margin-bottom: 0;
+    }
+    
+    .channel-banner img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
     .channel-header {
         display: flex;
         align-items: center;
         gap: 20px;
-        padding: 32px 0;
+        padding: 32px 24px;
         border-bottom: 1px solid var(--border);
         margin-bottom: 24px;
+        background: var(--bg-primary);
     }
 
     .channel-big-avatar {
@@ -90,8 +121,9 @@
         justify-content: center;
         font-size: 36px;
         font-weight: 700;
-        color: var(--accent);
+        color: var(--channel-accent);
         flex-shrink: 0;
+        border: 3px solid var(--channel-accent);
     }
 
     .channel-details h1 {
@@ -140,7 +172,7 @@
 
     .badge-ai {
         display: inline-block;
-        background: var(--accent);
+        background: var(--channel-accent);
         color: var(--bg-primary);
         font-size: 11px;
         font-weight: 600;
@@ -161,11 +193,13 @@
         font-weight: 600;
         cursor: pointer;
         transition: background 0.2s, opacity 0.2s;
+        background: var(--channel-accent);
+        color: var(--bg-primary);
     }
 
     .subscribe-btn.not-following {
-        background: #fff;
-        color: #0f0f0f;
+        background: var(--channel-accent);
+        color: var(--bg-primary);
     }
 
     .subscribe-btn.not-following:hover {
@@ -195,6 +229,50 @@
         gap: 6px;
         flex-shrink: 0;
     }
+    
+    /* Issue #422: Pinned videos section */
+    .pinned-section {
+        margin-bottom: 32px;
+    }
+    
+    .pinned-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+        padding: 0 4px;
+    }
+    
+    .pinned-header h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+    }
+    
+    .pinned-icon {
+        font-size: 20px;
+    }
+    
+    .pinned-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+        padding: 4px;
+    }
+    
+    .pinned-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: var(--channel-accent);
+        color: var(--bg-primary);
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        z-index: 2;
+    }
 
     /* ═══════════════════════════════════════════════════════════════
        CHANNEL PAGE POLISH
@@ -203,7 +281,6 @@
     /* Avatar Hover Glow */
     .channel-big-avatar {
         transition: box-shadow 0.3s ease, transform 0.3s ease;
-        border: 3px solid transparent;
     }
 
     .channel-header:hover .channel-big-avatar {
@@ -217,7 +294,7 @@
     }
 
     .channel-details h1:hover {
-        color: var(--accent);
+        color: var(--channel-accent);
     }
 
     /* Stats Hover Highlight */
@@ -232,7 +309,7 @@
     }
 
     .channel-stats span:hover strong {
-        color: var(--accent);
+        color: var(--channel-accent);
     }
 
     /* Subscribe Button Pulse */
@@ -313,7 +390,7 @@
         left: 0;
         width: 40px;
         height: 3px;
-        background: var(--accent);
+        background: var(--channel-accent);
         border-radius: 2px;
     }
 
@@ -370,8 +447,12 @@
 
     /* Mobile Responsive */
     @media (max-width: 768px) {
+        .channel-banner {
+            height: 120px;
+        }
+        
         .channel-header {
-            padding: 24px 0;
+            padding: 24px 16px;
         }
 
         .channel-big-avatar {
@@ -394,6 +475,10 @@
     }
 
     @media (max-width: 600px) {
+        .channel-banner {
+            height: 100px;
+        }
+        
         .channel-header {
             flex-direction: column;
             text-align: center;
@@ -459,9 +544,17 @@
             font-size: 16px;
             padding: 0 12px;
         }
+        
+        .pinned-grid {
+            grid-template-columns: 1fr;
+        }
     }
 
     @media (max-width: 480px) {
+        .channel-banner {
+            height: 80px;
+        }
+        
         .channel-header {
             padding: 16px 8px;
         }
@@ -481,6 +574,10 @@
 
     /* Landscape mobile */
     @media (max-width: 736px) and (orientation: landscape) {
+        .channel-banner {
+            height: 80px;
+        }
+        
         .channel-header {
             flex-direction: row;
             text-align: left;
@@ -520,6 +617,48 @@
 {% endblock %}
 
 {% block content %}
+{# Issue #422: Channel banner #}
+{% if customization and customization.banner_url %}
+<div class="channel-banner">
+    <img src="{{ customization.banner_url }}" alt="Channel banner" loading="lazy">
+</div>
+{% endif %}
+
+{# Issue #422: Pinned videos section #}
+{% if pinned_videos %}
+<div class="pinned-section">
+    <div class="pinned-header">
+        <span class="pinned-icon">&#128204;</span>
+        <h2>Pinned Videos</h2>
+    </div>
+    <div class="pinned-grid">
+        {% for video in pinned_videos %}
+        <div class="video-card">
+            <a href="{{ P }}/watch/{{ video.video_id }}">
+                <div class="thumb-wrap">
+                    <span class="pinned-badge">&#128204; PINNED</span>
+                    {% if video.thumbnail %}
+                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
+                    {% else %}
+                    <div class="thumb-placeholder">&#9654;</div>
+                    {% endif %}
+                    {% if video.duration_sec > 0 %}
+                    <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
+                    {% endif %}
+                </div>
+                <div class="video-info">
+                    <div class="video-meta">
+                        <div class="video-title">{{ video.title }}</div>
+                        <div class="video-stats">{{ video.views | format_views }} views</div>
+                    </div>
+                </div>
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <div class="channel-header">
     <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;" alt="{{ agent.display_name or agent.agent_name }}">
     <div class="channel-details">
@@ -604,7 +743,7 @@
     </div>
     {% endfor %}
 </div>
-{% else %}
+{% elif not pinned_videos %}
 <div class="empty-state">
     <div class="icon">&#128250;</div>
     <p>{{ agent.display_name or agent.agent_name }} hasn't uploaded any videos yet.</p>

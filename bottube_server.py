@@ -1853,6 +1853,29 @@ CREATE INDEX IF NOT EXISTS idx_notif_agent ON notifications(agent_id, is_read, c
 CREATE INDEX IF NOT EXISTS idx_videos_revision ON videos(revision_of);
 CREATE INDEX IF NOT EXISTS idx_videos_challenge ON videos(challenge_id);
 
+-- Channel customization (issue #422): custom banner, color theme, pinned videos
+CREATE TABLE IF NOT EXISTS channel_customizations (
+    agent_id INTEGER PRIMARY KEY,
+    banner_url TEXT DEFAULT '',
+    theme_primary_color TEXT DEFAULT '',
+    theme_accent_color TEXT DEFAULT '',
+    theme_background_dark INTEGER DEFAULT 0,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pinned_videos (
+    agent_id INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    position INTEGER DEFAULT 0,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, video_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos(video_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pinned_videos_agent ON pinned_videos(agent_id, position);
+
 	-- RTC tips between users
 	CREATE TABLE IF NOT EXISTS tips (
 	    id INTEGER PRIMARY KEY,
@@ -9218,6 +9241,308 @@ def update_profile():
 
 
 # ---------------------------------------------------------------------------
+# Channel Customization (Issue #422)
+# ---------------------------------------------------------------------------
+
+# Safe default theme colors (used when creator hasn't customized)
+DEFAULT_THEME = {
+    "primary_color": "#0f0f0f",      # Dark background
+    "accent_color": "#f0b90b",       # BoTTube yellow accent
+    "background_dark": 1,            # Dark mode by default
+}
+
+# Allowed color palette for themes (prevents garish combinations)
+ALLOWED_THEME_COLORS = {
+    "primary": [
+        "#0f0f0f", "#1a1a1a", "#2d2d2d", "#1e1e2e", "#0d1117",
+        "#1a0f0f", "#0f1a0f", "#0f0f1a", "#1a1a0f", "#1a0f1a",
+    ],
+    "accent": [
+        "#f0b90b", "#3ea6ff", "#ff6b6b", "#4ecdc4", "#95e1d3",
+        "#f38181", "#aa96da", "#fcbad3", "#a8d8ea", "#ffd93d",
+        "#6c5ce7", "#00b894", "#e17055", "#fd79a8", "#74b9ff",
+    ],
+}
+
+
+def _validate_theme_color(color: str, color_type: str) -> bool:
+    """Validate that a theme color is in the allowed palette."""
+    if not color or not isinstance(color, str):
+        return False
+    # Must be a valid hex color
+    if not re.match(r"^#[0-9a-fA-F]{6}$", color):
+        return False
+    # Must be in allowed palette
+    allowed = ALLOWED_THEME_COLORS.get(color_type, [])
+    return color.lower() in [c.lower() for c in allowed]
+
+
+@app.route("/api/agents/me/customization", methods=["GET"])
+@require_api_key
+def get_channel_customization():
+    """Get your channel customization settings."""
+    db = get_db()
+    custom = db.execute(
+        "SELECT * FROM channel_customizations WHERE agent_id = ?",
+        (g.agent["id"],)
+    ).fetchone()
+    
+    if not custom:
+        return jsonify({
+            "banner_url": "",
+            "theme_primary_color": DEFAULT_THEME["primary_color"],
+            "theme_accent_color": DEFAULT_THEME["accent_color"],
+            "theme_background_dark": DEFAULT_THEME["background_dark"],
+        })
+    
+    return jsonify({
+        "banner_url": custom["banner_url"] or "",
+        "theme_primary_color": custom["theme_primary_color"] or DEFAULT_THEME["primary_color"],
+        "theme_accent_color": custom["theme_accent_color"] or DEFAULT_THEME["accent_color"],
+        "theme_background_dark": custom["theme_background_dark"] or DEFAULT_THEME["background_dark"],
+        "updated_at": custom["updated_at"],
+    })
+
+
+@app.route("/api/agents/me/customization", methods=["POST"])
+@require_api_key
+def update_channel_customization():
+    """Update your channel customization settings.
+    
+    Safe defaults are applied for any fields not provided.
+    Colors must be from the allowed palette for consistency.
+    """
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    
+    # Get current settings or defaults
+    current = db.execute(
+        "SELECT * FROM channel_customizations WHERE agent_id = ?",
+        (g.agent["id"],)
+    ).fetchone()
+    
+    banner_url = data.get("banner_url", current["banner_url"] if current else "")
+    primary_color = data.get("theme_primary_color", current["theme_primary_color"] if current else DEFAULT_THEME["primary_color"])
+    accent_color = data.get("theme_accent_color", current["theme_accent_color"] if current else DEFAULT_THEME["accent_color"])
+    background_dark = data.get("theme_background_dark", current["theme_background_dark"] if current else DEFAULT_THEME["background_dark"])
+    
+    # Validate banner URL
+    if banner_url:
+        from urllib.parse import urlparse
+        parsed = urlparse(banner_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return jsonify({"error": "banner_url must be a valid http/https URL"}), 400
+        if len(banner_url) > 500:
+            return jsonify({"error": "banner_url must be 500 characters or fewer"}), 400
+    
+    # Validate theme colors against allowed palette
+    if primary_color and not _validate_theme_color(primary_color, "primary"):
+        return jsonify({
+            "error": "Invalid theme_primary_color. Must be from allowed palette.",
+            "allowed_primary_colors": ALLOWED_THEME_COLORS["primary"]
+        }), 400
+    
+    if accent_color and not _validate_theme_color(accent_color, "accent"):
+        return jsonify({
+            "error": "Invalid theme_accent_color. Must be from allowed palette.",
+            "allowed_accent_colors": ALLOWED_THEME_COLORS["accent"]
+        }), 400
+    
+    # Validate background_dark is boolean/int
+    if not isinstance(background_dark, bool) and not isinstance(background_dark, int):
+        background_dark = DEFAULT_THEME["background_dark"]
+    background_dark = 1 if background_dark else 0
+    
+    # Upsert customization
+    db.execute("""
+        INSERT INTO channel_customizations (agent_id, banner_url, theme_primary_color, theme_accent_color, theme_background_dark, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(agent_id) DO UPDATE SET
+            banner_url = excluded.banner_url,
+            theme_primary_color = excluded.theme_primary_color,
+            theme_accent_color = excluded.theme_accent_color,
+            theme_background_dark = excluded.theme_background_dark,
+            updated_at = excluded.updated_at
+    """, (g.agent["id"], banner_url, primary_color, accent_color, background_dark, time.time()))
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "banner_url": banner_url,
+        "theme_primary_color": primary_color,
+        "theme_accent_color": accent_color,
+        "theme_background_dark": background_dark,
+    })
+
+
+@app.route("/api/agents/<agent_name>/customization", methods=["GET"])
+def get_public_channel_customization(agent_name):
+    """Get public channel customization for display on channel/watch pages."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT id FROM agents WHERE agent_name = ?", (agent_name,)
+    ).fetchone()
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    custom = db.execute(
+        "SELECT * FROM channel_customizations WHERE agent_id = ?",
+        (agent["id"],)
+    ).fetchone()
+    
+    if not custom or (not custom["banner_url"] and not custom["theme_primary_color"] and not custom["theme_accent_color"]):
+        return jsonify({
+            "banner_url": "",
+            "theme_primary_color": DEFAULT_THEME["primary_color"],
+            "theme_accent_color": DEFAULT_THEME["accent_color"],
+            "theme_background_dark": DEFAULT_THEME["background_dark"],
+        })
+    
+    return jsonify({
+        "banner_url": custom["banner_url"] or "",
+        "theme_primary_color": custom["theme_primary_color"] or DEFAULT_THEME["primary_color"],
+        "theme_accent_color": custom["theme_accent_color"] or DEFAULT_THEME["accent_color"],
+        "theme_background_dark": custom["theme_background_dark"] or DEFAULT_THEME["background_dark"],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Pinned Videos (Issue #422)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agents/me/pinned", methods=["POST"])
+@require_api_key
+def pin_video():
+    """Pin a video to your channel. Max 3 pinned videos."""
+    data = request.get_json(silent=True) or {}
+    video_id = data.get("video_id", "").strip()
+    
+    if not video_id:
+        return jsonify({"error": "video_id is required"}), 400
+    
+    db = get_db()
+    
+    # Verify ownership
+    video = db.execute(
+        "SELECT id FROM videos WHERE video_id = ? AND agent_id = ?",
+        (video_id, g.agent["id"])
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found or not yours"}), 404
+    
+    # Check pin limit (max 3)
+    current_pins = db.execute(
+        "SELECT COUNT(*) FROM pinned_videos WHERE agent_id = ?",
+        (g.agent["id"],)
+    ).fetchone()[0]
+    
+    # Check if already pinned
+    already_pinned = db.execute(
+        "SELECT 1 FROM pinned_videos WHERE agent_id = ? AND video_id = ?",
+        (g.agent["id"], video_id)
+    ).fetchone()
+    
+    if already_pinned:
+        return jsonify({"ok": True, "message": "Video already pinned"})
+    
+    if current_pins >= 3:
+        return jsonify({"error": "Maximum 3 pinned videos allowed"}), 400
+    
+    # Get next position
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM pinned_videos WHERE agent_id = ?",
+        (g.agent["id"],)
+    ).fetchone()[0]
+    
+    db.execute("""
+        INSERT INTO pinned_videos (agent_id, video_id, position, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (g.agent["id"], video_id, max_pos + 1, time.time()))
+    db.commit()
+    
+    return jsonify({"ok": True, "video_id": video_id, "position": max_pos + 1})
+
+
+@app.route("/api/agents/me/pinned/<video_id>", methods=["DELETE"])
+@require_api_key
+def unpin_video(video_id):
+    """Unpin a video from your channel."""
+    db = get_db()
+    
+    # Verify ownership
+    video = db.execute(
+        "SELECT 1 FROM videos WHERE video_id = ? AND agent_id = ?",
+        (video_id, g.agent["id"])
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found or not yours"}), 404
+    
+    db.execute(
+        "DELETE FROM pinned_videos WHERE agent_id = ? AND video_id = ?",
+        (g.agent["id"], video_id)
+    )
+    db.commit()
+    
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agents/me/pinned/reorder", methods=["PUT"])
+@require_api_key
+def reorder_pinned_videos():
+    """Reorder pinned videos. Send {pinned_video_ids: [id1, id2, id3]}."""
+    data = request.get_json(silent=True) or {}
+    video_ids = data.get("pinned_video_ids", [])
+    
+    if not isinstance(video_ids, list) or len(video_ids) > 3:
+        return jsonify({"error": "Provide pinned_video_ids as array (max 3)"}), 400
+    
+    db = get_db()
+    
+    # Verify ownership of all videos
+    placeholders = ",".join("?" * len(video_ids))
+    owned = db.execute(f"""
+        SELECT video_id FROM videos 
+        WHERE video_id IN ({placeholders}) AND agent_id = ?
+    """, video_ids + [g.agent["id"]]).fetchall()
+    
+    if len(owned) != len(video_ids):
+        return jsonify({"error": "All videos must be yours"}), 400
+    
+    # Update positions
+    for pos, vid in enumerate(video_ids):
+        db.execute("""
+            UPDATE pinned_videos SET position = ?
+            WHERE agent_id = ? AND video_id = ?
+        """, (pos, g.agent["id"], vid))
+    
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agents/<agent_name>/pinned", methods=["GET"])
+def get_pinned_videos(agent_name):
+    """Get pinned videos for a channel (public endpoint)."""
+    db = get_db()
+    agent = db.execute(
+        "SELECT id FROM agents WHERE agent_name = ?", (agent_name,)
+    ).fetchone()
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    pinned = db.execute("""
+        SELECT v.video_id, v.title, v.thumbnail, v.views, v.duration_sec, pv.position
+        FROM pinned_videos pv
+        JOIN videos v ON pv.video_id = v.video_id
+        WHERE pv.agent_id = ?
+        ORDER BY pv.position ASC
+    """, (agent["id"],)).fetchall()
+    
+    return jsonify({
+        "pinned_videos": [dict(p) for p in pinned]
+    })
+
+
+# ---------------------------------------------------------------------------
 # Subscriptions / Follow
 # ---------------------------------------------------------------------------
 
@@ -12426,6 +12751,12 @@ def watch(video_id):
         if _uv:
             user_vote = _uv["vote"]
     creator_badges = _list_agent_badges(db, int(video["agent_id"]))
+    
+    # Issue #422: Creator's channel customization for themed video page
+    creator_customization = db.execute(
+        "SELECT * FROM channel_customizations WHERE agent_id = ?",
+        (video["agent_id"],)
+    ).fetchone()
 
     return render_template(
         "watch.html",
@@ -12446,6 +12777,7 @@ def watch(video_id):
         revisions=revisions,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
+        creator_customization=creator_customization,
     )
 
 
@@ -12658,12 +12990,33 @@ def channel(agent_name):
 
     beacon_data = get_agent_beacon(agent_name)
     agent_badges = _list_agent_badges(db, int(agent["id"]))
+    
+    # Issue #422: Channel customization
+    customization = db.execute(
+        "SELECT * FROM channel_customizations WHERE agent_id = ?",
+        (agent["id"],)
+    ).fetchone()
+    
+    # Issue #422: Pinned videos
+    pinned_videos = db.execute("""
+        SELECT v.video_id, v.title, v.thumbnail, v.views, v.duration_sec, v.created_at, pv.position
+        FROM pinned_videos pv
+        JOIN videos v ON pv.video_id = v.video_id
+        WHERE pv.agent_id = ?
+        ORDER BY pv.position ASC
+    """, (agent["id"],)).fetchall()
+    
+    # Filter out pinned videos from main video list
+    pinned_ids = {p["video_id"] for p in pinned_videos}
+    videos = [v for v in videos if v["video_id"] not in pinned_ids]
 
     return render_template(
         "channel.html",
         agent=agent,
         agent_badges=agent_badges,
         videos=videos,
+        pinned_videos=pinned_videos,
+        customization=customization,
         total_views=total_views,
         subscriber_count=subscriber_count,
         is_following=is_following,
