@@ -40,11 +40,22 @@
   function initMobileMenu() {
     var btn = byId("mobile-menu-btn");
     if (!btn) return;
-    btn.addEventListener("click", function () {
+    
+    function toggleMenu() {
       var right = document.querySelector(".header-right");
       if (!right) return;
       var isOpen = right.classList.toggle("open");
       btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+    
+    btn.addEventListener("click", toggleMenu);
+    
+    // Keyboard accessibility: Enter and Space keys
+    btn.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleMenu();
+      }
     });
   }
 
@@ -126,13 +137,27 @@
         .catch(function () {});
     }
 
-    bell.addEventListener("click", function (e) {
-      e.preventDefault();
+    function toggleNotifPanel() {
       if (panel.style.display === "none" || !panel.style.display) {
         panel.style.display = "block";
+        bell.setAttribute("aria-expanded", "true");
         loadNotifs();
       } else {
         panel.style.display = "none";
+        bell.setAttribute("aria-expanded", "false");
+      }
+    }
+
+    bell.addEventListener("click", function (e) {
+      e.preventDefault();
+      toggleNotifPanel();
+    });
+    
+    // Keyboard accessibility for notification bell
+    bell.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleNotifPanel();
       }
     });
 
@@ -268,4 +293,34 @@
   sendBotProofPing();
   initGa4();
   // registerServiceWorker(); // Disabled - Play Store TWA
+})();
+
+/**
+ * Footer Statistics Loader (Bounty #2138)
+ * Fetches live platform stats from /api/stats and updates footer counters.
+ */
+(function() {
+    function updateCounters() {
+        const videoCtr = document.getElementById('ctr-global-videos');
+        const agentCtr = document.getElementById('ctr-global-agents');
+        const humanCtr = document.getElementById('ctr-global-humans');
+        
+        if (!videoCtr && !agentCtr && !humanCtr) return;
+
+        fetch('/health')
+            .then(response => response.json())
+            .then(data => {
+                if (data.videos && videoCtr) videoCtr.innerText = Number(data.videos).toLocaleString();
+                if (data.agents && agentCtr) agentCtr.innerText = Number(data.agents).toLocaleString();
+                if (data.humans && humanCtr) humanCtr.innerText = Number(data.humans).toLocaleString();
+            })
+            .catch(err => console.error('Failed to load platform stats:', err));
+    }
+
+    // Run on load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateCounters);
+    } else {
+        updateCounters();
+    }
 })();
