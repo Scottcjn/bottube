@@ -65,104 +65,40 @@ class APIMiddleware:
             response.headers['Access-Control-Allow-Origin'] = g.cors_origin
         
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-API-Version'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Max-Age'] = '3600'
-        return response
     
     def apply_rate_limit(self):
-        client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
-        endpoint = request.endpoint or 'unknown'
-        
-        # Different limits for different endpoints
-        limits = {
-            'auth': {'requests': 10, 'window': 300},     # 10 requests per 5 minutes
-            'upload': {'requests': 5, 'window': 300},    # 5 uploads per 5 minutes
-            'default': {'requests': 100, 'window': 60}   # 100 requests per minute
-        }
-        
-        limit_key = 'auth' if 'auth' in endpoint else 'upload' if 'upload' in endpoint else 'default'
-        limit_config = limits[limit_key]
-        
-        key = f"{client_ip}:{limit_key}"
+        client_ip = request.remote_addr
         current_time = time.time()
         
         # Clean old entries
-        if key in rate_limit_store:
-            rate_limit_store[key] = [t for t in rate_limit_store[key] if current_time - t < limit_config['window']]
-        else:
-            rate_limit_store[key] = []
+        rate_limit_store[client_ip] = [
+            timestamp for timestamp in rate_limit_store.get(client_ip, [])
+            if current_time - timestamp < 60  # 1 minute window
+        ]
         
-        # Check rate limit
-        if len(rate_limit_store[key]) >= limit_config['requests']:
+        # Check rate limit (100 requests per minute)
+        if len(rate_limit_store.get(client_ip, [])) >= 100:
             raise TooManyRequests('Rate limit exceeded')
         
         # Add current request
-        rate_limit_store[key].append(current_time)
+        rate_limit_store.setdefault(client_ip, []).append(current_time)
     
     def handle_jwt_auth(self):
-        auth_header = request.headers.get('Authorization')
-        g.mobile_user = None
-        g.jwt_token = None
+        # Skip auth for login/register endpoints
+        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
+            return
         
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
+        token = request.headers.get('Authorization')
+        if token and token.startswith('Bearer '):
             try:
-                payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
-                user_id = payload.get('user_id')
-                
-                if user_id:
-                    from bottube_server import get_db
-                    db = get_db()
-                    user = db.execute(
-                        'SELECT * FROM users WHERE id = ?', (user_id,)
-                    ).fetchone()
-                    
-                    if user:
-                        g.mobile_user = dict(user)
-                        g.jwt_token = token
-                        
-            except jwt.ExpiredSignatureError:
-                pass  # Token expired, user remains None
+                token = token[7:]
+                data = jwt.decode(token, 'your-secret-key', algorithms=['HS256'])
+                g.user_id = data['user_id']
+                g.username = data['username']
             except jwt.InvalidTokenError:
-                pass  # Invalid token, user remains None
+                pass
     
     def set_api_version(self):
-        version = request.headers.get('X-API-Version', '1.0')
-        g.api_version = version
-
-def jwt_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not g.mobile_user:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated
-
-def generate_jwt_token(user_id, expires_in=86400):
-    payload = {
-        'user_id': user_id,
-        'exp': time.time() + expires_in,
-        'iat': time.time()
-    }
-    return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
-
-def api_response(data=None, message=None, status=200, error=None):
-    response_data = {
-        'success': status < 400,
-        'timestamp': int(time.time())
-    }
-    
-    if data is not None:
-        response_data['data'] = data
-    
-    if message:
-        response_data['message'] = message
-    
-    if error:
-        response_data['error'] = error
-    
-    if hasattr(g, 'api_version'):
-        response_data['api_version'] = g.api_version
-    
-    return jsonify(response_data), status
+        g.api_version = 'v1'
