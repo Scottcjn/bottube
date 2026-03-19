@@ -94,8 +94,8 @@ textarea:focus {
         --bg-primary: #000000;
         --bg-secondary: #1a1a1a;
         --border-color: #ffffff;
-        --link-color: #66b3ff;
-        --link-hover: #4da6ff;
+        --link-color: #87ceeb;
+        --link-hover: #00bfff;
     }
     
     body {
@@ -108,15 +108,9 @@ textarea:focus {
         border: 2px solid var(--border-color);
         color: var(--text-primary) !important;
     }
-    
-    .category-nav a:hover,
-    .nav-link:hover {
-        background-color: var(--text-primary);
-        color: var(--bg-primary) !important;
-    }
 }
 
-/* Reduce Motion Support */
+/* Reduced Motion Support */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -124,58 +118,47 @@ textarea:focus {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
     }
 }
 
 /* Large Text Support */
-@media (min-resolution: 120dpi) {
+@media (min-resolution: 192dpi) {
     body {
         font-size: 16px;
         line-height: 1.5;
     }
     
-    .category-nav a,
-    .nav-link {
+    .category-nav a {
         padding: 12px 16px;
-        font-size: 16px;
+        min-height: 44px;
     }
     
     button {
         min-height: 44px;
         min-width: 44px;
-        font-size: 16px;
     }
-}
-
-/* Keyboard Navigation Improvements */
-.keyboard-user *:focus {
-    outline: 3px solid #005fcc;
-    outline-offset: 2px;
 }
 
 /* Accessible Button Styles */
 .accessible-btn {
-    min-height: 44px;
-    min-width: 44px;
-    padding: 8px 16px;
-    border: 1px solid #ccc;
-    background: #f8f9fa;
-    color: #333;
+    background: #005fcc;
+    color: white;
+    border: none;
+    padding: 12px 24px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    text-align: center;
-    transition: all 0.2s ease;
+    font-size: 16px;
+    min-height: 44px;
+    transition: background-color 0.2s ease;
 }
 
-.accessible-btn:hover:not(:disabled) {
-    background: #e9ecef;
-    border-color: #adb5bd;
+.accessible-btn:hover {
+    background: #0056b3;
 }
 
 .accessible-btn:disabled {
-    opacity: 0.6;
+    background: #6c757d;
     cursor: not-allowed;
 }
 
@@ -183,70 +166,56 @@ textarea:focus {
 .accessible-link {
     color: #005fcc;
     text-decoration: underline;
-    font-weight: 500;
-    padding: 4px 8px;
+    padding: 4px;
     border-radius: 4px;
-    display: inline-block;
-    transition: all 0.2s ease;
+    transition: color 0.2s ease;
 }
 
 .accessible-link:hover {
-    color: #004499;
-    background-color: rgba(0, 95, 204, 0.1);
+    color: #0056b3;
     text-decoration: none;
 }
 
-/* Category Navigation Accessibility */
+/* Category Navigation Improvements */
 .category-link {
     display: inline-block;
-    padding: 10px 16px;
+    padding: 8px 16px;
     margin: 4px;
-    border: 2px solid transparent;
-    border-radius: 6px;
-    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 4px;
     text-decoration: none;
-    font-weight: 500;
+    color: #333;
     transition: all 0.2s ease;
+    min-height: 44px;
+    line-height: 1.5;
 }
 
-.category-link:hover {
-    background-color: #f8f9fa;
-    border-color: #dee2e6;
-    color: #005fcc;
+.category-link:hover,
+.category-link:focus {
+    background: #f8f9fa;
+    border-color: #005fcc;
 }
 
 .category-link.active {
-    background-color: #005fcc;
+    background: #005fcc;
     color: white;
-    border-color: #004499;
-}
-
-.category-link:focus {
-    outline: 3px solid #005fcc;
-    outline-offset: 2px;
+    border-color: #005fcc;
 }
 
 /* Icon Button Accessibility */
 .icon-btn {
+    background: transparent;
+    border: 1px solid #ddd;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
     min-height: 44px;
     min-width: 44px;
-    padding: 10px;
-    border: 1px solid #ccc;
-    background: transparent;
-    border-radius: 50%;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     transition: all 0.2s ease;
 }
 
-.icon-btn:hover {
-    background-color: #f8f9fa;
-    border-color: #adb5bd;
-}
-
+.icon-btn:hover,
 .icon-btn:focus {
-    outline: 3px solid #005fcc;
-    outline-offset: 2px;
+    background: #f8f9fa;
+    border-color: #005fcc;
 }
