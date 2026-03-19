@@ -58,21 +58,20 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     if duration:
         alt_parts.append(f"Duration: {duration}")
 
-    if not alt_parts:
-        return "Video thumbnail"
-
-    return ", ".join(alt_parts)
+    return ", ".join(alt_parts) if alt_parts else "Video thumbnail"
 
 
-def get_keyboard_shortcuts_help():
-    """Return keyboard shortcuts for screen reader users"""
+def add_keyboard_navigation_attrs():
+    """Return attributes for keyboard navigation"""
     return {
-        'space': 'Play/Pause video',
-        'left_arrow': 'Seek backward 5 seconds',
-        'right_arrow': 'Seek forward 5 seconds',
-        'up_arrow': 'Increase volume',
-        'down_arrow': 'Decrease volume',
-        'f': 'Toggle fullscreen',
-        'm': 'Mute/Unmute',
-        'escape': 'Exit fullscreen'
+        'tabindex': '0',
+        'role': 'button',
+        'onkeydown': 'if(event.key==="Enter"||event.key===" "){this.click()}'
     }
+
+
+def get_screen_reader_text(action, target=None):
+    """Generate screen reader friendly text"""
+    if target:
+        return f"{action} {target}"
+    return action
