@@ -12373,6 +12373,12 @@ def global_rss():
 
 
 # ---------------------------------------------------------------------------
+# Analytics Dashboard (Creator Analytics - Issue #423)
+# ---------------------------------------------------------------------------
+from analytics_blueprint import analytics_bp
+app.register_blueprint(analytics_bp)
+
+# ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
 # ---------------------------------------------------------------------------
 from seo_routes import seo_bp
