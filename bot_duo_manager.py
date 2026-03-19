@@ -35,211 +35,215 @@ class BotDuoManager:
         self.interaction_templates = {
             'cross_comments': [
                 "Amazing work! The {} aspect really caught my attention.",
-                "This is inspiring! I'd love to collaborate on something involving {}.",
-                "Great perspective on {}. It makes me think about this differently."
+                "This is so inspiring! I love how you approached {}.",
+                "Brilliant execution! The {} element is particularly well done.",
+                "Fantastic content! Your perspective on {} is refreshing."
             ],
-            'supportive': [
-                "Fantastic content as always! Keep up the great work.",
-                "This is exactly what the community needs. Well done!",
-                "Your unique perspective always adds so much value."
+            'collaborative_responses': [
+                "We should collaborate on a {} project sometime!",
+                "Your {} skills would be perfect for my next project.",
+                "I'd love to explore {} from both our perspectives.",
+                "Maybe we can create something together involving {}?"
             ],
-            'curious': [
-                "I'm curious about your process for {}. Any tips?",
-                "How did you approach the {} part of this?",
-                "What inspired you to focus on {} here?"
+            'supportive_engagement': [
+                "Keep up the amazing work with {}!",
+                "Your {} content always inspires me to improve.",
+                "Thanks for sharing your knowledge about {}!",
+                "Looking forward to more {} content from you!"
             ]
         }
     
-    def ensure_bots_exist(self):
-        """Ensure both bot accounts exist in the database"""
+    def initialize_bots(self):
+        """Create bot accounts if they don't exist"""
         db = get_db()
         
-        for bot_id, persona in self.bot_personas.items():
+        for bot_key, bot_data in self.bot_personas.items():
             # Check if bot user exists
-            existing = db.execute(
+            existing_user = db.execute(
                 'SELECT id FROM users WHERE username = ?',
-                (persona['username'],)
+                (bot_data['username'],)
             ).fetchone()
             
-            if not existing:
+            if not existing_user:
                 # Create bot user account
                 db.execute(
-                    '''INSERT INTO users (username, display_name, bio, avatar_url, 
-                       created_at, is_bot) 
-                       VALUES (?, ?, ?, ?, ?, 1)''',
-                    (persona['username'], persona['display_name'], 
-                     persona['bio'], persona['avatar_url'], datetime.now())
+                    'INSERT INTO users (username, email, password_hash, display_name, bio, avatar_url, is_bot) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (
+                        bot_data['username'],
+                        f"{bot_data['username'].lower()}@bottube.ai",
+                        'bot_account_no_login',  # Bots don't need real passwords
+                        bot_data['display_name'],
+                        bot_data['bio'],
+                        bot_data['avatar_url'],
+                        1  # Mark as bot account
+                    )
                 )
         
         db.commit()
     
-    def get_bot_user_id(self, bot_type):
-        """Get the user ID for a bot"""
-        if bot_type not in self.bot_personas:
+    def create_bot_video(self, bot_key):
+        """Create a video for a specific bot"""
+        if bot_key not in self.bot_personas:
             return None
             
         db = get_db()
-        username = self.bot_personas[bot_type]['username']
+        bot_data = self.bot_personas[bot_key]
         
-        user = db.execute(
+        # Get bot user ID
+        bot_user = db.execute(
             'SELECT id FROM users WHERE username = ?',
-            (username,)
+            (bot_data['username'],)
         ).fetchone()
         
-        return user['id'] if user else None
-    
-    def create_bot_video(self, bot_type, title, description, tags=None):
-        """Create a video for a bot"""
-        user_id = self.get_bot_user_id(bot_type)
-        if not user_id:
+        if not bot_user:
             return None
             
-        db = get_db()
+        # Generate video content
+        theme = random.choice(bot_data['content_themes'])
+        title = f"{theme.title()}: A {bot_data['display_name']} Guide"
+        description = f"Join {bot_data['display_name']} as we explore {theme}. {bot_data['bio']}"
         
-        # Create video entry
-        cursor = db.execute(
-            '''INSERT INTO videos (user_id, title, description, thumbnail_url,
-               upload_date, view_count, like_count, tags, is_bot_generated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)''',
-            (user_id, title, description, 
-             f'https://picsum.photos/320/180?random={random.randint(1000, 9999)}',
-             datetime.now(), 0, 0, json.dumps(tags or []))
-        )
+        # Create video record
+        video_id = db.execute(
+            'INSERT INTO videos (user_id, title, description, filename, thumbnail_url, duration, upload_date, views, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                bot_user['id'],
+                title,
+                description,
+                f"bot_video_{int(time.time())}.mp4",  # Placeholder filename
+                f"https://picsum.photos/320/180?random={int(time.time())}",  # Random thumbnail
+                random.randint(180, 1800),  # 3-30 minute videos
+                datetime.now(),
+                random.randint(10, 1000),
+                random.randint(1, 50),
+                random.randint(0, 5)
+            )
+        ).lastrowid
         
-        video_id = cursor.lastrowid
         db.commit()
-        
         return video_id
     
-    def create_bot_comment(self, bot_type, video_id, comment_text, parent_comment_id=None):
-        """Create a comment by a bot on a video"""
-        user_id = self.get_bot_user_id(bot_type)
-        if not user_id:
-            return None
+    def create_bot_interaction(self, video_id):
+        """Create comments between the two bots on a video"""
+        db = get_db()
+        
+        # Get both bot user IDs
+        bot_users = {}
+        for bot_key, bot_data in self.bot_personas.items():
+            user = db.execute(
+                'SELECT id FROM users WHERE username = ?',
+                (bot_data['username'],)
+            ).fetchone()
+            if user:
+                bot_users[bot_key] = user['id']
+        
+        if len(bot_users) != 2:
+            return False
             
-        db = get_db()
-        
-        cursor = db.execute(
-            '''INSERT INTO comments (video_id, user_id, comment_text, 
-               timestamp, like_count, parent_comment_id, is_bot_generated)
-               VALUES (?, ?, ?, ?, ?, ?, 1)''',
-            (video_id, user_id, comment_text, datetime.now(), 0, parent_comment_id)
-        )
-        
-        comment_id = cursor.lastrowid
-        db.commit()
-        
-        return comment_id
-    
-    def generate_cross_interaction(self, video_id, original_bot_type):
-        """Generate interaction where the other bot comments on a video"""
-        # Determine which bot should comment
-        commenting_bot = 'creative_bot' if original_bot_type == 'techie_bot' else 'techie_bot'
-        
-        # Get video details
-        db = get_db()
+        # Get video details for context
         video = db.execute(
-            'SELECT title, description FROM videos WHERE id = ?',
+            'SELECT title, user_id FROM videos WHERE id = ?',
             (video_id,)
         ).fetchone()
         
         if not video:
-            return None
+            return False
             
-        # Generate appropriate comment
-        persona = self.bot_personas[commenting_bot]
-        template = random.choice(self.interaction_templates['cross_comments'])
+        # Determine which bot posted the video and which will comment
+        video_author_bot = None
+        commenting_bot = None
         
-        # Extract key topic from video title for contextualization
-        title_words = video['title'].split()
-        key_topic = random.choice([word for word in title_words if len(word) > 4] or ['this topic'])
+        for bot_key, user_id in bot_users.items():
+            if user_id == video['user_id']:
+                video_author_bot = bot_key
+            else:
+                commenting_bot = bot_key
+                
+        if not video_author_bot or not commenting_bot:
+            return False
+            
+        # Generate initial comment from the non-author bot
+        comment_template = random.choice(self.interaction_templates['cross_comments'])
+        video_topic = video['title'].split(':')[0] if ':' in video['title'] else video['title']
+        comment_text = comment_template.format(video_topic.lower())
         
-        comment_text = template.format(key_topic)
+        # Create initial comment
+        comment_id = db.execute(
+            'INSERT INTO comments (video_id, user_id, content, timestamp, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?)',
+            (
+                video_id,
+                bot_users[commenting_bot],
+                comment_text,
+                datetime.now(),
+                random.randint(0, 20),
+                0
+            )
+        ).lastrowid
         
-        # Create the comment
-        comment_id = self.create_bot_comment(commenting_bot, video_id, comment_text)
+        # 70% chance of author bot replying
+        if random.random() < 0.7:
+            reply_template = random.choice(self.interaction_templates['supportive_engagement'])
+            reply_text = reply_template.format(video_topic.lower())
+            
+            db.execute(
+                'INSERT INTO comments (video_id, user_id, content, timestamp, likes, dislikes, parent_comment_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (
+                    video_id,
+                    bot_users[video_author_bot],
+                    reply_text,
+                    datetime.now() + timedelta(minutes=random.randint(5, 60)),
+                    random.randint(0, 15),
+                    0,
+                    comment_id
+                )
+            )
         
-        return {
-            'comment_id': comment_id,
-            'commenting_bot': commenting_bot,
-            'comment_text': comment_text
-        }
+        db.commit()
+        return True
     
-    def simulate_bot_interaction(self):
-        """Simulate a full interaction between the two bots"""
-        # Ensure bots exist
-        self.ensure_bots_exist()
+    def run_bot_activity_cycle(self):
+        """Run one cycle of bot activity - create content and interactions"""
+        self.initialize_bots()
         
-        # Bot 1 creates content
-        first_bot = random.choice(['techie_bot', 'creative_bot'])
-        persona = self.bot_personas[first_bot]
+        # Each bot has a chance to create a video
+        for bot_key in self.bot_personas.keys():
+            if random.random() < 0.3:  # 30% chance per cycle
+                video_id = self.create_bot_video(bot_key)
+                if video_id:
+                    # 80% chance the other bot will interact
+                    if random.random() < 0.8:
+                        self.create_bot_interaction(video_id)
         
-        # Generate content idea
-        theme = random.choice(persona['content_themes'])
-        title = f"Exploring {theme.title()}: A Deep Dive"
-        description = f"Join me as I explore the fascinating world of {theme}. " + \
-                     f"This video covers key insights and {persona['personality']} perspectives."
-        
-        # Create video
-        video_id = self.create_bot_video(first_bot, title, description, [theme, 'education', 'tutorial'])
-        
-        if not video_id:
-            return None
-            
-        # Wait a bit (simulate time)
-        time.sleep(1)
-        
-        # Other bot discovers and comments
-        interaction = self.generate_cross_interaction(video_id, first_bot)
-        
-        # Original bot might respond to the comment
-        if interaction and random.random() > 0.5:
-            response_templates = [
-                "Thanks for watching! I'd love to hear more about your perspective on this.",
-                "Great point! This is exactly the kind of discussion I was hoping for.",
-                "Appreciate the feedback! Always excited to explore new angles."
-            ]
-            
-            response_text = random.choice(response_templates)
-            self.create_bot_comment(first_bot, video_id, response_text, interaction['comment_id'])
-        
-        return {
-            'primary_video_id': video_id,
-            'primary_bot': first_bot,
-            'interaction': interaction,
-            'title': title
-        }
+        return True
     
-    def get_bot_activity_summary(self, hours=24):
-        """Get summary of bot activity in the last N hours"""
+    def get_bot_stats(self):
+        """Get statistics about bot activity"""
         db = get_db()
-        since_time = datetime.now() - timedelta(hours=hours)
+        stats = {}
         
-        # Get bot user IDs
-        bot_usernames = [persona['username'] for persona in self.bot_personas.values()]
-        placeholders = ','.join(['?' for _ in bot_usernames])
+        for bot_key, bot_data in self.bot_personas.items():
+            user = db.execute(
+                'SELECT id FROM users WHERE username = ?',
+                (bot_data['username'],)
+            ).fetchone()
+            
+            if user:
+                # Count videos
+                video_count = db.execute(
+                    'SELECT COUNT(*) as count FROM videos WHERE user_id = ?',
+                    (user['id'],)
+                ).fetchone()['count']
+                
+                # Count comments
+                comment_count = db.execute(
+                    'SELECT COUNT(*) as count FROM comments WHERE user_id = ?',
+                    (user['id'],)
+                ).fetchone()['count']
+                
+                stats[bot_key] = {
+                    'username': bot_data['username'],
+                    'videos': video_count,
+                    'comments': comment_count
+                }
         
-        # Get recent videos
-        videos = db.execute(f'''
-            SELECT v.id, v.title, u.username, v.upload_date, v.view_count
-            FROM videos v
-            JOIN users u ON v.user_id = u.id
-            WHERE u.username IN ({placeholders}) AND v.upload_date > ?
-            ORDER BY v.upload_date DESC
-        ''', (*bot_usernames, since_time)).fetchall()
-        
-        # Get recent comments
-        comments = db.execute(f'''
-            SELECT c.id, c.comment_text, u.username, c.timestamp, v.title as video_title
-            FROM comments c
-            JOIN users u ON c.user_id = u.id
-            JOIN videos v ON c.video_id = v.id
-            WHERE u.username IN ({placeholders}) AND c.timestamp > ?
-            ORDER BY c.timestamp DESC
-        ''', (*bot_usernames, since_time)).fetchall()
-        
-        return {
-            'videos': [dict(video) for video in videos],
-            'comments': [dict(comment) for comment in comments],
-            'total_interactions': len(videos) + len(comments)
-        }
+        return stats
