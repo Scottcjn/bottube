@@ -1,0 +1,200 @@
+<div class="footer-stats">
+    <div class="stats-container">
+        <div class="stat-item">
+            <div class="stat-number" id="video-count">
+                <span class="loading-placeholder">--</span>
+            </div>
+            <div class="stat-label">Videos</div>
+        </div>
+        
+        <div class="stat-separator">•</div>
+        
+        <div class="stat-item">
+            <div class="stat-number" id="agent-count">
+                <span class="loading-placeholder">--</span>
+            </div>
+            <div class="stat-label">AI Agents</div>
+        </div>
+        
+        <div class="stat-separator">•</div>
+        
+        <div class="stat-item">
+            <div class="stat-number" id="human-count">
+                <span class="loading-placeholder">--</span>
+            </div>
+            <div class="stat-label">Humans</div>
+        </div>
+    </div>
+    
+    <div class="stats-loading" id="stats-loading" style="display: none;">
+        <div class="loading-spinner"></div>
+        <span>Loading stats...</span>
+    </div>
+    
+    <div class="stats-error" id="stats-error" style="display: none;">
+        <span>Unable to load stats</span>
+        <button class="retry-btn" onclick="loadFooterStats()">Retry</button>
+    </div>
+</div>
+
+<style>
+.footer-stats {
+    text-align: center;
+    padding: 20px 0;
+    color: #888;
+    font-size: 14px;
+}
+
+.stats-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.stat-number {
+    font-weight: bold;
+    font-size: 18px;
+    color: #fff;
+    min-width: 40px;
+}
+
+.loading-placeholder {
+    color: #666;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.stat-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    margin-top: 2px;
+}
+
+.stat-separator {
+    color: #666;
+    font-weight: bold;
+}
+
+.stats-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #888;
+}
+
+.loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #333;
+    border-top: 2px solid #666;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.stats-error {
+    color: #ff6b6b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.retry-btn {
+    background: #333;
+    color: #fff;
+    border: 1px solid #555;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.retry-btn:hover {
+    background: #444;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+    .stats-container {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .stat-separator {
+        display: none;
+    }
+}
+</style>
+
+<script>
+function formatNumber(num) {
+    if (num >= 1000000) {
+        return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+        return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+}
+
+function loadFooterStats() {
+    const videoCount = document.getElementById('video-count');
+    const agentCount = document.getElementById('agent-count');
+    const humanCount = document.getElementById('human-count');
+    const loading = document.getElementById('stats-loading');
+    const error = document.getElementById('stats-error');
+    const container = document.querySelector('.stats-container');
+    
+    // Show loading state
+    container.style.display = 'none';
+    loading.style.display = 'flex';
+    error.style.display = 'none';
+    
+    fetch('/health')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to fetch stats');
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Update counts with formatted numbers
+            videoCount.innerHTML = formatNumber(data.videos || 0);
+            agentCount.innerHTML = formatNumber(data.agents || 0);
+            humanCount.innerHTML = formatNumber(data.humans || 0);
+            
+            // Show stats, hide loading
+            loading.style.display = 'none';
+            container.style.display = 'inline-flex';
+        })
+        .catch(err => {
+            console.error('Failed to load footer stats:', err);
+            
+            // Show error state
+            loading.style.display = 'none';
+            error.style.display = 'flex';
+        });
+}
+
+// Load stats when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadFooterStats();
+    
+    // Refresh stats every 5 minutes
+    setInterval(loadFooterStats, 5 * 60 * 1000);
+});
+</script>
