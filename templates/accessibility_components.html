@@ -1,0 +1,299 @@
+{% macro accessible_button(text, onclick='', class='', icon='', aria_label='', disabled=false) %}
+<button 
+    class="accessible-btn {{ class }}"
+    {% if onclick %}onclick="{{ onclick }}"{% endif %}
+    {% if aria_label %}aria-label="{{ aria_label }}"{% else %}aria-label="{{ text }}"{% endif %}
+    {% if disabled %}disabled{% endif %}
+    role="button"
+    tabindex="0">
+    {% if icon %}
+        <i class="{{ icon }}" aria-hidden="true"></i>
+    {% endif %}
+    {% if text %}
+        <span>{{ text }}</span>
+    {% endif %}
+</button>
+{% endmacro %}
+
+{% macro accessible_link(text, href, class='', icon='', aria_label='', external=false) %}
+<a 
+    href="{{ href }}"
+    class="accessible-link {{ class }}"
+    {% if aria_label %}aria-label="{{ aria_label }}"{% else %}aria-label="{{ text }}"{% endif %}
+    {% if external %}target="_blank" rel="noopener noreferrer"{% endif %}
+    role="link"
+    tabindex="0">
+    {% if icon %}
+        <i class="{{ icon }}" aria-hidden="true"></i>
+    {% endif %}
+    <span>{{ text }}</span>
+    {% if external %}
+        <span class="sr-only">(opens in new tab)</span>
+    {% endif %}
+</a>
+{% endmacro %}
+
+{% macro category_nav_link(category_name, category_id, current_category='') %}
+<a 
+    href="{{ url_for('trending', category=category_id) }}"
+    class="category-link {% if category_id == current_category %}active{% endif %}"
+    aria-label="View {{ category_name }} category"
+    role="link"
+    tabindex="0"
+    {% if category_id == current_category %}aria-current="page"{% endif %}>
+    <span class="category-text">{{ category_name }}</span>
+</a>
+{% endmacro %}
+
+{% macro accessible_icon_button(icon_class, action, aria_label, class='') %}
+<button 
+    class="icon-btn {{ class }}"
+    onclick="{{ action }}"
+    aria-label="{{ aria_label }}"
+    role="button"
+    tabindex="0">
+    <i class="{{ icon_class }}" aria-hidden="true"></i>
+    <span class="sr-only">{{ aria_label }}</span>
+</button>
+{% endmacro %}
+
+{% macro skip_navigation() %}
+<a href="#main-content" class="skip-nav" tabindex="0">
+    Skip to main content
+</a>
+{% endmacro %}
+
+{% macro accessible_form_field(label, field_type='text', name='', value='', required=false, placeholder='') %}
+<div class="form-field">
+    <label for="{{ name }}" class="form-label">
+        {{ label }}
+        {% if required %}
+            <span class="required" aria-label="required">*</span>
+        {% endif %}
+    </label>
+    <input 
+        type="{{ field_type }}"
+        id="{{ name }}"
+        name="{{ name }}"
+        value="{{ value }}"
+        class="form-input"
+        {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+        {% if required %}required aria-required="true"{% endif %}
+        aria-describedby="{{ name }}-help">
+    <div id="{{ name }}-help" class="form-help sr-only">
+        {{ caller() if caller }}
+    </div>
+</div>
+{% endmacro %}
+
+{% macro accessible_dropdown(label, options, selected='', name='') %}
+<div class="dropdown-container">
+    <label for="{{ name }}" class="dropdown-label">{{ label }}</label>
+    <select 
+        id="{{ name }}"
+        name="{{ name }}"
+        class="dropdown-select"
+        aria-label="{{ label }}"
+        role="listbox">
+        {% for option in options %}
+        <option 
+            value="{{ option.value }}" 
+            {% if option.value == selected %}selected{% endif %}
+            role="option">
+            {{ option.text }}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+{% endmacro %}
+
+{% macro status_message(message, type='info') %}
+<div 
+    class="status-message status-{{ type }}"
+    role="alert"
+    aria-live="polite"
+    tabindex="0">
+    <span class="status-icon" aria-hidden="true">
+        {% if type == 'error' %}⚠{% elif type == 'success' %}✓{% else %}ℹ{% endif %}
+    </span>
+    <span class="status-text">{{ message }}</span>
+</div>
+{% endmacro %}
+
+{% macro loading_spinner(text='Loading...') %}
+<div class="loading-container" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <span class="loading-text">{{ text }}</span>
+</div>
+{% endmacro %}
+
+<style>
+.accessible-btn, .accessible-link, .icon-btn, .category-link {
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.accessible-btn:focus, .accessible-link:focus, .icon-btn:focus, .category-link:focus {
+    outline: 2px solid #0066cc;
+    outline-offset: 2px;
+    border-color: #0066cc;
+}
+
+.accessible-btn:hover, .accessible-link:hover, .icon-btn:hover, .category-link:hover {
+    background-color: #f0f0f0;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.skip-nav {
+    position: absolute;
+    top: -40px;
+    left: 6px;
+    background: #000;
+    color: #fff;
+    padding: 8px;
+    text-decoration: none;
+    z-index: 9999;
+}
+
+.skip-nav:focus {
+    top: 6px;
+}
+
+.category-link.active {
+    background-color: #e6f3ff;
+    font-weight: bold;
+}
+
+.form-field {
+    margin-bottom: 1rem;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #333;
+}
+
+.form-input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.form-input:focus {
+    outline: 2px solid #0066cc;
+    border-color: #0066cc;
+}
+
+.required {
+    color: #d32f2f;
+}
+
+.status-message {
+    padding: 1rem;
+    border-radius: 4px;
+    margin: 1rem 0;
+    display: flex;
+    align-items: center;
+}
+
+.status-info {
+    background-color: #e3f2fd;
+    border-left: 4px solid #2196f3;
+    color: #1565c0;
+}
+
+.status-success {
+    background-color: #e8f5e8;
+    border-left: 4px solid #4caf50;
+    color: #2e7d32;
+}
+
+.status-error {
+    background-color: #ffebee;
+    border-left: 4px solid #f44336;
+    color: #c62828;
+}
+
+.status-icon {
+    margin-right: 0.5rem;
+    font-weight: bold;
+}
+
+.loading-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #0066cc;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 0.5rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.dropdown-container {
+    margin-bottom: 1rem;
+}
+
+.dropdown-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.dropdown-select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.dropdown-select:focus {
+    outline: 2px solid #0066cc;
+    border-color: #0066cc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@media (prefers-contrast: high) {
+    .accessible-btn, .accessible-link, .category-link {
+        border: 2px solid #000;
+    }
+    
+    .form-input, .dropdown-select {
+        border: 2px solid #000;
+    }
+}
+</style>
