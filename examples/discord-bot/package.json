@@ -1,0 +1,27 @@
+{
+  "name": "@bottube/discord-bot-example",
+  "version": "1.0.0",
+  "description": "Example Discord bot using BoTTube SDK",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "bottube",
+    "music",
+    "youtube"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@bottube/sdk": "^1.0.0",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
