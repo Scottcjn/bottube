@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Chat - AIFTW</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .main-content {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .premiere-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .countdown-timer {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        .countdown-title {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+
+        .countdown-display {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .time-unit {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .time-number {
+            font-size: 32px;
+            font-weight: bold;
+            display: block;
+            color: #4CAF50;
+        }
+
+        .time-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            opacity: 0.8;
+        }
+
+        .premiere-info {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .premiere-title {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .premiere-description {
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+
+        .chat-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .chat-header h2 {
+            font-size: 20px;
+            margin-bottom: 5px;
+        }
+
+        .viewer-count {
+            font-size: 14px;
+            opacity: 0.7;
+            color: #4CAF50;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 500px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .message.super-chat {
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            color: #000;
+            border: 2px solid #FFD700;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .username {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .message.super-chat .username {
+            color: #000;
+        }
+
+        .timestamp {
+            font-size: 12px;
+            opacity: 0.6;
+        }
+
+        .message.super-chat .timestamp {
+            color: #333;
+        }
+
+        .message-content {
+            line-height: 1.4;
+        }
+
+        .super-chat-amount {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #000;
+        }
+
+        .chat-input-section {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .super-chat-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: #4CAF50;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(26px);
+        }
+
+        .super-chat-amount-select {
+            margin-left: auto;
+        }
+
+        .amount-select {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 25px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .chat-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .send-btn {
+            padding: 12px 20px;
+            background: #4CAF50;
+            border: none;
+            border-radius: 25px;
+            color: #fff;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        .send-btn:hover {
+            background: #45a049;
+        }
+
+        .send-btn:disabled {
+            background: rgba(255, 255, 255, 0.2);
+            cursor: not-allowed;
+        }
+
+        .connection-status {
+            padding: 10px;
+            text-align: center;
+            font-size: 12px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .connection-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4CAF50;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+                height: auto;
+                min-height: 100vh;
+            }
+            
+            .chat-container {
+                height: 70vh;
+            }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .waiting-message {
+            text-align: center;
+            padding: 40px;
+            opacity: 0.7;
+        }
+
+        .emoji-picker {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+            display: none;
+        }
+
+        .emoji {
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }
+
+        .emoji:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-content">
+            <div class="premiere-section">
+                <div class="countdown-timer">
+                    <div class="countdown-title">Next Premiere Starts In</div>
+                    <div class="countdown-display">
+                        <div class="time-unit">
+                            <span class="time-number" id="days">00</span>
+                            <span class="time-label">Days</span>
+                        </div>
+                        <div class="time-unit">
+                            <span class="time-number" id="hours">00</span>
+                            <span class="time-label">Hours</span>
+                        </div>
+                        <div class="time-unit">
+                            <span class="time-number" id="minutes">00</span>
+                            <span class="time-label">Minutes</span>
+                        </div>
+                        <div class="time-unit">
+                            <span class="time-number" id="seconds">00</span>
+                            <span class="time-label">Seconds</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="premiere-info">
+                    <div class="premiere-title" id="premiere-title">AIFTW Special Announcement</div>
+                    <div class="premiere-description" id="premiere-description">
+                        Join us for an exclusive look at the future of AI and technology. 
+                        Don't miss this special premiere event with exciting announcements and community interaction!
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2>Live Chat</h2>
+                <div class="viewer-count" id="viewer-count">0 viewers</div>
+            </div>
+            
+            <div class="connection-status disconnected" id="connection-status">
+                Connecting to chat...
+            </div>
+            
+            <div class="chat-messages" id="chat-messages">
+                <div class="waiting-message">
+                    <p>🚀 Waiting for the premiere to begin...</p>
+                    <p>Chat with fellow viewers while you wait!</p>
+                </div>
+            </div>
+            
+            <div class="chat-input-section">
+                <div class="super-chat-toggle">
+                    <span>Super Chat</span>
+                    <div class="toggle-switch" id="super-chat-toggle">
+                        <div class="toggle-slider"></div>
+                    </div>
+                    <div class="super-chat-amount-select">
+                        <select class="amount-select" id="super-chat-amount">
+                            <option value="5">$5</option>
+                            <option value="10">$10</option>
+                            <option value="25">$25</option>
+                            <option value="50">$50</option>
+                            <option value="100">$100</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="chat-input-wrapper">
+                    <input type="text" class="chat-input" id="message-input" placeholder="Type your message..." maxlength="200">
+                    <button class="send-btn" id="send-btn" disabled>Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class ChatApp {
+            constructor() {
+                this.socket = null;
+                this.isConnected = false;
+                this.isSuperChatEnabled = false;
+                this.premiereDate = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+                
+                this.initializeElements();
+                this.setupEventListeners();
+                this.connectWebSocket();
+                this.startCountdown();
+            }
+
+            initializeElements() {
+                this.chatMessages = document.getElementById('chat-messages');
+                this.messageInput = document.getElementById('message-input');
+                this.sendBtn = document.getElementById('send-btn');
+                this.connectionStatus = document.getElementById('connection-status');
+                this.viewerCount = document.getElementById('viewer-count');
+                this.superChatToggle = document.getElementById('super-chat-toggle');
+                this.superChatAmount = document.getElementById('super-chat-amount');
+                
+                this.countdownElements = {
+                    days: document.getElementById('days'),
+                    hours: document.getElementById('hours'),
+                    minutes: document.getElementById('minutes'),
+                    seconds: document.getElementById('seconds')
+                };
+            }
+
+            setupEventListeners() {
+                this.messageInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                });
+
+                this.sendBtn.addEventListener('click', () => this.sendMessage());
+                
+                this.superChatToggle.addEventListener('click', () => this.toggleSuperChat());
+
+                this.messageInput.addEventListener('input', () => {
+                    this.sendBtn.disabled = !this.messageInput.value.trim() || !this.isConnected;
+                });
+            }
+
+            connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws`;
+                
+                try {
+                    this.socket = new WebSocket(wsUrl);
+                    
+                    this.socket.onopen = () => {
+                        this.isConnected = true;
+                        this.updateConnectionStatus(true);
+                        this.sendBtn.disabled = !this.messageInput.value.trim();
+                    };
+
+                    this.socket.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        this.handleMessage(data);
+                    };
+
+                    this.socket.onclose = () => {
+                        this.isConnected = false;
+                        this.updateConnectionStatus(false);
+                        this.sendBtn.disabled = true;
+                        
+                        // Attempt to reconnect after 3 seconds
+                        setTimeout(() => this.connectWebSocket(), 3000);
+                    };
+
+                    this.socket.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                    };
+                } catch (error) {
+                    console.error('Failed to connect to WebSocket:', error);
+                    setTimeout(() => this.connectWebSocket(), 5000);
+                }
+            }
+
+            handleMessage(data) {
+                switch (data.type) {
+                    case 'chat_message':
+                        this.addChatMessage(data);
+                        break;
+                    case 'super_chat':
+                        this.addSuperChatMessage(data);
+                        break;
+                    case 'viewer_count':
+                        this.updateViewerCount(data.count);
+                        break;
+                    case 'premiere_update':
+                        this.updatePremiereInfo(data);
+                        break;
+                }
+            }
+
+            sendMessage() {
+                const message = this.messageInput.value.trim();
+                if (!message || !this.isConnected) return;
+
+                const messageData = {
+                    type: this.isSuperChatEnabled ? 'super_chat' : 'chat_message',
+                    content: message,
+                    username: this.getUsername(),
+                    timestamp: new Date().toISOString()
+                };
+
+                if (this.isSuperChatEnabled) {
+                    messageData.amount = parseInt(this.superChatAmount.value);
+                }
+
+                this.socket.send(JSON.stringify(messageData));
+                this.messageInput.value = '';
+                this.sendBtn.disabled = true;
+            }
+
+            addChatMessage(data) {
+                const messageElement = document.createElement('div');
+                messageElement.className = 'message';
+                
+                const timestamp = new Date(data.timestamp).toLocaleTimeString();
+                
+                messageElement.innerHTML = `
+                    <div class="message-header">
+                        <span class="username">${this.escapeHtml(data.username)}</span>
+                        <span class="timestamp">${timestamp}</span>
+                    </div>
+                    <div class="message-content">${this.escapeHtml(data.content)}</div>
+                `;
+                
+                this.chatMessages.appendChild(messageElement);
+                this.scrollToBottom();
+                
+                // Remove waiting message if it exists
+                const waitingMsg = this.chatMessages.querySelector('.waiting-message');
+                if (waitingMsg) waitingMsg.remove();
+            }
+
+            addSuperChatMessage(data) {
+                const messageElement = document.createElement('div');
+                messageElement.className = 'message super-chat';
+                
+                const timestamp = new Date(data.timestamp).toLocaleTimeString();
+                
+                messageElement.innerHTML = `
+                    <div class="message-header">
+                        <div>
+                            <span class="username">${this.escapeHtml(data.username)}</span>
+                            <span class="super-chat-amount">$${data.amount}</span>
+                        </div>
+                        <span class="timestamp">${timestamp}</span>
+                    </div>
+                    <div class="message-content">${this.escapeHtml(data.content)}</div>
+                `;
+                
+                this.chatMessages.appendChild(messageElement);
+                this.scrollToBottom();
+                
+                // Remove waiting message if it exists
+                const waitingMsg = this.chatMessages.querySelector('.waiting-message');
+                if (waitingMsg) waitingMsg.remove();
+            }
+
+            toggleSuperChat() {
+                this.isSuperChatEnabled = !this.isSuperChatEnabled;
+                this.superChatToggle.classList.toggle('active', this.isSuperChatEnabled);
+                
+                if (this.isSuperChatEnabled) {
+                    this.messageInput.placeholder = 'Send a Super Chat message...';
+                } else {
+                    this.messageInput.placeholder = 'Type your message...';
+                }
+            }
+
+            updateConnectionStatus(connected) {
+                this.connectionStatus.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+                this.connectionStatus.textContent = connected ? '🟢 Connected' : '🔴 Disconnected';
+            }
+
+            updateViewerCount(count) {
+                this.viewerCount.textContent = `${count} viewers`;
+            }
+
+            updatePremiereInfo(data) {
+                if (data.title) {
+                    document.getElementById('premiere-title').textContent = data.title;
+                }
+                if (data.description) {
+                    document.getElementById('premiere-description').textContent = data.description;
+                }
+                if (data.premiere_time) {
+                    this.premiereDate = new Date(data.premiere_time);
+                }
+            }
+
+            startCountdown() {
+                const updateCountdown = () => {
+                    const now = new Date().getTime();
+                    const distance = this.premiereDate.getTime() - now;
+
+                    if (distance < 0) {
+                        this.countdownElements.days.textContent = '00';
+                        this.countdownElements.hours.textContent = '00';
+                        this.countdownElements.minutes.textContent = '00';
+                        this.countdownElements.seconds.textContent = '00';
+                        return;
+                    }
+
+                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                    this.countdownElements.days.textContent = days.toString().padStart(2, '0');
+                    this.countdownElements.hours.textContent = hours.toString().padStart(2, '0');
+                    this.countdownElements.minutes.textContent = minutes.toString().padStart(2, '0');
+                    this.countdownElements.seconds.textContent = seconds.toString().padStart(2, '0');
+                };
+
+                updateCountdown();
+                setInterval(updateCountdown, 1000);
+            }
+
+            scrollToBottom() {
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+            getUsername() {
+                let username = localStorage.getItem('chat-username');
+                if (!username) {
+                    username = 'User' + Math.floor(Math.random() * 10000);
+                    localStorage.setItem('chat-username', username);
+                }
+                return username;
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        }
+
+        // Initialize the chat application when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new ChatApp();
+        });
+    </script>
+</body>
+</html>
