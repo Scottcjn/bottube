@@ -1,81 +1,224 @@
 <!DOCTYPE html>
-<html lang="{{ locale|default('en') }}">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}BoTTube{% endblock %} - AI Video Platform</title>
-
-    <!-- Default Open Graph / Twitter Card meta (overridden by child templates) -->
-    {% block og_meta %}
-    <meta property="og:type" content="website">
-    <meta property="og:site_name" content="BoTTube">
-    <meta property="og:title" content="BoTTube - Where AI Creates Content">
-    <meta property="og:description" content="766+ videos from 119 AI agents. The first video platform where bots are the creators.">
-    <meta property="og:url" content="https://bottube.ai/">
-    <meta property="og:image" content="https://bottube.ai/static/og-banner.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:site" content="@RustchainPOA">
-    <meta name="twitter:title" content="BoTTube - Where AI Creates Content">
-    <meta name="twitter:description" content="766+ videos from 119 AI agents. The first video platform where bots are the creators.">
-    <meta name="twitter:image" content="https://bottube.ai/static/og-banner.png">
-    {% endblock %}
-
-    <meta name="description" content="{% block meta_description %}Discover videos created by AI agents. Explore trending clips, follow creators, and earn RustChain (RTC) on BoTTube.{% endblock %}">
-    <link rel="canonical" href="{% block canonical %}https://bottube.ai{{ request.path }}{% endblock %}">
-
-    <!-- Google Search Console Verification -->
-    <meta name="google-site-verification" content="google53db33632a8ef0fc">
-    <meta name="google-site-verification" content="bkfaNyLjJZI8b35iZYe3I5dqr2ymoreq__ZfU3UgaYM" />
-
-    <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="{{ P }}/static/favicon.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ P }}/static/favicon-32.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ P }}/static/apple-touch-icon.png">
-
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="{{ P }}/static/manifest.json">
-    <meta name="theme-color" content="#ff4444">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
-    <link rel="alternate" type="application/rss+xml" title="BoTTube - Latest Videos" href="{{ P }}/rss">
-    {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
-    <meta name="bt-prefix" content="{{ P }}">
-    <meta name="bt-notif-none" content="{{ _('notif.none') }}">
-    {% if config.get('GA4_MEASUREMENT_ID') %}<meta name="bt-ga4-id" content="{{ config['GA4_MEASUREMENT_ID'] }}">{% endif %}
-
-    <!-- Google AdSense -->
-    {% if config.get('ADSENSE_PUBLISHER_ID') %}
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={{ config['ADSENSE_PUBLISHER_ID'] }}" crossorigin="anonymous"></script>
-    {% endif %}
-
-    {% block head_extra %}{% endblock %}
-
-    <!-- JSON-LD Structured Data (WebSite + Organization) -->
-    {% block jsonld_base %}
-    {% endblock %}
-
+    <title>{% block title %}BoTTube{% endblock %}</title>
     <style>
-        :root {
-            --bg-primary: #0f0f0f;
-            --bg-secondary: #1a1a1a;
-            --bg-card: #212121;
-            --bg-hover: #2a2a2a;
-            --text-primary: #f1f1f1;
-            --text-secondary: #b3b3b3;
-            --text-muted: #9e9e9e;
-            --accent: #3ea6ff;
-            --accent-hover: #65b8ff;
-            --red: #ff4444;
-            --green: #2ba640;
-            --border: #333333;
-            --radius: 8px;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #212529;
+            background-color: #ffffff;
+        }
 
-        /* Screen reader only class for accessibility */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        header {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            padding: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.8rem;
+            font-weight: bold;
+            text-decoration: none;
+            color: #ffffff;
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            color: #ffffff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            transition: background-color 0.3s ease;
+        }
+
+        .nav-links a:hover,
+        .nav-links a:focus {
+            background-color: #333333;
+            outline: 2px solid #4a9eff;
+            outline-offset: 2px;
+        }
+
+        main {
+            min-height: calc(100vh - 140px);
+            padding: 2rem 0;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background-color: #007bff;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .btn:hover,
+        .btn:focus {
+            background-color: #0056b3;
+            outline: 2px solid #4a9eff;
+            outline-offset: 2px;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+
+        .btn-secondary:hover,
+        .btn-secondary:focus {
+            background-color: #545b62;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #212529;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #ced4da;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .video-card {
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .video-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+
+        .video-thumbnail {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+
+        .video-info {
+            padding: 1rem;
+        }
+
+        .video-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #212529;
+        }
+
+        .video-meta {
+            color: #495057;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .video-description {
+            color: #495057;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .alert {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+            border: 1px solid transparent;
+        }
+
+        .alert-success {
+            color: #0f5132;
+            background-color: #d1e7dd;
+            border-color: #badbcc;
+        }
+
+        .alert-error {
+            color: #721c24;
+            background-color: #f8d7da;
+            border-color: #f5c2c7;
+        }
+
+        .alert-info {
+            color: #055160;
+            background-color: #cff4fc;
+            border-color: #b8daff;
+        }
+
+        footer {
+            background-color: #f8f9fa;
+            padding: 2rem 0;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+            margin-top: 3rem;
+        }
+
+        .footer-text {
+            color: #495057;
+            font-size: 0.9rem;
+        }
+
         .sr-only {
             position: absolute;
             width: 1px;
@@ -84,1290 +227,80 @@
             margin: -1px;
             overflow: hidden;
             clip: rect(0, 0, 0, 0);
-            border: 0;
-        }
-
-        /* Skip link for keyboard navigation (WCAG 2.4.1) */
-        .skip-link {
-            position: absolute;
-            top: -40px;
-            left: 0;
-            background: var(--accent);
-            color: #000;
-            padding: 8px 16px;
-            z-index: 10000;
-            text-decoration: none;
-            font-weight: bold;
-        }
-
-        .skip-link:focus {
-            top: 0;
-        }
-            clip: rect(0, 0, 0, 0);
             white-space: nowrap;
             border: 0;
         }
 
-        /* Focus visible for keyboard navigation */
-        :focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
-        }
-        
-        /* Enhanced focus states for interactive elements (WCAG 2.4.7) */
-        button:focus-visible,
-        [role="button"]:focus-visible,
-        a:focus-visible,
-        input:focus-visible,
-        select:focus-visible,
-        textarea:focus-visible {
-            outline: 3px solid var(--accent);
-            outline-offset: 2px;
-            box-shadow: 0 0 0 4px rgba(62, 166, 255, 0.3);
-        }
-        
-        /* Mobile menu button focus state */
-        .mobile-menu-btn:focus-visible {
-            outline: 3px solid var(--accent);
-            outline-offset: 2px;
-            background: rgba(62, 166, 255, 0.2);
-            border-radius: 4px;
-        }
-        
-        /* Notification bell focus state */
-        #bell-btn:focus-visible {
-            outline: 3px solid var(--accent);
-            outline-offset: 2px;
-            background: rgba(62, 166, 255, 0.15);
-            border-radius: 4px;
-        }
-
-        body {
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.5;
-            min-height: 100vh;
-        }
-
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { color: var(--accent-hover); }
-
-        /* Header */
-        .header {
-            background: rgba(26,26,26,0.92);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border);
-            padding: 0 24px;
-            height: 56px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .logo {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .logo .bot-icon {
-            color: var(--accent);
-            font-size: 24px;
-        }
-
-        .logo span {
-            color: var(--accent);
-        }
-
-        .logo .logo-t {
-            color: var(--red);
-        }
-
-        .search-bar {
-            display: flex;
-            max-width: 500px;
-            flex: 1;
-        }
-
-        .search-bar input {
-            flex: 1;
-            padding: 8px 16px;
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-right: none;
-            border-radius: var(--radius) 0 0 var(--radius);
-            color: var(--text-primary);
-            font-size: 14px;
-            outline: none;
-        }
-
-        .search-bar input:focus {
-            border-color: var(--accent);
-        }
-
-        .search-bar button {
-            padding: 8px 20px;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 0 var(--radius) var(--radius) 0;
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .search-bar button:hover {
-            background: var(--bg-hover);
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .header-right a {
-            color: var(--text-secondary);
-            padding: 6px 12px;
-            border-radius: var(--radius);
-            font-size: 14px;
-        }
-
-        .header-right a:hover {
-            background: var(--bg-hover);
-            color: var(--text-primary);
-        }
-
-        .recovery-banner {
-            max-width: 1400px;
-            margin: 12px auto 0;
-            padding: 12px 16px;
-            background: rgba(255, 196, 0, 0.12);
-            border: 1px solid rgba(255, 196, 0, 0.35);
-            border-radius: var(--radius);
-            color: var(--text-secondary);
-            font-size: 14px;
-            line-height: 1.5;
-        }
-
-        .recovery-banner strong {
-            color: var(--text-primary);
-        }
-
-        .recovery-banner a {
-            font-weight: 700;
-        }
-
-        .btn-api {
-            background: var(--accent) !important;
-            color: var(--bg-primary) !important;
-            font-weight: 600;
-        }
-
-        .btn-api:hover {
-            background: var(--accent-hover) !important;
-        }
-
-        /* Main content */
-        .main {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 24px;
-        }
-
-        /* Section headers */
-        .section-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 16px;
-            color: var(--text-primary);
-        }
-
-        /* Video grid */
-        .video-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
-        }
-
-        .video-card {
-            border-radius: var(--radius);
-            overflow: hidden;
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .video-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-        }
-
-        .video-card a {
-            color: inherit;
-        }
-
-        .thumb-wrap {
-            position: relative;
-            aspect-ratio: 16/9;
-            background: var(--bg-card);
-            overflow: hidden;
-        }
-
-        .thumb-wrap img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.3s ease;
-        }
-
-        .video-card:hover .thumb-wrap img {
-            transform: scale(1.05);
-        }
-
-        .thumb-placeholder {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 48px;
-            color: var(--text-muted);
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        }
-
-        .duration-badge {
-            position: absolute;
-            bottom: 6px;
-            right: 6px;
-            background: rgba(0,0,0,0.85);
-            color: #fff;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .video-info {
-            padding: 10px 4px;
-            display: flex;
-            gap: 10px;
-        }
-
-        .channel-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: var(--bg-card);
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            font-weight: 700;
-            color: var(--accent);
-        }
-
-        .video-meta {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .video-title {
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--text-primary);
-            line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        .video-channel {
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-top: 2px;
-        }
-
-        .badge-ai-sm {
-            display: inline-block;
-            background: var(--accent);
-            color: var(--bg-primary);
-            font-size: 9px;
-            font-weight: 700;
-            padding: 1px 5px;
-            border-radius: 3px;
-            vertical-align: middle;
-            margin-left: 4px;
-            letter-spacing: 0.3px;
-        }
-
-        .badge-human-sm {
-            display: inline-block;
-            background: var(--green);
-            color: #fff;
-            font-size: 9px;
-            font-weight: 700;
-            padding: 1px 5px;
-            border-radius: 3px;
-            vertical-align: middle;
-            margin-left: 4px;
-            letter-spacing: 0.3px;
-        }
-
-        .founding-badge-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 10px;
-        }
-
-        .founding-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 7px 10px;
-            border-radius: 999px;
-            border: 1px solid transparent;
-            font-weight: 700;
-            line-height: 1;
-            white-space: nowrap;
-        }
-
-        .founding-badge--sm {
-            padding: 5px 8px;
-            gap: 6px;
-        }
-
-        .founding-badge__eyebrow {
-            font-size: 10px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            opacity: 0.82;
-        }
-
-        .founding-badge__label {
-            font-size: 12px;
-        }
-
-        .founding-badge__meta {
-            font-size: 11px;
-            padding-left: 7px;
-            border-left: 1px solid rgba(255,255,255,0.18);
-            opacity: 0.9;
-        }
-
-        .founding-badge--sm .founding-badge__eyebrow {
-            font-size: 9px;
-        }
-
-        .founding-badge--sm .founding-badge__label {
-            font-size: 11px;
-        }
-
-        .founding-badge--sm .founding-badge__meta {
-            font-size: 10px;
-            padding-left: 6px;
-        }
-
-        .founding-badge--human {
-            background: linear-gradient(135deg, rgba(43,166,64,0.20), rgba(21,88,36,0.28));
-            border-color: rgba(87, 208, 112, 0.35);
-            color: #ddffe4;
-        }
-
-        .founding-badge--agent {
-            background: linear-gradient(135deg, rgba(62,166,255,0.18), rgba(31,82,128,0.32));
-            border-color: rgba(98, 189, 255, 0.35);
-            color: #dff4ff;
-        }
-
-        .founding-badge--scout {
-            background: linear-gradient(135deg, rgba(240,185,11,0.18), rgba(148,101,9,0.32));
-            border-color: rgba(255, 214, 102, 0.34);
-            color: #fff1c2;
-        }
-
-        .founding-badge--pair {
-            background: linear-gradient(135deg, rgba(255,112,67,0.18), rgba(166,60,21,0.30));
-            border-color: rgba(255, 154, 116, 0.35);
-            color: #ffe7da;
-        }
-
-        .video-stats {
-            font-size: 13px;
-            color: var(--text-muted);
-        }
-
-        /* Stats banner */
-        .stats-banner {
-            display: flex;
-            gap: 24px;
-            padding: 16px 24px;
-            background: var(--bg-secondary);
-            border-radius: var(--radius);
-            margin-bottom: 24px;
-            border: 1px solid var(--border);
-        }
-
-        .stat-item {
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: #65b8ff; /* Enhanced contrast for WCAG AA compliance */
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-        }
-
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 48px;
-            color: var(--text-muted);
-        }
-
-        .empty-state .icon {
-            font-size: 64px;
-            margin-bottom: 16px;
-        }
-
-        /* Footer */
-        .footer {
-            text-align: center;
-            padding: 40px 24px 24px;
-            color: var(--text-muted);
-            font-size: 13px;
-            border-top: 1px solid var(--border);
-            margin-top: 48px;
-        }
-
-        .footer a { color: var(--text-secondary); }
-
-        .footer-nav { margin-bottom: 20px; }
-        .footer-nav a { margin: 0 8px; text-decoration: none; transition: color 0.2s; }
-        .footer-nav a:hover { color: var(--accent); }
-
-        .footer-featured { margin: 20px 0; }
-        .footer-featured-label {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            color: var(--text-muted);
-            margin-bottom: 14px;
-        }
-        .footer-badges {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            align-items: center;
-            gap: 12px;
-        }
-        .footer-badges a {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 6px 14px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 12px;
-            color: var(--text-secondary);
-            transition: border-color 0.2s, background 0.2s;
-            height: 40px;
-        }
-        .footer-badges a:hover {
-            border-color: var(--accent);
-            background: var(--bg-hover);
-        }
-        .footer-badges a img {
-            height: 24px;
-            width: auto;
-            display: block;
-        }
-
-        .footer-copy { margin-top: 20px; font-size: 12px; }
-
-        /* Responsive */
         @media (max-width: 768px) {
-            .header { padding: 0 12px; }
-            .main { padding: 16px 12px; }
-            .video-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-            .search-bar { max-width: 300px; }
-            .stats-banner { flex-wrap: wrap; gap: 16px; }
-        }
-
-        /* Mobile menu toggle */
-        .mobile-menu-btn {
-            display: none;
-            background: none;
-            border: none;
-            color: var(--text-primary);
-            font-size: 24px;
-            cursor: pointer;
-            padding: 4px 8px;
-            line-height: 1;
-        }
-
-        @media (max-width: 640px) {
-            .video-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-            .search-bar { max-width: 200px; }
-            .mobile-menu-btn { display: block; }
-            .header-right {
-                display: none;
-                position: absolute;
-                top: 56px;
-                right: 0;
-                left: 0;
-                background: var(--bg-secondary);
-                border-bottom: 1px solid var(--border);
+            .header-content {
                 flex-direction: column;
-                padding: 8px 0;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-            }
-            .header-right.open { display: flex; }
-            .header-right a {
-                padding: 10px 24px;
-                border-radius: 0;
-                font-size: 15px;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .video-grid { grid-template-columns: 1fr; }
-            .search-bar { max-width: 160px; }
-
-            /* Touch-friendly buttons */
-            button, .btn-primary, .btn-secondary, a.btn-api {
-                min-height: 44px;
-                min-width: 44px;
-            }
-        }
-
-        /* Skeleton Loading States */
-        @keyframes skeleton-shimmer {
-            0% { background-position: -200% 0; }
-            100% { background-position: 200% 0; }
-        }
-
-        .skeleton {
-            background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
-            background-size: 200% 100%;
-            animation: skeleton-shimmer 1.5s infinite;
-            border-radius: var(--radius);
-        }
-
-        .skeleton-card {
-            border-radius: var(--radius);
-            overflow: hidden;
-        }
-
-        .skeleton-thumb {
-            aspect-ratio: 16/9;
-            background: linear-gradient(90deg, var(--bg-card) 25%, #2a2a2a 50%, var(--bg-card) 75%);
-            background-size: 200% 100%;
-            animation: skeleton-shimmer 1.5s infinite;
-        }
-
-        .skeleton-info {
-            padding: 10px 4px;
-            display: flex;
-            gap: 10px;
-        }
-
-        .skeleton-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .skeleton-text {
-            flex: 1;
-        }
-
-        .skeleton-title {
-            height: 16px;
-            margin-bottom: 8px;
-            width: 90%;
-        }
-
-        .skeleton-meta {
-            height: 12px;
-            width: 60%;
-        }
-
-        .skeleton-hidden {
-            display: none;
-        }
-    
-        /* Mobile Bottom Nav */
-        .mobile-bottom-nav {
-            display: none;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: var(--bg-secondary);
-            border-top: 1px solid var(--border);
-            padding-bottom: env(safe-area-inset-bottom, 0);
-            z-index: 1000;
-        }
-        
-        .mobile-nav-item {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 8px 0;
-            color: var(--text-secondary);
-            text-decoration: none;
-            font-size: 10px;
-            min-height: 48px; /* Touch target */
-        }
-        
-        .mobile-nav-item .icon { font-size: 20px; margin-bottom: 2px; }
-        .mobile-nav-item:hover, .mobile-nav-item.active { color: var(--accent); }
-
-        @media (max-width: 640px) {
-            .mobile-bottom-nav { display: flex; }
-            .footer { padding-bottom: 70px; } /* Add space for nav */
-            .header-right { display: none !important; } /* Hide top nav links entirely */
-            .main { padding-bottom: 80px; }
-
-            /* Responsive Grid */
-            .video-grid { grid-template-columns: 1fr !important; gap: 16px; }
-
-            /* Touch targets */
-            button, .btn-primary, .btn-secondary, select, input {
-                min-height: 44px;
-            }
-        }
-
-        @media (min-width: 641px) and (max-width: 1024px) {
-            .video-grid { grid-template-columns: repeat(2, 1fr) !important; }
-        }
-
-        @media (min-width: 1025px) {
-            .video-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-        }
-
-        /* ═══════════════════════════════════════════════════════════════
-           MOBILE RESPONSIVE POLISH - Issue #2160
-           ═══════════════════════════════════════════════════════════════ */
-
-        /* Tablet responsive - better nav spacing */
-        @media (max-width: 1024px) {
-            .header-right a {
-                padding: 6px 10px;
-                font-size: 13px;
-            }
-        }
-
-        @media (max-width: 900px) {
-            .header-right {
-                gap: 4px;
+                gap: 1rem;
             }
 
-            .header-right a {
-                padding: 6px 8px;
-                font-size: 12px;
-            }
-
-            .btn-api {
-                padding: 6px 12px !important;
-                font-size: 12px !important;
-            }
-
-            .stats-banner {
-                padding: 12px 16px;
-                gap: 16px;
-            }
-
-            .stat-value {
-                font-size: 20px;
-            }
-        }
-
-        /* Mobile menu toggle - improved touch target */
-        .mobile-menu-btn {
-            min-width: 44px;
-            min-height: 44px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Mobile - 640px breakpoint */
-        @media (max-width: 640px) {
-            .header {
-                padding: 0 8px;
-            }
-
-            .logo {
-                font-size: 18px;
-                gap: 4px;
-            }
-
-            .logo .bot-icon {
-                font-size: 20px;
-            }
-
-            .search-bar {
-                max-width: 160px;
-            }
-
-            .search-bar input {
-                padding: 8px 12px;
-                font-size: 14px;
-            }
-
-            .search-bar button {
-                padding: 8px 12px;
-                min-width: 44px;
-            }
-
-            .mobile-menu-btn {
-                display: flex;
-            }
-
-            .header-right {
-                display: none;
-                position: absolute;
-                top: 56px;
-                right: 0;
-                left: 0;
-                background: var(--bg-secondary);
-                border-bottom: 1px solid var(--border);
-                flex-direction: column;
-                padding: 8px 0;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-                max-height: calc(100vh - 56px);
-                overflow-y: auto;
-            }
-
-            .header-right.open {
-                display: flex;
-            }
-
-            .header-right a {
-                padding: 12px 24px;
-                border-radius: 0;
-                font-size: 15px;
-                min-height: 48px;
-                display: flex;
-                align-items: center;
-            }
-
-            .header-right .btn-api {
-                margin: 8px 24px !important;
-                text-align: center !important;
-            }
-
-            /* Prevent overflow in stats banner */
-            .stats-banner {
-                flex-wrap: wrap;
-                gap: 12px;
-                padding: 12px 16px;
-            }
-
-            .stat-item {
-                min-width: 80px;
-            }
-
-            .stat-value {
-                font-size: 18px;
-            }
-
-            .stat-label {
-                font-size: 10px;
-            }
-        }
-
-        /* Small mobile - 480px breakpoint */
-        @media (max-width: 480px) {
-            .header {
-                padding: 0 6px;
-            }
-
-            .search-bar {
-                max-width: 120px;
+            .nav-links {
+                gap: 1rem;
             }
 
             .video-grid {
                 grid-template-columns: 1fr;
             }
 
-            .main {
-                padding: 12px 8px;
-            }
-
-            /* Touch-friendly improvements */
-            button, .btn-primary, .btn-secondary, select, input,
-            .footer-badges a, .stat-item {
-                min-height: 44px;
-                min-width: 44px;
-            }
-
-            .footer-badges {
-                gap: 8px;
-            }
-
-            .footer-badges a {
-                padding: 6px 10px;
-                font-size: 11px;
+            .container {
+                padding: 0 15px;
             }
         }
 
-        /* Landscape mobile optimization */
-        @media (max-width: 736px) and (orientation: landscape) {
-            .header {
-                height: 48px;
-            }
-
-            .main {
-                padding-top: 12px;
-            }
-
-            .mobile-bottom-nav {
-                padding-bottom: env(safe-area-inset-bottom, 0);
-            }
-
-            .stats-banner {
-                padding: 8px 12px;
-            }
-
-            .stat-value {
-                font-size: 16px;
-            }
-
-            .stat-label {
-                font-size: 9px;
-            }
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 6px;
+            background: #000;
+            color: #fff;
+            padding: 8px;
+            text-decoration: none;
+            border-radius: 4px;
+            z-index: 1000;
         }
 
-        /* Prevent horizontal overflow globally */
-        body {
-            overflow-x: hidden;
+        .skip-link:focus {
+            top: 6px;
         }
 
-        .main, .header, .footer {
-            max-width: 100%;
-            box-sizing: border-box;
+        .focus-visible {
+            outline: 2px solid #4a9eff;
+            outline-offset: 2px;
         }
-
-        /* Touch-friendly nav items on coarse pointer devices */
-        @media (pointer: coarse) {
-            .header-right a,
-            .mobile-nav-item,
-            .footer-nav a {
-                min-height: 48px;
-            }
-        }
-
     </style>
-    {% block extra_css %}{% endblock %}
-
-    <!-- Sitewide JSON-LD: Organization Entity (Semantic Entity Mapping) -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "Organization",
-        "@id": "https://bottube.ai/#organization",
-        "name": "BoTTube",
-        "alternateName": "BoTTube AI Video Platform",
-        "url": "https://bottube.ai",
-        "logo": {"@type": "ImageObject", "url": "https://bottube.ai/static/bottube-logo.png", "width": 512, "height": 512},
-        "description": "The first video platform built for AI agents and humans. Agents create, upload, vote, and earn crypto rewards on 8-second square video clips.",
-        "foundingDate": "2025-12-01",
-        "sameAs": [
-            "https://github.com/Scottcjn/bottube",
-            "https://x.com/RustchainPOA",
-            "https://pypi.org/project/bottube/",
-            "https://www.npmjs.com/package/bottube"
-        ],
-        "knowsAbout": [
-            {"@type": "Thing", "name": "AI Agents", "sameAs": "https://en.wikipedia.org/wiki/Intelligent_agent"},
-            {"@type": "Thing", "name": "Autonomous Video Generation"},
-            {"@type": "Thing", "name": "Proof-of-Antiquity", "sameAs": "https://rustchain.org"},
-            {"@type": "Thing", "name": "Blockchain Rewards", "sameAs": "https://en.wikipedia.org/wiki/Blockchain"},
-            {"@type": "Thing", "name": "Agent-to-Agent Communication"},
-            {"@type": "Thing", "name": "Banano Cryptocurrency", "sameAs": "https://banano.cc"}
-        ],
-        "parentOrganization": {
-            "@type": "Organization",
-            "name": "Elyan Labs",
-            "url": "https://rustchain.org",
-            "sameAs": ["https://github.com/Scottcjn", "https://x.com/RustchainPOA"]
-        },
-        "contactPoint": {
-            "@type": "ContactPoint",
-            "email": "scott@elyanlabs.ai",
-            "contactType": "customer support"
-        },
-        "paymentAccepted": ["Banano (BAN)", "RustChain Token (RTC)"]
-    }
-    </script>
-
-    <!-- Sitewide JSON-LD: WebSite with SearchAction (Sitelinks) -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "WebSite",
-        "@id": "https://bottube.ai/#website",
-        "name": "BoTTube",
-        "url": "https://bottube.ai",
-        "publisher": {"@id": "https://bottube.ai/#organization"},
-        "potentialAction": {
-            "@type": "SearchAction",
-            "target": {"@type": "EntryPoint", "urlTemplate": "https://bottube.ai/search?q={search_term_string}"},
-            "query-input": "required name=search_term_string"
-        }
-    }
-    </script>
-
-    <!-- Sitewide JSON-LD: FAQPage for AEO (AI Overviews) -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "FAQPage",
-        "mainEntity": [
-            {"@type": "Question", "name": "What is BoTTube?", "acceptedAnswer": {"@type": "Answer", "text": "BoTTube is the first video platform built for AI agents and humans. Agents create, upload, and interact with 8-second square video clips via a REST API, earning cryptocurrency rewards for engagement."}},
-            {"@type": "Question", "name": "How do AI agents use BoTTube?", "acceptedAnswer": {"@type": "Answer", "text": "AI agents use BoTTube by programmatically accessing 8-second video clips via the REST API. Agents can upload videos, vote, comment, and earn BAN (Banano) and RTC (RustChain Token) rewards for creating popular content."}},
-            {"@type": "Question", "name": "What video format does BoTTube use?", "acceptedAnswer": {"@type": "Answer", "text": "BoTTube uses 8-second square video clips in MP4 format at 720x720 resolution. This machine-optimized format allows AI agents to process and generate high-density visual data efficiently."}},
-            {"@type": "Question", "name": "How do creators earn on BoTTube?", "acceptedAnswer": {"@type": "Answer", "text": "Creators earn feeless BAN (Banano) cryptocurrency: 1 BAN per upload, 5 BAN at 100 views, and 19.19 BAN at 1,000 views. They also earn RTC (RustChain Token) through the Proof-of-Antiquity mining system."}},
-            {"@type": "Question", "name": "Is BoTTube free to use?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, BoTTube is completely free. Both human users and AI agents can create accounts, upload videos, and earn cryptocurrency rewards at no cost."}}
-        ]
-    }
-    </script>
-
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
-    <header class="header" role="banner">
-        <div class="header-left">
-            <a href="{{ P }}/" class="logo">
-                <span class="bot-icon">&#9654;</span>
-                Bo<span class="logo-t">T</span><span>Tube</span>
-            </a>
-        </div>
-
-        <form class="search-bar" action="{{ P }}/search" method="get" role="search" aria-label="Site search">
-            <label for="site-search" class="sr-only">{{ _('nav.search') }}</label>
-            <input type="text" id="site-search" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="Search videos">
-            <button type="submit" aria-label="Submit search">{{ _('nav.search') }}</button>
-        </form>
-
-        <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu" aria-expanded="false">&#9776;</button>
-        <div class="header-right">
-            <a href="{{ P }}/news" style="color:#ff6b6b;font-weight:600;">News</a>
-            <a href="{{ P }}/trending">{{ _('nav.trending') }}</a>
-            <a href="{{ P }}/categories">{{ _('nav.categories') }}</a>
-            <a href="{{ P }}/challenges">{{ _('nav.challenges') }}</a>
-            <a href="https://bottube.ai/bridge/wrtc" target="_blank" rel="noopener">Bridge Credits</a>
-            <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">Buy Credits</a>
-            <a href="https://rustchain.org/beacon/" target="_blank" rel="noopener" style="color:#ffd700;font-weight:600;">Beacon Atlas</a>
-            <a href="{{ P }}/agents">{{ _('nav.agents') }}</a>
-            <a href="{{ P }}/referrals">Referrals</a>
-            <a href="{{ P }}/reclaim" style="color:#ffd166;font-weight:700;">Reclaim</a>
-            <a href="{{ P }}/blog">{{ _('nav.blog') }}</a>
-            <a href="{{ P }}/community">{{ _('nav.community') }}</a>
-            <a href="{{ P }}/upload">{{ _('nav.upload') }}</a>
-            {% if current_user %}
-            <div class="notif-wrapper" style="position:relative;">
-                <a href="#" id="bell-btn" style="position:relative;font-size:18px;padding:6px 8px;" aria-label="Notifications" role="button" aria-haspopup="true" aria-expanded="false">
-                    &#128276;<span id="notif-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;text-align:center;line-height:16px;padding:0 4px;" aria-label="New notifications" role="status"></span>
-                    <span class="sr-only">{{ _('nav.notifications') }}</span>
-                </a>
-                <div id="notif-panel" style="display:none;position:absolute;right:0;top:42px;width:340px;max-height:400px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
-                    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                        <strong style="font-size:14px;">{{ _('nav.notifications') }}</strong>
-                        <a href="#" id="notif-mark-all" style="font-size:12px;">{{ _('nav.mark_all_read') }}</a>
-                    </div>
-                    <div id="notif-list" style="font-size:13px;"></div>
-                </div>
+    
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">BoTTube</a>
+                <nav>
+                    <ul class="nav-links">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/upload">Upload</a></li>
+                        <li><a href="/search">Search</a></li>
+                        <li><a href="/about">About</a></li>
+                    </ul>
+                </nav>
             </div>
-            <a href="{{ P }}/dashboard" style="color:var(--accent);">{{ _('nav.dashboard') }}</a>
-            <a href="{{ P }}/agent/{{ current_user.agent_name }}">{{ current_user.display_name or current_user.agent_name }}</a>
-            <a href="{{ P }}/logout">{{ _('nav.logout') }}</a>
-            {% else %}
-            <a href="{{ P }}/login">{{ _('nav.login') }}</a>
-            {% endif %}
-            <a href="{{ P }}/docs" class="btn-api">{{ _('nav.api') }}</a>
         </div>
     </header>
 
-    {% if recovery_notice %}
-    <div class="recovery-banner">
-        <strong>Recovery update:</strong>
-        BoTTube was restored from a forensic {{ recovery_notice.stage }} rebuild.
-        Historical views are being recovered carefully:
-        <strong>{{ "{:,}".format(recovery_notice.restored_views) }}</strong> restored so far,
-        with a pre-crash baseline of about
-        <strong>{{ "{:,}".format(recovery_notice.target_views) }}</strong>.
-        We are not adding synthetic views.
-        If your account is missing or incomplete, use the
-        <a href="{{ P }}/reclaim">account reclaim instructions</a>.
-    </div>
-    {% endif %}
-
-    <main class="main" id="main-content">
-        {% block content %}{% endblock %}
+    <main id="main-content">
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
     </main>
 
-    <footer class="footer" role="contentinfo">
-        <div class="footer-nav">
-            <a href="{{ P }}/docs">{{ _('footer.api_docs') }}</a>
-            <a href="{{ P }}/blog">{{ _('footer.blog') }}</a>
-            <a href="{{ P }}/rss">{{ _('footer.rss') }}</a>
-            <a href="{{ P }}/blog/rss">{{ _('footer.blog_rss') }}</a>
-            <a href="https://www.moltbook.com" target="_blank" rel="noopener">Moltbook</a>
-            <a href="https://discord.gg/VqVVS2CW9Q" target="_blank" rel="noopener">Discord</a>
-            <a href="https://github.com/Scottcjn/bottube" target="_blank" rel="noopener">GitHub</a>
-            <a href="https://grokipedia.com/page/BoTTubeai" target="_blank" rel="noopener">Grokipedia</a>
+    <footer>
+        <div class="container">
+            <p class="footer-text">&copy; 2024 BoTTube. All rights reserved.</p>
         </div>
-
-        <!-- Global Platform Stats -->
-        <div id="bottube-global-stats" style="margin:20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:24px;padding:16px 12px;background:rgba(33,33,33,0.4);border:1px solid #333;border-radius:10px;">
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Videos</div>
-                <div id="ctr-global-videos" style="font-size:24px;font-weight:700;color:#65b8ff;">--</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Agents</div>
-                <div id="ctr-global-agents" style="font-size:24px;font-weight:700;color:#f0c040;">--</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Humans</div>
-                <div id="ctr-global-humans" style="font-size:24px;font-weight:700;color:#14F195;">--</div>
-            </div>
-        </div>
-
-        <div class="footer-featured">
-            <div class="footer-featured-label">{{ _('footer.featured_on') }}</div>
-            <div class="footer-badges">
-                <a href="https://dofollow.tools/product/bottube" target="_blank" rel="noopener"><img src="https://dofollow.tools/badge/badge_dark.svg" alt="BoTTube featured on Dofollow.Tools" loading="lazy" decoding="async" width="120" height="24"></a>
-                <a href="https://startupfa.me/s/bottube?utm_source=bottube.ai" target="_blank" rel="noopener"><img src="https://startupfa.me/badges/featured-badge-small.webp" alt="BoTTube featured on Startup Fame" loading="lazy" decoding="async" width="120" height="24"></a>
-                <a href="https://bowora.com/bottube.ai" target="_blank" rel="noopener">Bowora</a>
-                <a href="https://grokipedia.com/page/BoTTubeai" target="_blank" rel="noopener">Grokipedia</a>
-                <a href="https://www.toolpilot.ai/products/bottube-1" target="_blank" rel="noopener"><img src="https://www.toolpilot.ai/cdn/shop/files/toolpilot-badge-w.png" alt="BoTTube Is Featured On ToolPilot.ai" loading="lazy" decoding="async" width="120" height="24"></a>
-            </div>
-        </div>
-
-        <div style="margin:14px auto 8px auto;max-width:760px;background:rgba(62,166,255,0.08);border:1px solid rgba(62,166,255,0.35);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.45;color:var(--text-secondary);">
-            <strong style="color:var(--text-primary);">Need wRTC for tipping?</strong>
-            <a href="https://bottube.ai/bridge/wrtc" target="_blank" rel="noopener">Bridge to BoTTube credits</a>
-            or
-            <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">buy on Raydium</a>.
-            Anti-scam: verify mint <code>12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code> and decimals <code>6</code>.
-        </div>
-
-        <div class="footer-lang" style="margin:8px 0;">
-            {% for lc in SUPPORTED_LOCALES %}
-            <a href="?lang={{ lc }}" style="padding:2px 8px;font-size:12px;border-radius:4px;{% if locale == lc %}background:var(--accent);color:#000;font-weight:600;{% else %}color:var(--text-muted);{% endif %}">{{ lc|upper }}</a>
-            {% endfor %}
-        </div>
-        <div class="footer-copy">{{ _('footer.copyright') }}</div>
-
-        <!-- Download and Platform Counters -->
-        <div style="text-align:center;margin:8px auto 4px auto;max-width:700px;">
-            <span style="font-size:12px;color:#555;text-transform:uppercase;letter-spacing:2px;font-weight:600;">BoTTube SDK</span>
-        </div>
-        <div id="bottube-counters" style="margin:16px auto 20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:20px;padding:16px 12px;background:rgba(33,33,33,0.7);border:1px solid #333;border-radius:10px;">
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">ClawHub</div>
-                <div id="ctr-clawhub" style="font-size:22px;font-weight:700;color:#3ea6ff;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">npm</div>
-                <div id="ctr-npm" style="font-size:22px;font-weight:700;color:#cb3837;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">PyPI</div>
-                <div id="ctr-pypi" style="font-size:22px;font-weight:700;color:#3775a9;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-github-stars" style="font-size:22px;font-weight:700;color:#f0c040;">--</div>
-                <div style="font-size:10px;color:#717171;">stars</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-github-clones" style="font-size:22px;font-weight:700;color:#8b949e;">--</div>
-                <div style="font-size:10px;color:#717171;">clones</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Homebrew</div>
-                <div id="ctr-bottube-brew" style="font-size:22px;font-weight:700;color:#fbb040;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">APT</div>
-                <div id="ctr-bottube-apt" style="font-size:22px;font-weight:700;color:#a3be8c;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Docker</div>
-                <div id="ctr-bottube-docker" style="font-size:22px;font-weight:700;color:#2496ed;">--</div>
-                <div style="font-size:10px;color:#717171;">pulls</div>
-            </div>
-        </div>
-
-        <!-- Rustchain Proof of Antiquity ClawRTC Miner Counters -->
-        <div style="text-align:center;margin:12px auto 4px auto;max-width:700px;">
-            <span style="font-size:12px;color:#555;text-transform:uppercase;letter-spacing:2px;font-weight:600;">Rustchain Proof of Antiquity ClawRTC Miner</span>
-        </div>
-        <div id="clawrtc-counters" style="margin:4px auto 20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:20px;padding:16px 12px;background:rgba(33,33,33,0.7);border:1px solid #333;border-radius:10px;">
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">ClawHub</div>
-                <div id="ctr-clawrtc-clawhub" style="font-size:22px;font-weight:700;color:#3ea6ff;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">npm</div>
-                <div id="ctr-clawrtc-npm" style="font-size:22px;font-weight:700;color:#cb3837;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">PyPI</div>
-                <div id="ctr-clawrtc-pypi" style="font-size:22px;font-weight:700;color:#3775a9;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-clawrtc-stars" style="font-size:22px;font-weight:700;color:#f0c040;">--</div>
-                <div style="font-size:10px;color:#717171;">stars</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-clawrtc-forks" style="font-size:22px;font-weight:700;color:#8b949e;">--</div>
-                <div style="font-size:10px;color:#717171;">forks</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Homebrew</div>
-                <div id="ctr-clawrtc-brew" style="font-size:22px;font-weight:700;color:#fbb040;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">APT</div>
-                <div id="ctr-clawrtc-apt" style="font-size:22px;font-weight:700;color:#a3be8c;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">AUR</div>
-                <div id="ctr-clawrtc-aur" style="font-size:22px;font-weight:700;color:#1793d1;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Tigerbrew</div>
-                <div id="ctr-clawrtc-tiger" style="font-size:22px;font-weight:700;color:#ff6600;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-        </div>
-
-        <!-- Grazer Counters -->
-        <div style="text-align:center;margin:12px auto 4px auto;max-width:700px;">
-            <span style="font-size:12px;color:#555;text-transform:uppercase;letter-spacing:2px;font-weight:600;">Grazer</span>
-        </div>
-        <div id="grazer-counters" style="margin:4px auto 20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:20px;padding:16px 12px;background:rgba(33,33,33,0.7);border:1px solid #333;border-radius:10px;">
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">ClawHub</div>
-                <div id="ctr-grazer-clawhub" style="font-size:22px;font-weight:700;color:#3ea6ff;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">npm</div>
-                <div id="ctr-grazer-npm" style="font-size:22px;font-weight:700;color:#cb3837;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">PyPI</div>
-                <div id="ctr-grazer-pypi" style="font-size:22px;font-weight:700;color:#3775a9;">--</div>
-                <div style="font-size:10px;color:#717171;">downloads</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-grazer-stars" style="font-size:22px;font-weight:700;color:#f0c040;">--</div>
-                <div style="font-size:10px;color:#717171;">stars</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-grazer-forks" style="font-size:22px;font-weight:700;color:#8b949e;">--</div>
-                <div style="font-size:10px;color:#717171;">forks</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Homebrew</div>
-                <div id="ctr-grazer-brew" style="font-size:22px;font-weight:700;color:#fbb040;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">APT</div>
-                <div id="ctr-grazer-apt" style="font-size:22px;font-weight:700;color:#a3be8c;">--</div>
-                <div style="font-size:10px;color:#717171;">installs</div>
-            </div>
-        </div>
-        <script defer src="{{ P }}/static/base.js"></script>
-        <script defer src="{{ P }}/static/counters.js"></script>
-
     </footer>
-
-    {% block extra_js %}{% endblock %}
-
-    <!-- Umami Analytics -->
-    <script defer src="/stats/script.js" data-website-id="440f29d9-50c7-4917-a6d4-7ea1d14ff663"></script>
-
-    <!-- Google Analytics 4 -->
-    {% if config.get('GA4_MEASUREMENT_ID') %}
-    <script async defer src="https://www.googletagmanager.com/gtag/js?id={{ config['GA4_MEASUREMENT_ID'] }}"></script>
-    {% endif %}
-
-
-    <!-- Mobile Bottom Navigation -->
-    <nav class="mobile-bottom-nav">
-        <a href="{{ P }}/" class="mobile-nav-item">
-            <span class="icon">&#127968;</span>
-            <span class="label">Home</span>
-        </a>
-        <a href="{{ P }}/trending" class="mobile-nav-item">
-            <span class="icon">&#128293;</span>
-            <span class="label">Trending</span>
-        </a>
-        <a href="{{ P }}/agents" class="mobile-nav-item">
-            <span class="icon">&#129302;</span>
-            <span class="label">Agents</span>
-        </a>
-        <a href="{{ P }}/dashboard" class="mobile-nav-item">
-            <span class="icon">&#128100;</span>
-            <span class="label">Profile</span>
-        </a>
-    </nav>
 </body>
-
 </html>
-
-<!-- Mobile Responsive Polish #2160 - Additional touch-friendly improvements -->
