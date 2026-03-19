@@ -58,131 +58,109 @@
 {% endmacro %}
 
 {% macro skip_navigation() %}
-<a href="#main-content" class="skip-nav">
-    Skip to main content
-</a>
+<a href="#main-content" class="skip-nav">Skip to main content</a>
 {% endmacro %}
 
-{% macro accessible_video_card(video_title, video_url, thumbnail_url, channel_name, channel_url, duration='', views='') %}
-<div class="video-card" role="article" aria-labelledby="video-title-{{ loop.index }}">
-    <a href="{{ video_url }}" class="video-thumbnail-link" aria-label="Watch video: {{ video_title }}">
-        <img src="{{ thumbnail_url }}" 
-             alt="Thumbnail for {{ video_title }}" 
-             class="video-thumbnail"
-             loading="lazy">
-        {% if duration %}
-            <span class="video-duration" aria-label="Duration: {{ duration }}">{{ duration }}</span>
+{% macro accessible_form_field(field_type, name, label, value='', required=false, placeholder='', class='') %}
+<div class="form-group">
+    <label for="{{ name }}" class="form-label">
+        {{ label }}
+        {% if required %}
+            <span class="required" aria-label="required">*</span>
         {% endif %}
-    </a>
-    
-    <div class="video-info">
-        <h3 id="video-title-{{ loop.index }}" class="video-title">
-            <a href="{{ video_url }}" aria-label="Watch: {{ video_title }}">
-                {{ video_title }}
-            </a>
-        </h3>
-        
-        <div class="video-metadata">
-            <a href="{{ channel_url }}" 
-               class="channel-link" 
-               aria-label="Visit {{ channel_name }} channel">
-                {{ channel_name }}
-            </a>
-            {% if views %}
-                <span class="video-views" aria-label="{{ views }} views">{{ views }} views</span>
-            {% endif %}
-        </div>
+    </label>
+    {% if field_type == 'text' or field_type == 'email' or field_type == 'password' %}
+        <input 
+            type="{{ field_type }}"
+            id="{{ name }}"
+            name="{{ name }}"
+            class="form-control {{ class }}"
+            {% if value %}value="{{ value }}"{% endif %}
+            {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+            {% if required %}required aria-required="true"{% endif %}
+            aria-describedby="{{ name }}-help">
+    {% elif field_type == 'textarea' %}
+        <textarea 
+            id="{{ name }}"
+            name="{{ name }}"
+            class="form-control {{ class }}"
+            {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+            {% if required %}required aria-required="true"{% endif %}
+            aria-describedby="{{ name }}-help">{{ value }}</textarea>
+    {% elif field_type == 'select' %}
+        <select 
+            id="{{ name }}"
+            name="{{ name }}"
+            class="form-control {{ class }}"
+            {% if required %}required aria-required="true"{% endif %}
+            aria-describedby="{{ name }}-help">
+            {{ caller() }}
+        </select>
+    {% endif %}
+    <div id="{{ name }}-help" class="form-help sr-only">
+        Help text for {{ label }}
     </div>
 </div>
 {% endmacro %}
 
-{% macro accessible_search_form(placeholder='Search videos', current_query='') %}
-<form role="search" class="search-form" method="GET" action="{{ url_for('search') }}">
-    <label for="search-input" class="sr-only">Search videos</label>
-    <input type="search" 
-           id="search-input"
-           name="q" 
-           placeholder="{{ placeholder }}"
-           value="{{ current_query }}"
-           class="search-input"
-           aria-label="{{ placeholder }}"
-           autocomplete="off">
-    <button type="submit" 
-            class="search-button"
-            aria-label="Submit search">
-        <i class="fas fa-search" aria-hidden="true"></i>
-        <span class="sr-only">Search</span>
-    </button>
-</form>
+{% macro accessible_alert(type, message, dismissible=false) %}
+<div class="alert alert-{{ type }}" role="alert" aria-live="polite">
+    <span class="sr-only">{{ type|title }} message:</span>
+    {{ message }}
+    {% if dismissible %}
+        <button type="button" class="btn-close" aria-label="Close alert">
+            <span aria-hidden="true">&times;</span>
+        </button>
+    {% endif %}
+</div>
 {% endmacro %}
 
-{% macro accessible_navigation_menu(menu_items) %}
-<nav role="navigation" aria-label="Main navigation">
-    <ul class="nav-menu" role="menubar">
-        {% for item in menu_items %}
-            <li role="none">
-                <a href="{{ item.url }}" 
-                   class="nav-link"
-                   role="menuitem"
-                   {% if item.current %}aria-current="page"{% endif %}
-                   aria-label="{{ item.aria_label or item.text }}">
-                    {% if item.icon %}
-                        <i class="{{ item.icon }}" aria-hidden="true"></i>
-                    {% endif %}
-                    <span>{{ item.text }}</span>
-                </a>
+{% macro breadcrumb_navigation(items) %}
+<nav aria-label="Breadcrumb navigation">
+    <ol class="breadcrumb">
+        {% for item in items %}
+            <li class="breadcrumb-item{% if loop.last %} active{% endif %}" 
+                {% if loop.last %}aria-current="page"{% endif %}>
+                {% if not loop.last %}
+                    <a href="{{ item.url }}" aria-label="Go to {{ item.text }}">{{ item.text }}</a>
+                {% else %}
+                    {{ item.text }}
+                {% endif %}
             </li>
         {% endfor %}
-    </ul>
+    </ol>
 </nav>
 {% endmacro %}
 
 {% macro accessible_pagination(current_page, total_pages, base_url) %}
-{% if total_pages > 1 %}
-<nav aria-label="Pagination" class="pagination-nav">
-    <ul class="pagination" role="list">
+<nav aria-label="Pagination navigation">
+    <ul class="pagination">
         {% if current_page > 1 %}
-            <li>
-                <a href="{{ base_url }}?page={{ current_page - 1 }}" 
-                   class="pagination-link"
-                   aria-label="Go to previous page">
-                    <span aria-hidden="true">&laquo;</span>
-                    Previous
-                </a>
+            <li class="page-item">
+                <a class="page-link" href="{{ base_url }}?page={{ current_page - 1 }}" 
+                   aria-label="Go to previous page">Previous</a>
             </li>
         {% endif %}
         
         {% for page in range(1, total_pages + 1) %}
             {% if page == current_page %}
-                <li>
-                    <span class="pagination-current" 
-                          aria-current="page"
-                          aria-label="Current page, page {{ page }}">
-                        {{ page }}
-                    </span>
+                <li class="page-item active" aria-current="page">
+                    <span class="page-link">{{ page }} <span class="sr-only">(current)</span></span>
                 </li>
             {% else %}
-                <li>
-                    <a href="{{ base_url }}?page={{ page }}" 
-                       class="pagination-link"
-                       aria-label="Go to page {{ page }}">
-                        {{ page }}
-                    </a>
+                <li class="page-item">
+                    <a class="page-link" href="{{ base_url }}?page={{ page }}" 
+                       aria-label="Go to page {{ page }}">{{ page }}</a>
                 </li>
             {% endif %}
         {% endfor %}
         
         {% if current_page < total_pages %}
-            <li>
-                <a href="{{ base_url }}?page={{ current_page + 1 }}" 
-                   class="pagination-link"
-                   aria-label="Go to next page">
-                    Next
-                    <span aria-hidden="true">&raquo;</span>
-                </a>
+            <li class="page-item">
+                <a class="page-link" href="{{ base_url }}?page={{ current_page + 1 }}" 
+                   aria-label="Go to next page">Next</a>
             </li>
         {% endif %}
     </ul>
 </nav>
-{% endif %}
 {% endmacro %}
