@@ -1,0 +1,137 @@
+.keyboard-shortcut-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.keyboard-shortcut-overlay.show {
+  opacity: 1;
+}
+
+.keyboard-shortcut-overlay.fade-out {
+  opacity: 0;
+}
+
+.shortcut-indicator {
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 20px;
+  border-radius: 12px;
+  font-size: 24px;
+  font-weight: bold;
+  text-align: center;
+  min-width: 120px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.play-pause-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.play-pause-icon.play::before {
+  content: "▶";
+}
+
+.play-pause-icon.pause::before {
+  content: "⏸";
+}
+
+.volume-indicator {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-width: 200px;
+}
+
+.volume-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.volume-icon.muted::before {
+  content: "🔇";
+}
+
+.volume-icon.low::before {
+  content: "🔈";
+}
+
+.volume-icon.medium::before {
+  content: "🔉";
+}
+
+.volume-icon.high::before {
+  content: "🔊";
+}
+
+.volume-bar-container {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.volume-bar {
+  height: 100%;
+  background: #ffffff;
+  border-radius: 4px;
+  transition: width 0.1s ease;
+}
+
+.volume-text {
+  font-size: 18px;
+  min-width: 40px;
+  text-align: right;
+}
+
+.seek-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.seek-icon {
+  font-size: 36px;
+}
+
+.seek-icon.forward::before {
+  content: "⏩";
+}
+
+.seek-icon.backward::before {
+  content: "⏪";
+}
+
+.seek-text {
+  font-size: 16px;
+  opacity: 0.9;
+}
+
+.fullscreen-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.fullscreen-icon {
+  font-size: 36px;
+}
+
+.fullscreen-icon.enter::before {
+  content: "⛶";
+}
+
+.fullscreen-icon.exit::before {
+  content: "⛤";
+}
