@@ -66,10 +66,10 @@ class APIMiddleware:
         
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'
     
     def apply_rate_limit(self):
-        client_ip = request.remote_addr
+        client_ip = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         current_time = time.time()
         
         # Clean old entries
@@ -83,11 +83,13 @@ class APIMiddleware:
             raise TooManyRequests('Rate limit exceeded')
         
         # Add current request
-        rate_limit_store.setdefault(client_ip, []).append(current_time)
+        if client_ip not in rate_limit_store:
+            rate_limit_store[client_ip] = []
+        rate_limit_store[client_ip].append(current_time)
     
     def handle_jwt_auth(self):
         # Skip auth for login/register endpoints
-        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
+        if request.path in ['/api/mobile/auth/login', '/api/mobile/auth/register']:
             return
         
         token = request.headers.get('Authorization')
@@ -101,4 +103,4 @@ class APIMiddleware:
                 pass
     
     def set_api_version(self):
-        g.api_version = 'v1'
+        g.api_version = '1.0'
