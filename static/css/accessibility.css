@@ -94,38 +94,32 @@ textarea:focus {
         --bg-primary: #000000;
         --bg-secondary: #1a1a1a;
         --border-color: #ffffff;
+        --link-color: #66b3ff;
+        --link-hover: #4d94d9;
+    }
+    
+    body {
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+    }
+    
+    .category-nav a,
+    .nav-link {
+        border: 2px solid var(--border-color);
+        color: var(--text-primary) !important;
+    }
+    
+    .category-nav a:hover,
+    .nav-link:hover {
+        background-color: var(--text-primary);
+        color: var(--bg-primary) !important;
     }
     
     .text-muted,
     .text-secondary,
     .secondary-info {
-        color: #cccccc !important;
+        color: #b3b3b3 !important;
     }
-}
-
-/* Icon Button Accessibility */
-.icon-button {
-    min-width: 44px;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-}
-
-.icon-button:focus::after {
-    content: attr(aria-label);
-    position: absolute;
-    bottom: -30px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #333;
-    color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    white-space: nowrap;
-    z-index: 1000;
 }
 
 /* Reduced Motion Support */
@@ -140,84 +134,111 @@ textarea:focus {
     }
 }
 
-/* Enhanced Touch Target Sizes */
-@media (max-width: 768px) {
-    .category-nav a,
-    .nav-link,
-    button {
-        min-height: 44px;
-        min-width: 44px;
-        padding: 12px 16px;
-    }
-}
-
-/* Form Field Improvements */
-.form-group {
-    position: relative;
-}
-
-.form-control:invalid {
-    border-color: #dc3545;
-}
-
-.form-control:invalid:focus {
-    border-color: #dc3545;
-    box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.25);
-}
-
-.form-error {
-    color: #dc3545;
-    font-size: 0.875rem;
-    margin-top: 4px;
-    display: block;
-}
-
-/* Category Navigation Improvements */
-.category-nav {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.category-nav a {
-    display: block;
-    padding: 12px 16px;
-    text-decoration: none;
-    color: inherit;
-    border-radius: 6px;
-    transition: background-color 0.2s ease;
-}
-
-.category-nav a[aria-current="page"] {
-    background-color: #e3f2fd;
-    font-weight: 600;
-}
-
-/* Loading States */
-.loading {
-    position: relative;
-    color: transparent !important;
-}
-
-.loading::after {
-    content: "Loading...";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: #666;
-}
-
-/* Error States */
-.error-message {
-    background-color: #ffeaa7;
-    border: 1px solid #fdcb6e;
-    color: #2d3436;
-    padding: 12px;
+/* Accessible Button Styles */
+.accessible-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 16px;
+    border: 2px solid transparent;
+    background-color: #007bff;
+    color: white;
     border-radius: 4px;
-    margin: 16px 0;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
 }
 
-.error-message[role="alert"] {
-    font-weight: 600;
+.accessible-btn:hover {
+    background-color: #0056b3;
+}
+
+.accessible-btn:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Accessible Link Styles */
+.accessible-link {
+    color: #007bff;
+    text-decoration: underline;
+    padding: 4px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.accessible-link:hover {
+    color: #0056b3;
+    background-color: rgba(0, 123, 255, 0.1);
+}
+
+/* Category Navigation */
+.category-link {
+    display: inline-block;
+    padding: 12px 16px;
+    margin: 4px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #333;
+    background-color: #f8f9fa;
+    transition: all 0.2s ease;
+    min-height: 44px;
+    min-width: 44px;
+}
+
+.category-link:hover {
+    background-color: #e9ecef;
+    border-color: #007bff;
+}
+
+.category-link.active {
+    background-color: #007bff;
+    color: white;
+    font-weight: bold;
+}
+
+/* Icon Button Accessibility */
+.icon-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px;
+    border: 2px solid transparent;
+    background-color: transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-btn:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Mobile Accessibility */
+@media (max-width: 768px) {
+    .accessible-btn,
+    .icon-btn,
+    .category-link {
+        min-height: 48px;
+        min-width: 48px;
+    }
+    
+    .accessible-btn {
+        padding: 12px 20px;
+        font-size: 18px;
+    }
+    
+    .category-link {
+        padding: 16px 20px;
+        margin: 8px 4px;
+    }
 }
