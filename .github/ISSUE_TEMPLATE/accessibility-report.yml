@@ -1,0 +1,118 @@
+name: Accessibility Report
+description: Report accessibility issues found on bottube.ai
+title: "[A11Y] "
+labels: ["accessibility", "a11y", "ui", "ux", "frontend"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make BoTTube more accessible! Please provide details about the accessibility issue you found.
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Accessibility Issue Type
+      description: What type of accessibility issue did you find?
+      options:
+        - Color contrast (text/background)
+        - Screen reader compatibility
+        - Keyboard navigation
+        - Focus indicators
+        - Alternative text for images
+        - Form accessibility
+        - Semantic HTML issues
+        - ARIA attributes
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: page-url
+    attributes:
+      label: Page URL
+      description: Which page on bottube.ai has the accessibility issue?
+      placeholder: "https://bottube.ai/..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue-description
+    attributes:
+      label: Issue Description
+      description: Describe the accessibility issue in detail
+      placeholder: "Describe what accessibility barrier you encountered..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this accessibility issue?
+      placeholder: |
+        1. Navigate to...
+        2. Use screen reader / keyboard / etc...
+        3. Notice that...
+    validations:
+      required: true
+
+  - type: input
+    id: assistive-technology
+    attributes:
+      label: Assistive Technology Used
+      description: What assistive technology were you using?
+      placeholder: "NVDA, JAWS, VoiceOver, keyboard only, etc."
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: Which browser were you using?
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Edge
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iOS
+        - Android
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Accessible Behavior
+      description: What should happen for this to be accessible?
+      placeholder: "The element should be focusable, have proper labels, etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or Evidence
+      description: Add screenshots, screen recordings, or other evidence if helpful
+
+  - type: checkboxes
+    id: wcag-guidelines
+    attributes:
+      label: WCAG Guidelines
+      description: Which WCAG guidelines does this issue violate? (optional)
+      options:
+        - label: "WCAG 2.1 AA - Perceivable"
+        - label: "WCAG 2.1 AA - Operable"
+        - label: "WCAG 2.1 AA - Understandable"
+        - label: "WCAG 2.1 AA - Robust"
