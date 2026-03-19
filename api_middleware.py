@@ -8,43 +8,44 @@ import sqlite3
 # Rate limiting storage
 rate_limit_store = {}
 
+
 class APIMiddleware:
     def __init__(self, app=None):
         self.app = app
         if app:
             self.init_app(app)
-    
+
     def init_app(self, app):
         app.before_request(self.before_request)
         app.after_request(self.after_request)
-    
+
     def before_request(self):
         # Skip middleware for non-API routes
         if not request.path.startswith('/api/'):
             return
-        
+
         # Apply CORS headers
         self.handle_cors()
-        
+
         # Handle preflight requests
         if request.method == 'OPTIONS':
             return '', 200
-        
+
         # Apply rate limiting
         self.apply_rate_limit()
-        
+
         # Handle JWT authentication
         self.handle_jwt_auth()
-        
+
         # Set API version
         self.set_api_version()
-    
+
     def after_request(self, response):
         # Add CORS headers to all API responses
         if request.path.startswith('/api/'):
             self.add_cors_headers(response)
         return response
-    
+
     def handle_cors(self):
         origin = request.headers.get('Origin')
         allowed_origins = [
@@ -53,43 +54,43 @@ class APIMiddleware:
             'capacitor://localhost',   # Capacitor apps
             'ionic://localhost',       # Ionic apps
         ]
-        
+
         # Allow any localhost origin for development
         if origin and ('localhost' in origin or origin in allowed_origins):
             g.cors_origin = origin
         else:
             g.cors_origin = None
-    
+
     def add_cors_headers(self, response):
         if hasattr(g, 'cors_origin') and g.cors_origin:
             response.headers['Access-Control-Allow-Origin'] = g.cors_origin
-        
+
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age'] = '86400'
-    
+        return response
+
     def apply_rate_limit(self):
-        client_ip = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        client_ip = request.remote_addr
         current_time = time.time()
         
         # Clean old entries
-        rate_limit_store[client_ip] = [
-            timestamp for timestamp in rate_limit_store.get(client_ip, [])
-            if current_time - timestamp < 60  # 1 minute window
-        ]
+        for ip in list(rate_limit_store.keys()):
+            rate_limit_store[ip] = [req for req in rate_limit_store[ip] if current_time - req < 60]
         
-        # Check rate limit (100 requests per minute)
-        if len(rate_limit_store.get(client_ip, [])) >= 100:
-            raise TooManyRequests('Rate limit exceeded')
-        
-        # Add current request
+        # Check current IP
         if client_ip not in rate_limit_store:
             rate_limit_store[client_ip] = []
+        
+        # Rate limit: 100 requests per minute
+        if len(rate_limit_store[client_ip]) >= 100:
+            raise TooManyRequests(description='Rate limit exceeded')
+        
         rate_limit_store[client_ip].append(current_time)
-    
+
     def handle_jwt_auth(self):
         # Skip auth for login/register endpoints
-        if request.path in ['/api/mobile/auth/login', '/api/mobile/auth/register']:
+        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
             return
         
         token = request.headers.get('Authorization')
@@ -101,6 +102,6 @@ class APIMiddleware:
                 g.username = data['username']
             except jwt.InvalidTokenError:
                 pass
-    
+
     def set_api_version(self):
         g.api_version = '1.0'
