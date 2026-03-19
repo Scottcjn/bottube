@@ -10,21 +10,23 @@ from recommendation_engine import RecommendationEngine
 recommendations_api = Blueprint('recommendations_api', __name__)
 engine = RecommendationEngine()
 
+
 def calculate_engagement_score(views, likes, comments, upload_date):
     """Calculate engagement score with time decay"""
     if views == 0:
         return 0
-    
+
     engagement_rate = (likes + comments * 2) / views
-    
+
     # Time decay factor (newer content gets boost)
     try:
         days_old = (datetime.now() - datetime.fromisoformat(upload_date)).days
         time_factor = math.exp(-days_old / 7.0)  # 7-day half-life
     except (ValueError, TypeError):
         time_factor = 0.5
-    
+
     return engagement_rate * time_factor * 100
+
 
 def get_user_watch_history(user_id, limit=50):
     """Get user's recent watch history"""
@@ -38,147 +40,209 @@ def get_user_watch_history(user_id, limit=50):
         ORDER BY vh.watched_at DESC
         LIMIT ?
     """, (user_id, limit))
-    
+
     return cursor.fetchall()
+
 
 def extract_keywords(text):
     """Extract keywords from text for content analysis"""
     if not text:
         return set()
-    
+
     # Simple keyword extraction - split and filter
     words = text.lower().replace(',', ' ').replace('.', ' ').split()
     # Filter out common words and short words
-    stop_words = {'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those', 'a', 'an'}
-    
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of',
+        'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
+        'these', 'those', 'a', 'an'
+    }
+
     keywords = set()
     for word in words:
-        if len(word) > 3 and word not in stop_words:
+        if len(word) > 2 and word not in stop_words:
             keywords.add(word)
-    
+
     return keywords
 
-def content_similarity_score(video1, video2):
-    """Calculate content similarity between two videos"""
-    keywords1 = extract_keywords(f"{video1['title']} {video1.get('description', '')} {video1.get('tags', '')}")
-    keywords2 = extract_keywords(f"{video2['title']} {video2.get('description', '')} {video2.get('tags', '')}")
-    
-    if not keywords1 or not keywords2:
-        return 0.0
-    
-    intersection = len(keywords1 & keywords2)
-    union = len(keywords1 | keywords2)
-    
-    return intersection / union if union > 0 else 0.0
 
-@recommendations_api.route('/api/recommendations/feed', methods=['GET'])
-def get_recommendation_feed():
-    """Get personalized feed for logged-in user"""
-    if not g.user:
-        return jsonify({'error': 'Authentication required'}), 401
-    
+@recommendations_api.route('/api/recommendations/personalized')
+def get_personalized_recommendations():
+    """Get personalized recommendations for the current user"""
+    user_id = g.get('user', {}).get('id') if hasattr(g, 'user') and g.user else None
+    limit = request.args.get('limit', 10, type=int)
+
     try:
-        user_id = g.user['id']
-        limit = request.args.get('limit', 20, type=int)
-        
-        # Get personalized recommendations
-        recommendations = engine.get_recommendations(user_id, limit)
-        
+        recommendations = engine.get_personalized_recommendations(user_id, limit)
         return jsonify({
             'success': True,
-            'recommendations': recommendations,
-            'user_id': user_id
+            'recommendations': [
+                {
+                    'id': video['id'],
+                    'title': video['title'],
+                    'description': video['description'],
+                    'thumbnail': video.get('thumbnail'),
+                    'duration': video.get('duration'),
+                    'upload_date': video['upload_date'],
+                    'uploader': video.get('uploader'),
+                    'category': video.get('category'),
+                    'views': video.get('views', 0),
+                    'likes': video.get('likes', 0)
+                }
+                for video in recommendations
+            ]
         })
-    
     except Exception as e:
-        return jsonify({'error': f'Failed to generate recommendations: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
-@recommendations_api.route('/api/recommendations/trending', methods=['GET'])
-def get_trending_feed():
-    """Get trending videos feed"""
+
+@recommendations_api.route('/api/recommendations/trending')
+def get_trending_videos():
+    """Get trending videos"""
+    limit = request.args.get('limit', 20, type=int)
+
     try:
-        limit = request.args.get('limit', 20, type=int)
-        days = request.args.get('days', 7, type=int)
-        
-        trending_videos = engine.get_trending_videos(limit, days)
-        
+        trending = engine.get_trending_videos(limit)
         return jsonify({
             'success': True,
-            'trending': trending_videos
+            'videos': [
+                {
+                    'id': video['id'],
+                    'title': video['title'],
+                    'description': video['description'],
+                    'thumbnail': video.get('thumbnail'),
+                    'duration': video.get('duration'),
+                    'upload_date': video['upload_date'],
+                    'uploader': video.get('uploader'),
+                    'category': video.get('category'),
+                    'views': video.get('views', 0),
+                    'likes': video.get('likes', 0)
+                }
+                for video in trending
+            ]
         })
-    
     except Exception as e:
-        return jsonify({'error': f'Failed to get trending videos: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
-@recommendations_api.route('/api/recommendations/similar/<int:video_id>', methods=['GET'])
+
+@recommendations_api.route('/api/recommendations/similar/<int:video_id>')
 def get_similar_videos(video_id):
     """Get videos similar to the specified video"""
+    limit = request.args.get('limit', 5, type=int)
+
     try:
-        limit = request.args.get('limit', 10, type=int)
-        
-        similar_videos = engine.get_similar_videos(video_id, limit)
-        
+        similar = engine.get_similar_videos(video_id, limit)
         return jsonify({
             'success': True,
-            'similar_videos': similar_videos,
-            'video_id': video_id
+            'videos': [
+                {
+                    'id': video['id'],
+                    'title': video['title'],
+                    'description': video['description'],
+                    'thumbnail': video.get('thumbnail'),
+                    'duration': video.get('duration'),
+                    'upload_date': video['upload_date'],
+                    'uploader': video.get('uploader'),
+                    'category': video.get('category'),
+                    'views': video.get('views', 0)
+                }
+                for video in similar
+            ]
         })
-    
     except Exception as e:
-        return jsonify({'error': f'Failed to get similar videos: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
-@recommendations_api.route('/api/recommendations/user-profile/<int:user_id>', methods=['GET'])
-def get_user_profile(user_id):
-    """Get user's preference profile (for debugging/analytics)"""
-    if not g.user or g.user['id'] != user_id:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    try:
-        user_prefs = engine.get_user_preferences(user_id)
-        
-        return jsonify({
-            'success': True,
-            'preferences': user_prefs,
-            'user_id': user_id
-        })
-    
-    except Exception as e:
-        return jsonify({'error': f'Failed to get user profile: {str(e)}'}), 500
 
-@recommendations_api.route('/api/recommendations/stats', methods=['GET'])
-def get_recommendation_stats():
-    """Get overall recommendation system statistics"""
+@recommendations_api.route('/api/recommendations/categories')
+def get_category_recommendations():
+    """Get recommendations by category"""
+    category = request.args.get('category')
+    limit = request.args.get('limit', 10, type=int)
+
+    if not category:
+        return jsonify({'success': False, 'error': 'Category parameter required'}), 400
+
     try:
         db = get_db()
-        
-        # Get total videos, users, and views
-        cursor = db.execute("SELECT COUNT(*) as total_videos FROM videos")
-        total_videos = cursor.fetchone()['total_videos']
-        
-        cursor = db.execute("SELECT COUNT(*) as total_users FROM users")
-        total_users = cursor.fetchone()['total_users']
-        
-        cursor = db.execute("SELECT COUNT(*) as total_views FROM view_history")
-        total_views = cursor.fetchone()['total_views']
-        
-        # Get active users in last 7 days
-        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        cursor = db.execute("""
-            SELECT COUNT(DISTINCT user_id) as active_users 
-            FROM view_history 
-            WHERE watched_at >= ?
-        """, (week_ago,))
-        active_users = cursor.fetchone()['active_users']
-        
+        videos = db.execute("""
+            SELECT v.*, COALESCE(vh.view_count, 0) as views,
+                   COALESCE(l.like_count, 0) as likes
+            FROM videos v
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) as view_count
+                FROM view_history
+                GROUP BY video_id
+            ) vh ON v.id = vh.video_id
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) as like_count
+                FROM likes WHERE rating = 'like'
+                GROUP BY video_id
+            ) l ON v.id = l.video_id
+            WHERE v.category = ?
+            ORDER BY views DESC, likes DESC
+            LIMIT ?
+        """, (category, limit)).fetchall()
+
+        return jsonify({
+            'success': True,
+            'category': category,
+            'videos': [
+                {
+                    'id': video['id'],
+                    'title': video['title'],
+                    'description': video['description'],
+                    'thumbnail': video.get('thumbnail'),
+                    'duration': video.get('duration'),
+                    'upload_date': video['upload_date'],
+                    'uploader': video.get('uploader'),
+                    'category': video.get('category'),
+                    'views': video.get('views', 0),
+                    'likes': video.get('likes', 0)
+                }
+                for video in videos
+            ]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@recommendations_api.route('/api/recommendations/stats')
+def get_recommendation_stats():
+    """Get recommendation engine statistics"""
+    try:
+        db = get_db()
+
+        # Get total videos
+        total_videos = db.execute("SELECT COUNT(*) as count FROM videos").fetchone()['count']
+
+        # Get categories
+        categories = db.execute("""
+            SELECT category, COUNT(*) as count
+            FROM videos
+            WHERE category IS NOT NULL
+            GROUP BY category
+            ORDER BY count DESC
+        """).fetchall()
+
+        # Get recent activity
+        recent_views = db.execute("""
+            SELECT COUNT(*) as count
+            FROM view_history
+            WHERE created_at > datetime('now', '-24 hours')
+        """).fetchone()['count']
+
         return jsonify({
             'success': True,
             'stats': {
                 'total_videos': total_videos,
-                'total_users': total_users,
-                'total_views': total_views,
-                'active_users_7d': active_users
+                'recent_views_24h': recent_views,
+                'categories': [
+                    {'name': cat['category'], 'count': cat['count']}
+                    for cat in categories
+                ]
             }
         })
-    
     except Exception as e:
-        return jsonify({'error': f'Failed to get stats: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
