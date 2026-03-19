@@ -74,32 +74,84 @@ class RecommendationEngine:
 
         return dot_product / (norm1 * norm2)
 
-    def get_user_preferences(self, user_id):
+    def get_content_based_recommendations(self, user_id, limit=10):
         db = get_db()
-        cursor = db.execute("""
-            SELECT v.category, COUNT(*) as watch_count,
-                   AVG(CASE WHEN l.rating = 'like' THEN 1
-                           WHEN l.rating = 'dislike' THEN -1
-                           ELSE 0 END) as avg_rating
+
+        # Get user's watch history
+        history_cursor = db.execute("""
+            SELECT DISTINCT v.id, v.title, v.description, v.tags
             FROM view_history vh
             JOIN videos v ON vh.video_id = v.id
-            LEFT JOIN likes l ON l.video_id = v.id AND l.user_id = ?
             WHERE vh.user_id = ?
-            GROUP BY v.category
-            ORDER BY watch_count DESC
-        """, (user_id, user_id))
+            ORDER BY vh.watched_at DESC
+            LIMIT 20
+        """, (user_id,))
+        history = history_cursor.fetchall()
 
-        preferences = {}
-        for row in cursor.fetchall():
-            preferences[row['category']] = {
-                'watch_count': row['watch_count'],
-                'avg_rating': row['avg_rating'] or 0
-            }
+        if not history:
+            return self.get_popular_videos(limit)
 
-        return preferences
+        # Get all videos (excluding watched ones)
+        watched_ids = [str(v['id']) for v in history]
+        placeholders = ','.join('?' * len(watched_ids))
+        all_videos_cursor = db.execute(f"""
+            SELECT id, title, description, tags, views, likes, comments, upload_date
+            FROM videos
+            WHERE id NOT IN ({placeholders})
+            ORDER BY upload_date DESC
+            LIMIT 1000
+        """, watched_ids)
+        all_videos = all_videos_cursor.fetchall()
 
-    def calculate_similarity_score(self, user_vector, video_vector):
-        return self.cosine_similarity(user_vector, video_vector)
+        # Convert to dicts for TF-IDF
+        history_dicts = [dict(v) for v in history]
+        video_dicts = [dict(v) for v in all_videos]
+
+        # Compute TF-IDF for all videos
+        all_videos_tfidf = history_dicts + video_dicts
+        tfidf_vectors = self.compute_tf_idf(all_videos_tfidf)
+
+        # Calculate user profile (average of watched videos)
+        user_profile = defaultdict(float)
+        for video in history_dicts:
+            video_vector = tfidf_vectors.get(video['id'], {})
+            for word, score in video_vector.items():
+                user_profile[word] += score
+
+        # Normalize user profile
+        if user_profile:
+            profile_norm = math.sqrt(sum(val ** 2 for val in user_profile.values()))
+            if profile_norm > 0:
+                user_profile = {word: score / profile_norm for word, score in user_profile.items()}
+
+        # Calculate similarities and scores
+        recommendations = []
+        for video in video_dicts:
+            video_vector = tfidf_vectors.get(video['id'], {})
+            similarity = self.cosine_similarity(dict(user_profile), video_vector)
+
+            # Calculate engagement score
+            engagement = self.calculate_engagement_score(
+                video['views'] or 0,
+                video['likes'] or 0,
+                video['comments'] or 0,
+                video['upload_date']
+            )
+
+            # Combined score
+            score = similarity * 0.7 + engagement * 0.3
+
+            recommendations.append({
+                'video_id': video['id'],
+                'title': video['title'],
+                'similarity_score': similarity,
+                'engagement_score': engagement,
+                'combined_score': score
+            })
+
+        # Sort by combined score and return top recommendations
+        recommendations.sort(key=lambda x: x['combined_score'], reverse=True)
+        return recommendations[:limit]
 
     def calculate_engagement_score(self, views, likes, comments, upload_date):
         if views == 0:
@@ -107,138 +159,41 @@ class RecommendationEngine:
 
         engagement_rate = (likes + comments * 2) / views
 
+        # Time decay factor
         try:
-            if isinstance(upload_date, str):
-                upload_dt = datetime.fromisoformat(upload_date)
-            else:
-                upload_dt = upload_date
-            days_old = (datetime.now() - upload_dt).days
+            days_old = (datetime.now() - datetime.fromisoformat(upload_date)).days
             time_factor = math.exp(-days_old / 7.0)
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError):
             time_factor = 0.5
 
         return engagement_rate * time_factor * 100
 
-    def get_trending_videos(self, limit=20):
+    def get_popular_videos(self, limit=10):
         db = get_db()
         cursor = db.execute("""
-            SELECT v.*, COALESCE(l.like_count, 0) as likes,
-                   COALESCE(c.comment_count, 0) as comments,
-                   COALESCE(vh.view_count, 0) as views
-            FROM videos v
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as like_count
-                FROM likes WHERE rating = 'like'
-                GROUP BY video_id
-            ) l ON v.id = l.video_id
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as comment_count
-                FROM comments
-                GROUP BY video_id
-            ) c ON v.id = c.video_id
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as view_count
-                FROM view_history
-                WHERE created_at > datetime('now', '-7 days')
-                GROUP BY video_id
-            ) vh ON v.id = vh.video_id
+            SELECT id, title, views, likes, comments, upload_date
+            FROM videos
             ORDER BY views DESC, likes DESC
             LIMIT ?
         """, (limit,))
 
-        return cursor.fetchall()
+        videos = cursor.fetchall()
+        recommendations = []
 
-    def get_personalized_recommendations(self, user_id, limit=10):
-        if not user_id:
-            return self.get_trending_videos(limit)
-
-        db = get_db()
-
-        # Get user's watch history
-        watched_videos = db.execute("""
-            SELECT DISTINCT video_id FROM view_history WHERE user_id = ?
-        """, (user_id,)).fetchall()
-        watched_ids = {row['video_id'] for row in watched_videos}
-
-        # Get user preferences
-        preferences = self.get_user_preferences(user_id)
-
-        # Get candidate videos (excluding watched)
-        placeholders = ','.join('?' for _ in watched_ids) if watched_ids else ''
-        exclude_clause = f"AND v.id NOT IN ({placeholders})" if watched_ids else ""
-
-        query = f"""
-            SELECT v.*, COALESCE(l.like_count, 0) as likes,
-                   COALESCE(c.comment_count, 0) as comments,
-                   COALESCE(vh.view_count, 0) as views
-            FROM videos v
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as like_count
-                FROM likes WHERE rating = 'like'
-                GROUP BY video_id
-            ) l ON v.id = l.video_id
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as comment_count
-                FROM comments
-                GROUP BY video_id
-            ) c ON v.id = c.video_id
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as view_count
-                FROM view_history
-                GROUP BY video_id
-            ) vh ON v.id = vh.video_id
-            WHERE 1=1 {exclude_clause}
-            LIMIT 100
-        """
-
-        params = list(watched_ids) if watched_ids else []
-        candidates = db.execute(query, params).fetchall()
-
-        # Score candidates
-        scored_videos = []
-        for video in candidates:
-            # Base engagement score
+        for video in videos:
             engagement = self.calculate_engagement_score(
-                video['views'], video['likes'],
-                video['comments'], video['upload_date']
+                video['views'] or 0,
+                video['likes'] or 0,
+                video['comments'] or 0,
+                video['upload_date']
             )
 
-            # Category preference score
-            category_score = 1.0
-            if video['category'] in preferences:
-                pref = preferences[video['category']]
-                category_score = 1 + (pref['avg_rating'] * 0.5) + \
-                                min(pref['watch_count'] / 10.0, 1.0)
+            recommendations.append({
+                'video_id': video['id'],
+                'title': video['title'],
+                'similarity_score': 0,
+                'engagement_score': engagement,
+                'combined_score': engagement
+            })
 
-            final_score = engagement * category_score
-            scored_videos.append((video, final_score))
-
-        # Sort by score and return top results
-        scored_videos.sort(key=lambda x: x[1], reverse=True)
-        return [video for video, score in scored_videos[:limit]]
-
-    def get_similar_videos(self, video_id, limit=5):
-        db = get_db()
-
-        # Get target video
-        target_video = db.execute(
-            "SELECT * FROM videos WHERE id = ?", (video_id,)
-        ).fetchone()
-        if not target_video:
-            return []
-
-        # Get similar videos from same category
-        similar_videos = db.execute("""
-            SELECT v.*, COALESCE(vh.view_count, 0) as views
-            FROM videos v
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as view_count
-                FROM view_history
-                GROUP BY video_id
-            ) vh ON v.id = vh.video_id
-            WHERE v.category = ? AND v.id != ?
-            ORDER BY views DESC
-            LIMIT ?
-        """, (target_video['category'], video_id, limit)).fetchall()
-
-        return similar_videos
+        return recommendations
