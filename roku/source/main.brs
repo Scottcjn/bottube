@@ -68,121 +68,16 @@ sub setupUI()
 end sub
 
 sub loadTrendingVideos()
-    request = CreateObject("roUrlTransfer")
-    request.setUrl(m.api.baseUrl + "/videos/trending")
-    request.setMessagePort(m.port)
-    
-    if request.asyncGetToString()
-        m.loadingTrending = true
-    end if
+    ' Implementation for loading trending videos
+    print "Loading trending videos..."
 end sub
 
-sub loadRecentVideos()
-    request = CreateObject("roUrlTransfer")
-    request.setUrl(m.api.baseUrl + "/videos/recent")
-    request.setMessagePort(m.port)
-    
-    if request.asyncGetToString()
-        m.loadingRecent = true
-    end if
+sub onNavSelected()
+    ' Handle navigation selection
+    print "Navigation item selected"
 end sub
 
-sub onNavSelected(event as Object)
-    selectedIndex = event.getRoSGNode().itemSelected
-    
-    if selectedIndex = 0
-        loadTrendingVideos()
-    else if selectedIndex = 1
-        loadRecentVideos()
-    else if selectedIndex = 2
-        showCategories()
-    end if
-end sub
-
-sub onVideoSelected(event as Object)
-    grid = event.getRoSGNode()
-    selectedItem = grid.content.getChild(grid.rowItemSelected[0]).getChild(grid.rowItemSelected[1])
-    
-    videoId = selectedItem.videoId
-    playVideo(videoId)
-end sub
-
-sub playVideo(videoId as String)
-    videoPlayer = CreateObject("roSGNode", "Video")
-    videoPlayer.content = CreateObject("roSGNode", "ContentNode")
-    videoPlayer.content.url = m.api.baseUrl + "/videos/" + videoId + "/stream"
-    videoPlayer.content.title = "BoTTube Video"
-    videoPlayer.content.streamFormat = "mp4"
-    
-    videoPlayer.visible = true
-    videoPlayer.control = "play"
-    m.top.appendChild(videoPlayer)
-    
-    videoPlayer.observeField("state", "onVideoStateChanged")
-end sub
-
-sub onVideoStateChanged(event as Object)
-    video = event.getRoSGNode()
-    
-    if video.state = "finished" or video.state = "stopped"
-        video.visible = false
-        m.top.removeChild(video)
-        m.videoGrid.setFocus(true)
-    end if
-end sub
-
-sub showCategories()
-    categoryContent = CreateObject("roSGNode", "ContentNode")
-    
-    cat1 = categoryContent.createChild("ContentNode")
-    cat1.title = "Tech"
-    cat2 = categoryContent.createChild("ContentNode") 
-    cat2.title = "Gaming"
-    cat3 = categoryContent.createChild("ContentNode")
-    cat3.title = "Music"
-    
-    m.videoGrid.content = categoryContent
-end sub
-
-function onKeyEvent(key as String, press as Boolean) as Boolean
-    if press
-        if key = "back"
-            return true
-        else if key = "up" or key = "down" or key = "left" or key = "right"
-            return false
-        end if
-    end if
-    
-    return false
-end function
-
-sub handleApiResponse(msg as Object)
-    if m.loadingTrending
-        m.loadingTrending = false
-        parseVideoResponse(msg.getString(), "trending")
-    else if m.loadingRecent
-        m.loadingRecent = false
-        parseVideoResponse(msg.getString(), "recent")
-    end if
-end sub
-
-sub parseVideoResponse(responseStr as String, contentType as String)
-    json = ParseJson(responseStr)
-    
-    if json <> Invalid and json.videos <> Invalid
-        content = CreateObject("roSGNode", "ContentNode")
-        
-        for each video in json.videos
-            videoNode = content.createChild("ContentNode")
-            videoNode.title = video.title
-            videoNode.description = video.description
-            videoNode.videoId = video.id
-            
-            if video.thumbnail <> Invalid
-                videoNode.hdPosterUrl = video.thumbnail
-            end if
-        end for
-        
-        m.videoGrid.content = content
-    end if
+sub onVideoSelected()
+    ' Handle video selection
+    print "Video selected"
 end sub
