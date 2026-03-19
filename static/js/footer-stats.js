@@ -68,59 +68,45 @@ class FooterStats {
         
         Object.entries(updates).forEach(([key, value]) => {
             if (this.elements[key]) {
-                this.animateCountUpdate(this.elements[key], value);
+                this.elements[key].textContent = this.formatNumber(value);
             }
         });
-    }
-    
-    animateCountUpdate(element, newValue) {
-        const currentText = element.textContent.replace(/,/g, '');
-        const currentValue = parseInt(currentText) || 0;
-        
-        if (currentValue === newValue) return;
-        
-        const duration = 800;
-        const steps = 20;
-        const increment = (newValue - currentValue) / steps;
-        let step = 0;
-        
-        const timer = setInterval(() => {
-            step++;
-            const value = Math.round(currentValue + (increment * step));
-            element.textContent = this.formatNumber(Math.min(value, newValue));
-            
-            if (step >= steps) {
-                clearInterval(timer);
-                element.textContent = this.formatNumber(newValue);
-            }
-        }, duration / steps);
     }
     
     formatNumber(num) {
-        return num.toLocaleString();
+        if (num >= 1000000) {
+            return (num / 1000000).toFixed(1) + 'M';
+        } else if (num >= 1000) {
+            return (num / 1000).toFixed(1) + 'K';
+        }
+        return num.toString();
     }
     
     setLoadingState() {
-        Object.values(this.elements).forEach(el => {
-            if (el) el.classList.add('loading');
-        });
-    }
-    
-    setErrorState() {
-        Object.values(this.elements).forEach(el => {
-            if (el) {
-                el.textContent = '--';
-                el.classList.remove('loading');
-                el.classList.add('error');
-            }
-        });
+        const loadingEl = document.getElementById('stats-loading');
+        const errorEl = document.getElementById('stats-error');
+        
+        if (loadingEl) loadingEl.style.display = 'block';
+        if (errorEl) errorEl.style.display = 'none';
     }
     
     clearErrorState() {
+        const loadingEl = document.getElementById('stats-loading');
+        const errorEl = document.getElementById('stats-error');
+        
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (errorEl) errorEl.style.display = 'none';
+    }
+    
+    setErrorState() {
+        const loadingEl = document.getElementById('stats-loading');
+        const errorEl = document.getElementById('stats-error');
+        
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (errorEl) errorEl.style.display = 'block';
+        
         Object.values(this.elements).forEach(el => {
-            if (el) {
-                el.classList.remove('loading', 'error');
-            }
+            if (el) el.textContent = '--';
         });
     }
     
@@ -129,20 +115,23 @@ class FooterStats {
             this.fetchStats();
         }, this.updateInterval);
     }
-    
-    destroy() {
-        if (this.updateTimer) {
-            clearInterval(this.updateTimer);
-        }
+}
+
+// Initialize footer stats when DOM is loaded
+function loadFooterStats() {
+    if (window.footerStatsInstance) {
+        window.footerStatsInstance.fetchStats();
+    } else {
+        window.footerStatsInstance = new FooterStats();
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    window.footerStats = new FooterStats();
-});
+// Auto-initialize on DOM ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadFooterStats);
+} else {
+    loadFooterStats();
+}
 
-window.addEventListener('beforeunload', () => {
-    if (window.footerStats) {
-        window.footerStats.destroy();
-    }
-});
+// Export for use in retry button
+window.loadFooterStats = loadFooterStats;
