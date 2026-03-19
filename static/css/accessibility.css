@@ -95,7 +95,7 @@ textarea:focus {
         --bg-secondary: #1a1a1a;
         --border-color: #ffffff;
         --link-color: #66b3ff;
-        --link-hover: #4d94d9;
+        --link-hover: #4da6ff;
     }
     
     body {
@@ -114,15 +114,9 @@ textarea:focus {
         background-color: var(--text-primary);
         color: var(--bg-primary) !important;
     }
-    
-    .text-muted,
-    .text-secondary,
-    .secondary-info {
-        color: #b3b3b3 !important;
-    }
 }
 
-/* Reduced Motion Support */
+/* Reduce Motion Support */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -130,8 +124,33 @@ textarea:focus {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
-        scroll-behavior: auto !important;
     }
+}
+
+/* Large Text Support */
+@media (min-resolution: 120dpi) {
+    body {
+        font-size: 16px;
+        line-height: 1.5;
+    }
+    
+    .category-nav a,
+    .nav-link {
+        padding: 12px 16px;
+        font-size: 16px;
+    }
+    
+    button {
+        min-height: 44px;
+        min-width: 44px;
+        font-size: 16px;
+    }
+}
+
+/* Keyboard Navigation Improvements */
+.keyboard-user *:focus {
+    outline: 3px solid #005fcc;
+    outline-offset: 2px;
 }
 
 /* Accessible Button Styles */
@@ -139,106 +158,95 @@ textarea:focus {
     min-height: 44px;
     min-width: 44px;
     padding: 8px 16px;
-    border: 2px solid transparent;
-    background-color: #007bff;
-    color: white;
+    border: 1px solid #ccc;
+    background: #f8f9fa;
+    color: #333;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 500;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    text-align: center;
+    transition: all 0.2s ease;
 }
 
-.accessible-btn:hover {
-    background-color: #0056b3;
+.accessible-btn:hover:not(:disabled) {
+    background: #e9ecef;
+    border-color: #adb5bd;
 }
 
 .accessible-btn:disabled {
-    background-color: #6c757d;
-    cursor: not-allowed;
     opacity: 0.6;
+    cursor: not-allowed;
 }
 
 /* Accessible Link Styles */
 .accessible-link {
-    color: #007bff;
+    color: #005fcc;
     text-decoration: underline;
-    padding: 4px;
+    font-weight: 500;
+    padding: 4px 8px;
     border-radius: 4px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    display: inline-block;
+    transition: all 0.2s ease;
 }
 
 .accessible-link:hover {
-    color: #0056b3;
-    background-color: rgba(0, 123, 255, 0.1);
+    color: #004499;
+    background-color: rgba(0, 95, 204, 0.1);
+    text-decoration: none;
 }
 
-/* Category Navigation */
+/* Category Navigation Accessibility */
 .category-link {
     display: inline-block;
-    padding: 12px 16px;
+    padding: 10px 16px;
     margin: 4px;
     border: 2px solid transparent;
-    border-radius: 8px;
-    text-decoration: none;
+    border-radius: 6px;
     color: #333;
-    background-color: #f8f9fa;
+    text-decoration: none;
+    font-weight: 500;
     transition: all 0.2s ease;
-    min-height: 44px;
-    min-width: 44px;
 }
 
 .category-link:hover {
-    background-color: #e9ecef;
-    border-color: #007bff;
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    color: #005fcc;
 }
 
 .category-link.active {
-    background-color: #007bff;
+    background-color: #005fcc;
     color: white;
-    font-weight: bold;
+    border-color: #004499;
+}
+
+.category-link:focus {
+    outline: 3px solid #005fcc;
+    outline-offset: 2px;
 }
 
 /* Icon Button Accessibility */
 .icon-btn {
     min-height: 44px;
     min-width: 44px;
-    padding: 12px;
-    border: 2px solid transparent;
-    background-color: transparent;
+    padding: 10px;
+    border: 1px solid #ccc;
+    background: transparent;
     border-radius: 50%;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: all 0.2s ease;
 }
 
 .icon-btn:hover {
-    background-color: rgba(0, 0, 0, 0.1);
+    background-color: #f8f9fa;
+    border-color: #adb5bd;
 }
 
-/* Mobile Accessibility */
-@media (max-width: 768px) {
-    .accessible-btn,
-    .icon-btn,
-    .category-link {
-        min-height: 48px;
-        min-width: 48px;
-    }
-    
-    .accessible-btn {
-        padding: 12px 20px;
-        font-size: 18px;
-    }
-    
-    .category-link {
-        padding: 16px 20px;
-        margin: 8px 4px;
-    }
+.icon-btn:focus {
+    outline: 3px solid #005fcc;
+    outline-offset: 2px;
 }
