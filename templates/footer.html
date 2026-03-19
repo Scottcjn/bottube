@@ -1,0 +1,68 @@
+<footer class="bg-dark text-light py-4">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-6">
+                <h5>BoTTube</h5>
+                <p class="text-muted">Your decentralized video platform powered by blockchain technology.</p>
+            </div>
+            <div class="col-md-6 text-md-end">
+                <div class="mb-3">
+                    <h6>System Stats</h6>
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <div class="text-primary" id="total-videos">--</div>
+                            <small class="text-muted">Videos</small>
+                        </div>
+                        <div class="col-4">
+                            <div class="text-success" id="active-users">--</div>
+                            <small class="text-muted">Users</small>
+                        </div>
+                        <div class="col-4">
+                            <div class="text-info" id="total-views">--</div>
+                            <small class="text-muted">Views</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-muted">
+                    <small>&copy; 2024 BoTTube. All rights reserved.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</footer>
+
+<script>
+async function updateFooterStats() {
+    try {
+        const response = await fetch('/health');
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Update stats elements with real data
+            const totalVideosElement = document.getElementById('total-videos');
+            const activeUsersElement = document.getElementById('active-users');
+            const totalViewsElement = document.getElementById('total-views');
+            
+            if (totalVideosElement && data.stats && data.stats.total_videos !== undefined) {
+                totalVideosElement.textContent = data.stats.total_videos.toLocaleString();
+            }
+            
+            if (activeUsersElement && data.stats && data.stats.active_users !== undefined) {
+                activeUsersElement.textContent = data.stats.active_users.toLocaleString();
+            }
+            
+            if (totalViewsElement && data.stats && data.stats.total_views !== undefined) {
+                totalViewsElement.textContent = data.stats.total_views.toLocaleString();
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch health stats:', error);
+    }
+}
+
+// Update stats when page loads
+document.addEventListener('DOMContentLoaded', updateFooterStats);
+
+// Update stats every 30 seconds
+setInterval(updateFooterStats, 30000);
+</script>
