@@ -70,84 +70,92 @@ def sanitize_category_param(category_value):
         'people': 'people'
     }
     
-    # Normalize to lowercase for matching
-    category_lower = category_clean.lower()
+    # Normalize to lowercase and check against valid categories
+    category_normalized = category_clean.lower().strip()
     
-    if category_lower in valid_categories:
-        return valid_categories[category_lower]
+    if category_normalized in valid_categories:
+        return valid_categories[category_normalized]
     
-    # If not a standard category, return sanitized version
-    category_clean = re.sub(r'[^a-zA-Z0-9\s_-]', '', category_clean)
-    category_clean = re.sub(r'\s+', '_', category_clean)
+    # If not in predefined list, sanitize and return
+    # Remove any non-alphanumeric characters except spaces and hyphens
+    category_safe = re.sub(r'[^a-zA-Z0-9\s\-]', '', category_clean)
+    category_safe = re.sub(r'\s+', ' ', category_safe).strip()
     
-    return category_clean if len(category_clean) > 0 else None
+    if len(category_safe) > 0:
+        return category_safe
+    
+    return None
 
 
-def check_color_contrast(foreground, background):
-    """Check if color contrast meets WCAG guidelines"""
-    
-    def hex_to_rgb(hex_color):
-        """Convert hex color to RGB values"""
-        hex_color = hex_color.lstrip('#')
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+def check_color_contrast(foreground_rgb, background_rgb):
+    """Check if color combination meets WCAG contrast requirements"""
     
     def get_luminance(rgb):
-        """Calculate relative luminance of RGB color"""
-        rgb_norm = [c/255.0 for c in rgb]
-        rgb_linear = []
-        
-        for c in rgb_norm:
+        # Convert RGB values to relative luminance
+        def normalize(c):
+            c = c / 255.0
             if c <= 0.03928:
-                rgb_linear.append(c / 12.92)
+                return c / 12.92
             else:
-                rgb_linear.append(((c + 0.055) / 1.055) ** 2.4)
+                return pow((c + 0.055) / 1.055, 2.4)
         
-        return 0.2126 * rgb_linear[0] + 0.7152 * rgb_linear[1] + 0.0722 * rgb_linear[2]
+        r, g, b = [normalize(c) for c in rgb]
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
     
-    try:
-        fg_rgb = hex_to_rgb(foreground)
-        bg_rgb = hex_to_rgb(background)
-        
-        fg_lum = get_luminance(fg_rgb)
-        bg_lum = get_luminance(bg_rgb)
-        
-        # Calculate contrast ratio
-        lighter = max(fg_lum, bg_lum)
-        darker = min(fg_lum, bg_lum)
-        
-        contrast_ratio = (lighter + 0.05) / (darker + 0.05)
-        
-        return {
-            'ratio': contrast_ratio,
-            'aa_normal': contrast_ratio >= 4.5,
-            'aa_large': contrast_ratio >= 3.0,
-            'aaa_normal': contrast_ratio >= 7.0,
-            'aaa_large': contrast_ratio >= 4.5
-        }
+    l1 = get_luminance(foreground_rgb)
+    l2 = get_luminance(background_rgb)
     
-    except (ValueError, TypeError):
-        return None
+    # Ensure l1 is the lighter color
+    if l1 < l2:
+        l1, l2 = l2, l1
+    
+    contrast_ratio = (l1 + 0.05) / (l2 + 0.05)
+    
+    return {
+        'ratio': contrast_ratio,
+        'aa_normal': contrast_ratio >= 4.5,
+        'aa_large': contrast_ratio >= 3.0,
+        'aaa_normal': contrast_ratio >= 7.0,
+        'aaa_large': contrast_ratio >= 4.5
+    }
 
 
 def validate_aria_attributes(element_dict):
     """Validate ARIA attributes for accessibility compliance"""
     
-    validation_results = {
-        'valid': True,
-        'warnings': [],
-        'errors': []
+    valid_roles = {
+        'button', 'link', 'tab', 'tabpanel', 'dialog', 'alert', 'status',
+        'menu', 'menuitem', 'navigation', 'main', 'banner', 'contentinfo',
+        'complementary', 'search', 'form', 'article', 'section', 'heading'
     }
     
-    # Check for required ARIA attributes
-    if element_dict.get('role') == 'button' and not element_dict.get('aria-label') and not element_dict.get('aria-labelledby'):
-        validation_results['warnings'].append('Button should have aria-label or aria-labelledby')
+    valid_properties = {
+        'aria-label', 'aria-labelledby', 'aria-describedby', 'aria-hidden',
+        'aria-expanded', 'aria-current', 'aria-selected', 'aria-checked',
+        'aria-disabled', 'aria-required', 'aria-invalid', 'aria-live',
+        'aria-atomic', 'aria-relevant', 'aria-busy', 'aria-controls',
+        'aria-owns', 'aria-activedescendant', 'aria-haspopup', 'aria-level',
+        'aria-posinset', 'aria-setsize'
+    }
     
-    if element_dict.get('role') == 'link' and not element_dict.get('aria-label') and not element_dict.get('text_content'):
-        validation_results['errors'].append('Link must have accessible name')
-        validation_results['valid'] = False
+    issues = []
     
-    # Check for conflicting ARIA attributes
-    if element_dict.get('aria-label') and element_dict.get('aria-labelledby'):
-        validation_results['warnings'].append('Both aria-label and aria-labelledby present - aria-labelledby takes precedence')
+    # Check role validity
+    if 'role' in element_dict:
+        if element_dict['role'] not in valid_roles:
+            issues.append(f"Invalid role: {element_dict['role']}")
     
-    return validation_results
+    # Check ARIA properties
+    for attr, value in element_dict.items():
+        if attr.startswith('aria-'):
+            if attr not in valid_properties:
+                issues.append(f"Invalid ARIA attribute: {attr}")
+            elif attr == 'aria-hidden' and value not in ['true', 'false']:
+                issues.append(f"Invalid aria-hidden value: {value}")
+            elif attr == 'aria-expanded' and value not in ['true', 'false']:
+                issues.append(f"Invalid aria-expanded value: {value}")
+    
+    return {
+        'valid': len(issues) == 0,
+        'issues': issues
+    }
