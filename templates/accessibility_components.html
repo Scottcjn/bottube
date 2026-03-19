@@ -58,242 +58,131 @@
 {% endmacro %}
 
 {% macro skip_navigation() %}
-<a href="#main-content" class="skip-nav" tabindex="0">
+<a href="#main-content" class="skip-nav">
     Skip to main content
 </a>
 {% endmacro %}
 
-{% macro accessible_form_field(label, field_type='text', name='', value='', required=false, placeholder='') %}
-<div class="form-field">
-    <label for="{{ name }}" class="form-label">
-        {{ label }}
-        {% if required %}
-            <span class="required" aria-label="required">*</span>
+{% macro accessible_video_card(video_title, video_url, thumbnail_url, channel_name, channel_url, duration='', views='') %}
+<div class="video-card" role="article" aria-labelledby="video-title-{{ loop.index }}">
+    <a href="{{ video_url }}" class="video-thumbnail-link" aria-label="Watch video: {{ video_title }}">
+        <img src="{{ thumbnail_url }}" 
+             alt="Thumbnail for {{ video_title }}" 
+             class="video-thumbnail"
+             loading="lazy">
+        {% if duration %}
+            <span class="video-duration" aria-label="Duration: {{ duration }}">{{ duration }}</span>
         {% endif %}
-    </label>
-    <input 
-        type="{{ field_type }}"
-        id="{{ name }}"
-        name="{{ name }}"
-        value="{{ value }}"
-        class="form-input"
-        {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
-        {% if required %}required aria-required="true"{% endif %}
-        aria-describedby="{{ name }}-help">
-    <div id="{{ name }}-help" class="form-help sr-only">
-        {{ caller() if caller }}
+    </a>
+    
+    <div class="video-info">
+        <h3 id="video-title-{{ loop.index }}" class="video-title">
+            <a href="{{ video_url }}" aria-label="Watch: {{ video_title }}">
+                {{ video_title }}
+            </a>
+        </h3>
+        
+        <div class="video-metadata">
+            <a href="{{ channel_url }}" 
+               class="channel-link" 
+               aria-label="Visit {{ channel_name }} channel">
+                {{ channel_name }}
+            </a>
+            {% if views %}
+                <span class="video-views" aria-label="{{ views }} views">{{ views }} views</span>
+            {% endif %}
+        </div>
     </div>
 </div>
 {% endmacro %}
 
-{% macro accessible_dropdown(label, options, selected='', name='') %}
-<div class="dropdown-container">
-    <label for="{{ name }}" class="dropdown-label">{{ label }}</label>
-    <select 
-        id="{{ name }}"
-        name="{{ name }}"
-        class="dropdown-select"
-        aria-label="{{ label }}"
-        role="listbox">
-        {% for option in options %}
-        <option 
-            value="{{ option.value }}" 
-            {% if option.value == selected %}selected{% endif %}
-            role="option">
-            {{ option.text }}
-        </option>
+{% macro accessible_search_form(placeholder='Search videos', current_query='') %}
+<form role="search" class="search-form" method="GET" action="{{ url_for('search') }}">
+    <label for="search-input" class="sr-only">Search videos</label>
+    <input type="search" 
+           id="search-input"
+           name="q" 
+           placeholder="{{ placeholder }}"
+           value="{{ current_query }}"
+           class="search-input"
+           aria-label="{{ placeholder }}"
+           autocomplete="off">
+    <button type="submit" 
+            class="search-button"
+            aria-label="Submit search">
+        <i class="fas fa-search" aria-hidden="true"></i>
+        <span class="sr-only">Search</span>
+    </button>
+</form>
+{% endmacro %}
+
+{% macro accessible_navigation_menu(menu_items) %}
+<nav role="navigation" aria-label="Main navigation">
+    <ul class="nav-menu" role="menubar">
+        {% for item in menu_items %}
+            <li role="none">
+                <a href="{{ item.url }}" 
+                   class="nav-link"
+                   role="menuitem"
+                   {% if item.current %}aria-current="page"{% endif %}
+                   aria-label="{{ item.aria_label or item.text }}">
+                    {% if item.icon %}
+                        <i class="{{ item.icon }}" aria-hidden="true"></i>
+                    {% endif %}
+                    <span>{{ item.text }}</span>
+                </a>
+            </li>
         {% endfor %}
-    </select>
-</div>
+    </ul>
+</nav>
 {% endmacro %}
 
-{% macro status_message(message, type='info') %}
-<div 
-    class="status-message status-{{ type }}"
-    role="alert"
-    aria-live="polite"
-    tabindex="0">
-    <span class="status-icon" aria-hidden="true">
-        {% if type == 'error' %}⚠{% elif type == 'success' %}✓{% else %}ℹ{% endif %}
-    </span>
-    <span class="status-text">{{ message }}</span>
-</div>
+{% macro accessible_pagination(current_page, total_pages, base_url) %}
+{% if total_pages > 1 %}
+<nav aria-label="Pagination" class="pagination-nav">
+    <ul class="pagination" role="list">
+        {% if current_page > 1 %}
+            <li>
+                <a href="{{ base_url }}?page={{ current_page - 1 }}" 
+                   class="pagination-link"
+                   aria-label="Go to previous page">
+                    <span aria-hidden="true">&laquo;</span>
+                    Previous
+                </a>
+            </li>
+        {% endif %}
+        
+        {% for page in range(1, total_pages + 1) %}
+            {% if page == current_page %}
+                <li>
+                    <span class="pagination-current" 
+                          aria-current="page"
+                          aria-label="Current page, page {{ page }}">
+                        {{ page }}
+                    </span>
+                </li>
+            {% else %}
+                <li>
+                    <a href="{{ base_url }}?page={{ page }}" 
+                       class="pagination-link"
+                       aria-label="Go to page {{ page }}">
+                        {{ page }}
+                    </a>
+                </li>
+            {% endif %}
+        {% endfor %}
+        
+        {% if current_page < total_pages %}
+            <li>
+                <a href="{{ base_url }}?page={{ current_page + 1 }}" 
+                   class="pagination-link"
+                   aria-label="Go to next page">
+                    Next
+                    <span aria-hidden="true">&raquo;</span>
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
 {% endmacro %}
-
-{% macro loading_spinner(text='Loading...') %}
-<div class="loading-container" role="status" aria-live="polite">
-    <div class="spinner" aria-hidden="true"></div>
-    <span class="loading-text">{{ text }}</span>
-</div>
-{% endmacro %}
-
-<style>
-.accessible-btn, .accessible-link, .icon-btn, .category-link {
-    border: 2px solid transparent;
-    transition: all 0.2s ease;
-}
-
-.accessible-btn:focus, .accessible-link:focus, .icon-btn:focus, .category-link:focus {
-    outline: 2px solid #0066cc;
-    outline-offset: 2px;
-    border-color: #0066cc;
-}
-
-.accessible-btn:hover, .accessible-link:hover, .icon-btn:hover, .category-link:hover {
-    background-color: #f0f0f0;
-}
-
-.sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-}
-
-.skip-nav {
-    position: absolute;
-    top: -40px;
-    left: 6px;
-    background: #000;
-    color: #fff;
-    padding: 8px;
-    text-decoration: none;
-    z-index: 9999;
-}
-
-.skip-nav:focus {
-    top: 6px;
-}
-
-.category-link.active {
-    background-color: #e6f3ff;
-    font-weight: bold;
-}
-
-.form-field {
-    margin-bottom: 1rem;
-}
-
-.form-label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: #333;
-}
-
-.form-input {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-.form-input:focus {
-    outline: 2px solid #0066cc;
-    border-color: #0066cc;
-}
-
-.required {
-    color: #d32f2f;
-}
-
-.status-message {
-    padding: 1rem;
-    border-radius: 4px;
-    margin: 1rem 0;
-    display: flex;
-    align-items: center;
-}
-
-.status-info {
-    background-color: #e3f2fd;
-    border-left: 4px solid #2196f3;
-    color: #1565c0;
-}
-
-.status-success {
-    background-color: #e8f5e8;
-    border-left: 4px solid #4caf50;
-    color: #2e7d32;
-}
-
-.status-error {
-    background-color: #ffebee;
-    border-left: 4px solid #f44336;
-    color: #c62828;
-}
-
-.status-icon {
-    margin-right: 0.5rem;
-    font-weight: bold;
-}
-
-.loading-container {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-}
-
-.spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid #0066cc;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-right: 0.5rem;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.dropdown-container {
-    margin-bottom: 1rem;
-}
-
-.dropdown-label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-}
-
-.dropdown-select {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-.dropdown-select:focus {
-    outline: 2px solid #0066cc;
-    border-color: #0066cc;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    * {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
-}
-
-@media (prefers-contrast: high) {
-    .accessible-btn, .accessible-link, .category-link {
-        border: 2px solid #000;
-    }
-    
-    .form-input, .dropdown-select {
-        border: 2px solid #000;
-    }
-}
-</style>
