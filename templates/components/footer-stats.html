@@ -88,29 +88,29 @@
     margin-top: 10px;
 }
 
+.stats-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    color: #ff6b6b;
+}
+
 .loading-spinner {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     border: 2px solid #666;
     border-top: 2px solid #fff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
-.stats-error {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 10px;
-    color: #ff6b6b;
-}
-
 .retry-btn {
-    padding: 4px 8px;
     background: #333;
     color: #fff;
     border: 1px solid #555;
+    padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
@@ -121,23 +121,12 @@
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 0.6; }
+    0%, 100% { opacity: 0.5; }
     50% { opacity: 1; }
 }
 
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
-}
-
-@media (max-width: 768px) {
-    .stats-container {
-        flex-direction: column;
-        gap: 10px;
-    }
-    
-    .stat-separator {
-        display: none;
-    }
 }
 </style>
