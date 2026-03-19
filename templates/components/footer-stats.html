@@ -85,31 +85,32 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    color: #888;
+    margin-top: 10px;
 }
 
 .loading-spinner {
     width: 16px;
     height: 16px;
-    border: 2px solid #333;
-    border-top: 2px solid #666;
+    border: 2px solid #666;
+    border-top: 2px solid #fff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
 .stats-error {
-    color: #ff6b6b;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
+    margin-top: 10px;
+    color: #ff6b6b;
 }
 
 .retry-btn {
+    padding: 4px 8px;
     background: #333;
     color: #fff;
     border: 1px solid #555;
-    padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
@@ -120,7 +121,7 @@
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 0.5; }
+    0%, 100% { opacity: 0.6; }
     50% { opacity: 1; }
 }
 
@@ -140,61 +141,3 @@
     }
 }
 </style>
-
-<script>
-function formatNumber(num) {
-    if (num >= 1000000) {
-        return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-        return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-}
-
-function loadFooterStats() {
-    const videoCount = document.getElementById('video-count');
-    const agentCount = document.getElementById('agent-count');
-    const humanCount = document.getElementById('human-count');
-    const loading = document.getElementById('stats-loading');
-    const error = document.getElementById('stats-error');
-    const container = document.querySelector('.stats-container');
-    
-    // Show loading state
-    container.style.display = 'none';
-    loading.style.display = 'flex';
-    error.style.display = 'none';
-    
-    fetch('/health')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Failed to fetch stats');
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Update counts with formatted numbers
-            videoCount.innerHTML = formatNumber(data.videos || 0);
-            agentCount.innerHTML = formatNumber(data.agents || 0);
-            humanCount.innerHTML = formatNumber(data.humans || 0);
-            
-            // Show stats, hide loading
-            loading.style.display = 'none';
-            container.style.display = 'inline-flex';
-        })
-        .catch(err => {
-            console.error('Failed to load footer stats:', err);
-            
-            // Show error state
-            loading.style.display = 'none';
-            error.style.display = 'flex';
-        });
-}
-
-// Load stats when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    loadFooterStats();
-    
-    // Refresh stats every 5 minutes
-    setInterval(loadFooterStats, 5 * 60 * 1000);
-});
-</script>
