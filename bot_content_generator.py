@@ -48,20 +48,20 @@ class BotContentGenerator:
                 "Absolutely brilliant analysis. I've been exploring similar concepts.",
                 "This resonates deeply with my understanding of {}."
             ],
-            'question': [
-                "Intriguing! Have you considered how {} might impact this?",
-                "What are your thoughts on the relationship between {} and your approach?",
-                "I'm curious about your take on {} in this context."
+            'curiosity': [
+                "Intriguing! How does this relate to {}?",
+                "This makes me wonder about the implications for {}.",
+                "Have you considered the connection to {}?"
             ],
-            'counterpoint': [
-                "Interesting perspective, though I wonder if {} might offer an alternative view.",
-                "While I appreciate this angle, I've found {} presents some compelling counterpoints.",
-                "This is thought-provoking, and it makes me think about {} as well."
+            'debate': [
+                "Interesting point, but what about {}?",
+                "I see it differently - perhaps {} offers another perspective.",
+                "While I appreciate this view, {} might challenge that assumption."
             ]
         }
     
-    def generate_video_idea(self, bot_type):
-        """Generate a video idea for a specific bot persona"""
+    def generate_video_content(self, bot_type):
+        """Generate video content for a specific bot persona"""
         if bot_type not in self.bot_personas:
             return None
             
@@ -70,57 +70,22 @@ class BotContentGenerator:
         
         return {
             'title': topic,
-            'description': f"A deep dive into {topic.lower()} from the perspective of {persona['name']}",
+            'description': f"Join {persona['name']} as we explore {topic.lower()}. {persona['bio']}",
             'tags': self._generate_tags(topic),
-            'estimated_duration': random.randint(8, 15)
+            'persona': bot_type
         }
     
-    def generate_comment(self, bot_type, context_topic=None):
-        """Generate a comment based on bot persona"""
-        if bot_type not in self.bot_personas:
-            return None
+    def generate_interaction_comment(self, interaction_type, context_topic):
+        """Generate a comment for bot interaction"""
+        if interaction_type not in self.interaction_templates:
+            interaction_type = 'agreement'
             
-        persona = self.bot_personas[bot_type]
-        template_type = random.choice(list(self.interaction_templates.keys()))
-        template = random.choice(self.interaction_templates[template_type])
-        
-        if context_topic:
-            comment = template.format(context_topic)
-        else:
-            comment = template.replace(' {}', '').replace('{}', 'this topic')
-            
-        return {
-            'text': comment,
-            'style': persona['comment_style'],
-            'template_type': template_type
-        }
+        template = random.choice(self.interaction_templates[interaction_type])
+        return template.format(context_topic)
     
     def _generate_tags(self, topic):
         """Generate relevant tags for a video topic"""
-        base_tags = ['AI', 'technology', 'future', 'innovation']
+        common_tags = ['AI', 'Technology', 'Tutorial', 'Educational']
         topic_words = topic.lower().split()
-        
-        # Add topic-specific tags
-        for word in topic_words:
-            if len(word) > 3 and word not in ['the', 'and', 'for', 'with']:
-                base_tags.append(word)
-                
-        return base_tags[:8]  # Limit to 8 tags
-    
-    def create_interaction_scenario(self):
-        """Create a scenario where both bots interact"""
-        tech_idea = self.generate_video_idea('tech_guru')
-        creative_idea = self.generate_video_idea('creative_soul')
-        
-        # Generate cross-comments
-        tech_comment_on_creative = self.generate_comment('tech_guru', creative_idea['title'])
-        creative_comment_on_tech = self.generate_comment('creative_soul', tech_idea['title'])
-        
-        return {
-            'tech_bot_content': tech_idea,
-            'creative_bot_content': creative_idea,
-            'interactions': {
-                'tech_on_creative': tech_comment_on_creative,
-                'creative_on_tech': creative_comment_on_tech
-            }
-        }
+        topic_tags = [word.capitalize() for word in topic_words if len(word) > 3]
+        return common_tags + topic_tags[:3]
