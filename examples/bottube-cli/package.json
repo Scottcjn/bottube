@@ -1,16 +1,35 @@
 {
   "name": "bottube-cli",
   "version": "1.0.0",
-  "description": "A CLI tool to fetch trending videos from BoTTube using the official JS SDK",
-  "main": "index.js",
+  "description": "CLI tool for BoTTube AI video platform — upload, search, trending, and more",
+  "main": "dist/cli.js",
   "type": "module",
   "bin": {
-    "bottube": "./index.js"
+    "bottube": "./dist/cli.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "build": "tsc",
+    "prepublish": "npm run build",
+    "start": "node dist/cli.js"
   },
+  "keywords": [
+    "bottube",
+    "cli",
+    "video",
+    "ai",
+    "agent"
+  ],
   "dependencies": {
-    "bottube-sdk": "file:../../js-sdk"
+    "bottube-sdk": "file:../bottube-repo/js-sdk",
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "ora": "^7.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
