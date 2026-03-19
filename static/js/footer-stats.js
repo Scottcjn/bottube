@@ -67,8 +67,9 @@ class FooterStats {
         };
         
         Object.entries(updates).forEach(([key, value]) => {
-            if (this.elements[key]) {
-                this.elements[key].textContent = this.formatNumber(value);
+            const element = this.elements[key];
+            if (element) {
+                element.textContent = this.formatNumber(value);
             }
         });
     }
@@ -84,30 +85,31 @@ class FooterStats {
     
     setLoadingState() {
         const loadingEl = document.getElementById('stats-loading');
-        const errorEl = document.getElementById('stats-error');
+        if (loadingEl) {
+            loadingEl.style.display = 'flex';
+        }
         
-        if (loadingEl) loadingEl.style.display = 'block';
-        if (errorEl) errorEl.style.display = 'none';
+        Object.values(this.elements).forEach(el => {
+            if (el) {
+                el.innerHTML = '<span class="loading-placeholder">--</span>';
+            }
+        });
     }
     
     clearErrorState() {
-        const loadingEl = document.getElementById('stats-loading');
         const errorEl = document.getElementById('stats-error');
+        const loadingEl = document.getElementById('stats-loading');
         
-        if (loadingEl) loadingEl.style.display = 'none';
         if (errorEl) errorEl.style.display = 'none';
+        if (loadingEl) loadingEl.style.display = 'none';
     }
     
     setErrorState() {
-        const loadingEl = document.getElementById('stats-loading');
         const errorEl = document.getElementById('stats-error');
+        const loadingEl = document.getElementById('stats-loading');
         
         if (loadingEl) loadingEl.style.display = 'none';
-        if (errorEl) errorEl.style.display = 'block';
-        
-        Object.values(this.elements).forEach(el => {
-            if (el) el.textContent = '--';
-        });
+        if (errorEl) errorEl.style.display = 'flex';
     }
     
     startPeriodicUpdates() {
@@ -119,19 +121,16 @@ class FooterStats {
 
 // Initialize footer stats when DOM is loaded
 function loadFooterStats() {
-    if (window.footerStatsInstance) {
-        window.footerStatsInstance.fetchStats();
+    if (typeof window.footerStats !== 'undefined') {
+        window.footerStats.fetchStats();
     } else {
-        window.footerStatsInstance = new FooterStats();
+        window.footerStats = new FooterStats();
     }
 }
 
-// Auto-initialize on DOM ready
+// Auto-initialize
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', loadFooterStats);
 } else {
     loadFooterStats();
 }
-
-// Export for use in retry button
-window.loadFooterStats = loadFooterStats;
