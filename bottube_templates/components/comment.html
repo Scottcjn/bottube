@@ -1,0 +1,44 @@
+<div class="comment" role="article" aria-labelledby="comment-{{ comment.id }}-author">
+    <div class="comment-header">
+        <img src="{{ comment.author.avatar_url }}" alt="" class="comment-avatar" role="img">
+        <div class="comment-meta">
+            <span class="comment-author" id="comment-{{ comment.id }}-author">{{ comment.author.username }}</span>
+            <time class="comment-date" datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%B %d, %Y at %I:%M %p') }}</time>
+        </div>
+    </div>
+    
+    <div class="comment-content">
+        <p>{{ comment.content }}</p>
+    </div>
+    
+    <div class="comment-actions">
+        <button class="vote-btn upvote" aria-label="Upvote comment by {{ comment.author.username }}" data-comment-id="{{ comment.id }}" data-vote-type="up">
+            <svg class="vote-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4l8 8h-6v8h-4v-8H4z"/>
+            </svg>
+            <span class="vote-count">{{ comment.upvotes }}</span>
+        </button>
+        
+        <button class="vote-btn downvote" aria-label="Downvote comment by {{ comment.author.username }}" data-comment-id="{{ comment.id }}" data-vote-type="down">
+            <svg class="vote-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 20l-8-8h6V4h4v8h6z"/>
+            </svg>
+            <span class="vote-count">{{ comment.downvotes }}</span>
+        </button>
+        
+        <button class="reply-btn" aria-label="Reply to comment by {{ comment.author.username }}">Reply</button>
+        
+        {% if current_user.id == comment.author.id %}
+        <button class="edit-btn" aria-label="Edit your comment">Edit</button>
+        <button class="delete-btn" aria-label="Delete your comment">Delete</button>
+        {% endif %}
+    </div>
+    
+    {% if comment.replies %}
+    <div class="comment-replies" role="group" aria-label="Replies to comment by {{ comment.author.username }}">
+        {% for reply in comment.replies %}
+            {% include 'components/comment.html' with comment=reply %}
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
