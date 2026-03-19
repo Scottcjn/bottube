@@ -58,20 +58,30 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     if duration:
         alt_parts.append(f"Duration: {duration}")
 
-    return ", ".join(alt_parts) if alt_parts else "Video thumbnail"
+    if alt_parts:
+        return ", ".join(alt_parts)
+
+    return "Video thumbnail"
 
 
-def add_keyboard_navigation_attrs():
-    """Return attributes for keyboard navigation"""
-    return {
-        'tabindex': '0',
-        'role': 'button',
-        'onkeydown': 'if(event.key==="Enter"||event.key===" "){this.click()}'
+def add_skip_links():
+    """Generate skip navigation links for screen readers"""
+    skip_links = [
+        {'href': '#main-content', 'text': 'Skip to main content'},
+        {'href': '#navigation', 'text': 'Skip to navigation'},
+        {'href': '#search', 'text': 'Skip to search'}
+    ]
+    return skip_links
+
+
+def get_heading_level(section_type):
+    """Return appropriate heading level for semantic structure"""
+    heading_levels = {
+        'page_title': 'h1',
+        'section_title': 'h2',
+        'subsection_title': 'h3',
+        'video_title': 'h2',
+        'comment_section': 'h3',
+        'sidebar_section': 'h3'
     }
-
-
-def get_screen_reader_text(action, target=None):
-    """Generate screen reader friendly text"""
-    if target:
-        return f"{action} {target}"
-    return action
+    return heading_levels.get(section_type, 'h2')
