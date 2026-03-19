@@ -67,95 +67,93 @@ def sanitize_category_param(category_value):
         'comedy': 'comedy',
         'film': 'film',
         'animation': 'animation',
-        'people': 'people'
+        'people': 'people',
+        'pets': 'pets',
+        'travel': 'travel',
+        'autos': 'autos',
+        'howto': 'howto'
     }
     
-    # Normalize to lowercase and check against valid categories
-    category_normalized = category_clean.lower().strip()
+    # Normalize and validate
+    category_lower = category_clean.lower().strip()
     
-    if category_normalized in valid_categories:
-        return valid_categories[category_normalized]
+    if category_lower in valid_categories:
+        return valid_categories[category_lower]
     
-    # If not in predefined list, sanitize and return
-    # Remove any non-alphanumeric characters except spaces and hyphens
-    category_safe = re.sub(r'[^a-zA-Z0-9\s\-]', '', category_clean)
-    category_safe = re.sub(r'\s+', ' ', category_safe).strip()
-    
-    if len(category_safe) > 0:
-        return category_safe
-    
+    # Return None for invalid categories
     return None
 
 
-def check_color_contrast(foreground_rgb, background_rgb):
+def check_color_contrast(foreground, background):
     """Check if color combination meets WCAG contrast requirements"""
     
+    def hex_to_rgb(hex_color):
+        """Convert hex color to RGB tuple"""
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) == 3:
+            hex_color = ''.join([c*2 for c in hex_color])
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    
     def get_luminance(rgb):
-        # Convert RGB values to relative luminance
-        def normalize(c):
+        """Calculate relative luminance of RGB color"""
+        rgb_linear = []
+        for c in rgb:
             c = c / 255.0
             if c <= 0.03928:
-                return c / 12.92
+                rgb_linear.append(c / 12.92)
             else:
-                return pow((c + 0.055) / 1.055, 2.4)
+                rgb_linear.append(pow((c + 0.055) / 1.055, 2.4))
+        return 0.2126 * rgb_linear[0] + 0.7152 * rgb_linear[1] + 0.0722 * rgb_linear[2]
+    
+    try:
+        fg_rgb = hex_to_rgb(foreground)
+        bg_rgb = hex_to_rgb(background)
         
-        r, g, b = [normalize(c) for c in rgb]
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b
-    
-    l1 = get_luminance(foreground_rgb)
-    l2 = get_luminance(background_rgb)
-    
-    # Ensure l1 is the lighter color
-    if l1 < l2:
-        l1, l2 = l2, l1
-    
-    contrast_ratio = (l1 + 0.05) / (l2 + 0.05)
-    
-    return {
-        'ratio': contrast_ratio,
-        'aa_normal': contrast_ratio >= 4.5,
-        'aa_large': contrast_ratio >= 3.0,
-        'aaa_normal': contrast_ratio >= 7.0,
-        'aaa_large': contrast_ratio >= 4.5
-    }
+        fg_lum = get_luminance(fg_rgb)
+        bg_lum = get_luminance(bg_rgb)
+        
+        # Calculate contrast ratio
+        if fg_lum > bg_lum:
+            contrast = (fg_lum + 0.05) / (bg_lum + 0.05)
+        else:
+            contrast = (bg_lum + 0.05) / (fg_lum + 0.05)
+        
+        return {
+            'ratio': round(contrast, 2),
+            'aa_normal': contrast >= 4.5,
+            'aa_large': contrast >= 3.0,
+            'aaa_normal': contrast >= 7.0,
+            'aaa_large': contrast >= 4.5
+        }
+    except (ValueError, TypeError):
+        return None
 
 
-def validate_aria_attributes(element_dict):
-    """Validate ARIA attributes for accessibility compliance"""
+def validate_heading_structure(html_content):
+    """Validate heading hierarchy in HTML content"""
     
-    valid_roles = {
-        'button', 'link', 'tab', 'tabpanel', 'dialog', 'alert', 'status',
-        'menu', 'menuitem', 'navigation', 'main', 'banner', 'contentinfo',
-        'complementary', 'search', 'form', 'article', 'section', 'heading'
-    }
+    headings = re.findall(r'<h([1-6])[^>]*>', html_content, re.IGNORECASE)
     
-    valid_properties = {
-        'aria-label', 'aria-labelledby', 'aria-describedby', 'aria-hidden',
-        'aria-expanded', 'aria-current', 'aria-selected', 'aria-checked',
-        'aria-disabled', 'aria-required', 'aria-invalid', 'aria-live',
-        'aria-atomic', 'aria-relevant', 'aria-busy', 'aria-controls',
-        'aria-owns', 'aria-activedescendant', 'aria-haspopup', 'aria-level',
-        'aria-posinset', 'aria-setsize'
-    }
+    if not headings:
+        return {'valid': True, 'issues': []}
     
     issues = []
+    heading_levels = [int(h) for h in headings]
     
-    # Check role validity
-    if 'role' in element_dict:
-        if element_dict['role'] not in valid_roles:
-            issues.append(f"Invalid role: {element_dict['role']}")
+    # Check if starts with h1
+    if heading_levels and heading_levels[0] != 1:
+        issues.append('Document should start with h1')
     
-    # Check ARIA properties
-    for attr, value in element_dict.items():
-        if attr.startswith('aria-'):
-            if attr not in valid_properties:
-                issues.append(f"Invalid ARIA attribute: {attr}")
-            elif attr == 'aria-hidden' and value not in ['true', 'false']:
-                issues.append(f"Invalid aria-hidden value: {value}")
-            elif attr == 'aria-expanded' and value not in ['true', 'false']:
-                issues.append(f"Invalid aria-expanded value: {value}")
+    # Check for level skipping
+    for i in range(1, len(heading_levels)):
+        current = heading_levels[i]
+        previous = heading_levels[i-1]
+        
+        if current > previous + 1:
+            issues.append(f'Heading level skipped: h{previous} to h{current}')
     
     return {
         'valid': len(issues) == 0,
-        'issues': issues
+        'issues': issues,
+        'levels': heading_levels
     }
