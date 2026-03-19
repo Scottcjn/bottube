@@ -68,16 +68,104 @@ sub setupUI()
 end sub
 
 sub loadTrendingVideos()
-    ' Implementation for loading trending videos
-    print "Loading trending videos..."
+    request = CreateObject("roUrlTransfer")
+    request.SetUrl(m.api.baseUrl + "/tv/videos/trending")
+    request.SetRequest("GET")
+    response = request.GetToString()
+    
+    if response <> ""
+        json = ParseJson(response)
+        if json <> invalid and json.videos <> invalid
+            populateVideoGrid(json.videos)
+        end if
+    end if
+end sub
+
+sub populateVideoGrid(videos as object)
+    content = CreateObject("roSGNode", "ContentNode")
+    
+    for each video in videos
+        videoNode = content.createChild("ContentNode")
+        videoNode.title = video.title
+        videoNode.description = video.description
+        videoNode.hdPosterUrl = video.thumbnail_url
+        videoNode.id = video.id
+        videoNode.username = video.username
+        videoNode.viewCount = video.view_count
+    end for
+    
+    m.videoGrid.content = content
 end sub
 
 sub onNavSelected()
-    ' Handle navigation selection
-    print "Navigation item selected"
+    selectedIndex = m.navBar.itemSelected
+    
+    if selectedIndex = 0
+        loadTrendingVideos()
+    else if selectedIndex = 1
+        loadRecentVideos()
+    else if selectedIndex = 2
+        loadCategories()
+    end if
+end sub
+
+sub loadRecentVideos()
+    request = CreateObject("roUrlTransfer")
+    request.SetUrl(m.api.baseUrl + "/tv/videos/recent")
+    request.SetRequest("GET")
+    response = request.GetToString()
+    
+    if response <> ""
+        json = ParseJson(response)
+        if json <> invalid and json.videos <> invalid
+            populateVideoGrid(json.videos)
+        end if
+    end if
+end sub
+
+sub loadCategories()
+    ' Placeholder for categories functionality
+    print "Categories not implemented yet"
 end sub
 
 sub onVideoSelected()
-    ' Handle video selection
-    print "Video selected"
+    selectedVideo = m.videoGrid.content.getChild(m.videoGrid.itemSelected)
+    
+    if selectedVideo <> invalid
+        playVideo(selectedVideo.id)
+    end if
+end sub
+
+sub playVideo(videoId as integer)
+    request = CreateObject("roUrlTransfer")
+    request.SetUrl(m.api.baseUrl + "/tv/video/" + videoId.toStr())
+    request.SetRequest("GET")
+    response = request.GetToString()
+    
+    if response <> ""
+        json = ParseJson(response)
+        if json <> invalid and json.stream_url <> invalid
+            video = CreateObject("roVideoScreen")
+            port = CreateObject("roMessagePort")
+            video.SetMessagePort(port)
+            
+            videoContent = {
+                stream: { url: json.stream_url },
+                title: json.title,
+                description: json.description
+            }
+            
+            video.SetContent(videoContent)
+            video.show()
+            
+            while true
+                msg = wait(0, port)
+                if type(msg) = "roVideoScreenEvent"
+                    if msg.isScreenClosed()
+                        exit while
+                    end if
+                end if
+            end while
+        end if
+    end if
 end sub
