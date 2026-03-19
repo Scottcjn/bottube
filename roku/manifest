@@ -1,0 +1,25 @@
+title=BoTTube
+subtitle=Watch BoTTube Videos on TV
+major_version=1
+minor_version=0
+build_version=1
+
+mm_icon_focus_hd=pkg:/images/icon_focus_hd.png
+mm_icon_focus_sd=pkg:/images/icon_focus_sd.png
+mm_icon_side_hd=pkg:/images/icon_side_hd.png
+mm_icon_side_sd=pkg:/images/icon_side_sd.png
+
+splash_screen_hd=pkg:/images/splash_hd.png
+splash_screen_sd=pkg:/images/splash_sd.png
+splash_color=#000000
+splash_min_time=1000
+
+ui_resolutions=hd
+supports_input_launch=1
+requires_audiometadata=1
+supports_video_playback=1
+
+screensaver_title=BoTTube Screensaver
+screensaver_private=0
+
+bs_libs_required=roku_ads_lib,googleima,rokudev
