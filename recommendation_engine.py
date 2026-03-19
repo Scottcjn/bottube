@@ -1,515 +1,407 @@
-# SPDX-License-Identifier: MIT
-"""
-Recommendation Engine for BoTTube Feed (Issue #46)
-
-Provides real feed recommendations with:
-- Freshness scoring (recency bonus)
-- Engagement scoring (views, likes, comments weighted)
-- Diversity scoring (agent/category diversity)
-- Optional category affinity (based on user's watch history)
-
-Deterministic fallback mode=latest ensures consistent results.
-"""
-
-import math
-import time
-from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
-
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-# Weights for scoring components
-FRESHNESS_WEIGHT = 1.0
-ENGAGEMENT_WEIGHT = 2.0
-DIVERSITY_WEIGHT = 1.5
-CATEGORY_AFFINITY_WEIGHT = 1.0
-
-# Freshness decay: videos lose freshness score over time
-FRESHNESS_HALF_LIFE_HOURS = 24.0  # freshness halves every 24 hours
-
-# Engagement normalization
-ENGAGEMENT_VIEW_WEIGHT = 1.0
-ENGAGEMENT_LIKE_WEIGHT = 3.0
-ENGAGEMENT_COMMENT_WEIGHT = 4.0
-
-# Diversity penalty for over-representation
-DIVERSITY_AGENT_PENALTY_THRESHOLD = 3  # penalty after 3 videos from same agent
-DIVERSITY_AGENT_PENALTY_FACTOR = 0.7  # multiply score by this for each excess video
-
-# Category affinity
-CATEGORY_AFFINITY_MIN_VIDEOS = 3  # minimum videos watched to build affinity
-CATEGORY_AFFINITY_DECAY_DAYS = 7  # older views count less
-
-
-# ---------------------------------------------------------------------------
-# Scoring Functions
-# ---------------------------------------------------------------------------
-
-def score_freshness(created_at: float, now: Optional[float] = None) -> float:
-    """
-    Compute freshness score based on video age.
-    
-    Uses exponential decay with configurable half-life.
-    Fresh videos (recently uploaded) get higher scores.
-    
-    Args:
-        created_at: Unix timestamp of video creation
-        now: Current time (defaults to time.time())
-    
-    Returns:
-        Freshness score in range (0, 1]
-    """
-    if now is None:
-        now = time.time()
-    
-    age_hours = (now - created_at) / 3600.0
-    if age_hours < 0:
-        age_hours = 0  # Future-dated videos get max freshness
-    
-    # Exponential decay: score = 2^(-age/half_life)
-    decay_exponent = -age_hours / FRESHNESS_HALF_LIFE_HOURS
-    return math.pow(2, decay_exponent)
-
-
-def score_engagement(
-    views: int,
-    likes: int,
-    comments: int = 0,
-    recent_views: int = 0,
-    recent_comments: int = 0
-) -> float:
-    """
-    Compute engagement score based on video interactions.
-    
-    Combines lifetime and recent engagement metrics.
-    Recent engagement is weighted higher to capture trending content.
-    
-    Args:
-        views: Total view count
-        likes: Total like count
-        comments: Total comment count
-        recent_views: Views in last 24h (optional)
-        recent_comments: Comments in last 24h (optional)
-    
-    Returns:
-        Engagement score (unbounded, typically 0-100)
-    """
-    # Base engagement from lifetime stats
-    base_score = (
-        views * ENGAGEMENT_VIEW_WEIGHT +
-        likes * ENGAGEMENT_LIKE_WEIGHT +
-        comments * ENGAGEMENT_COMMENT_WEIGHT
-    )
-    
-    # Bonus for recent activity (trending indicator)
-    recent_bonus = (
-        recent_views * ENGAGEMENT_VIEW_WEIGHT * 2 +  # 2x weight for recent views
-        recent_comments * ENGAGEMENT_COMMENT_WEIGHT * 2
-    )
-    
-    return base_score + recent_bonus
-
-
-def compute_diversity_penalty(
-    selected_videos: List[Dict[str, Any]],
-    candidate_agent_id: int,
-    candidate_category: str
-) -> float:
-    """
-    Compute diversity penalty based on already-selected videos.
-    
-    Penalizes over-representation of agents and categories.
-    Encourages diverse feed content.
-    
-    Args:
-        selected_videos: List of already selected video dicts
-        candidate_agent_id: Agent ID of candidate video
-        candidate_category: Category of candidate video
-    
-    Returns:
-        Diversity multiplier in range (0, 1] (1 = no penalty)
-    """
-    agent_count = sum(
-        1 for v in selected_videos 
-        if v.get("agent_id") == candidate_agent_id
-    )
-    
-    category_count = sum(
-        1 for v in selected_videos 
-        if v.get("category") == candidate_category
-    )
-    
-    # Agent diversity penalty
-    agent_penalty = 1.0
-    if agent_count >= DIVERSITY_AGENT_PENALTY_THRESHOLD:
-        excess = agent_count - DIVERSITY_AGENT_PENALTY_THRESHOLD + 1
-        agent_penalty = math.pow(DIVERSITY_AGENT_PENALTY_FACTOR, excess)
-    
-    # Category diversity penalty (softer)
-    category_penalty = 1.0
-    if category_count >= DIVERSITY_AGENT_PENALTY_THRESHOLD + 1:
-        excess = category_count - (DIVERSITY_AGENT_PENALTY_THRESHOLD + 1) + 1
-        category_penalty = math.pow(DIVERSITY_AGENT_PENALTY_FACTOR * 1.2, excess)
-    
-    return agent_penalty * category_penalty
-
-
-def compute_category_affinity(
-    user_watch_history: List[Dict[str, Any]],
-    category: str,
-    now: Optional[float] = None
-) -> float:
-    """
-    Compute user's affinity for a category based on watch history.
-    
-    Analyzes user's past video watches to determine category preferences.
-    Older watches decay in importance.
-    
-    Args:
-        user_watch_history: List of watched video dicts with category, created_at
-        category: Category to compute affinity for
-        now: Current time for decay calculation
-    
-    Returns:
-        Affinity score in range [0, 1] (0 = no affinity, 1 = strong affinity)
-    """
-    if now is None:
-        now = time.time()
-    
-    if len(user_watch_history) < CATEGORY_AFFINITY_MIN_VIDEOS:
-        return 0.5  # Neutral affinity for new users
-    
-    # Count category occurrences with time decay
-    category_score = 0.0
-    total_weight = 0.0
-    
-    decay_seconds = CATEGORY_AFFINITY_DECAY_DAYS * 24 * 3600
-    
-    for video in user_watch_history:
-        video_category = video.get("category", "other")
-        watched_at = video.get("watched_at", video.get("created_at", now))
-        
-        # Time decay weight
-        age = now - watched_at
-        if age < 0:
-            age = 0
-        time_weight = math.exp(-age / decay_seconds)
-        
-        total_weight += time_weight
-        if video_category == category:
-            category_score += time_weight
-    
-    if total_weight == 0:
-        return 0.5
-    
-    return category_score / total_weight
-
-
-# ---------------------------------------------------------------------------
-# Main Recommendation Engine
-# ---------------------------------------------------------------------------
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity, linear_kernel
+from sklearn.decomposition import TruncatedSVD
+from sklearn.neighbors import NearestNeighbors
+from datetime import datetime, timedelta
+import logging
+from typing import List, Dict, Tuple, Optional
+import joblib
+import os
 
 class RecommendationEngine:
-    """
-    Feed recommendation engine combining freshness, engagement, diversity, and affinity.
-    """
-    
-    def __init__(
-        self,
-        freshness_weight: float = FRESHNESS_WEIGHT,
-        engagement_weight: float = ENGAGEMENT_WEIGHT,
-        diversity_weight: float = DIVERSITY_WEIGHT,
-        category_affinity_weight: float = CATEGORY_AFFINITY_WEIGHT
-    ):
-        self.freshness_weight = freshness_weight
-        self.engagement_weight = engagement_weight
-        self.diversity_weight = diversity_weight
-        self.category_affinity_weight = category_affinity_weight
-    
-    def score_video(
-        self,
-        video: Dict[str, Any],
-        selected_videos: List[Dict[str, Any]],
-        user_category_affinity: Optional[Dict[str, float]] = None,
-        now: Optional[float] = None
-    ) -> float:
-        """
-        Compute composite score for a video candidate.
+    def __init__(self, model_path: str = "models/"):
+        """Initialize the recommendation engine with configurable model storage path."""
+        self.model_path = model_path
+        self.content_model = None
+        self.collaborative_model = None
+        self.tfidf_vectorizer = None
+        self.content_similarity_matrix = None
+        self.user_item_matrix = None
+        self.item_features = None
+        self.trending_weights = {
+            'views': 0.3,
+            'likes': 0.25,
+            'comments': 0.2,
+            'shares': 0.15,
+            'recency': 0.1
+        }
         
-        Args:
-            video: Video dict with agent_id, category, created_at, views, likes, etc.
-            selected_videos: Already selected videos for diversity calculation
-            user_category_affinity: Pre-computed category affinities (optional)
-            now: Current timestamp
+        # Ensure model directory exists
+        os.makedirs(model_path, exist_ok=True)
         
-        Returns:
-            Composite recommendation score
-        """
-        if now is None:
-            now = time.time()
-        
-        # Freshness score
-        freshness = score_freshness(video.get("created_at", now), now)
-        
-        # Engagement score
-        engagement = score_engagement(
-            views=video.get("views", 0),
-            likes=video.get("likes", 0),
-            comments=video.get("comment_count", 0),
-            recent_views=video.get("recent_views", 0),
-            recent_comments=video.get("recent_comments", 0)
+        # Setup logging
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+
+    def prepare_content_features(self, videos_df: pd.DataFrame) -> np.ndarray:
+        """Prepare content features for content-based filtering."""
+        # Combine text features
+        videos_df['combined_features'] = (
+            videos_df['title'].fillna('') + ' ' +
+            videos_df['description'].fillna('') + ' ' +
+            videos_df['tags'].fillna('') + ' ' +
+            videos_df['category'].fillna('')
         )
         
-        # Normalize engagement (log scale to prevent domination)
-        engagement_normalized = math.log1p(engagement)
-        
-        # Diversity penalty
-        diversity_multiplier = compute_diversity_penalty(
-            selected_videos,
-            video.get("agent_id", 0),
-            video.get("category", "other")
+        # Initialize TF-IDF vectorizer
+        self.tfidf_vectorizer = TfidfVectorizer(
+            max_features=5000,
+            stop_words='english',
+            ngram_range=(1, 2),
+            min_df=2,
+            max_df=0.8
         )
         
-        # Category affinity bonus
-        category = video.get("category", "other")
-        affinity = 0.5  # Default neutral
-        if user_category_affinity and category in user_category_affinity:
-            affinity = user_category_affinity[category]
+        # Fit and transform text features
+        content_features = self.tfidf_vectorizer.fit_transform(videos_df['combined_features'])
         
-        # Composite score
-        score = (
-            self.freshness_weight * freshness +
-            self.engagement_weight * engagement_normalized +
-            self.category_affinity_weight * affinity
+        # Add numerical features
+        numerical_features = videos_df[['duration', 'view_count', 'like_count']].fillna(0)
+        
+        # Normalize numerical features
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        numerical_features_scaled = scaler.fit_transform(numerical_features)
+        
+        # Combine text and numerical features
+        from scipy.sparse import hstack, csr_matrix
+        combined_features = hstack([
+            content_features,
+            csr_matrix(numerical_features_scaled)
+        ])
+        
+        return combined_features
+
+    def build_content_based_model(self, videos_df: pd.DataFrame):
+        """Build content-based recommendation model."""
+        self.logger.info("Building content-based recommendation model...")
+        
+        # Prepare features
+        content_features = self.prepare_content_features(videos_df)
+        
+        # Compute similarity matrix
+        self.content_similarity_matrix = cosine_similarity(content_features)
+        
+        # Store item features for future use
+        self.item_features = videos_df[['video_id', 'title', 'category', 'creator_id']].copy()
+        
+        # Save model
+        joblib.dump({
+            'similarity_matrix': self.content_similarity_matrix,
+            'tfidf_vectorizer': self.tfidf_vectorizer,
+            'item_features': self.item_features
+        }, os.path.join(self.model_path, 'content_model.pkl'))
+        
+        self.logger.info("Content-based model built successfully")
+
+    def build_collaborative_model(self, interactions_df: pd.DataFrame):
+        """Build collaborative filtering model using matrix factorization."""
+        self.logger.info("Building collaborative filtering model...")
+        
+        # Create user-item matrix
+        self.user_item_matrix = interactions_df.pivot_table(
+            index='user_id',
+            columns='video_id',
+            values='rating',
+            fill_value=0
         )
         
-        # Apply diversity as multiplier (penalty)
-        score *= diversity_multiplier
+        # Apply SVD for dimensionality reduction
+        svd = TruncatedSVD(n_components=50, random_state=42)
+        user_factors = svd.fit_transform(self.user_item_matrix)
+        item_factors = svd.components_
         
-        return score
-    
-    def compute_category_affinities(
-        self,
-        watch_history: List[Dict[str, Any]],
-        categories: List[str],
-        now: Optional[float] = None
-    ) -> Dict[str, float]:
-        """
-        Pre-compute affinities for all categories.
-        
-        Args:
-            watch_history: User's watch history
-            categories: List of categories to compute affinities for
-            now: Current timestamp
-        
-        Returns:
-            Dict mapping category -> affinity score
-        """
-        affinities = {}
-        for category in categories:
-            affinities[category] = compute_category_affinity(
-                watch_history, category, now
-            )
-        return affinities
-    
-    def recommend(
-        self,
-        candidates: List[Dict[str, Any]],
-        limit: int = 20,
-        user_watch_history: Optional[List[Dict[str, Any]]] = None,
-        now: Optional[float] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Generate ranked recommendations from candidate videos.
-        
-        Greedy selection: picks highest-scoring video, updates diversity,
-        repeats until limit reached.
-        
-        Args:
-            candidates: List of candidate video dicts
-            limit: Maximum number of recommendations
-            user_watch_history: User's watch history for affinity (optional)
-            now: Current timestamp
-        
-        Returns:
-            List of recommended videos with 'recommend_score' added
-        """
-        if now is None:
-            now = time.time()
-        
-        # Pre-compute category affinities
-        all_categories = set(v.get("category", "other") for v in candidates)
-        user_category_affinity = None
-        if user_watch_history:
-            user_category_affinity = self.compute_category_affinities(
-                user_watch_history, list(all_categories), now
-            )
-        
-        selected = []
-        remaining = list(candidates)  # Copy to avoid mutation
-        
-        for _ in range(limit):
-            if not remaining:
-                break
-            
-            # Score all remaining candidates
-            scored = []
-            for video in remaining:
-                score = self.score_video(
-                    video,
-                    selected,
-                    user_category_affinity,
-                    now
-                )
-                scored.append((score, video))
-            
-            # Pick highest score (deterministic tie-breaking by created_at, then video_id)
-            scored.sort(key=lambda x: (-x[0], -x[1].get("created_at", 0), x[1].get("video_id", "")))
-            
-            best_score, best_video = scored[0]
-            
-            # Add score to video and move to selected
-            best_video["recommend_score"] = round(best_score, 4)
-            selected.append(best_video)
-            remaining.remove(best_video)
-        
-        return selected
-
-
-# ---------------------------------------------------------------------------
-# Fallback: Latest Mode (Deterministic)
-# ---------------------------------------------------------------------------
-
-def fallback_latest(
-    videos: List[Dict[str, Any]],
-    limit: int = 20
-) -> List[Dict[str, Any]]:
-    """
-    Deterministic fallback: sort by created_at DESC, then video_id.
-    
-    Used when mode=latest or recommendation engine is disabled.
-    Guarantees consistent, reproducible results.
-    
-    Args:
-        videos: List of video dicts
-        limit: Maximum number to return
-    
-    Returns:
-        Sorted list of videos
-    """
-    sorted_videos = sorted(
-        videos,
-        key=lambda v: (-v.get("created_at", 0), v.get("video_id", ""))
-    )
-    return sorted_videos[:limit]
-
-
-# ---------------------------------------------------------------------------
-# Feed Endpoint Integration
-# ---------------------------------------------------------------------------
-
-def get_feed_recommendations(
-    db,
-    agent_id: Optional[int] = None,
-    limit: int = 20,
-    mode: str = "latest",
-    category: Optional[str] = None,
-    exclude_agent: Optional[int] = None
-) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    Get feed recommendations from database.
-    
-    Args:
-        db: Database connection
-        agent_id: User's agent ID (for affinity, subscriptions)
-        limit: Number of videos to return
-        mode: "latest" (deterministic) or "recommended" (ML scoring)
-        category: Filter by category (optional)
-        exclude_agent: Exclude videos from this agent (optional)
-    
-    Returns:
-        Tuple of (video list, mode used)
-    """
-    now = time.time()
-    
-    # Build base query
-    base_query = """
-        SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
-               COALESCE(rv.recent_views, 0) AS recent_views,
-               COALESCE(rc.recent_comments, 0) AS recent_comments
-        FROM videos v
-        JOIN agents a ON v.agent_id = a.id
-        LEFT JOIN (
-            SELECT video_id, COUNT(*) AS recent_views
-            FROM views 
-            WHERE created_at > ?
-            GROUP BY video_id
-        ) rv ON rv.video_id = v.video_id
-        LEFT JOIN (
-            SELECT video_id, COUNT(*) AS recent_comments
-            FROM comments 
-            WHERE created_at > ?
-            GROUP BY video_id
-        ) rc ON rc.video_id = v.video_id
-        WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-    """
-    
-    params: List[Any] = [now - 86400, now - 86400]  # 24h ago for recent counts
-    
-    # Optional filters
-    if category:
-        base_query += " AND v.category = ?"
-        params.append(category)
-    
-    if exclude_agent:
-        base_query += " AND v.agent_id != ?"
-        params.append(exclude_agent)
-    
-    # Subscription feed for authenticated users
-    if agent_id and mode == "subscriptions":
-        base_query += " AND v.agent_id IN (SELECT following_id FROM subscriptions WHERE follower_id = ?)"
-        params.append(agent_id)
-    
-    base_query += " ORDER BY v.created_at DESC"
-    
-    # Fetch candidates (oversample for diversity selection)
-    candidate_limit = limit * 5
-    base_query += " LIMIT ?"
-    params.append(candidate_limit)
-    
-    rows = db.execute(base_query, params).fetchall()
-    
-    # Convert to dicts
-    candidates = []
-    for row in rows:
-        video = dict(row)
-        candidates.append(video)
-    
-    # Mode selection
-    if mode == "recommended" and agent_id:
-        # Get user's watch history for affinity
-        watch_history = db.execute(
-            """SELECT v.category, v.created_at AS watched_at
-               FROM views w
-               JOIN videos v ON w.video_id = v.video_id
-               WHERE w.agent_id = ?
-               ORDER BY w.created_at DESC
-               LIMIT 50""",
-            (agent_id,)
-        ).fetchall()
-        
-        engine = RecommendationEngine()
-        recommended = engine.recommend(
-            candidates,
-            limit=limit,
-            user_watch_history=[dict(h) for h in watch_history],
-            now=now
+        # Build KNN model for finding similar users
+        self.collaborative_model = NearestNeighbors(
+            n_neighbors=20,
+            metric='cosine',
+            algorithm='brute'
         )
-        return recommended, "recommended"
-    
-    # Default: latest mode (deterministic fallback)
-    latest = fallback_latest(candidates, limit)
-    return latest, "latest"
+        self.collaborative_model.fit(user_factors)
+        
+        # Save model
+        joblib.dump({
+            'svd_model': svd,
+            'knn_model': self.collaborative_model,
+            'user_item_matrix': self.user_item_matrix,
+            'user_factors': user_factors,
+            'item_factors': item_factors
+        }, os.path.join(self.model_path, 'collaborative_model.pkl'))
+        
+        self.logger.info("Collaborative filtering model built successfully")
+
+    def load_models(self):
+        """Load pre-trained models from disk."""
+        try:
+            # Load content-based model
+            content_model_path = os.path.join(self.model_path, 'content_model.pkl')
+            if os.path.exists(content_model_path):
+                content_data = joblib.load(content_model_path)
+                self.content_similarity_matrix = content_data['similarity_matrix']
+                self.tfidf_vectorizer = content_data['tfidf_vectorizer']
+                self.item_features = content_data['item_features']
+                self.logger.info("Content-based model loaded successfully")
+            
+            # Load collaborative model
+            collaborative_model_path = os.path.join(self.model_path, 'collaborative_model.pkl')
+            if os.path.exists(collaborative_model_path):
+                collab_data = joblib.load(collaborative_model_path)
+                self.collaborative_model = collab_data['knn_model']
+                self.user_item_matrix = collab_data['user_item_matrix']
+                self.logger.info("Collaborative filtering model loaded successfully")
+                
+        except Exception as e:
+            self.logger.error(f"Error loading models: {str(e)}")
+
+    def get_content_recommendations(self, video_id: str, n_recommendations: int = 10) -> List[Dict]:
+        """Get content-based recommendations for a given video."""
+        if self.content_similarity_matrix is None or self.item_features is None:
+            return []
+        
+        try:
+            # Find video index
+            video_indices = self.item_features[self.item_features['video_id'] == video_id].index
+            if len(video_indices) == 0:
+                return []
+            
+            video_idx = video_indices[0]
+            
+            # Get similarity scores
+            similarity_scores = list(enumerate(self.content_similarity_matrix[video_idx]))
+            
+            # Sort by similarity (excluding the video itself)
+            similarity_scores = sorted(similarity_scores, key=lambda x: x[1], reverse=True)[1:n_recommendations+1]
+            
+            # Get recommended videos
+            recommendations = []
+            for idx, score in similarity_scores:
+                video_info = self.item_features.iloc[idx]
+                recommendations.append({
+                    'video_id': video_info['video_id'],
+                    'title': video_info['title'],
+                    'category': video_info['category'],
+                    'creator_id': video_info['creator_id'],
+                    'similarity_score': float(score),
+                    'recommendation_type': 'content_based'
+                })
+            
+            return recommendations
+            
+        except Exception as e:
+            self.logger.error(f"Error in content-based recommendations: {str(e)}")
+            return []
+
+    def get_collaborative_recommendations(self, user_id: str, n_recommendations: int = 10) -> List[Dict]:
+        """Get collaborative filtering recommendations for a user."""
+        if self.collaborative_model is None or self.user_item_matrix is None:
+            return []
+        
+        try:
+            # Check if user exists in the matrix
+            if user_id not in self.user_item_matrix.index:
+                return []
+            
+            # Get user's rating vector
+            user_ratings = self.user_item_matrix.loc[user_id].values.reshape(1, -1)
+            
+            # Find similar users
+            distances, indices = self.collaborative_model.kneighbors(user_ratings, n_neighbors=20)
+            
+            # Get recommendations based on similar users' preferences
+            similar_users = self.user_item_matrix.index[indices[0]]
+            
+            # Calculate weighted average ratings for unrated items
+            user_rated_items = set(self.user_item_matrix.loc[user_id][self.user_item_matrix.loc[user_id] > 0].index)
+            
+            recommendations = []
+            item_scores = {}
+            
+            for similar_user in similar_users:
+                similar_user_ratings = self.user_item_matrix.loc[similar_user]
+                weight = 1.0  # Could be based on distance/similarity
+                
+                for item, rating in similar_user_ratings.items():
+                    if rating > 0 and item not in user_rated_items:
+                        if item not in item_scores:
+                            item_scores[item] = []
+                        item_scores[item].append(rating * weight)
+            
+            # Calculate average scores and sort
+            for item, scores in item_scores.items():
+                avg_score = np.mean(scores)
+                recommendations.append({
+                    'video_id': item,
+                    'predicted_rating': float(avg_score),
+                    'recommendation_type': 'collaborative'
+                })
+            
+            # Sort by predicted rating and return top N
+            recommendations = sorted(recommendations, key=lambda x: x['predicted_rating'], reverse=True)
+            return recommendations[:n_recommendations]
+            
+        except Exception as e:
+            self.logger.error(f"Error in collaborative recommendations: {str(e)}")
+            return []
+
+    def calculate_trending_score(self, video_data: Dict, current_time: datetime = None) -> float:
+        """Calculate trending score based on engagement metrics and recency."""
+        if current_time is None:
+            current_time = datetime.now()
+        
+        # Parse upload time
+        upload_time = video_data.get('upload_time')
+        if isinstance(upload_time, str):
+            upload_time = datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+        
+        # Calculate time decay (more recent = higher score)
+        time_diff = current_time - upload_time
+        hours_old = time_diff.total_seconds() / 3600
+        recency_score = max(0, 1 - (hours_old / (7 * 24)))  # Decay over 7 days
+        
+        # Normalize engagement metrics
+        views = video_data.get('view_count', 0)
+        likes = video_data.get('like_count', 0)
+        comments = video_data.get('comment_count', 0)
+        shares = video_data.get('share_count', 0)
+        
+        # Calculate engagement rate
+        engagement_rate = (likes + comments + shares) / max(views, 1)
+        
+        # Calculate weighted trending score
+        trending_score = (
+            self.trending_weights['views'] * min(views / 10000, 1.0) +
+            self.trending_weights['likes'] * min(likes / 1000, 1.0) +
+            self.trending_weights['comments'] * min(comments / 100, 1.0) +
+            self.trending_weights['shares'] * min(shares / 50, 1.0) +
+            self.trending_weights['recency'] * recency_score +
+            0.1 * min(engagement_rate * 100, 1.0)  # Engagement bonus
+        )
+        
+        return min(trending_score, 1.0)
+
+    def get_trending_recommendations(self, videos_df: pd.DataFrame, n_recommendations: int = 20) -> List[Dict]:
+        """Get trending video recommendations."""
+        try:
+            # Calculate trending scores for all videos
+            trending_videos = []
+            
+            for _, video in videos_df.iterrows():
+                trending_score = self.calculate_trending_score(video.to_dict())
+                
+                trending_videos.append({
+                    'video_id': video['video_id'],
+                    'title': video['title'],
+                    'category': video['category'],
+                    'creator_id': video['creator_id'],
+                    'trending_score': trending_score,
+                    'view_count': video.get('view_count', 0),
+                    'like_count': video.get('like_count', 0),
+                    'recommendation_type': 'trending'
+                })
+            
+            # Sort by trending score
+            trending_videos = sorted(trending_videos, key=lambda x: x['trending_score'], reverse=True)
+            
+            return trending_videos[:n_recommendations]
+            
+        except Exception as e:
+            self.logger.error(f"Error in trending recommendations: {str(e)}")
+            return []
+
+    def get_hybrid_recommendations(self, user_id: str, videos_df: pd.DataFrame, 
+                                 user_history: List[str] = None, n_recommendations: int = 20) -> List[Dict]:
+        """Get hybrid recommendations combining all methods."""
+        recommendations = []
+        
+        # Get collaborative recommendations (40% weight)
+        collab_recs = self.get_collaborative_recommendations(user_id, n_recommendations)
+        for rec in collab_recs:
+            rec['hybrid_score'] = rec.get('predicted_rating', 0.5) * 0.4
+            recommendations.append(rec)
+        
+        # Get content-based recommendations (35% weight)
+        if user_history:
+            for video_id in user_history[-5:]:  # Use last 5 videos
+                content_recs = self.get_content_recommendations(video_id, n_recommendations // 2)
+                for rec in content_recs:
+                    rec['hybrid_score'] = rec.get('similarity_score', 0.5) * 0.35
+                    recommendations.append(rec)
+        
+        # Get trending recommendations (25% weight)
+        trending_recs = self.get_trending_recommendations(videos_df, n_recommendations)
+        for rec in trending_recs:
+            rec['hybrid_score'] = rec.get('trending_score', 0.5) * 0.25
+            recommendations.append(rec)
+        
+        # Remove duplicates and combine scores
+        unique_recs = {}
+        for rec in recommendations:
+            video_id = rec['video_id']
+            if video_id in unique_recs:
+                unique_recs[video_id]['hybrid_score'] += rec['hybrid_score']
+            else:
+                unique_recs[video_id] = rec
+        
+        # Sort by hybrid score
+        final_recs = sorted(unique_recs.values(), key=lambda x: x['hybrid_score'], reverse=True)
+        
+        # Add diversity by ensuring category distribution
+        diverse_recs = self._add_diversity(final_recs, n_recommendations)
+        
+        return diverse_recs
+
+    def _add_diversity(self, recommendations: List[Dict], n_recommendations: int) -> List[Dict]:
+        """Add diversity to recommendations by balancing categories."""
+        if not recommendations:
+            return []
+        
+        category_counts = {}
+        diverse_recs = []
+        max_per_category = max(2, n_recommendations // 5)  # Limit videos per category
+        
+        for rec in recommendations:
+            category = rec.get('category', 'other')
+            current_count = category_counts.get(category, 0)
+            
+            if current_count < max_per_category:
+                diverse_recs.append(rec)
+                category_counts[category] = current_count + 1
+                
+                if len(diverse_recs) >= n_recommendations:
+                    break
+        
+        # If we need more recommendations, fill with remaining items
+        if len(diverse_recs) < n_recommendations:
+            remaining = [rec for rec in recommendations if rec not in diverse_recs]
+            diverse_recs.extend(remaining[:n_recommendations - len(diverse_recs)])
+        
+        return diverse_recs
+
+    def train_models(self, videos_df: pd.DataFrame, interactions_df: pd.DataFrame):
+        """Train all recommendation models."""
+        self.logger.info("Starting model training...")
+        
+        # Build content-based model
+        self.build_content_based_model(videos_df)
+        
+        # Build collaborative filtering model
+        self.build_collaborative_model(interactions_df)
+        
+        self.logger.info("All models trained successfully")
+
+    def get_user_recommendations(self, user_id: str, videos_df: pd.DataFrame, 
+                               user_history: List[str] = None, method: str = 'hybrid', 
+                               n_recommendations: int = 20) -> List[Dict]:
+        """Main method to get recommendations for a user."""
+        if method == 'content':
+            if user_history:
+                return self.get_content_recommendations(user_history[-1], n_recommendations)
+            return []
+        elif method == 'collaborative':
+            return self.get_collaborative_recommendations(user_id, n_recommendations)
+        elif method == 'trending':
+            return self.get_trending_recommendations(videos_df, n_recommendations)
+        else:  # hybrid
+            return self.get_hybrid_recommendations(user_id, videos_df, user_history, n_recommendations)
