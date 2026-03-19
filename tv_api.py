@@ -59,200 +59,64 @@ def get_device_token():
         'INSERT INTO tv_access_tokens (access_token, user_id, device_code, expires_at) VALUES (?, ?, ?, ?)',
         (access_token, user_id, device_code, int(time.time()) + 86400)  # 24 hours
     )
-    db.execute('DELETE FROM tv_device_codes WHERE device_code = ?', (device_code,))
     db.commit()
     
     return jsonify({
         'access_token': access_token,
-        'token_type': 'bearer',
+        'token_type': 'Bearer',
         'expires_in': 86400
     })
 
-def get_tv_user():
-    """Get authenticated TV user from access token."""
+@tv_api.route('/videos/trending', methods=['GET'])
+def get_trending_videos():
+    """Get trending videos for TV interface."""
+    db = get_db()
+    videos = db.execute(
+        'SELECT * FROM videos ORDER BY view_count DESC LIMIT 20'
+    ).fetchall()
+    
+    video_list = []
+    for video in videos:
+        video_list.append({
+            'id': video['id'],
+            'title': video['title'],
+            'thumbnail_url': video['thumbnail_url'],
+            'duration': video['duration'],
+            'view_count': video['view_count'],
+            'upload_date': video['upload_date']
+        })
+    
+    return jsonify({'videos': video_list})
+
+@tv_api.route('/videos/<int:video_id>/stream', methods=['GET'])
+def get_video_stream(video_id):
+    """Get video stream URL for TV playback."""
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        return None
+        return jsonify({'error': 'unauthorized'}), 401
     
-    token = auth_header[7:]
+    access_token = auth_header.split(' ')[1]
+    
     db = get_db()
-    result = db.execute(
-        '''SELECT u.id, u.username 
-           FROM tv_access_tokens t 
-           JOIN users u ON t.user_id = u.id 
-           WHERE t.access_token = ? AND t.expires_at > ?''',
-        (token, int(time.time()))
+    token_result = db.execute(
+        'SELECT * FROM tv_access_tokens WHERE access_token = ? AND expires_at > ?',
+        (access_token, int(time.time()))
     ).fetchone()
     
-    return result
-
-@tv_api.route('/videos/trending')
-def trending_videos():
-    """Get trending videos for TV interface."""
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
+    if not token_result:
+        return jsonify({'error': 'invalid_token'}), 401
     
-    db = get_db()
-    videos = db.execute(
-        '''SELECT v.id, v.title, v.description, v.thumbnail_url, v.video_url, 
-                  v.duration, v.upload_date, u.username as uploader,
-                  COUNT(l.id) as view_count
-           FROM videos v
-           JOIN users u ON v.user_id = u.id
-           LEFT JOIN video_views l ON v.id = l.video_id
-           WHERE v.is_processed = 1
-           GROUP BY v.id
-           ORDER BY view_count DESC, v.upload_date DESC
-           LIMIT ? OFFSET ?''',
-        (limit, offset)
-    ).fetchall()
-    
-    return jsonify({
-        'videos': [dict(video) for video in videos],
-        'has_more': len(videos) == limit
-    })
-
-@tv_api.route('/videos/recent')
-def recent_videos():
-    """Get recently uploaded videos for TV interface."""
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
-    
-    db = get_db()
-    videos = db.execute(
-        '''SELECT v.id, v.title, v.description, v.thumbnail_url, v.video_url,
-                  v.duration, v.upload_date, u.username as uploader
-           FROM videos v
-           JOIN users u ON v.user_id = u.id
-           WHERE v.is_processed = 1
-           ORDER BY v.upload_date DESC
-           LIMIT ? OFFSET ?''',
-        (limit, offset)
-    ).fetchall()
-    
-    return jsonify({
-        'videos': [dict(video) for video in videos],
-        'has_more': len(videos) == limit
-    })
-
-@tv_api.route('/videos/<int:video_id>')
-def get_video_details(video_id):
-    """Get detailed video information for playback."""
-    db = get_db()
     video = db.execute(
-        '''SELECT v.id, v.title, v.description, v.thumbnail_url, v.video_url,
-                  v.duration, v.upload_date, u.username as uploader, u.id as uploader_id
-           FROM videos v
-           JOIN users u ON v.user_id = u.id
-           WHERE v.id = ? AND v.is_processed = 1''',
+        'SELECT * FROM videos WHERE id = ?',
         (video_id,)
     ).fetchone()
     
     if not video:
-        return jsonify({'error': 'Video not found'}), 404
-    
-    # Record view if user is authenticated
-    tv_user = get_tv_user()
-    if tv_user:
-        db.execute(
-            'INSERT OR IGNORE INTO video_views (video_id, user_id, view_date) VALUES (?, ?, ?)',
-            (video_id, tv_user['id'], int(time.time()))
-        )
-        db.commit()
-    
-    return jsonify(dict(video))
-
-@tv_api.route('/videos/search')
-def search_videos():
-    """Search videos with TV-friendly results."""
-    query = request.args.get('q', '').strip()
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
-    
-    if not query:
-        return jsonify({'videos': [], 'has_more': False})
-    
-    search_term = f"%{query}%"
-    db = get_db()
-    videos = db.execute(
-        '''SELECT v.id, v.title, v.description, v.thumbnail_url, v.video_url,
-                  v.duration, v.upload_date, u.username as uploader
-           FROM videos v
-           JOIN users u ON v.user_id = u.id
-           WHERE v.is_processed = 1 AND (v.title LIKE ? OR v.description LIKE ?)
-           ORDER BY v.upload_date DESC
-           LIMIT ? OFFSET ?''',
-        (search_term, search_term, limit, offset)
-    ).fetchall()
+        return jsonify({'error': 'video_not_found'}), 404
     
     return jsonify({
-        'videos': [dict(video) for video in videos],
-        'has_more': len(videos) == limit,
-        'query': query
-    })
-
-@tv_api.route('/categories')
-def get_categories():
-    """Get available video categories."""
-    db = get_db()
-    categories = db.execute(
-        '''SELECT DISTINCT category, COUNT(*) as video_count
-           FROM videos 
-           WHERE is_processed = 1 AND category IS NOT NULL AND category != ''
-           GROUP BY category
-           ORDER BY video_count DESC'''
-    ).fetchall()
-    
-    return jsonify([dict(cat) for cat in categories])
-
-@tv_api.route('/categories/<category>/videos')
-def category_videos(category):
-    """Get videos from a specific category."""
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
-    
-    db = get_db()
-    videos = db.execute(
-        '''SELECT v.id, v.title, v.description, v.thumbnail_url, v.video_url,
-                  v.duration, v.upload_date, u.username as uploader
-           FROM videos v
-           JOIN users u ON v.user_id = u.id
-           WHERE v.is_processed = 1 AND v.category = ?
-           ORDER BY v.upload_date DESC
-           LIMIT ? OFFSET ?''',
-        (category, limit, offset)
-    ).fetchall()
-    
-    return jsonify({
-        'videos': [dict(video) for video in videos],
-        'category': category,
-        'has_more': len(videos) == limit
-    })
-
-@tv_api.route('/user/watchlist')
-def get_watchlist():
-    """Get user's watchlist (requires authentication)."""
-    tv_user = get_tv_user()
-    if not tv_user:
-        return jsonify({'error': 'Authentication required'}), 401
-    
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
-    
-    db = get_db()
-    videos = db.execute(
-        '''SELECT v.id, v.title, v.description, v.thumbnail_url, v.video_url,
-                  v.duration, v.upload_date, u.username as uploader, w.added_date
-           FROM watchlist w
-           JOIN videos v ON w.video_id = v.id
-           JOIN users u ON v.user_id = u.id
-           WHERE w.user_id = ? AND v.is_processed = 1
-           ORDER BY w.added_date DESC
-           LIMIT ? OFFSET ?''',
-        (tv_user['id'], limit, offset)
-    ).fetchall()
-    
-    return jsonify({
-        'videos': [dict(video) for video in videos],
-        'has_more': len(videos) == limit
+        'stream_url': video['file_path'],
+        'title': video['title'],
+        'description': video['description'],
+        'duration': video['duration']
     })
