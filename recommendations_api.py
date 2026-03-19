@@ -62,187 +62,271 @@ def extract_keywords(text):
 
     keywords = set()
     for word in words:
+        word = word.strip()
         if len(word) > 2 and word not in stop_words:
             keywords.add(word)
 
     return keywords
 
 
-@recommendations_api.route('/api/recommendations/personalized')
-def get_personalized_recommendations():
-    """Get personalized recommendations for the current user"""
-    user_id = g.get('user', {}).get('id') if hasattr(g, 'user') and g.user else None
+def calculate_category_affinity(user_id):
+    """Calculate user's category preferences based on watch history"""
+    db = get_db()
+    cursor = db.execute("""
+        SELECT v.category, COUNT(*) as watch_count
+        FROM view_history vh
+        JOIN videos v ON vh.video_id = v.id
+        WHERE vh.user_id = ? AND v.category IS NOT NULL
+        GROUP BY v.category
+        ORDER BY watch_count DESC
+    """, (user_id,))
+
+    categories = cursor.fetchall()
+    total_watches = sum(cat['watch_count'] for cat in categories)
+
+    if total_watches == 0:
+        return {}
+
+    # Convert to affinity scores (0-1)
+    affinity = {}
+    for cat in categories:
+        affinity[cat['category']] = cat['watch_count'] / total_watches
+
+    return affinity
+
+
+@recommendations_api.route('/api/recommendations', methods=['GET'])
+def get_recommendations():
+    """Get personalized video recommendations for the current user"""
+    if not hasattr(g, 'user') or not g.user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    user_id = g.user['id']
     limit = request.args.get('limit', 10, type=int)
+    algorithm = request.args.get('algorithm', 'content')
+
+    if limit > 50:
+        limit = 50
 
     try:
-        recommendations = engine.get_personalized_recommendations(user_id, limit)
-        return jsonify({
-            'success': True,
-            'recommendations': [
-                {
-                    'id': video['id'],
-                    'title': video['title'],
-                    'description': video['description'],
-                    'thumbnail': video.get('thumbnail'),
-                    'duration': video.get('duration'),
-                    'upload_date': video['upload_date'],
-                    'uploader': video.get('uploader'),
-                    'category': video.get('category'),
-                    'views': video.get('views', 0),
-                    'likes': video.get('likes', 0)
-                }
-                for video in recommendations
-            ]
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@recommendations_api.route('/api/recommendations/trending')
-def get_trending_videos():
-    """Get trending videos"""
-    limit = request.args.get('limit', 20, type=int)
-
-    try:
-        trending = engine.get_trending_videos(limit)
-        return jsonify({
-            'success': True,
-            'videos': [
-                {
-                    'id': video['id'],
-                    'title': video['title'],
-                    'description': video['description'],
-                    'thumbnail': video.get('thumbnail'),
-                    'duration': video.get('duration'),
-                    'upload_date': video['upload_date'],
-                    'uploader': video.get('uploader'),
-                    'category': video.get('category'),
-                    'views': video.get('views', 0),
-                    'likes': video.get('likes', 0)
-                }
-                for video in trending
-            ]
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@recommendations_api.route('/api/recommendations/similar/<int:video_id>')
-def get_similar_videos(video_id):
-    """Get videos similar to the specified video"""
-    limit = request.args.get('limit', 5, type=int)
-
-    try:
-        similar = engine.get_similar_videos(video_id, limit)
-        return jsonify({
-            'success': True,
-            'videos': [
-                {
-                    'id': video['id'],
-                    'title': video['title'],
-                    'description': video['description'],
-                    'thumbnail': video.get('thumbnail'),
-                    'duration': video.get('duration'),
-                    'upload_date': video['upload_date'],
-                    'uploader': video.get('uploader'),
-                    'category': video.get('category'),
-                    'views': video.get('views', 0)
-                }
-                for video in similar
-            ]
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@recommendations_api.route('/api/recommendations/categories')
-def get_category_recommendations():
-    """Get recommendations by category"""
-    category = request.args.get('category')
-    limit = request.args.get('limit', 10, type=int)
-
-    if not category:
-        return jsonify({'success': False, 'error': 'Category parameter required'}), 400
-
-    try:
-        db = get_db()
-        videos = db.execute("""
-            SELECT v.*, COALESCE(vh.view_count, 0) as views,
-                   COALESCE(l.like_count, 0) as likes
-            FROM videos v
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as view_count
-                FROM view_history
-                GROUP BY video_id
-            ) vh ON v.id = vh.video_id
-            LEFT JOIN (
-                SELECT video_id, COUNT(*) as like_count
-                FROM likes WHERE rating = 'like'
-                GROUP BY video_id
-            ) l ON v.id = l.video_id
-            WHERE v.category = ?
-            ORDER BY views DESC, likes DESC
-            LIMIT ?
-        """, (category, limit)).fetchall()
+        if algorithm == 'collaborative':
+            recommendations = get_collaborative_recommendations(user_id, limit)
+        elif algorithm == 'trending':
+            recommendations = get_trending_recommendations(limit)
+        else:  # Default to content-based
+            recommendations = engine.get_content_based_recommendations(user_id, limit)
 
         return jsonify({
-            'success': True,
-            'category': category,
-            'videos': [
-                {
-                    'id': video['id'],
-                    'title': video['title'],
-                    'description': video['description'],
-                    'thumbnail': video.get('thumbnail'),
-                    'duration': video.get('duration'),
-                    'upload_date': video['upload_date'],
-                    'uploader': video.get('uploader'),
-                    'category': video.get('category'),
-                    'views': video.get('views', 0),
-                    'likes': video.get('likes', 0)
-                }
-                for video in videos
-            ]
+            'recommendations': recommendations,
+            'algorithm': algorithm,
+            'user_id': user_id,
+            'count': len(recommendations)
         })
+
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'error': f'Failed to generate recommendations: {str(e)}'}), 500
 
 
-@recommendations_api.route('/api/recommendations/stats')
-def get_recommendation_stats():
-    """Get recommendation engine statistics"""
-    try:
-        db = get_db()
+def get_collaborative_recommendations(user_id, limit=10):
+    """Get recommendations based on similar users' preferences"""
+    db = get_db()
 
-        # Get total videos
-        total_videos = db.execute("SELECT COUNT(*) as count FROM videos").fetchone()['count']
-
-        # Get categories
-        categories = db.execute("""
-            SELECT category, COUNT(*) as count
-            FROM videos
-            WHERE category IS NOT NULL
-            GROUP BY category
-            ORDER BY count DESC
-        """).fetchall()
-
-        # Get recent activity
-        recent_views = db.execute("""
-            SELECT COUNT(*) as count
+    # Find users with similar watch patterns
+    similar_users_cursor = db.execute("""
+        SELECT u2.user_id, COUNT(DISTINCT u2.video_id) as common_videos
+        FROM (
+            SELECT DISTINCT video_id
             FROM view_history
-            WHERE created_at > datetime('now', '-24 hours')
-        """).fetchone()['count']
+            WHERE user_id = ?
+            LIMIT 50
+        ) u1_videos
+        JOIN view_history u2 ON u1_videos.video_id = u2.video_id
+        WHERE u2.user_id != ?
+        GROUP BY u2.user_id
+        HAVING common_videos >= 2
+        ORDER BY common_videos DESC
+        LIMIT 10
+    """, (user_id, user_id))
+
+    similar_users = similar_users_cursor.fetchall()
+
+    if not similar_users:
+        return engine.get_popular_videos(limit)
+
+    # Get videos watched by similar users but not by current user
+    similar_user_ids = [str(user['user_id']) for user in similar_users]
+    watched_by_user_cursor = db.execute("""
+        SELECT DISTINCT video_id
+        FROM view_history
+        WHERE user_id = ?
+    """, (user_id,))
+    watched_by_user = [str(row['video_id']) for row in watched_by_user_cursor.fetchall()]
+
+    if watched_by_user:
+        watched_placeholders = ','.join('?' * len(watched_by_user))
+        similar_user_placeholders = ','.join('?' * len(similar_user_ids))
+
+        recommendations_cursor = db.execute(f"""
+            SELECT v.id, v.title, v.views, v.likes, v.comments, v.upload_date,
+                   COUNT(*) as recommendation_count
+            FROM view_history vh
+            JOIN videos v ON vh.video_id = v.id
+            WHERE vh.user_id IN ({similar_user_placeholders})
+              AND v.id NOT IN ({watched_placeholders})
+            GROUP BY v.id, v.title, v.views, v.likes, v.comments, v.upload_date
+            ORDER BY recommendation_count DESC, v.views DESC
+            LIMIT ?
+        """, similar_user_ids + watched_by_user + [limit])
+    else:
+        similar_user_placeholders = ','.join('?' * len(similar_user_ids))
+        recommendations_cursor = db.execute(f"""
+            SELECT v.id, v.title, v.views, v.likes, v.comments, v.upload_date,
+                   COUNT(*) as recommendation_count
+            FROM view_history vh
+            JOIN videos v ON vh.video_id = v.id
+            WHERE vh.user_id IN ({similar_user_placeholders})
+            GROUP BY v.id, v.title, v.views, v.likes, v.comments, v.upload_date
+            ORDER BY recommendation_count DESC, v.views DESC
+            LIMIT ?
+        """, similar_user_ids + [limit])
+
+    videos = recommendations_cursor.fetchall()
+    recommendations = []
+
+    for video in videos:
+        engagement = calculate_engagement_score(
+            video['views'] or 0,
+            video['likes'] or 0,
+            video['comments'] or 0,
+            video['upload_date']
+        )
+
+        recommendations.append({
+            'video_id': video['id'],
+            'title': video['title'],
+            'similarity_score': video['recommendation_count'] / len(similar_users),
+            'engagement_score': engagement,
+            'combined_score': (video['recommendation_count'] / len(similar_users)) * 0.6 + engagement * 0.4
+        })
+
+    return recommendations
+
+
+def get_trending_recommendations(limit=10):
+    """Get trending videos based on recent engagement"""
+    db = get_db()
+
+    # Get videos with high recent engagement (last 7 days)
+    cursor = db.execute("""
+        SELECT v.id, v.title, v.views, v.likes, v.comments, v.upload_date,
+               COUNT(vh.id) as recent_views
+        FROM videos v
+        LEFT JOIN view_history vh ON v.id = vh.video_id
+            AND vh.watched_at > datetime('now', '-7 days')
+        WHERE v.upload_date > datetime('now', '-30 days')
+        GROUP BY v.id, v.title, v.views, v.likes, v.comments, v.upload_date
+        ORDER BY recent_views DESC, v.views DESC
+        LIMIT ?
+    """, (limit,))
+
+    videos = cursor.fetchall()
+    recommendations = []
+
+    for video in videos:
+        engagement = calculate_engagement_score(
+            video['views'] or 0,
+            video['likes'] or 0,
+            video['comments'] or 0,
+            video['upload_date']
+        )
+
+        trending_score = (video['recent_views'] or 0) * 10 + engagement
+
+        recommendations.append({
+            'video_id': video['id'],
+            'title': video['title'],
+            'similarity_score': 0,
+            'engagement_score': engagement,
+            'combined_score': trending_score
+        })
+
+    return recommendations
+
+
+@recommendations_api.route('/api/recommendations/feedback', methods=['POST'])
+def recommendation_feedback():
+    """Record user feedback on recommendations for future improvement"""
+    if not hasattr(g, 'user') or not g.user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    data = request.get_json()
+    if not data or 'video_id' not in data or 'feedback' not in data:
+        return jsonify({'error': 'Missing required fields: video_id, feedback'}), 400
+
+    user_id = g.user['id']
+    video_id = data['video_id']
+    feedback = data['feedback']  # 'like', 'dislike', 'not_interested'
+
+    if feedback not in ['like', 'dislike', 'not_interested']:
+        return jsonify({'error': 'Invalid feedback value'}), 400
+
+    try:
+        db = get_db()
+        # Store feedback in a recommendations_feedback table
+        db.execute("""
+            INSERT OR REPLACE INTO recommendations_feedback
+            (user_id, video_id, feedback, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, video_id, feedback, datetime.now().isoformat()))
+        db.commit()
+
+        return jsonify({'message': 'Feedback recorded successfully'})
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to record feedback: {str(e)}'}), 500
+
+
+@recommendations_api.route('/api/recommendations/stats', methods=['GET'])
+def recommendation_stats():
+    """Get recommendation statistics for the current user"""
+    if not hasattr(g, 'user') or not g.user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    user_id = g.user['id']
+
+    try:
+        db = get_db()
+
+        # Get watch history count
+        history_cursor = db.execute("""
+            SELECT COUNT(DISTINCT video_id) as watched_count
+            FROM view_history
+            WHERE user_id = ?
+        """, (user_id,))
+        watched_count = history_cursor.fetchone()['watched_count']
+
+        # Get category preferences
+        category_affinity = calculate_category_affinity(user_id)
+
+        # Get recent feedback stats
+        feedback_cursor = db.execute("""
+            SELECT feedback, COUNT(*) as count
+            FROM recommendations_feedback
+            WHERE user_id = ? AND created_at > datetime('now', '-30 days')
+            GROUP BY feedback
+        """, (user_id,))
+        feedback_stats = {row['feedback']: row['count'] for row in feedback_cursor.fetchall()}
 
         return jsonify({
-            'success': True,
-            'stats': {
-                'total_videos': total_videos,
-                'recent_views_24h': recent_views,
-                'categories': [
-                    {'name': cat['category'], 'count': cat['count']}
-                    for cat in categories
-                ]
+            'user_id': user_id,
+            'watched_videos': watched_count,
+            'category_preferences': category_affinity,
+            'recent_feedback': feedback_stats,
+            'recommendation_quality': {
+                'data_points': watched_count,
+                'personalization_level': 'high' if watched_count > 10 else 'medium' if watched_count > 5 else 'low'
             }
         })
+
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'error': f'Failed to get stats: {str(e)}'}), 500
