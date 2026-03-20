@@ -61,152 +61,162 @@ class CreatorFund:
             SELECT
                 u.id,
                 u.username,
+                u.created_at,
                 COUNT(DISTINCT s.follower_id) as subscriber_count,
                 COUNT(DISTINCT v.id) as video_count,
+                COALESCE(SUM(vi.views), 0) as total_views,
                 MAX(v.uploaded_at) as last_upload
             FROM users u
             LEFT JOIN subscriptions s ON u.id = s.user_id
             LEFT JOIN videos v ON u.id = v.user_id
+            LEFT JOIN video_interactions vi ON v.id = vi.video_id
             WHERE u.id = ?
             GROUP BY u.id
         ''', (user_id,))
 
-        user_data = cursor.fetchone()
-        if not user_data:
-            return False, {"error": "User not found"}
+        user_stats = cursor.fetchone()
+        if not user_stats:
+            return False, {"reason": "User not found"}
+
+        stats_dict = dict(user_stats)
 
         # Check eligibility criteria
-        subscriber_count = user_data['subscriber_count'] or 0
-        video_count = user_data['video_count'] or 0
-        last_upload = user_data['last_upload']
+        is_eligible = (
+            stats_dict['subscriber_count'] >= 100 and
+            stats_dict['video_count'] >= 5 and
+            stats_dict['last_upload'] and
+            datetime.fromisoformat(stats_dict['last_upload'].replace('Z', '+00:00')) >= thirty_days_ago
+        )
 
-        criteria = {
-            "has_min_subscribers": subscriber_count >= 100,
-            "has_min_videos": video_count >= 3,
-            "recent_activity": last_upload and datetime.fromisoformat(last_upload) >= thirty_days_ago
-        }
-
-        is_eligible = all(criteria.values())
-
-        # Cache eligibility status
-        db.execute('''
-            INSERT OR REPLACE INTO creator_fund_eligibility
-            (user_id, is_eligible, subscriber_count, video_count, last_activity)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (user_id, is_eligible, subscriber_count, video_count, last_upload))
-        db.commit()
-
-        return is_eligible, {
-            "subscriber_count": subscriber_count,
-            "video_count": video_count,
-            "last_upload": last_upload,
-            "criteria": criteria
-        }
+        return is_eligible, stats_dict
 
     def calculate_monthly_distribution(self, month: int, year: int) -> List[Dict]:
-        """Calculate monthly fund distribution for eligible creators"""
+        """Calculate fund distribution for eligible creators"""
         db = get_db()
 
-        # Get eligible creators with their view counts
-        cursor = db.execute('''
-            SELECT
-                u.id,
-                u.username,
-                COALESCE(SUM(vi.views), 0) as total_views
-            FROM creator_fund_eligibility e
-            JOIN users u ON e.user_id = u.id
-            LEFT JOIN videos v ON u.id = v.user_id
-            LEFT JOIN video_interactions vi ON v.id = vi.video_id
-            WHERE e.is_eligible = 1
-            AND strftime('%m', v.uploaded_at) = printf('%02d', ?)
-            AND strftime('%Y', v.uploaded_at) = ?
-            GROUP BY u.id, u.username
-            HAVING total_views > 0
-            ORDER BY total_views DESC
-        ''', (month, str(year)))
-
-        eligible_creators = cursor.fetchall()
-
+        # Get all eligible creators for the month
+        eligible_creators = self._get_eligible_creators_for_month(month, year)
         if not eligible_creators:
             return []
 
-        # Determine month number for pilot pool
-        pilot_month = self._get_pilot_month(month, year)
-        available_pool = self.pilot_pools.get(pilot_month, 200)
-
         # Calculate total eligible views
-        total_eligible_views = sum(creator['total_views'] for creator in eligible_creators)
+        total_eligible_views = sum(creator['eligible_views'] for creator in eligible_creators)
+        if total_eligible_views == 0:
+            return []
+
+        # Determine pool size based on pilot month
+        pilot_month = self._get_pilot_month(month, year)
+        pool_size = self.pilot_pools.get(pilot_month, 150)
 
         distributions = []
         for creator in eligible_creators:
-            if total_eligible_views > 0:
-                share_ratio = creator['total_views'] / total_eligible_views
-                raw_amount = available_pool * share_ratio
-                capped_amount = min(raw_amount, self.monthly_cap)
+            # Calculate share based on eligible views
+            view_share = creator['eligible_views'] / total_eligible_views
+            raw_amount = pool_size * view_share
 
-                distributions.append({
-                    'user_id': creator['id'],
-                    'username': creator['username'],
-                    'total_views': creator['total_views'],
-                    'share_ratio': share_ratio,
-                    'raw_amount': raw_amount,
-                    'final_amount': capped_amount,
-                    'month': month,
-                    'year': year
-                })
+            # Apply monthly cap
+            final_amount = min(raw_amount, self.monthly_cap)
+
+            distributions.append({
+                'user_id': creator['user_id'],
+                'username': creator['username'],
+                'amount': round(final_amount, 2),
+                'eligible_views': creator['eligible_views'],
+                'total_views': creator['total_views'],
+                'view_share': round(view_share * 100, 2)
+            })
 
         return distributions
 
+    def _get_eligible_creators_for_month(self, month: int, year: int) -> List[Dict]:
+        """Get eligible creators and their stats for a specific month"""
+        db = get_db()
+
+        # Calculate date range for the month
+        start_date = datetime(year, month, 1)
+        if month == 12:
+            end_date = datetime(year + 1, 1, 1)
+        else:
+            end_date = datetime(year, month + 1, 1)
+
+        cursor = db.execute('''
+            SELECT
+                u.id as user_id,
+                u.username,
+                COUNT(DISTINCT s.follower_id) as subscriber_count,
+                COUNT(DISTINCT v.id) as video_count,
+                COALESCE(SUM(
+                    CASE WHEN vi.created_at >= ? AND vi.created_at < ?
+                    THEN vi.views ELSE 0 END
+                ), 0) as eligible_views,
+                COALESCE(SUM(vi.views), 0) as total_views
+            FROM users u
+            LEFT JOIN subscriptions s ON u.id = s.user_id
+            LEFT JOIN videos v ON u.id = v.user_id
+            LEFT JOIN video_interactions vi ON v.id = vi.video_id
+            WHERE u.created_at < ?
+            GROUP BY u.id
+            HAVING subscriber_count >= 100
+                AND video_count >= 5
+                AND eligible_views > 0
+        ''', (start_date.isoformat(), end_date.isoformat(), end_date.isoformat()))
+
+        return [dict(row) for row in cursor.fetchall()]
+
     def _get_pilot_month(self, month: int, year: int) -> int:
-        """Determine which pilot month this represents"""
-        # This is a simplified version - in practice you'd track pilot start date
-        current_date = datetime(year, month, 1)
-        pilot_start = datetime(2024, 1, 1)  # Adjust based on actual pilot start
+        """Determine which pilot month this is (1-3)"""
+        # This would need to be adjusted based on pilot start date
+        # For now, assuming pilot started in current year
+        current_year = datetime.now().year
+        if year == current_year:
+            return min(month, 3)
+        return 3
 
-        months_since_start = (current_date.year - pilot_start.year) * 12 + (current_date.month - pilot_start.month)
-        return min(months_since_start + 1, 3)  # Cap at month 3
+    def process_monthly_distribution(self, month: int, year: int) -> Dict:
+        """Process and record monthly fund distribution"""
+        db = get_db()
 
-    def process_distribution(self, distributions: List[Dict]) -> bool:
-        """Process and record fund distributions"""
+        # Check if distribution already exists
+        existing = db.execute('''
+            SELECT id FROM creator_fund_distributions
+            WHERE month = ? AND year = ?
+            LIMIT 1
+        ''', (month, year)).fetchone()
+
+        if existing:
+            return {"error": "Distribution already processed for this month"}
+
+        # Calculate distributions
+        distributions = self.calculate_monthly_distribution(month, year)
         if not distributions:
-            return False
+            return {"error": "No eligible creators found"}
 
+        # Record distributions
+        total_distributed = 0
+        for dist in distributions:
+            db.execute('''
+                INSERT INTO creator_fund_distributions
+                (user_id, month, year, amount, total_views, eligible_views)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                dist['user_id'], month, year, dist['amount'],
+                dist['total_views'], dist['eligible_views']
+            ))
+            total_distributed += dist['amount']
+
+        db.commit()
+
+        return {
+            "success": True,
+            "total_distributed": round(total_distributed, 2),
+            "creator_count": len(distributions),
+            "distributions": distributions
+        }
+
+    def get_creator_earnings(self, user_id: int) -> List[Dict]:
+        """Get earning history for a creator"""
         db = get_db()
-        try:
-            for dist in distributions:
-                # Record distribution
-                db.execute('''
-                    INSERT OR REPLACE INTO creator_fund_distributions
-                    (user_id, month, year, amount, total_views, eligible_views)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    dist['user_id'],
-                    dist['month'],
-                    dist['year'],
-                    dist['final_amount'],
-                    dist['total_views'],
-                    dist['total_views']  # For now, eligible_views = total_views
-                ))
 
-                # Update user's RTC balance
-                db.execute('''
-                    UPDATE users
-                    SET rtc_balance = rtc_balance + ?
-                    WHERE id = ?
-                ''', (dist['final_amount'], dist['user_id']))
-
-            db.commit()
-            logger.info(f"Processed {len(distributions)} creator fund distributions")
-            return True
-
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error processing distributions: {e}")
-            return False
-
-    def get_user_fund_history(self, user_id: int) -> List[Dict]:
-        """Get fund distribution history for a specific user"""
-        db = get_db()
         cursor = db.execute('''
             SELECT
                 month,
@@ -221,25 +231,3 @@ class CreatorFund:
         ''', (user_id,))
 
         return [dict(row) for row in cursor.fetchall()]
-
-    def get_fund_statistics(self) -> Dict:
-        """Get overall fund statistics"""
-        db = get_db()
-
-        cursor = db.execute('''
-            SELECT
-                COUNT(DISTINCT user_id) as total_recipients,
-                SUM(amount) as total_distributed,
-                AVG(amount) as avg_distribution,
-                COUNT(*) as total_distributions
-            FROM creator_fund_distributions
-        ''')
-
-        stats = dict(cursor.fetchone())
-
-        # Calculate remaining pilot pool
-        total_pilot_pool = sum(self.pilot_pools.values())
-        stats['remaining_pool'] = total_pilot_pool - (stats['total_distributed'] or 0)
-        stats['total_pilot_pool'] = total_pilot_pool
-
-        return stats
