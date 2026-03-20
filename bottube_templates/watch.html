@@ -2756,6 +2756,79 @@ function reportVideo() {
         );
     };
 })();
+
+// Video Player Keyboard Shortcuts (YouTube-style)
+var videoShortcutOverlay = null;
+function showVideoShortcut(icon) {
+    if (!videoShortcutOverlay) {
+        videoShortcutOverlay = document.createElement('div');
+        videoShortcutOverlay.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:#fff;font-size:36px;padding:20px 40px;border-radius:8px;z-index:999999;opacity:0;transition:opacity 0.3s;pointer-events:none;';
+        document.body.appendChild(videoShortcutOverlay);
+    }
+    videoShortcutOverlay.textContent = icon;
+    videoShortcutOverlay.style.opacity = '1';
+    clearTimeout(videoShortcutOverlay.hideTimeout);
+    videoShortcutOverlay.hideTimeout = setTimeout(function() {
+        videoShortcutOverlay.style.opacity = '0';
+    }, 800);
+}
+
+document.addEventListener('keydown', function(e) {
+    var video = document.getElementById('main-video');
+    if (!video) return;
+    
+    // Ignore if user is typing in an input or textarea
+    var tag = document.activeElement.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || document.activeElement.isContentEditable) return;
+    
+    var handled = true;
+    switch(e.key.toLowerCase()) {
+        case ' ':
+        case 'k':
+            video.paused ? video.play() : video.pause();
+            showVideoShortcut(video.paused ? '\u275A\u275A' : '\u25B6');
+            break;
+        case 'j':
+            video.currentTime = Math.max(0, video.currentTime - 10);
+            showVideoShortcut('\u25C0\u25C0 10s');
+            break;
+        case 'l':
+            video.currentTime = Math.min(video.duration, video.currentTime + 10);
+            showVideoShortcut('10s \u25B6\u25B6');
+            break;
+        case 'm':
+            video.muted = !video.muted;
+            showVideoShortcut(video.muted ? '\uD83D\uDD07' : '\uD83D\uDD0A');
+            break;
+        case 'f':
+            if (video.requestFullscreen) video.requestFullscreen();
+            else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+            showVideoShortcut('\u26F6');
+            break;
+        case 'arrowleft':
+            video.currentTime = Math.max(0, video.currentTime - 5);
+            showVideoShortcut('\u25C0 5s');
+            break;
+        case 'arrowright':
+            video.currentTime = Math.min(video.duration, video.currentTime + 5);
+            showVideoShortcut('5s \u25B6');
+            break;
+        case 'arrowup':
+            video.volume = Math.min(1, video.volume + 0.1);
+            showVideoShortcut('\uD83D\uDD0A ' + Math.round(video.volume * 100) + '%');
+            break;
+        case 'arrowdown':
+            video.volume = Math.max(0, video.volume - 0.1);
+            showVideoShortcut('\uD83D\uDD07 ' + Math.round(video.volume * 100) + '%');
+            break;
+        default:
+            handled = false;
+    }
+    if (handled) {
+        e.preventDefault();
+    }
+});
+
 </script>
 
 {% endblock %}
