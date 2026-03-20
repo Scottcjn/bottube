@@ -67,51 +67,52 @@ class APIMiddleware:
 
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Max-Age'] = '3600'
-        return response
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'
 
     def apply_rate_limit(self):
-        client_ip = request.remote_addr
+        client_ip = request.environ.get('REMOTE_ADDR')
         current_time = time.time()
-        window_size = 60  # 1 minute
-        max_requests = 100  # requests per minute
 
-        if client_ip not in rate_limit_store:
-            rate_limit_store[client_ip] = []
-
-        # Clean old requests
-        rate_limit_store[client_ip] = [
-            req_time for req_time in rate_limit_store[client_ip]
-            if current_time - req_time < window_size
-        ]
+        # Clean old entries
+        self.cleanup_rate_limit_store(current_time)
 
         # Check rate limit
-        if len(rate_limit_store[client_ip]) >= max_requests:
-            raise TooManyRequests('Rate limit exceeded')
+        if client_ip in rate_limit_store:
+            requests = rate_limit_store[client_ip]
+            # Allow 100 requests per minute
+            if len([r for r in requests if current_time - r < 60]) >= 100:
+                raise TooManyRequests()
 
-        # Add current request
+        # Record request
+        if client_ip not in rate_limit_store:
+            rate_limit_store[client_ip] = []
         rate_limit_store[client_ip].append(current_time)
 
+    def cleanup_rate_limit_store(self, current_time):
+        for ip in list(rate_limit_store.keys()):
+            rate_limit_store[ip] = [t for t in rate_limit_store[ip] if current_time - t < 60]
+            if not rate_limit_store[ip]:
+                del rate_limit_store[ip]
+
     def handle_jwt_auth(self):
-        # Skip auth for login/register endpoints
-        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
+        # Only apply JWT auth to protected endpoints
+        protected_paths = ['/api/mobile/profile', '/api/mobile/protected']
+        if not any(request.path.startswith(path) for path in protected_paths):
             return
 
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            g.user = None
+        token = request.headers.get('Authorization')
+        if not token:
             return
 
         try:
-            if auth_header.startswith('Bearer '):
-                token = auth_header[7:]
-                data = jwt.decode(token, 'your-secret-key', algorithms=['HS256'])
-                g.user = {
-                    'id': data['user_id'],
-                    'username': data['username']
-                }
+            if token.startswith('Bearer '):
+                token = token[7:]
+            data = jwt.decode(token, 'your-secret-key', algorithms=['HS256'])
+            g.user_id = data['user_id']
+            g.username = data['username']
         except jwt.InvalidTokenError:
-            g.user = None
+            pass
 
     def set_api_version(self):
-        g.api_version = '1.0'
+        g.api_version = 'v1'
