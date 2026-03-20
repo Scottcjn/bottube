@@ -67,93 +67,93 @@ def sanitize_category_param(category_value):
         'comedy': 'comedy',
         'film': 'film',
         'animation': 'animation',
-        'people': 'people',
         'pets': 'pets',
         'travel': 'travel',
-        'autos': 'autos',
-        'howto': 'howto'
+        'howto': 'howto',
+        'autos': 'autos'
     }
     
-    # Normalize and validate
-    category_lower = category_clean.lower().strip()
+    # Normalize to lowercase and check against valid categories
+    category_lower = category_clean.lower()
     
     if category_lower in valid_categories:
         return valid_categories[category_lower]
     
-    # Return None for invalid categories
+    # If not in predefined list, clean and validate format
+    category_clean = re.sub(r'[^a-zA-Z0-9_-]', '', category_clean)
+    
+    if len(category_clean) > 0 and len(category_clean) <= 50:
+        return category_clean.lower()
+    
     return None
 
 
-def check_color_contrast(foreground, background):
+def check_color_contrast_ratio(foreground_rgb, background_rgb):
+    """Calculate color contrast ratio for accessibility compliance"""
+    
+    def get_relative_luminance(rgb):
+        """Calculate relative luminance of RGB color"""
+        r, g, b = [c / 255.0 for c in rgb]
+        
+        def linearize(c):
+            if c <= 0.03928:
+                return c / 12.92
+            else:
+                return pow((c + 0.055) / 1.055, 2.4)
+        
+        r_lin = linearize(r)
+        g_lin = linearize(g)
+        b_lin = linearize(b)
+        
+        return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+    
+    l1 = get_relative_luminance(foreground_rgb)
+    l2 = get_relative_luminance(background_rgb)
+    
+    # Ensure l1 is the lighter color
+    if l1 < l2:
+        l1, l2 = l2, l1
+    
+    contrast_ratio = (l1 + 0.05) / (l2 + 0.05)
+    return contrast_ratio
+
+
+def meets_wcag_contrast(foreground_rgb, background_rgb, level='AA', size='normal'):
     """Check if color combination meets WCAG contrast requirements"""
     
-    def hex_to_rgb(hex_color):
-        """Convert hex color to RGB tuple"""
-        hex_color = hex_color.lstrip('#')
-        if len(hex_color) == 3:
-            hex_color = ''.join([c*2 for c in hex_color])
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    ratio = check_color_contrast_ratio(foreground_rgb, background_rgb)
     
-    def get_luminance(rgb):
-        """Calculate relative luminance of RGB color"""
-        rgb_linear = []
-        for c in rgb:
-            c = c / 255.0
-            if c <= 0.03928:
-                rgb_linear.append(c / 12.92)
-            else:
-                rgb_linear.append(pow((c + 0.055) / 1.055, 2.4))
-        return 0.2126 * rgb_linear[0] + 0.7152 * rgb_linear[1] + 0.0722 * rgb_linear[2]
-    
-    try:
-        fg_rgb = hex_to_rgb(foreground)
-        bg_rgb = hex_to_rgb(background)
-        
-        fg_lum = get_luminance(fg_rgb)
-        bg_lum = get_luminance(bg_rgb)
-        
-        # Calculate contrast ratio
-        if fg_lum > bg_lum:
-            contrast = (fg_lum + 0.05) / (bg_lum + 0.05)
+    # WCAG contrast requirements
+    if level == 'AAA':
+        if size == 'large':
+            return ratio >= 4.5
         else:
-            contrast = (bg_lum + 0.05) / (fg_lum + 0.05)
-        
-        return {
-            'ratio': round(contrast, 2),
-            'aa_normal': contrast >= 4.5,
-            'aa_large': contrast >= 3.0,
-            'aaa_normal': contrast >= 7.0,
-            'aaa_large': contrast >= 4.5
-        }
-    except (ValueError, TypeError):
-        return None
+            return ratio >= 7.0
+    else:  # AA level
+        if size == 'large':
+            return ratio >= 3.0
+        else:
+            return ratio >= 4.5
 
 
-def validate_heading_structure(html_content):
-    """Validate heading hierarchy in HTML content"""
+def generate_accessible_color_scheme(base_color_rgb):
+    """Generate accessible color variations from a base color"""
     
-    headings = re.findall(r'<h([1-6])[^>]*>', html_content, re.IGNORECASE)
+    r, g, b = [c / 255.0 for c in base_color_rgb]
+    h, l, s = rgb_to_hls(r, g, b)
     
-    if not headings:
-        return {'valid': True, 'issues': []}
-    
-    issues = []
-    heading_levels = [int(h) for h in headings]
-    
-    # Check if starts with h1
-    if heading_levels and heading_levels[0] != 1:
-        issues.append('Document should start with h1')
-    
-    # Check for level skipping
-    for i in range(1, len(heading_levels)):
-        current = heading_levels[i]
-        previous = heading_levels[i-1]
-        
-        if current > previous + 1:
-            issues.append(f'Heading level skipped: h{previous} to h{current}')
-    
-    return {
-        'valid': len(issues) == 0,
-        'issues': issues,
-        'levels': heading_levels
+    # Generate variations with sufficient contrast
+    schemes = {
+        'primary': base_color_rgb,
+        'light': tuple(int(c * 255) for c in hls_to_rgb(h, min(l + 0.3, 0.9), s)),
+        'dark': tuple(int(c * 255) for c in hls_to_rgb(h, max(l - 0.3, 0.1), s)),
+        'contrast_text': (255, 255, 255) if l < 0.5 else (0, 0, 0)
     }
+    
+    return schemes
+
+
+def hls_to_rgb(h, l, s):
+    """Convert HLS to RGB (helper function)"""
+    from colorsys import hls_to_rgb as convert_hls_to_rgb
+    return convert_hls_to_rgb(h, l, s)
