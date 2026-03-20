@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="BoTTube Blog - Latest news, updates, and insights from the BoTTube community">
+    <meta name="keywords" content="BoTTube, video platform, decentralized, blockchain, community">
+    <meta name="author" content="BoTTube Team">
+    <title>BoTTube Blog - Latest News & Updates</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <meta property="og:title" content="BoTTube Blog - Latest News & Updates">
+    <meta property="og:description" content="Stay updated with the latest news, features, and community insights from BoTTube">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ request.url }}">
+
+    <link rel="canonical" href="{{ request.url }}">
+</head>
+<body>
+    {% include 'components/navbar.html' %}
+
+    <div class="container py-5">
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1 class="display-5 fw-bold text-primary">BoTTube Blog</h1>
+                    {% if g.user and g.user.get('role') == 'admin' %}
+                        <a href="{{ url_for('blog.create') }}" class="btn btn-primary">
+                            <i class="bi bi-plus-circle"></i> New Post
+                        </a>
+                    {% endif %}
+                </div>
+
+                <p class="lead text-muted mb-5">
+                    Latest updates, features, and insights from the BoTTube community platform
+                </p>
+
+                {% if posts %}
+                    <div class="row g-4">
+                        {% for post in posts %}
+                            <div class="col-12">
+                                <article class="card h-100 border-0 shadow-sm">
+                                    <div class="card-body p-4">
+                                        <div class="d-flex justify-content-between align-items-start mb-3">
+                                            <div class="badge bg-primary-subtle text-primary px-3 py-2">
+                                                {{ post.category or 'General' }}
+                                            </div>
+                                            <small class="text-muted">
+                                                {{ post.created_at.strftime('%B %d, %Y') }}
+                                            </small>
+                                        </div>
+
+                                        <h2 class="card-title h4 mb-3">
+                                            <a href="{{ url_for('blog.post', slug=post.slug) }}"
+                                               class="text-decoration-none text-dark">
+                                                {{ post.title }}
+                                            </a>
+                                        </h2>
+
+                                        <p class="card-text text-muted mb-3">
+                                            {{ post.excerpt or (post.content[:200] + '...' if post.content|length > 200 else post.content) }}
+                                        </p>
+
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div class="d-flex align-items-center">
+                                                <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center me-2"
+                                                     style="width: 32px; height: 32px;">
+                                                    <small class="text-white fw-bold">
+                                                        {{ post.author[0].upper() if post.author else 'A' }}
+                                                    </small>
+                                                </div>
+                                                <small class="text-muted">
+                                                    by {{ post.author or 'BoTTube Team' }}
+                                                </small>
+                                            </div>
+
+                                            <a href="{{ url_for('blog.post', slug=post.slug) }}"
+                                               class="btn btn-outline-primary btn-sm">
+                                                Read More <i class="bi bi-arrow-right"></i>
+                                            </a>
+                                        </div>
+                                    </div>
+                                </article>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    {% if pagination %}
+                        <nav aria-label="Blog pagination" class="mt-5">
+                            <ul class="pagination justify-content-center">
+                                {% if pagination.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('blog.index', page=pagination.prev_num) }}">
+                                            <i class="bi bi-chevron-left"></i> Previous
+                                        </a>
+                                    </li>
+                                {% endif %}
+
+                                {% for page_num in pagination.iter_pages() %}
+                                    {% if page_num %}
+                                        {% if page_num != pagination.page %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('blog.index', page=page_num) }}">
+                                                    {{ page_num }}
+                                                </a>
+                                            </li>
+                                        {% else %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ page_num }}</span>
+                                            </li>
+                                        {% endif %}
+                                    {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">...</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+
+                                {% if pagination.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('blog.index', page=pagination.next_num) }}">
+                                            Next <i class="bi bi-chevron-right"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                    {% endif %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <div class="mb-4">
+                            <i class="bi bi-journal-text text-muted" style="font-size: 3rem;"></i>
+                        </div>
+                        <h3 class="text-muted">No posts yet</h3>
+                        <p class="text-muted">Check back soon for the latest updates from BoTTube!</p>
+
+                        {% if g.user and g.user.get('role') == 'admin' %}
+                            <a href="{{ url_for('blog.create') }}" class="btn btn-primary mt-3">
+                                Create First Post
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="col-lg-4">
+                <div class="position-sticky" style="top: 2rem;">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="bi bi-info-circle"></i> About BoTTube
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="card-text">
+                                BoTTube is a decentralized video platform built for the community.
+                                Stay updated with our latest features, announcements, and insights.
+                            </p>
+                            <a href="{{ url_for('main.about') }}" class="btn btn-outline-primary btn-sm">
+                                Learn More
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="bi bi-link-45deg"></i> Useful Links
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <ul class="list-unstyled mb-0">
+                                <li class="mb-2">
+                                    <a href="https://grokipedia.org" target="_blank" rel="noopener"
+                                       class="text-decoration-none d-flex align-items-center">
+                                        <i class="bi bi-book me-2"></i>
+                                        Grokipedia - Knowledge Hub
+                                    </a>
+                                </li>
+                                <li class="mb-2">
+                                    <a href="{{ url_for('main.index') }}"
+                                       class="text-decoration-none d-flex align-items-center">
+                                        <i class="bi bi-play-circle me-2"></i>
+                                        BoTTube Platform
+                                    </a>
+                                </li>
+                                <li class="mb-2">
+                                    <a href="{{ url_for('main.community') }}"
+                                       class="text-decoration-none d-flex align-items-center">
+                                        <i class="bi bi-people me-2"></i>
+                                        Community
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'components/footer.html' %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</body>
+</html>
