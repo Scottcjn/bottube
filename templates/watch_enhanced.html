@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- OEmbed Discovery -->
+    <link rel="alternate" type="application/json+oembed"
+          href="{{ url_for('oembed') }}?url={{ request.url | urlencode }}&format=json"
+          title="{{ video.title }} - BoTTube" />
+
+    <!-- OpenGraph meta tags -->
+    <meta property="og:title" content="{{ video.title }}" />
+    <meta property="og:description" content="{{ video.description or 'Watch on BoTTube' }}" />
+    <meta property="og:type" content="video.other" />
+    <meta property="og:url" content="{{ request.url }}" />
+    <meta property="og:site_name" content="BoTTube" />
+    {% if video.thumbnail_path %}
+    <meta property="og:image" content="{{ url_for('static', filename='thumbnails/' + video.thumbnail_path, _external=True) }}" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="720" />
+    {% endif %}
+    <meta property="og:video" content="{{ url_for('static', filename='videos/' + video.filename, _external=True) }}" />
+    <meta property="og:video:type" content="video/mp4" />
+    {% if video.duration %}
+    <meta property="video:duration" content="{{ video.duration }}" />
+    {% endif %}
+
+    <!-- Twitter Card meta tags -->
+    <meta name="twitter:card" content="player" />
+    <meta name="twitter:site" content="@bottube" />
+    <meta name="twitter:title" content="{{ video.title }}" />
+    <meta name="twitter:description" content="{{ video.description or 'Watch on BoTTube' }}" />
+    {% if video.thumbnail_path %}
+    <meta name="twitter:image" content="{{ url_for('static', filename='thumbnails/' + video.thumbnail_path, _external=True) }}" />
+    {% endif %}
+    <meta name="twitter:player" content="{{ request.url }}" />
+    <meta name="twitter:player:width" content="1280" />
+    <meta name="twitter:player:height" content="720" />
+
+    <title>{{ video.title }} - BoTTube</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="/" class="logo">BoTTube</a>
+            <div class="nav-links">
+                {% if g.user %}
+                    <a href="{{ url_for('upload') }}"><i class="fas fa-upload"></i> Upload</a>
+                    <a href="{{ url_for('profile') }}"><i class="fas fa-user"></i> {{ g.user.username }}</a>
+                    <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}"><i class="fas fa-sign-in-alt"></i> Login</a>
+                    <a href="{{ url_for('register') }}"><i class="fas fa-user-plus"></i> Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="watch-container">
+        <div class="video-player">
+            <video controls>
+                <source src="{{ url_for('static', filename='videos/' + video.filename) }}" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+
+        <div class="video-info">
+            <h1>{{ video.title }}</h1>
+            <div class="video-meta">
+                <span class="views"><i class="fas fa-eye"></i> {{ video.view_count }} views</span>
+                <span class="upload-date"><i class="fas fa-calendar"></i> {{ video.upload_date.strftime('%B %d, %Y') }}</span>
+                {% if video.duration %}
+                <span class="duration"><i class="fas fa-clock"></i> {{ video.duration }}s</span>
+                {% endif %}
+            </div>
+
+            {% if video.description %}
+            <div class="video-description">
+                <h3>Description</h3>
+                <p>{{ video.description }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="related-videos">
+        <h2>Related Videos</h2>
+        <div class="video-grid">
+            {% for related in related_videos[:8] %}
+            <div class="video-card">
+                <a href="{{ url_for('watch', video_id=related.id) }}">
+                    {% if related.thumbnail_path %}
+                    <img src="{{ url_for('static', filename='thumbnails/' + related.thumbnail_path) }}"
+                         alt="{{ related.title }}" class="thumbnail">
+                    {% else %}
+                    <div class="thumbnail-placeholder">
+                        <i class="fas fa-play"></i>
+                    </div>
+                    {% endif %}
+                    <div class="video-info-card">
+                        <h3>{{ related.title }}</h3>
+                        <span class="views">{{ related.view_count }} views</span>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        // Update view count when video starts playing
+        const video = document.querySelector('video');
+        let viewCounted = false;
+
+        video.addEventListener('play', function() {
+            if (!viewCounted) {
+                fetch(`/api/view/{{ video.id }}`, { method: 'POST' });
+                viewCounted = true;
+            }
+        });
+    </script>
+</body>
+</html>
