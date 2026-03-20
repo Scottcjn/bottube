@@ -66,42 +66,53 @@ class APIMiddleware:
             response.headers['Access-Control-Allow-Origin'] = g.cors_origin
 
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
         response.headers['Access-Control-Max-Age'] = '86400'
-        return response
 
     def apply_rate_limit(self):
-        client_ip = request.remote_addr
+        client_ip = request.environ.get('REMOTE_ADDR')
         current_time = time.time()
-        
-        # Clean old entries
-        for ip in list(rate_limit_store.keys()):
-            rate_limit_store[ip] = [req for req in rate_limit_store[ip] if current_time - req < 60]
-        
-        # Check current IP
+
+        # Rate limit: 100 requests per minute per IP
+        window_size = 60  # 1 minute
+        max_requests = 100
+
         if client_ip not in rate_limit_store:
             rate_limit_store[client_ip] = []
-        
-        # Rate limit: 100 requests per minute
-        if len(rate_limit_store[client_ip]) >= 100:
-            raise TooManyRequests(description='Rate limit exceeded')
-        
+
+        # Clean old requests outside the window
+        rate_limit_store[client_ip] = [
+            req_time for req_time in rate_limit_store[client_ip]
+            if current_time - req_time < window_size
+        ]
+
+        # Check if limit exceeded
+        if len(rate_limit_store[client_ip]) >= max_requests:
+            raise TooManyRequests('Rate limit exceeded')
+
+        # Add current request
         rate_limit_store[client_ip].append(current_time)
 
     def handle_jwt_auth(self):
-        # Skip auth for login/register endpoints
-        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
+        # Skip auth for public endpoints
+        public_endpoints = ['/api/mobile/auth/login', '/api/mobile/auth/register']
+        if request.path in public_endpoints:
             return
-        
+
         token = request.headers.get('Authorization')
-        if token and token.startswith('Bearer '):
-            try:
+        if not token:
+            return  # Let individual routes handle auth requirements
+
+        try:
+            if token.startswith('Bearer '):
                 token = token[7:]
-                data = jwt.decode(token, 'your-secret-key', algorithms=['HS256'])
-                g.user_id = data['user_id']
-                g.username = data['username']
-            except jwt.InvalidTokenError:
-                pass
+            data = jwt.decode(token, 'your-secret-key', algorithms=['HS256'])
+            g.user_id = data['user_id']
+            g.username = data['username']
+        except jwt.InvalidTokenError:
+            g.user_id = None
+            g.username = None
 
     def set_api_version(self):
         g.api_version = '1.0'
