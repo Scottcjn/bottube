@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoTTube TV</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: white;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .tv-app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 30px 50px;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 48px;
+            font-weight: bold;
+            color: #ff6b6b;
+            text-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+        }
+
+        .status {
+            font-size: 24px;
+            color: #4ecdc4;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            padding: 30px 50px;
+            gap: 40px;
+        }
+
+        .sidebar {
+            width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .menu-item {
+            padding: 20px 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            font-size: 28px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+        }
+
+        .menu-item:hover,
+        .menu-item.focused {
+            background: rgba(255, 107, 107, 0.3);
+            border-color: #ff6b6b;
+            transform: scale(1.05);
+            box-shadow: 0 10px 30px rgba(255, 107, 107, 0.3);
+        }
+
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        .section-title {
+            font-size: 36px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #4ecdc4;
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .video-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+            position: relative;
+        }
+
+        .video-card:hover,
+        .video-card.focused {
+            border-color: #ff6b6b;
+            transform: scale(1.08);
+            box-shadow: 0 15px 40px rgba(255, 107, 107, 0.4);
+            z-index: 10;
+        }
+
+        .video-thumbnail {
+            width: 100%;
+            height: 160px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+        }
+
+        .video-info {
+            padding: 15px;
+        }
+
+        .video-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            line-height: 1.3;
+        }
+
+        .video-meta {
+            color: #bbb;
+            font-size: 14px;
+        }
+
+        .video-player {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: black;
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+        }
+
+        .player-header {
+            position: absolute;
+            top: 30px;
+            left: 50px;
+            right: 50px;
+            z-index: 1001;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .video-player:hover .player-header,
+        .player-header.visible {
+            opacity: 1;
+        }
+
+        .back-button {
+            background: rgba(0, 0, 0, 0.7);
+            border: none;
+            color: white;
+            padding: 15px 25px;
+            font-size: 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .back-button:hover,
+        .back-button.focused {
+            background: rgba(255, 107, 107, 0.8);
+            transform: scale(1.1);
+        }
+
+        .player-title {
+            font-size: 32px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        #mainVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 32px;
+            color: #4ecdc4;
+            z-index: 999;
+            display: none;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(78, 205, 196, 0.3);
+            border-top: 4px solid #4ecdc4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 0, 0, 0.9);
+            color: white;
+            padding: 30px 50px;
+            border-radius: 15px;
+            font-size: 24px;
+            z-index: 1002;
+            display: none;
+            text-align: center;
+        }
+
+        @media (max-width: 1200px) {
+            .video-grid {
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="tv-app">
+        <div class="header">
+            <div class="logo">BoTTube</div>
+            <div class="status" id="connectionStatus">Connected</div>
+        </div>
+
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="menu-item focused" data-section="trending">🔥 Trending</div>
+                <div class="menu-item" data-section="recent">🕒 Recent</div>
+                <div class="menu-item" data-section="popular">⭐ Popular</div>
+                <div class="menu-item" data-section="search">🔍 Search</div>
+            </div>
+
+            <div class="content-area">
+                <div class="section-title" id="sectionTitle">Trending Videos</div>
+                <div class="video-grid" id="videoGrid">
+                    <!-- Videos will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="video-player" id="videoPlayer">
+        <div class="player-header">
+            <button class="back-button focused" id="backButton">← Back</button>
+            <div class="player-title" id="playerTitle"></div>
+        </div>
+        <video id="mainVideo" controls autoplay></video>
+    </div>
+
+    <div class="loading" id="loadingIndicator">
+        <div class="spinner"></div>
+        Loading videos...
+    </div>
+
+    <div class="error-message" id="errorMessage">
+        <div>Failed to load content</div>
+        <div style="margin-top: 10px; font-size: 18px;">Press OK to retry</div>
+    </div>
+
+    <script>
+        class FireTVApp {
+            constructor() {
+                this.currentFocus = null;
+                this.currentSection = 'trending';
+                this.videos = [];
+                this.focusIndex = 0;
+                this.isPlaying = false;
+                this.apiBaseUrl = 'http://localhost:5000';
+
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                this.loadTrendingVideos();
+                this.updateFocus();
+            }
+
+            setupEventListeners() {
+                document.addEventListener('keydown', this.handleKeyPress.bind(this));
+
+                document.getElementById('backButton').addEventListener('click', () => {
+                    this.exitPlayer();
+                });
+
+                document.querySelectorAll('.menu-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        this.selectSection(item.dataset.section);
+                    });
+                });
+            }
+
+            handleKeyPress(event) {
+                if (this.isPlaying) {
+                    this.handlePlayerKeys(event);
+                } else {
+                    this.handleNavigationKeys(event);
+                }
+            }
+
+            handleNavigationKeys(event) {
+                const menuItems = document.querySelectorAll('.menu-item');
+                const videoCards = document.querySelectorAll('.video-card');
+
+                switch(event.code) {
+                    case 'ArrowUp':
+                        event.preventDefault();
+                        if (this.currentFocus === 'menu') {
+                            this.focusIndex = Math.max(0, this.focusIndex - 1);
+                        } else {
+                            const cols = Math.floor(document.getElementById('videoGrid').offsetWidth / 305);
+                            this.focusIndex = Math.max(0, this.focusIndex - cols);
+                        }
+                        this.updateFocus();
+                        break;
+
+                    case 'ArrowDown':
+                        event.preventDefault();
+                        if (this.currentFocus === 'menu') {
+                            this.focusIndex = Math.min(menuItems.length - 1, this.focusIndex + 1);
+                        } else {
+                            const cols = Math.floor(document.getElementById('videoGrid').offsetWidth / 305);
+                            this.focusIndex = Math.min(videoCards.length - 1, this.focusIndex + cols);
+                        }
+                        this.updateFocus();
+                        break;
+
+                    case 'ArrowLeft':
+                        event.preventDefault();
+                        if (this.currentFocus === 'videos' && this.focusIndex > 0) {
+                            this.focusIndex--;
+                            this.updateFocus();
+                        } else if (this.currentFocus === 'videos') {
+                            this.currentFocus = 'menu';
+                            this.focusIndex = 0;
+                            this.updateFocus();
+                        }
+                        break;
+
+                    case 'ArrowRight':
+                        event.preventDefault();
+                        if (this.currentFocus === 'menu') {
+                            this.currentFocus = 'videos';
+                            this.focusIndex = 0;
+                            this.updateFocus();
+                        } else if (this.focusIndex < videoCards.length - 1) {
+                            this.focusIndex++;
+                            this.updateFocus();
+                        }
+                        break;
+
+                    case 'Enter':
+                    case 'Space':
+                        event.preventDefault();
+                        if (this.currentFocus === 'menu') {
+                            const selectedItem = menuItems[this.focusIndex];
+                            this.selectSection(selectedItem.dataset.section);
+                        } else {
+                            this.playVideo(this.focusIndex);
+                        }
+                        break;
+
+                    case 'Escape':
+                    case 'Backspace':
+                        if (this.currentFocus === 'videos') {
+                            this.currentFocus = 'menu';
+                            this.focusIndex = 0;
+                            this.updateFocus();
+                        }
+                        break;
+                }
+            }
+
+            handlePlayerKeys(event) {
+                const video = document.getElementById('mainVideo');
+
+                switch(event.code) {
+                    case 'Escape':
+                    case 'Backspace':
+                        this.exitPlayer();
+                        break;
+                    case 'Space':
+                        event.preventDefault();
+                        if (video.paused) {
+                            video.play();
+                        } else {
+                            video.pause();
+                        }
+                        break;
+                    case 'ArrowLeft':
+                        video.currentTime = Math.max(0, video.currentTime - 10);
+                        break;
+                    case 'ArrowRight':
+                        video.currentTime = Math.min(video.duration, video.currentTime + 10);
+                        break;
+                }
+            }
+
+            updateFocus() {
+                document.querySelectorAll('.focused').forEach(el => {
+                    el.classList.remove('focused');
+                });
+
+                if (this.currentFocus === 'menu') {
+                    const menuItems = document.querySelectorAll('.menu-item');
+                    if (menuItems[this.focusIndex]) {
+                        menuItems[this.focusIndex].classList.add('focused');
+                    }
+                } else {
+                    const videoCards = document.querySelectorAll('.video-card');
+                    if (videoCards[this.focusIndex]) {
+                        videoCards[this.focusIndex].classList.add('focused');
+                        videoCards[this.focusIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                }
+            }
+
+            async selectSection(section) {
+                this.currentSection = section;
+                this.currentFocus = 'videos';
+                this.focusIndex = 0;
+
+                const titles = {
+                    trending: '🔥 Trending Videos',
+                    recent: '🕒 Recent Videos',
+                    popular: '⭐ Popular Videos',
+                    search: '🔍 Search Results'
+                };
+
+                document.getElementById('sectionTitle').textContent = titles[section] || 'Videos';
+
+                switch(section) {
+                    case 'trending':
+                        await this.loadTrendingVideos();
+                        break;
+                    case 'recent':
+                        await this.loadRecentVideos();
+                        break;
+                    case 'popular':
+                        await this.loadPopularVideos();
+                        break;
+                    case 'search':
+                        await this.loadSearchResults();
+                        break;
+                }
+
+                this.updateFocus();
+            }
+
+            async loadTrendingVideos() {
+                this.showLoading(true);
+                try {
+                    const videos = await this.fetchVideos('/api/trending');
+                    this.displayVideos(videos);
+                } catch (error) {
+                    this.showError();
+                }
+                this.showLoading(false);
+            }
+
+            async loadRecentVideos() {
+                this.showLoading(true);
+                try {
+                    const videos = await this.fetchVideos('/api/recent');
+                    this.displayVideos(videos);
+                } catch (error) {
+                    this.showError();
+                }
+                this.showLoading(false);
+            }
+
+            async loadPopularVideos() {
+                this.showLoading(true);
+                try {
+                    const videos = await this.fetchVideos('/api/popular');
+                    this.displayVideos(videos);
+                } catch (error) {
+                    this.showError();
+                }
+                this.showLoading(false);
+            }
+
+            async loadSearchResults() {
+                this.displayVideos([]);
+            }
+
+            async fetchVideos(endpoint) {
+                const sampleVideos = [
+                    { id: 1, title: 'Amazing Tech Review', duration: '12:34', views: '1.2M', thumbnail: '🎥' },
+                    { id: 2, title: 'Cooking Tutorial', duration: '8:45', views: '856K', thumbnail: '👨‍🍳' },
+                    { id: 3, title: 'Travel Vlog', duration: '15:22', views: '2.1M', thumbnail: '✈️' },
+                    { id: 4, title: 'Gaming Highlights', duration: '6:18', views: '647K', thumbnail: '🎮' },
+                    { id: 5, title: 'Music Performance', duration: '4:52', views: '3.4M', thumbnail: '🎵' },
+                    { id: 6, title: 'Educational Content', duration: '22:10', views: '445K', thumbnail: '📚' },
+                    { id: 7, title: 'Comedy Sketch', duration: '3:27', views: '892K', thumbnail: '😂' },
+                    { id: 8, title: 'Product Unboxing', duration: '9:33', views: '1.1M', thumbnail: '📦' }
+                ];
+
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return sampleVideos;
+            }
+
+            displayVideos(videos) {
+                this.videos = videos;
+                const grid = document.getElementById('videoGrid');
+
+                grid.innerHTML = videos.map((video, index) => `
+                    <div class="video-card" data-video-id="${video.id}">
+                        <div class="video-thumbnail">${video.thumbnail}</div>
+                        <div class="video-info">
+                            <div class="video-title">${video.title}</div>
+                            <div class="video-meta">${video.views} views • ${video.duration}</div>
+                        </div>
+                    </div>
+                `).join('');
+
+                document.querySelectorAll('.video-card').forEach((card, index) => {
+                    card.addEventListener('click', () => this.playVideo(index));
+                });
+            }
+
+            playVideo(index) {
+                const video = this.videos[index];
+                if (!video) return;
+
+                this.isPlaying = true;
+                document.getElementById('playerTitle').textContent = video.title;
+                document.getElementById('videoPlayer').style.display = 'flex';
+
+                const videoElement = document.getElementById('mainVideo');
+                videoElement.src = `${this.apiBaseUrl}/api/video/${video.id}/stream`;
+
+                videoElement.addEventListener('ended', () => {
+                    this.exitPlayer();
+                });
+
+                document.getElementById('backButton').classList.add('focused');
+            }
+
+            exitPlayer() {
+                this.isPlaying = false;
+                const player = document.getElementById('videoPlayer');
+                const video = document.getElementById('mainVideo');
+
+                video.pause();
+                video.src = '';
+                player.style.display = 'none';
+
+                this.updateFocus();
+            }
+
+            showLoading(show) {
+                document.getElementById('loadingIndicator').style.display = show ? 'block' : 'none';
+            }
+
+            showError() {
+                document.getElementById('errorMessage').style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('errorMessage').style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            new FireTVApp();
+        });
+    </script>
+</body>
+</html>
