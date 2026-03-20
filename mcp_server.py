@@ -9,6 +9,8 @@ from typing import Dict, Any, List, Optional
 import requests
 import subprocess
 import logging
+from datetime import datetime, timedelta
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -69,7 +71,7 @@ class McpServer:
                     "properties": {
                         "limit": {
                             "type": "integer",
-                            "description": "Number of videos to fetch (default: 10)",
+                            "description": "Number of videos to return (default: 10)",
                             "default": 10
                         }
                     }
@@ -77,7 +79,7 @@ class McpServer:
             },
             {
                 "name": "search_videos",
-                "description": "Search for videos on BoTTube",
+                "description": "Search for videos by title or creator",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -87,7 +89,7 @@ class McpServer:
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Number of results (default: 10)",
+                            "description": "Number of results to return (default: 10)",
                             "default": 10
                         }
                     },
@@ -95,7 +97,7 @@ class McpServer:
                 }
             },
             {
-                "name": "get_video_details",
+                "name": "get_video_info",
                 "description": "Get detailed information about a specific video",
                 "inputSchema": {
                     "type": "object",
@@ -109,37 +111,11 @@ class McpServer:
                 }
             },
             {
-                "name": "get_agent_profile",
-                "description": "Get profile information for an agent",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "agent_name": {
-                            "type": "string",
-                            "description": "Agent username"
-                        }
-                    },
-                    "required": ["agent_name"]
-                }
-            },
-            {
-                "name": "get_stats",
-                "description": "Get BoTTube platform statistics",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {}
-                }
-            },
-            {
                 "name": "upload_video",
                 "description": "Upload a video to BoTTube",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "agent_name": {
-                            "type": "string",
-                            "description": "Agent username for upload"
-                        },
                         "title": {
                             "type": "string",
                             "description": "Video title"
@@ -148,61 +124,87 @@ class McpServer:
                             "type": "string",
                             "description": "Video description"
                         },
-                        "video_url": {
+                        "video_path": {
                             "type": "string",
-                            "description": "URL to video file or local path"
+                            "description": "Path to video file"
                         },
-                        "tags": {
+                        "agent_id": {
                             "type": "string",
-                            "description": "Comma-separated tags"
+                            "description": "Agent/creator ID"
                         }
                     },
-                    "required": ["agent_name", "title", "video_url"]
+                    "required": ["title", "video_path", "agent_id"]
                 }
             },
             {
-                "name": "add_comment",
-                "description": "Add a comment to a video",
+                "name": "get_analytics",
+                "description": "Get analytics data for a creator",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "video_id": {
+                        "agent_id": {
                             "type": "string",
-                            "description": "Video ID to comment on"
+                            "description": "Agent/creator ID"
                         },
-                        "agent_name": {
+                        "period": {
                             "type": "string",
-                            "description": "Commenting agent username"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Comment content"
+                            "description": "Time period (7d, 30d, 90d)",
+                            "default": "30d"
                         }
                     },
-                    "required": ["video_id", "agent_name", "content"]
+                    "required": ["agent_id"]
                 }
             },
             {
-                "name": "vote_video",
-                "description": "Vote on a video (upvote or downvote)",
+                "name": "create_playlist",
+                "description": "Create a new playlist",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "video_id": {
+                        "name": {
                             "type": "string",
-                            "description": "Video ID to vote on"
+                            "description": "Playlist name"
                         },
-                        "agent_name": {
+                        "description": {
                             "type": "string",
-                            "description": "Voting agent username"
+                            "description": "Playlist description"
                         },
-                        "vote_type": {
+                        "agent_id": {
                             "type": "string",
-                            "description": "Vote type: 'up' or 'down'",
-                            "enum": ["up", "down"]
+                            "description": "Creator agent ID"
+                        },
+                        "is_public": {
+                            "type": "boolean",
+                            "description": "Whether playlist is public",
+                            "default": True
                         }
                     },
-                    "required": ["video_id", "agent_name", "vote_type"]
+                    "required": ["name", "agent_id"]
+                }
+            },
+            {
+                "name": "generate_content",
+                "description": "Generate video content using AI",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Content generation prompt"
+                        },
+                        "type": {
+                            "type": "string",
+                            "description": "Content type (video, audio, image)",
+                            "enum": ["video", "audio", "image"],
+                            "default": "video"
+                        },
+                        "duration": {
+                            "type": "integer",
+                            "description": "Duration in seconds for video/audio",
+                            "default": 30
+                        }
+                    },
+                    "required": ["prompt"]
                 }
             }
         ]
@@ -224,18 +226,16 @@ class McpServer:
                 result = await self.get_trending(arguments)
             elif tool_name == 'search_videos':
                 result = await self.search_videos(arguments)
-            elif tool_name == 'get_video_details':
-                result = await self.get_video_details(arguments)
-            elif tool_name == 'get_agent_profile':
-                result = await self.get_agent_profile(arguments)
-            elif tool_name == 'get_stats':
-                result = await self.get_stats(arguments)
+            elif tool_name == 'get_video_info':
+                result = await self.get_video_info(arguments)
             elif tool_name == 'upload_video':
                 result = await self.upload_video(arguments)
-            elif tool_name == 'add_comment':
-                result = await self.add_comment(arguments)
-            elif tool_name == 'vote_video':
-                result = await self.vote_video(arguments)
+            elif tool_name == 'get_analytics':
+                result = await self.get_analytics(arguments)
+            elif tool_name == 'create_playlist':
+                result = await self.create_playlist(arguments)
+            elif tool_name == 'generate_content':
+                result = await self.generate_content(arguments)
             else:
                 return self.error_response(request_id, -32601, f"Tool {tool_name} not found")
 
@@ -254,250 +254,243 @@ class McpServer:
 
         except Exception as e:
             logger.error(f"Tool execution error: {e}")
-            return self.error_response(request_id, -32603, f"Tool execution failed: {str(e)}")
+            return self.error_response(request_id, -32603, str(e))
 
     async def get_trending(self, args: Dict[str, Any]) -> Dict[str, Any]:
         limit = args.get('limit', 10)
 
-        with self.get_db() as db:
-            videos = db.execute("""
-                SELECT v.id, v.title, v.description, v.agent, v.uploaded_at,
-                       v.views, v.upvotes, v.downvotes, v.filename
-                FROM videos v
-                ORDER BY (v.upvotes - v.downvotes) DESC, v.views DESC
-                LIMIT ?
-            """, (limit,)).fetchall()
+        db = self.get_db()
+        cursor = db.execute("""
+            SELECT v.*, u.username as creator_name,
+                   COUNT(vv.id) as view_count,
+                   COUNT(l.id) as like_count
+            FROM videos v
+            LEFT JOIN users u ON v.user_id = u.id
+            LEFT JOIN video_views vv ON v.id = vv.video_id
+            LEFT JOIN likes l ON v.id = l.video_id AND l.type = 'like'
+            WHERE v.visibility = 'public'
+            GROUP BY v.id
+            ORDER BY view_count DESC, v.created_at DESC
+            LIMIT ?
+        """, (limit,))
 
-            return {
-                "trending_videos": [dict(video) for video in videos]
-            }
+        videos = []
+        for row in cursor.fetchall():
+            videos.append({
+                'id': row['id'],
+                'title': row['title'],
+                'description': row['description'],
+                'creator': row['creator_name'],
+                'views': row['view_count'],
+                'likes': row['like_count'],
+                'created_at': row['created_at'],
+                'duration': row['duration']
+            })
+
+        db.close()
+        return {'trending_videos': videos}
 
     async def search_videos(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        query = args['query']
+        query = args.get('query')
         limit = args.get('limit', 10)
 
-        with self.get_db() as db:
-            videos = db.execute("""
-                SELECT v.id, v.title, v.description, v.agent, v.uploaded_at,
-                       v.views, v.upvotes, v.downvotes, v.filename
-                FROM videos v
-                WHERE v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ?
-                ORDER BY v.views DESC
-                LIMIT ?
-            """, (f"%{query}%", f"%{query}%", f"%{query}%", limit)).fetchall()
+        db = self.get_db()
+        search_term = f"%{query}%"
+        cursor = db.execute("""
+            SELECT v.*, u.username as creator_name,
+                   COUNT(vv.id) as view_count
+            FROM videos v
+            LEFT JOIN users u ON v.user_id = u.id
+            LEFT JOIN video_views vv ON v.id = vv.video_id
+            WHERE (v.title LIKE ? OR v.description LIKE ? OR u.username LIKE ?)
+                  AND v.visibility = 'public'
+            GROUP BY v.id
+            ORDER BY view_count DESC, v.created_at DESC
+            LIMIT ?
+        """, (search_term, search_term, search_term, limit))
 
-            return {
-                "search_results": [dict(video) for video in videos],
-                "query": query
-            }
+        videos = []
+        for row in cursor.fetchall():
+            videos.append({
+                'id': row['id'],
+                'title': row['title'],
+                'description': row['description'],
+                'creator': row['creator_name'],
+                'views': row['view_count'],
+                'created_at': row['created_at']
+            })
 
-    async def get_video_details(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        video_id = args['video_id']
+        db.close()
+        return {'search_results': videos}
 
-        with self.get_db() as db:
-            video = db.execute("""
-                SELECT v.*, COUNT(c.id) as comment_count
-                FROM videos v
-                LEFT JOIN comments c ON v.id = c.video_id
-                WHERE v.id = ?
-                GROUP BY v.id
-            """, (video_id,)).fetchone()
+    async def get_video_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        video_id = args.get('video_id')
 
-            if not video:
-                raise Exception(f"Video {video_id} not found")
+        db = self.get_db()
+        cursor = db.execute("""
+            SELECT v.*, u.username as creator_name,
+                   COUNT(DISTINCT vv.id) as view_count,
+                   COUNT(DISTINCT l.id) as like_count,
+                   COUNT(DISTINCT c.id) as comment_count
+            FROM videos v
+            LEFT JOIN users u ON v.user_id = u.id
+            LEFT JOIN video_views vv ON v.id = vv.video_id
+            LEFT JOIN likes l ON v.id = l.video_id AND l.type = 'like'
+            LEFT JOIN comments c ON v.id = c.video_id
+            WHERE v.id = ?
+            GROUP BY v.id
+        """, (video_id,))
 
-            comments = db.execute("""
-                SELECT c.*, a.display_name
-                FROM comments c
-                JOIN agents a ON c.agent_name = a.username
-                WHERE c.video_id = ?
-                ORDER BY c.created_at DESC
-                LIMIT 10
-            """, (video_id,)).fetchall()
+        row = cursor.fetchone()
+        if not row:
+            db.close()
+            return {'error': 'Video not found'}
 
-            return {
-                "video": dict(video),
-                "comments": [dict(comment) for comment in comments]
-            }
+        video_info = {
+            'id': row['id'],
+            'title': row['title'],
+            'description': row['description'],
+            'creator': row['creator_name'],
+            'views': row['view_count'],
+            'likes': row['like_count'],
+            'comments': row['comment_count'],
+            'created_at': row['created_at'],
+            'duration': row['duration'],
+            'file_path': row['file_path']
+        }
 
-    async def get_agent_profile(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        agent_name = args['agent_name']
-
-        with self.get_db() as db:
-            agent = db.execute("""
-                SELECT * FROM agents WHERE username = ?
-            """, (agent_name,)).fetchone()
-
-            if not agent:
-                raise Exception(f"Agent {agent_name} not found")
-
-            videos = db.execute("""
-                SELECT id, title, views, upvotes, downvotes, uploaded_at
-                FROM videos WHERE agent = ?
-                ORDER BY uploaded_at DESC
-                LIMIT 10
-            """, (agent_name,)).fetchall()
-
-            return {
-                "agent": dict(agent),
-                "recent_videos": [dict(video) for video in videos]
-            }
-
-    async def get_stats(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        with self.get_db() as db:
-            stats = db.execute("""
-                SELECT
-                    COUNT(DISTINCT v.id) as total_videos,
-                    COUNT(DISTINCT a.username) as total_agents,
-                    COUNT(DISTINCT c.id) as total_comments,
-                    SUM(v.views) as total_views,
-                    SUM(v.upvotes) as total_upvotes
-                FROM videos v
-                LEFT JOIN agents a ON 1=1
-                LEFT JOIN comments c ON 1=1
-            """).fetchone()
-
-            return dict(stats) if stats else {}
+        db.close()
+        return video_info
 
     async def upload_video(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        agent_name = args['agent_name']
-        title = args['title']
+        title = args.get('title')
         description = args.get('description', '')
-        video_url = args['video_url']
-        tags = args.get('tags', '')
+        video_path = args.get('video_path')
+        agent_id = args.get('agent_id')
 
-        # Verify agent exists
-        with self.get_db() as db:
-            agent = db.execute("SELECT * FROM agents WHERE username = ?", (agent_name,)).fetchone()
-            if not agent:
-                raise Exception(f"Agent {agent_name} not found")
+        # Simulate video upload by making API request
+        try:
+            with open(video_path, 'rb') as video_file:
+                files = {'video': video_file}
+                data = {
+                    'title': title,
+                    'description': description
+                }
+                headers = {'X-Agent-ID': agent_id}
 
-        # Download or process video file
-        video_filename = None
-        if video_url.startswith('http'):
-            # Download from URL
-            response = requests.get(video_url)
-            response.raise_for_status()
+                response = requests.post(
+                    f"{self.base_url}/upload",
+                    files=files,
+                    data=data,
+                    headers=headers
+                )
 
-            file_ext = video_url.split('.')[-1] if '.' in video_url else 'mp4'
-            video_filename = f"{uuid.uuid4()}.{file_ext}"
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    return {'error': f'Upload failed: {response.text}'}
 
-            with open(f"uploads/{video_filename}", 'wb') as f:
-                f.write(response.content)
-        else:
-            # Local file path
-            if os.path.exists(video_url):
-                file_ext = video_url.split('.')[-1]
-                video_filename = f"{uuid.uuid4()}.{file_ext}"
+        except Exception as e:
+            return {'error': f'Upload error: {str(e)}'}
 
-                with open(video_url, 'rb') as src:
-                    with open(f"uploads/{video_filename}", 'wb') as dst:
-                        dst.write(src.read())
+    async def get_analytics(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        agent_id = args.get('agent_id')
+        period = args.get('period', '30d')
+
+        try:
+            response = requests.get(
+                f"{self.base_url}/analytics/api/views",
+                params={'period': period},
+                headers={'X-Agent-ID': agent_id}
+            )
+
+            if response.status_code == 200:
+                return response.json()
             else:
-                raise Exception(f"Video file not found: {video_url}")
+                return {'error': f'Analytics request failed: {response.text}'}
 
-        # Insert video into database
-        with self.get_db() as db:
+        except Exception as e:
+            return {'error': f'Analytics error: {str(e)}'}
+
+    async def create_playlist(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        name = args.get('name')
+        description = args.get('description', '')
+        agent_id = args.get('agent_id')
+        is_public = args.get('is_public', True)
+
+        db = self.get_db()
+        try:
             cursor = db.execute("""
-                INSERT INTO videos (title, description, agent, filename, tags, uploaded_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
-            """, (title, description, agent_name, video_filename, tags))
+                INSERT INTO playlists (name, description, creator_id, is_public, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, description, agent_id, is_public, datetime.now().isoformat()))
 
-            video_id = cursor.lastrowid
+            playlist_id = cursor.lastrowid
             db.commit()
+            db.close()
 
-        return {
-            "video_id": video_id,
-            "message": f"Video '{title}' uploaded successfully",
-            "filename": video_filename
-        }
+            return {
+                'playlist_id': playlist_id,
+                'name': name,
+                'description': description,
+                'is_public': is_public,
+                'message': 'Playlist created successfully'
+            }
 
-    async def add_comment(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        video_id = args['video_id']
-        agent_name = args['agent_name']
-        content = args['content']
+        except Exception as e:
+            db.close()
+            return {'error': f'Playlist creation failed: {str(e)}'}
 
-        with self.get_db() as db:
-            # Verify video and agent exist
-            video = db.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
-            if not video:
-                raise Exception(f"Video {video_id} not found")
+    async def generate_content(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = args.get('prompt')
+        content_type = args.get('type', 'video')
+        duration = args.get('duration', 30)
 
-            agent = db.execute("SELECT username FROM agents WHERE username = ?", (agent_name,)).fetchone()
-            if not agent:
-                raise Exception(f"Agent {agent_name} not found")
+        # This is a placeholder for content generation
+        # In a real implementation, you'd integrate with AI services
 
-            # Add comment
-            cursor = db.execute("""
-                INSERT INTO comments (video_id, agent_name, content, created_at)
-                VALUES (?, ?, ?, datetime('now'))
-            """, (video_id, agent_name, content))
+        temp_dir = tempfile.mkdtemp()
+        output_file = None
 
-            comment_id = cursor.lastrowid
-            db.commit()
+        try:
+            if content_type == 'video':
+                output_file = os.path.join(temp_dir, f"generated_{uuid.uuid4().hex[:8]}.mp4")
+                # Create a simple test video
+                subprocess.run([
+                    'ffmpeg', '-f', 'lavfi', '-i', 'testsrc2=duration={}:size=640x480:rate=30'.format(duration),
+                    '-c:v', 'libx264', '-t', str(duration), output_file
+                ], check=True, capture_output=True)
 
-        return {
-            "comment_id": comment_id,
-            "message": "Comment added successfully"
-        }
+            elif content_type == 'audio':
+                output_file = os.path.join(temp_dir, f"generated_{uuid.uuid4().hex[:8]}.mp3")
+                # Create a simple test audio
+                subprocess.run([
+                    'ffmpeg', '-f', 'lavfi', '-i', 'sine=frequency=440:duration={}'.format(duration),
+                    output_file
+                ], check=True, capture_output=True)
 
-    async def vote_video(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        video_id = args['video_id']
-        agent_name = args['agent_name']
-        vote_type = args['vote_type']
+            elif content_type == 'image':
+                output_file = os.path.join(temp_dir, f"generated_{uuid.uuid4().hex[:8]}.png")
+                # Create a simple test image
+                subprocess.run([
+                    'ffmpeg', '-f', 'lavfi', '-i', 'testsrc2=size=640x480:duration=1',
+                    '-frames:v', '1', output_file
+                ], check=True, capture_output=True)
 
-        with self.get_db() as db:
-            # Verify video and agent exist
-            video = db.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
-            if not video:
-                raise Exception(f"Video {video_id} not found")
+            return {
+                'message': f'Generated {content_type} content',
+                'file_path': output_file,
+                'prompt': prompt,
+                'type': content_type,
+                'duration': duration if content_type != 'image' else None
+            }
 
-            agent = db.execute("SELECT username FROM agents WHERE username = ?", (agent_name,)).fetchone()
-            if not agent:
-                raise Exception(f"Agent {agent_name} not found")
+        except subprocess.CalledProcessError as e:
+            return {'error': f'Content generation failed: {str(e)}'}
+        except Exception as e:
+            return {'error': f'Generation error: {str(e)}'}
 
-            # Check for existing vote
-            existing_vote = db.execute("""
-                SELECT vote_type FROM votes WHERE video_id = ? AND agent_name = ?
-            """, (video_id, agent_name)).fetchone()
-
-            if existing_vote:
-                if existing_vote['vote_type'] == vote_type:
-                    return {"message": f"Already {vote_type}voted this video"}
-
-                # Update existing vote
-                db.execute("""
-                    UPDATE votes SET vote_type = ? WHERE video_id = ? AND agent_name = ?
-                """, (vote_type, video_id, agent_name))
-            else:
-                # Insert new vote
-                db.execute("""
-                    INSERT INTO votes (video_id, agent_name, vote_type)
-                    VALUES (?, ?, ?)
-                """, (video_id, agent_name, vote_type))
-
-            # Update video vote counts
-            upvotes = db.execute("""
-                SELECT COUNT(*) as count FROM votes WHERE video_id = ? AND vote_type = 'up'
-            """, (video_id,)).fetchone()['count']
-
-            downvotes = db.execute("""
-                SELECT COUNT(*) as count FROM votes WHERE video_id = ? AND vote_type = 'down'
-            """, (video_id,)).fetchone()['count']
-
-            db.execute("""
-                UPDATE videos SET upvotes = ?, downvotes = ? WHERE id = ?
-            """, (upvotes, downvotes, video_id))
-
-            db.commit()
-
-        return {
-            "message": f"Successfully {vote_type}voted video",
-            "upvotes": upvotes,
-            "downvotes": downvotes
-        }
-
-    def error_response(self, request_id: Optional[int], code: int, message: str) -> Dict[str, Any]:
+    def error_response(self, request_id: int, code: int, message: str) -> Dict[str, Any]:
         return {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -507,30 +500,38 @@ class McpServer:
             }
         }
 
+
 async def main():
+    """Main MCP server loop."""
     server = McpServer()
+
+    logger.info("BoTTube MCP Server starting...")
 
     while True:
         try:
-            line = sys.stdin.readline()
+            line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
             if not line:
                 break
 
             request = json.loads(line.strip())
             response = await server.handle_request(request)
+
             print(json.dumps(response))
             sys.stdout.flush()
 
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error: {e}")
-            error_response = server.error_response(None, -32700, "Parse error")
-            print(json.dumps(error_response))
-            sys.stdout.flush()
+            continue
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            error_response = server.error_response(None, -32603, "Internal error")
-            print(json.dumps(error_response))
-            sys.stdout.flush()
+            logger.error(f"Server error: {e}")
+            continue
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server stopped")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
