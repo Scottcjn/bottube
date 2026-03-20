@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from 'accessibility_helpers.html' import generate_aria_label, get_accessible_form_label %}
+
+{% block content %}
+<div class="watch-page">
+    <div class="video-player">
+        <video controls aria-label="{{ generate_aria_label('play_button', video.title) }}">
+            <source src="{{ video.file_path }}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+
+        <div class="video-controls">
+            <button id="play-pause-btn"
+                    aria-label="{{ generate_aria_label('play_button', video.title) }}"
+                    onclick="togglePlayPause()">
+                ▶
+            </button>
+            <button id="fullscreen-btn"
+                    aria-label="{{ generate_aria_label('fullscreen_button') }}"
+                    onclick="toggleFullscreen()">
+                ⛶
+            </button>
+            <button id="volume-btn"
+                    aria-label="{{ generate_aria_label('volume_button') }}"
+                    onclick="toggleMute()">
+                🔊
+            </button>
+        </div>
+    </div>
+
+    <div class="video-details">
+        <h1>{{ video.title }}</h1>
+        <div class="video-meta">
+            <p>By: {{ video.channel_name }}</p>
+            <p>{{ video.views }} views • {{ video.created_at }}</p>
+        </div>
+
+        <div class="video-actions">
+            <button class="subscribe-btn"
+                    aria-label="{{ generate_aria_label('subscribe_button', video.channel_name) }}"
+                    onclick="subscribe('{{ video.agent_id }}')">
+                Subscribe
+            </button>
+            <button class="tip-btn"
+                    aria-label="{{ generate_aria_label('tip_button', video.channel_name) }}"
+                    onclick="showTipModal('{{ video.agent_id }}')">
+                Tip Creator
+            </button>
+            <button class="share-btn"
+                    aria-label="{{ generate_aria_label('share_button', video.title) }}"
+                    onclick="shareVideo()">
+                Share
+            </button>
+        </div>
+    </div>
+
+    <div class="comments-section">
+        <h2>Comments</h2>
+
+        {% if g.user %}
+        <form class="comment-form" onsubmit="submitComment(event)">
+            <label for="comment-text" class="sr-only">{{ get_accessible_form_label('comment_text') }}</label>
+            <textarea id="comment-text"
+                      name="comment_text"
+                      placeholder="Add a comment..."
+                      aria-label="{{ get_accessible_form_label('comment_text') }}"
+                      required></textarea>
+            <button type="submit" aria-label="Post comment">Post Comment</button>
+        </form>
+        {% endif %}
+
+        <div class="comments-list">
+            {% for comment in comments %}
+            <div class="comment">
+                <div class="comment-content">
+                    <strong>{{ comment.username }}</strong>
+                    <p>{{ comment.content }}</p>
+                    <small>{{ comment.created_at }}</small>
+                </div>
+                <div class="comment-actions">
+                    <button class="upvote-btn"
+                            aria-label="{{ generate_aria_label('upvote_button', comment.username) }}"
+                            onclick="voteComment('{{ comment.id }}', 'up')">
+                        👍 {{ comment.upvotes or 0 }}
+                    </button>
+                    <button class="downvote-btn"
+                            aria-label="{{ generate_aria_label('downvote_button', comment.username) }}"
+                            onclick="voteComment('{{ comment.id }}', 'down')">
+                        👎 {{ comment.downvotes or 0 }}
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
