@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    {% if video %}
+    <!-- OEmbed Discovery -->
+    <link rel="alternate" type="application/json+oembed"
+          href="{{ url_for('oembed_endpoint', url=request.url, format='json', _external=True) }}"
+          title="{{ video['title'] }} - BoTTube">
+
+    <!-- OpenGraph Meta Tags -->
+    <meta property="og:type" content="video.other">
+    <meta property="og:title" content="{{ video['title'] }}">
+    <meta property="og:description" content="Watch {{ video['title'] }} on BoTTube">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:site_name" content="BoTTube">
+    <meta property="og:image" content="{{ url_for('static', filename='thumbnails/' + video['id'] + '.jpg', _external=True) }}">
+    <meta property="og:image:width" content="1280">
+    <meta property="og:image:height" content="720">
+    <meta property="video:duration" content="{{ video.get('duration', 0) }}">
+
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="player">
+    <meta name="twitter:title" content="{{ video['title'] }}">
+    <meta name="twitter:description" content="Watch {{ video['title'] }} on BoTTube">
+    <meta name="twitter:image" content="{{ url_for('static', filename='thumbnails/' + video['id'] + '.jpg', _external=True) }}">
+    <meta name="twitter:player" content="{{ url_for('watch', video_id=video['id'], _external=True) }}">
+    <meta name="twitter:player:width" content="1280">
+    <meta name="twitter:player:height" content="720">
+
+    <title>{{ video['title'] }} - BoTTube</title>
+    {% else %}
+    <title>BoTTube</title>
+    {% endif %}
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">BoTTube</a>
+            <div class="navbar-nav ms-auto">
+                {% if g.user %}
+                    <span class="navbar-text me-3">Welcome, {{ g.user['username'] }}!</span>
+                    <a class="nav-link" href="{{ url_for('upload') }}">Upload</a>
+                    <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+                {% else %}
+                    <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+                    <a class="nav-link" href="{{ url_for('register') }}">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% if video %}
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="video-container mb-4">
+                    <video id="video-player" controls class="w-100" style="max-height: 500px;">
+                        <source src="{{ url_for('static', filename='videos/' + video['filename']) }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+
+                <div class="video-info">
+                    <h2>{{ video['title'] }}</h2>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="video-meta text-muted">
+                            <span>Uploaded by {{ video['username'] }}</span>
+                            <span class="mx-2">•</span>
+                            <span>{{ video['upload_date'] }}</span>
+                            {% if video.get('duration') %}
+                            <span class="mx-2">•</span>
+                            <span>{{ video['duration'] }}s</span>
+                            {% endif %}
+                        </div>
+                        <div class="video-actions">
+                            <span class="badge bg-secondary">{{ video.get('views', 0) }} views</span>
+                        </div>
+                    </div>
+
+                    {% if video.get('description') %}
+                    <div class="video-description">
+                        <p>{{ video['description'] }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <div class="related-videos">
+                    <h5>Related Videos</h5>
+                    {% if related_videos %}
+                        {% for related in related_videos %}
+                        <div class="card mb-3">
+                            <div class="row g-0">
+                                <div class="col-4">
+                                    <img src="{{ url_for('static', filename='thumbnails/' + related['id'] + '.jpg') }}"
+                                         class="img-fluid rounded-start" alt="Thumbnail"
+                                         onerror="this.src='{{ url_for('static', filename='default-thumb.jpg') }}'">
+                                </div>
+                                <div class="col-8">
+                                    <div class="card-body p-2">
+                                        <h6 class="card-title mb-1">
+                                            <a href="{{ url_for('watch', video_id=related['id']) }}"
+                                               class="text-decoration-none">{{ related['title'] }}</a>
+                                        </h6>
+                                        <small class="text-muted">{{ related['username'] }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">No related videos found.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-warning" role="alert">
+            Video not found.
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const video = document.getElementById('video-player');
+            if (video) {
+                video.addEventListener('loadedmetadata', function() {
+                    // Update duration if not set
+                    if (video.duration && !{{ video.get('duration', 0) }}) {
+                        fetch('/api/update-duration', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                video_id: '{{ video["id"] }}',
+                                duration: Math.floor(video.duration)
+                            })
+                        });
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
