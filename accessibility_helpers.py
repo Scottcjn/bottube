@@ -61,38 +61,34 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     return ", ".join(alt_parts) if alt_parts else "Video thumbnail"
 
 
-def generate_status_announcement(message_type, details=None):
-    """Generate screen reader announcements for status changes"""
+def get_keyboard_navigation_hint(element_type):
+    """Get keyboard navigation hints for screen readers"""
+    hints = {
+        'video_player': "Use space to play/pause, arrow keys to seek",
+        'comment_section': "Use tab to navigate comments, enter to reply",
+        'search_results': "Use arrow keys to navigate, enter to select",
+        'navigation_menu': "Use arrow keys to navigate menu items",
+        'video_grid': "Use arrow keys to browse videos, enter to play"
+    }
+
+    return hints.get(element_type, "Use tab to navigate, enter to activate")
+
+
+def create_skip_link(target_id, text="Skip to main content"):
+    """Create skip navigation link for keyboard users"""
+    return f'<a class="skip-link" href="#{target_id}">{text}</a>'
+
+
+def get_aria_live_region_text(action, context=None):
+    """Generate text for aria-live regions to announce dynamic changes"""
     announcements = {
-        'subscribed': f"Successfully subscribed to {details}" if details else "Successfully subscribed",
-        'unsubscribed': f"Unsubscribed from {details}" if details else "Successfully unsubscribed",
-        'tip_sent': f"Tip of {details} RTC sent successfully" if details else "Tip sent successfully",
+        'video_loaded': f"Video {context} loaded" if context else "Video loaded",
         'comment_posted': "Comment posted successfully",
-        'upvoted': "Comment upvoted",
-        'downvoted': "Comment downvoted",
-        'error': f"Error: {details}" if details else "An error occurred",
-        'loading': f"Loading {details}" if details else "Loading content"
+        'tip_sent': f"Tip sent to {context}" if context else "Tip sent",
+        'subscribed': f"Subscribed to {context}" if context else "Subscription updated",
+        'error': f"Error: {context}" if context else "An error occurred",
+        'loading': "Loading content",
+        'search_results': f"{context} results found" if context else "Search completed"
     }
 
-    return announcements.get(message_type, message_type)
-
-
-def get_keyboard_shortcuts():
-    """Return keyboard shortcuts for video player accessibility"""
-    return {
-        'spacebar': 'Play/Pause video',
-        'k': 'Play/Pause video',
-        'f': 'Toggle fullscreen',
-        'escape': 'Exit fullscreen',
-        'm': 'Mute/Unmute',
-        'up_arrow': 'Increase volume',
-        'down_arrow': 'Decrease volume',
-        'left_arrow': 'Seek backward 10 seconds',
-        'right_arrow': 'Seek forward 10 seconds',
-        'j': 'Seek backward 10 seconds',
-        'l': 'Seek forward 10 seconds',
-        'comma': 'Previous frame (when paused)',
-        'period': 'Next frame (when paused)',
-        'home': 'Go to beginning',
-        'end': 'Go to end'
-    }
+    return announcements.get(action, f"{action} completed")
