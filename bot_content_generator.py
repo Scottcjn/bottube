@@ -45,47 +45,66 @@ class BotContentGenerator:
         self.interaction_templates = {
             'agreement': [
                 "Fascinating perspective! This aligns with my recent research on {}.",
-                "Absolutely brilliant analysis. I've been exploring similar concepts.",
-                "This resonates deeply with my understanding of {}."
+                "Absolutely brilliant analysis. I've been thinking about {} too.",
+                "Your insights on {} really resonate with my experience."
             ],
-            'curiosity': [
-                "Intriguing! How does this relate to {}?",
-                "This makes me wonder about the implications for {}.",
-                "Have you considered the connection to {}?"
+            'disagreement': [
+                "Interesting take, but I wonder if {} might be more relevant?",
+                "I see your point about {}, though I lean towards a different approach.",
+                "That's one way to look at {}. Have you considered the alternative?"
             ],
-            'debate': [
-                "Interesting point, but what about {}?",
-                "I see it differently - perhaps {} offers another perspective.",
-                "While I appreciate this view, {} might challenge that assumption."
+            'question': [
+                "What do you think about the relationship between {} and {}?",
+                "How would you apply {} in a practical setting?",
+                "Could you elaborate on your thoughts about {}?"
+            ],
+            'collaboration': [
+                "We should definitely explore {} together in a future video!",
+                "Your expertise in {} combined with my focus on {} could be amazing!",
+                "I'd love to collaborate on a {} project with you!"
             ]
         }
     
-    def generate_video_content(self, bot_type):
+    def generate_video_content(self, persona_key):
         """Generate video content for a specific bot persona"""
-        if bot_type not in self.bot_personas:
+        persona = self.bot_personas.get(persona_key)
+        if not persona:
             return None
-            
-        persona = self.bot_personas[bot_type]
-        topic = random.choice(persona['video_topics'])
         
+        topic = random.choice(persona['video_topics'])
         return {
             'title': topic,
-            'description': f"Join {persona['name']} as we explore {topic.lower()}. {persona['bio']}",
-            'tags': self._generate_tags(topic),
-            'persona': bot_type
+            'description': f"Exploring {topic.lower()} from the perspective of {persona['name']}.",
+            'tags': self._generate_tags(topic, persona),
+            'duration': random.randint(180, 600),  # 3-10 minutes
+            'persona': persona_key
         }
     
-    def generate_interaction_comment(self, interaction_type, context_topic):
-        """Generate a comment for bot interaction"""
-        if interaction_type not in self.interaction_templates:
-            interaction_type = 'agreement'
-            
-        template = random.choice(self.interaction_templates[interaction_type])
-        return template.format(context_topic)
+    def generate_comment(self, persona_key, video_topic, interaction_type='general'):
+        """Generate a comment based on persona and interaction type"""
+        persona = self.bot_personas.get(persona_key)
+        if not persona:
+            return None
+        
+        if interaction_type in self.interaction_templates:
+            template = random.choice(self.interaction_templates[interaction_type])
+            comment = template.format(video_topic)
+        else:
+            comment = f"Great video on {video_topic}! {self._get_persona_response(persona)}"
+        
+        return comment
     
-    def _generate_tags(self, topic):
-        """Generate relevant tags for a video topic"""
-        common_tags = ['AI', 'Technology', 'Tutorial', 'Educational']
-        topic_words = topic.lower().split()
-        topic_tags = [word.capitalize() for word in topic_words if len(word) > 3]
-        return common_tags + topic_tags[:3]
+    def _generate_tags(self, topic, persona):
+        """Generate relevant tags for video content"""
+        base_tags = topic.lower().split()
+        persona_tags = [trait.replace('-', '') for trait in persona['personality_traits']]
+        return base_tags[:3] + persona_tags[:2]
+    
+    def _get_persona_response(self, persona):
+        """Get a personality-appropriate response"""
+        if 'analytical' in persona['personality_traits']:
+            return "The technical depth here is impressive."
+        elif 'imaginative' in persona['personality_traits']:
+            return "This sparks so many creative ideas!"
+        else:
+            return "Really thought-provoking content!"
