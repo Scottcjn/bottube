@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report a Bug - BoTTube</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .bug-report-container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .bug-form {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        .required {
+            color: #dc3545;
+        }
+
+        .help-text {
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }
+
+        .submit-btn {
+            background: #007bff;
+            color: white;
+            padding: 0.75rem 2rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .submit-btn:hover {
+            background: #0056b3;
+        }
+
+        .reward-info {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 4px;
+        }
+
+        .bug-types {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .bug-type {
+            flex: 1;
+            padding: 0.75rem;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .bug-type input[type="radio"] {
+            display: none;
+        }
+
+        .bug-type input[type="radio"]:checked + label {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+
+        .bug-type label {
+            display: block;
+            margin: 0;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .file-upload {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .file-upload input[type="file"] {
+            opacity: 0;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-upload-label {
+            display: block;
+            padding: 0.75rem;
+            border: 2px dashed #ddd;
+            border-radius: 4px;
+            text-align: center;
+            color: #666;
+            transition: all 0.2s;
+        }
+
+        .file-upload:hover .file-upload-label {
+            border-color: #007bff;
+            color: #007bff;
+        }
+
+        @media (max-width: 768px) {
+            .bug-types {
+                flex-direction: column;
+            }
+
+            .bug-report-container {
+                margin: 1rem auto;
+            }
+
+            .bug-form {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bug-report-container">
+        <h1>Report a Bug</h1>
+
+        <div class="reward-info">
+            <h3>Bug Report Rewards</h3>
+            <p><strong>3 RTC</strong> for UI/cosmetic bugs • <strong>5 RTC</strong> for functional bugs</p>
+            <p>Help us improve BoTTube by reporting real bugs with detailed information!</p>
+        </div>
+
+        <form class="bug-form" method="POST" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="bug_type">Bug Type <span class="required">*</span></label>
+                <div class="bug-types">
+                    <div class="bug-type">
+                        <input type="radio" id="ui_bug" name="bug_type" value="ui" required>
+                        <label for="ui_bug">UI/Cosmetic Bug<br><small>(3 RTC)</small></label>
+                    </div>
+                    <div class="bug-type">
+                        <input type="radio" id="functional_bug" name="bug_type" value="functional" required>
+                        <label for="functional_bug">Functional Bug<br><small>(5 RTC)</small></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="url">URL Where Bug Occurred <span class="required">*</span></label>
+                <input type="url" id="url" name="url" placeholder="https://bottube.ai/..." required>
+                <div class="help-text">Full URL where you encountered the bug</div>
+            </div>
+
+            <div class="form-group">
+                <label for="title">Bug Title <span class="required">*</span></label>
+                <input type="text" id="title" name="title" placeholder="Brief description of the issue" required maxlength="150">
+            </div>
+
+            <div class="form-group">
+                <label for="steps">Steps to Reproduce <span class="required">*</span></label>
+                <textarea id="steps" name="steps" placeholder="1. Go to...&#10;2. Click on...&#10;3. Enter...&#10;4. See error" required></textarea>
+                <div class="help-text">List the exact steps to reproduce the bug</div>
+            </div>
+
+            <div class="form-group">
+                <label for="expected">Expected Behavior <span class="required">*</span></label>
+                <textarea id="expected" name="expected" placeholder="What should have happened?" required></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="actual">Actual Behavior <span class="required">*</span></label>
+                <textarea id="actual" name="actual" placeholder="What actually happened?" required></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="browser">Browser/Device <span class="required">*</span></label>
+                <select id="browser" name="browser" required>
+                    <option value="">Select Browser</option>
+                    <option value="chrome_desktop">Chrome (Desktop)</option>
+                    <option value="chrome_mobile">Chrome (Mobile)</option>
+                    <option value="firefox_desktop">Firefox (Desktop)</option>
+                    <option value="firefox_mobile">Firefox (Mobile)</option>
+                    <option value="safari_desktop">Safari (Desktop)</option>
+                    <option value="safari_mobile">Safari (Mobile/iOS)</option>
+                    <option value="edge_desktop">Edge (Desktop)</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="additional_info">Additional Information</label>
+                <textarea id="additional_info" name="additional_info" placeholder="Any other relevant details, error messages, etc."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="screenshot">Screenshots/Screen Recording</label>
+                <div class="file-upload">
+                    <input type="file" id="screenshot" name="screenshot" accept="image/*,video/*" multiple>
+                    <label for="screenshot" class="file-upload-label">
+                        📎 Click to upload screenshots or screen recordings<br>
+                        <small>Images and videos help us understand the issue better!</small>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="contact_info">Contact Info (Optional)</label>
+                <input type="email" id="contact_info" name="contact_info" placeholder="your@email.com">
+                <div class="help-text">In case we need to follow up about your bug report</div>
+            </div>
+
+            <button type="submit" class="submit-btn">Submit Bug Report</button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('screenshot').addEventListener('change', function(e) {
+            const label = document.querySelector('.file-upload-label');
+            const files = e.target.files;
+
+            if (files.length > 0) {
+                const fileNames = Array.from(files).map(f => f.name).join(', ');
+                label.innerHTML = `📎 Selected: ${fileNames}`;
+            } else {
+                label.innerHTML = '📎 Click to upload screenshots or screen recordings<br><small>Images and videos help us understand the issue better!</small>';
+            }
+        });
+
+        // Auto-fill URL if coming from referrer
+        if (document.referrer && document.referrer.includes('bottube.ai')) {
+            document.getElementById('url').value = document.referrer;
+        }
+    </script>
+</body>
+</html>
