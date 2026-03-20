@@ -61,34 +61,48 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     return ", ".join(alt_parts) if alt_parts else "Video thumbnail"
 
 
-def get_keyboard_navigation_hint(element_type):
-    """Get keyboard navigation hints for screen readers"""
-    hints = {
-        'video_player': "Use space to play/pause, arrow keys to seek",
-        'comment_section': "Use tab to navigate comments, enter to reply",
-        'search_results': "Use arrow keys to navigate, enter to select",
-        'navigation_menu': "Use arrow keys to navigate menu items",
-        'video_grid': "Use arrow keys to browse videos, enter to play"
+def add_keyboard_navigation(element_selector):
+    """Add keyboard navigation support to elements"""
+    return f"""
+    document.addEventListener('DOMContentLoaded', function() {{
+        const elements = document.querySelectorAll('{element_selector}');
+        elements.forEach(function(element) {{
+            element.setAttribute('tabindex', '0');
+            element.addEventListener('keydown', function(e) {{
+                if (e.key === 'Enter' || e.key === ' ') {{
+                    e.preventDefault();
+                    element.click();
+                }}
+            }});
+        }});
+    }});
+    """
+
+
+def validate_color_contrast(foreground, background):
+    """Check if color combination meets WCAG contrast requirements"""
+    # Simplified contrast check - in real implementation would use proper color parsing
+    high_contrast_pairs = [
+        ('#000000', '#ffffff'),
+        ('#ffffff', '#000000'),
+        ('#333333', '#ffffff'),
+        ('#ffffff', '#333333')
+    ]
+
+    return (foreground.lower(), background.lower()) in high_contrast_pairs
+
+
+def get_screen_reader_text(element_type, data=None):
+    """Generate text specifically for screen readers"""
+    templates = {
+        'video_stats': 'Video has {views} views, {likes} likes, {comments} comments',
+        'channel_info': 'Channel {name} has {subscribers} subscribers',
+        'tip_status': 'Tip of {amount} RTC sent successfully',
+        'comment_metadata': 'Comment by {author} posted {time_ago}',
+        'video_progress': 'Video progress: {current_time} of {total_time}'
     }
 
-    return hints.get(element_type, "Use tab to navigate, enter to activate")
+    if element_type in templates and data:
+        return templates[element_type].format(**data)
 
-
-def create_skip_link(target_id, text="Skip to main content"):
-    """Create skip navigation link for keyboard users"""
-    return f'<a class="skip-link" href="#{target_id}">{text}</a>'
-
-
-def get_aria_live_region_text(action, context=None):
-    """Generate text for aria-live regions to announce dynamic changes"""
-    announcements = {
-        'video_loaded': f"Video {context} loaded" if context else "Video loaded",
-        'comment_posted': "Comment posted successfully",
-        'tip_sent': f"Tip sent to {context}" if context else "Tip sent",
-        'subscribed': f"Subscribed to {context}" if context else "Subscription updated",
-        'error': f"Error: {context}" if context else "An error occurred",
-        'loading': "Loading content",
-        'search_results': f"{context} results found" if context else "Search completed"
-    }
-
-    return announcements.get(action, f"{action} completed")
+    return ""
