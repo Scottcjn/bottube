@@ -69,11 +69,11 @@ def mobile_register():
     password = data.get('password')
 
     if not username or not email or not password:
-        return jsonify({'error': 'Username, email and password required'}), 400
+        return jsonify({'error': 'Username, email, and password required'}), 400
 
     db = get_db()
 
-    # Check if user exists
+    # Check if user already exists
     existing_user = db.execute(
         'SELECT id FROM users WHERE username = ? OR email = ?',
         (username, email)
@@ -83,17 +83,19 @@ def mobile_register():
         return jsonify({'error': 'User already exists'}), 409
 
     # Create new user
-    hashed_password = hashlib.sha256(password.encode()).hexdigest()
-
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
     try:
         db.execute(
             'INSERT INTO users (username, email, password, rtc_balance) VALUES (?, ?, ?, ?)',
-            (username, email, hashed_password, 0)
+            (username, email, password_hash, 0)
         )
         db.commit()
 
-        # Get the newly created user
-        user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        # Get the created user
+        user = db.execute(
+            'SELECT * FROM users WHERE username = ?',
+            (username,)
+        ).fetchone()
 
         token = jwt.encode({
             'user_id': user['id'],
@@ -111,11 +113,11 @@ def mobile_register():
             }
         }), 201
 
-    except sqlite3.Error as e:
-        return jsonify({'error': 'Failed to create user'}), 500
+    except sqlite3.Error:
+        return jsonify({'error': 'Registration failed'}), 500
 
 
-@mobile_api.route('/user/profile', methods=['GET'])
+@mobile_api.route('/profile', methods=['GET'])
 @token_required
 def get_profile():
     db = get_db()
@@ -137,57 +139,47 @@ def get_profile():
     })
 
 
-@mobile_api.route('/user/balance', methods=['GET'])
-@token_required
-def get_balance():
-    db = get_db()
-    user = db.execute(
-        'SELECT rtc_balance FROM users WHERE id = ?',
-        (g.user_id,)
-    ).fetchone()
-
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-
-    return jsonify({
-        'rtc_balance': user.get('rtc_balance', 0)
-    })
-
-
 @mobile_api.route('/videos', methods=['GET'])
 @token_required
 def get_videos():
     db = get_db()
-
-    page = int(request.args.get('page', 1))
-    limit = min(int(request.args.get('limit', 10)), 50)  # Max 50 per page
-    offset = (page - 1) * limit
-
     videos = db.execute(
-        'SELECT * FROM videos ORDER BY created_at DESC LIMIT ? OFFSET ?',
-        (limit, offset)
+        'SELECT * FROM videos ORDER BY upload_date DESC LIMIT 50'
     ).fetchall()
 
-    total_videos = db.execute('SELECT COUNT(*) FROM videos').fetchone()[0]
+    video_list = []
+    for video in videos:
+        video_list.append({
+            'id': video['id'],
+            'title': video['title'],
+            'description': video['description'],
+            'filename': video['filename'],
+            'upload_date': video['upload_date'],
+            'user_id': video['user_id']
+        })
 
-    return jsonify({
-        'videos': [dict(video) for video in videos],
-        'pagination': {
-            'page': page,
-            'limit': limit,
-            'total': total_videos,
-            'pages': (total_videos + limit - 1) // limit
-        }
-    })
+    return jsonify({'videos': video_list})
 
 
 @mobile_api.route('/videos/<int:video_id>', methods=['GET'])
 @token_required
 def get_video(video_id):
     db = get_db()
-    video = db.execute('SELECT * FROM videos WHERE id = ?', (video_id,)).fetchone()
+    video = db.execute(
+        'SELECT * FROM videos WHERE id = ?',
+        (video_id,)
+    ).fetchone()
 
     if not video:
         return jsonify({'error': 'Video not found'}), 404
 
-    return jsonify({'video': dict(video)})
+    return jsonify({
+        'video': {
+            'id': video['id'],
+            'title': video['title'],
+            'description': video['description'],
+            'filename': video['filename'],
+            'upload_date': video['upload_date'],
+            'user_id': video['user_id']
+        }
+    })
