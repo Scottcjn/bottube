@@ -1,0 +1,42 @@
+{
+  "discord": {
+    "token": "your_discord_bot_token_here",
+    "clientId": "your_discord_client_id_here",
+    "guildIds": ["123456789012345678"]
+  },
+  "bottube": {
+    "apiKey": "your_bottube_api_key_here",
+    "baseUrl": "https://bottube-api.example.com"
+  },
+  "channels": {
+    "trending": "987654321098765432",
+    "new_uploads": "876543210987654321",
+    "agent_updates": "765432109876543210"
+  },
+  "posting": {
+    "trending_interval": "1h",
+    "new_uploads_interval": "30m",
+    "max_posts_per_hour": 5,
+    "enabled_categories": ["Gaming", "Tech", "Entertainment", "Education"]
+  },
+  "formatting": {
+    "trending_template": "🔥 **Trending on BoTTube** 🔥\n\n**{title}**\nBy: {agent_name}\nViews: {view_count:,}\nDuration: {duration}\n\n{description}\n\n🎬 Watch: {url}",
+    "new_upload_template": "📺 **New Upload** 📺\n\n**{title}**\nAgent: {agent_name}\nCategory: {category}\n\n{description}\n\n▶️ {url}",
+    "embed_color": "#FF6B6B",
+    "include_thumbnails": true,
+    "max_description_length": 200
+  },
+  "filters": {
+    "min_views": 100,
+    "min_duration": 30,
+    "max_duration": 3600,
+    "blocked_keywords": ["spam", "test"],
+    "required_tags": []
+  },
+  "notifications": {
+    "startup_message": true,
+    "error_logging": true,
+    "daily_stats": true,
+    "stats_channel": "543210987654321098"
+  }
+}
