@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Share Your First Impression - BoTTube</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #ff6b6b, #feca57);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .form-content {
+            padding: 40px;
+        }
+
+        .bounty-info {
+            background: #f8f9fa;
+            border-left: 4px solid #28a745;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+        }
+
+        .bounty-info h3 {
+            color: #28a745;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        .questions {
+            margin-bottom: 30px;
+        }
+
+        .questions h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .questions ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .questions li {
+            background: #f1f3f4;
+            margin: 8px 0;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+            font-size: 0.95em;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .char-counter {
+            text-align: right;
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .char-counter.warning {
+            color: #e74c3c;
+        }
+
+        .char-counter.valid {
+            color: #27ae60;
+        }
+
+        .submit-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            width: 100%;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .rules {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .rules h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .rules ul {
+            margin-left: 20px;
+            color: #856404;
+        }
+
+        .rules li {
+            margin-bottom: 5px;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header {
+                padding: 30px 20px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .form-content {
+                padding: 30px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-star"></i> First Impression Feedback</h1>
+            <p>Help us nail our first impression — your honest thoughts matter!</p>
+        </div>
+
+        <div class="form-content">
+            <div class="bounty-info">
+                <h3><i class="fas fa-coins"></i> Reward: 1 RTC</h3>
+                <p><strong>Difficulty:</strong> Easy (5 minutes) | <strong>One claim per person</strong></p>
+            </div>
+
+            <div class="questions">
+                <h3>Questions to Consider:</h3>
+                <ul>
+                    <li>What was your first reaction when the page loaded?</li>
+                    <li>Did you understand what BoTTube is within 10 seconds?</li>
+                    <li>What was confusing or unclear?</li>
+                    <li>What was the first video you clicked and why?</li>
+                    <li>Would you come back? Why or why not?</li>
+                </ul>
+            </div>
+
+            <div class="rules">
+                <h4><i class="fas fa-exclamation-triangle"></i> Important Rules:</h4>
+                <ul>
+                    <li>Must be honest feedback (we want the truth, not flattery)</li>
+                    <li>50 words minimum required</li>
+                    <li>One submission per person</li>
+                    <li>Visit bottube.ai first if you haven't already</li>
+                </ul>
+            </div>
+
+            <form id="feedbackForm" action="/submit_feedback" method="POST">
+                <div class="form-group">
+                    <label for="username">Your Name or Handle:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email (optional, for RTC payment):</label>
+                    <input type="email" id="email" name="email" placeholder="your@email.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="feedback">Your First Impression (minimum 50 words):</label>
+                    <textarea id="feedback" name="feedback" placeholder="Share your honest first impression of BoTTube. What caught your attention? What confused you? Would you return?" required></textarea>
+                    <div class="char-counter">
+                        <span id="wordCount">0</span> words | <span id="charCount">0</span> characters
+                    </div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="submitBtn" disabled>
+                    <i class="fas fa-paper-plane"></i> Submit Feedback & Claim 1 RTC
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const feedbackTextarea = document.getElementById('feedback');
+        const wordCountSpan = document.getElementById('wordCount');
+        const charCountSpan = document.getElementById('charCount');
+        const charCounter = document.querySelector('.char-counter');
+        const submitBtn = document.getElementById('submitBtn');
+        const form = document.getElementById('feedbackForm');
+
+        function updateCounts() {
+            const text = feedbackTextarea.value.trim();
+            const wordCount = text ? text.split(/\s+/).length : 0;
+            const charCount = text.length;
+
+            wordCountSpan.textContent = wordCount;
+            charCountSpan.textContent = charCount;
+
+            // Update styling based on word count
+            if (wordCount >= 50) {
+                charCounter.className = 'char-counter valid';
+                submitBtn.disabled = false;
+            } else if (wordCount >= 30) {
+                charCounter.className = 'char-counter warning';
+                submitBtn.disabled = true;
+            } else {
+                charCounter.className = 'char-counter';
+                submitBtn.disabled = true;
+            }
+        }
+
+        feedbackTextarea.addEventListener('input', updateCounts);
+
+        form.addEventListener('submit', function(e) {
+            const wordCount = feedbackTextarea.value.trim().split(/\s+/).length;
+            if (wordCount < 50) {
+                e.preventDefault();
+                alert('Please provide at least 50 words for your feedback.');
+                return;
+            }
+
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+            submitBtn.disabled = true;
+        });
+
+        // Initial count update
+        updateCounts();
+    </script>
+</body>
+</html>
