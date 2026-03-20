@@ -6,6 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class CreatorFund:
     def __init__(self):
         self.monthly_cap = 75  # RTC per creator per month
@@ -59,241 +60,144 @@ class CreatorFund:
             SELECT u.id, u.username,
                    COUNT(DISTINCT s.follower_id) as subscriber_count,
                    COUNT(DISTINCT v.id) as video_count,
-                   MAX(v.created_at) as last_video_date,
-                   MAX(COALESCE(v.created_at, u.created_at)) as last_activity
+                   MAX(v.uploaded_at) as last_upload
             FROM users u
             LEFT JOIN subscriptions s ON u.id = s.user_id
             LEFT JOIN videos v ON u.id = v.user_id
             WHERE u.id = ?
-            GROUP BY u.id
+            GROUP BY u.id, u.username
         ''', (user_id,)).fetchone()
 
         if not user_stats:
-            return False, {"reason": "User not found"}
+            return False, {'reason': 'User not found'}
 
-        stats = dict(user_stats)
+        # Eligibility criteria
+        min_subscribers = 100
+        min_videos = 5
+        max_days_inactive = 30
 
-        # Check minimum subscribers (10+)
-        if stats['subscriber_count'] < 10:
-            return False, {
-                "reason": "Insufficient subscribers",
-                "required": 10,
-                "current": stats['subscriber_count']
+        subscriber_count = user_stats['subscriber_count'] or 0
+        video_count = user_stats['video_count'] or 0
+        last_upload = user_stats['last_upload']
+
+        # Check activity
+        if last_upload:
+            last_upload_date = datetime.strptime(last_upload, '%Y-%m-%d %H:%M:%S')
+            days_inactive = (datetime.now() - last_upload_date).days
+        else:
+            days_inactive = float('inf')
+
+        eligibility_details = {
+            'subscriber_count': subscriber_count,
+            'video_count': video_count,
+            'days_inactive': days_inactive,
+            'requirements': {
+                'min_subscribers': min_subscribers,
+                'min_videos': min_videos,
+                'max_days_inactive': max_days_inactive
             }
-
-        # Check minimum videos (10+)
-        if stats['video_count'] < 10:
-            return False, {
-                "reason": "Insufficient videos",
-                "required": 10,
-                "current": stats['video_count']
-            }
-
-        # Check activity in last 30 days
-        if stats['last_activity']:
-            last_active = datetime.fromisoformat(stats['last_activity'].replace('Z', '+00:00'))
-            thirty_days_ago = datetime.now() - timedelta(days=30)
-
-            if last_active < thirty_days_ago:
-                return False, {
-                    "reason": "Inactive for >30 days",
-                    "last_activity": stats['last_activity']
-                }
-
-        # Check for spam content (basic flag check)
-        spam_count = db.execute('''
-            SELECT COUNT(*) as spam_videos
-            FROM videos
-            WHERE user_id = ? AND is_flagged = 1
-        ''', (user_id,)).fetchone()['spam_videos']
-
-        if spam_count > 0:
-            return False, {
-                "reason": "Flagged content detected",
-                "flagged_videos": spam_count
-            }
-
-        return True, {
-            "subscriber_count": stats['subscriber_count'],
-            "video_count": stats['video_count'],
-            "last_activity": stats['last_activity']
         }
 
-    def get_eligible_creators(self) -> List[Dict]:
-        """Get all creators eligible for the fund"""
-        db = get_db()
+        is_eligible = (
+            subscriber_count >= min_subscribers and
+            video_count >= min_videos and
+            days_inactive <= max_days_inactive
+        )
 
-        all_users = db.execute('SELECT id FROM users').fetchall()
-        eligible_creators = []
+        return is_eligible, eligibility_details
 
-        for user in all_users:
-            is_eligible, stats = self.check_eligibility(user['id'])
-            if is_eligible:
-                eligible_creators.append({
-                    'user_id': user['id'],
-                    'stats': stats
-                })
-
-                # Cache eligibility
-                db.execute('''
-                    INSERT OR REPLACE INTO creator_fund_eligibility
-                    (user_id, is_eligible, subscriber_count, video_count,
-                     last_activity, last_checked)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (user['id'], True, stats['subscriber_count'],
-                      stats['video_count'], stats['last_activity'],
-                      datetime.now()))
-
-        db.commit()
-        return eligible_creators
-
-    def calculate_monthly_distribution(self, month: int) -> Dict[int, float]:
+    def calculate_monthly_distribution(self, month: int, year: int) -> List[Dict]:
         """Calculate RTC distribution for eligible creators"""
-        if month not in self.pilot_pools:
-            raise ValueError(f"Invalid month: {month}. Must be 1, 2, or 3")
-
         db = get_db()
-        pool_size = self.pilot_pools[month]
+        month_key = ((year - 2024) * 12) + month
+        monthly_pool = self.pilot_pools.get(month_key, 200)
 
-        # Get eligible creators and their view counts
-        eligible_creators = self.get_eligible_creators()
+        # Get eligible creators with view counts
+        eligible_creators = db.execute('''
+            SELECT u.id, u.username,
+                   COALESCE(SUM(vi.views), 0) as total_views
+            FROM users u
+            JOIN videos v ON u.id = v.user_id
+            LEFT JOIN video_interactions vi ON v.id = vi.video_id
+            WHERE v.uploaded_at >= ? AND v.uploaded_at < ?
+            GROUP BY u.id, u.username
+            HAVING total_views > 0
+        ''', (
+            f'{year}-{month:02d}-01',
+            f'{year}-{month+1:02d}-01' if month < 12 else f'{year+1}-01-01'
+        )).fetchall()
 
-        if not eligible_creators:
-            logger.info(f"No eligible creators for month {month}")
-            return {}
-
-        creator_views = {}
+        # Filter by eligibility
+        distributions = []
         total_eligible_views = 0
 
         for creator in eligible_creators:
-            user_id = creator['user_id']
+            is_eligible, _ = self.check_eligibility(creator['id'])
+            if is_eligible:
+                total_eligible_views += creator['total_views']
 
-            # Get total views for this creator's videos
-            view_data = db.execute('''
-                SELECT COALESCE(SUM(views), 0) as total_views
-                FROM videos
-                WHERE user_id = ?
-            ''', (user_id,)).fetchone()
+        # Calculate distributions
+        for creator in eligible_creators:
+            is_eligible, _ = self.check_eligibility(creator['id'])
+            if is_eligible and total_eligible_views > 0:
+                view_share = creator['total_views'] / total_eligible_views
+                raw_amount = monthly_pool * view_share
+                capped_amount = min(raw_amount, self.monthly_cap)
 
-            views = view_data['total_views'] if view_data else 0
-            creator_views[user_id] = views
-            total_eligible_views += views
-
-        if total_eligible_views == 0:
-            logger.info(f"No views found for eligible creators in month {month}")
-            return {}
-
-        # Calculate distribution
-        distributions = {}
-
-        for user_id, views in creator_views.items():
-            if views > 0:
-                # Pro-rata share calculation
-                share_percentage = views / total_eligible_views
-                raw_amount = pool_size * share_percentage
-
-                # Apply monthly cap
-                final_amount = min(raw_amount, self.monthly_cap)
-                distributions[user_id] = final_amount
+                distributions.append({
+                    'user_id': creator['id'],
+                    'username': creator['username'],
+                    'total_views': creator['total_views'],
+                    'view_share': view_share,
+                    'raw_amount': raw_amount,
+                    'final_amount': capped_amount
+                })
 
         return distributions
 
-    def execute_distribution(self, month: int, year: int = None) -> Dict[str, any]:
+    def distribute_monthly_fund(self, month: int, year: int) -> Dict:
         """Execute monthly fund distribution"""
-        if year is None:
-            year = datetime.now().year
-
+        distributions = self.calculate_monthly_distribution(month, year)
         db = get_db()
 
-        # Check if distribution already exists
-        existing = db.execute('''
-            SELECT COUNT(*) as count
-            FROM creator_fund_distributions
-            WHERE month = ? AND year = ?
-        ''', (month, year)).fetchone()
-
-        if existing['count'] > 0:
-            raise ValueError(f"Distribution for {month}/{year} already executed")
-
-        distributions = self.calculate_monthly_distribution(month)
-
-        if not distributions:
-            return {
-                "success": False,
-                "message": "No eligible creators found",
-                "distributed": 0,
-                "recipients": 0
-            }
-
         total_distributed = 0
-        recipient_count = 0
+        successful_distributions = 0
 
-        for user_id, amount in distributions.items():
-            # Get user's total views for record keeping
-            total_views = db.execute('''
-                SELECT COALESCE(SUM(views), 0) as total_views
-                FROM videos WHERE user_id = ?
-            ''', (user_id,)).fetchone()['total_views']
+        for dist in distributions:
+            try:
+                # Record distribution
+                db.execute('''
+                    INSERT INTO creator_fund_distributions
+                    (user_id, month, year, amount, total_views, eligible_views)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    dist['user_id'],
+                    month,
+                    year,
+                    dist['final_amount'],
+                    dist['total_views'],
+                    dist['total_views']
+                ))
 
-            # Record distribution
-            db.execute('''
-                INSERT INTO creator_fund_distributions
-                (user_id, month, year, amount, total_views, eligible_views)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (user_id, month, year, amount, total_views, total_views))
+                # Add RTC to user balance
+                db.execute('''
+                    UPDATE users SET rtc_balance = rtc_balance + ?
+                    WHERE id = ?
+                ''', (dist['final_amount'], dist['user_id']))
 
-            total_distributed += amount
-            recipient_count += 1
+                total_distributed += dist['final_amount']
+                successful_distributions += 1
+
+            except Exception as e:
+                logger.error(f"Failed to distribute to user {dist['user_id']}: {e}")
+                continue
 
         db.commit()
 
         return {
-            "success": True,
-            "month": month,
-            "year": year,
-            "pool_size": self.pilot_pools[month],
-            "distributed": total_distributed,
-            "recipients": recipient_count,
-            "distributions": distributions
-        }
-
-    def get_creator_earnings(self, user_id: int) -> List[Dict]:
-        """Get earning history for a specific creator"""
-        db = get_db()
-
-        earnings = db.execute('''
-            SELECT month, year, amount, total_views, created_at
-            FROM creator_fund_distributions
-            WHERE user_id = ?
-            ORDER BY year DESC, month DESC
-        ''', (user_id,)).fetchall()
-
-        return [dict(earning) for earning in earnings]
-
-    def get_fund_statistics(self) -> Dict[str, any]:
-        """Get overall fund statistics"""
-        db = get_db()
-
-        stats = db.execute('''
-            SELECT
-                COUNT(DISTINCT user_id) as total_recipients,
-                SUM(amount) as total_distributed,
-                AVG(amount) as avg_distribution,
-                COUNT(*) as total_distributions
-            FROM creator_fund_distributions
-        ''').fetchone()
-
-        monthly_stats = db.execute('''
-            SELECT month, year,
-                   COUNT(DISTINCT user_id) as recipients,
-                   SUM(amount) as distributed,
-                   AVG(amount) as avg_amount
-            FROM creator_fund_distributions
-            GROUP BY month, year
-            ORDER BY year, month
-        ''').fetchall()
-
-        return {
-            "overall": dict(stats) if stats else {},
-            "monthly": [dict(row) for row in monthly_stats]
+            'month': month,
+            'year': year,
+            'total_distributed': total_distributed,
+            'recipients': successful_distributions,
+            'distributions': distributions
         }
