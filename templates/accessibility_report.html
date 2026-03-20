@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accessibility Report - BoTTube</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .accessibility-report {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            background-color: #ffffff;
+            color: #1a1a1a;
+        }
+
+        .report-header {
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .report-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0 0 0.5rem 0;
+            color: #1a1a1a;
+        }
+
+        .report-summary {
+            background-color: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .stat-card {
+            background-color: #ffffff;
+            border: 2px solid #0066cc;
+            border-radius: 6px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0066cc;
+            margin: 0;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #495057;
+            margin: 0.25rem 0 0 0;
+        }
+
+        .issue-section {
+            margin-bottom: 3rem;
+        }
+
+        .section-header {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin: 0 0 1rem 0;
+            color: #1a1a1a;
+            border-left: 4px solid #0066cc;
+            padding-left: 1rem;
+        }
+
+        .issue-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .issue-item {
+            background-color: #ffffff;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+
+        .issue-item.high {
+            border-left: 6px solid #dc3545;
+        }
+
+        .issue-item.medium {
+            border-left: 6px solid #fd7e14;
+        }
+
+        .issue-item.low {
+            border-left: 6px solid #28a745;
+        }
+
+        .issue-header {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .issue-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin: 0 0 0.5rem 0;
+            color: #1a1a1a;
+        }
+
+        .issue-meta {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .issue-severity,
+        .issue-category {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .severity-high {
+            background-color: #dc3545;
+            color: #ffffff;
+        }
+
+        .severity-medium {
+            background-color: #fd7e14;
+            color: #ffffff;
+        }
+
+        .severity-low {
+            background-color: #28a745;
+            color: #ffffff;
+        }
+
+        .category-contrast {
+            background-color: #6f42c1;
+            color: #ffffff;
+        }
+
+        .category-keyboard {
+            background-color: #20c997;
+            color: #ffffff;
+        }
+
+        .category-screen-reader {
+            background-color: #0dcaf0;
+            color: #000000;
+        }
+
+        .issue-body {
+            padding: 1rem;
+        }
+
+        .issue-description {
+            margin: 0 0 1rem 0;
+            line-height: 1.6;
+            color: #495057;
+        }
+
+        .issue-location {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin: 0 0 1rem 0;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+
+        .issue-recommendation {
+            background-color: #e7f3ff;
+            border-left: 4px solid #0066cc;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .recommendation-title {
+            font-weight: 600;
+            margin: 0 0 0.5rem 0;
+            color: #0066cc;
+        }
+
+        .filter-controls {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-label {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .filter-select {
+            padding: 0.5rem;
+            border: 2px solid #0066cc;
+            border-radius: 4px;
+            font-size: 1rem;
+            background-color: #ffffff;
+            color: #1a1a1a;
+            min-width: 150px;
+        }
+
+        .filter-select:focus {
+            outline: 3px solid #80bdff;
+            outline-offset: 2px;
+        }
+
+        .export-controls {
+            text-align: right;
+            margin-bottom: 2rem;
+        }
+
+        .btn-export {
+            background-color: #0066cc;
+            color: #ffffff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-export:hover {
+            background-color: #0052a3;
+        }
+
+        .btn-export:focus {
+            outline: 3px solid #80bdff;
+            outline-offset: 2px;
+        }
+
+        .wcag-reference {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 0.5rem;
+        }
+
+        .wcag-link {
+            color: #0066cc;
+            text-decoration: underline;
+        }
+
+        .wcag-link:focus {
+            outline: 2px solid #0066cc;
+            outline-offset: 2px;
+        }
+
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 6px;
+            background: #000;
+            color: #fff;
+            padding: 8px;
+            text-decoration: none;
+            z-index: 1000;
+        }
+
+        .skip-link:focus {
+            top: 6px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .accessibility-report {
+                padding: 1rem;
+            }
+
+            .report-title {
+                font-size: 2rem;
+            }
+
+            .summary-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .filter-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .export-controls {
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <div class="accessibility-report">
+        <header class="report-header">
+            <h1 class="report-title">Accessibility Audit Report</h1>
+            <p>Generated on {{ report_date }} for BoTTube Platform</p>
+        </header>
+
+        <main id="main-content">
+            <section class="report-summary" role="region" aria-labelledby="summary-heading">
+                <h2 id="summary-heading">Report Summary</h2>
+                <div class="summary-stats">
+                    <div class="stat-card">
+                        <p class="stat-number">{{ total_issues }}</p>
+                        <p class="stat-label">Total Issues</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="stat-number">{{ high_priority }}</p>
+                        <p class="stat-label">High Priority</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="stat-number">{{ medium_priority }}</p>
+                        <p class="stat-label">Medium Priority</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="stat-number">{{ low_priority }}</p>
+                        <p class="stat-label">Low Priority</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="filter-controls" role="region" aria-labelledby="filter-heading">
+                <h2 id="filter-heading" class="sr-only">Filter Options</h2>
+                <div class="filter-group">
+                    <label for="severity-filter" class="filter-label">Filter by Severity:</label>
+                    <select id="severity-filter" class="filter-select" onchange="filterIssues('severity', this.value)">
+                        <option value="all">All Severities</option>
+                        <option value="high">High Priority</option>
+                        <option value="medium">Medium Priority</option>
+                        <option value="low">Low Priority</option>
+                    </select>
+
+                    <label for="category-filter" class="filter-label">Filter by Category:</label>
+                    <select id="category-filter" class="filter-select" onchange="filterIssues('category', this.value)">
+                        <option value="all">All Categories</option>
+                        <option value="contrast">Color Contrast</option>
+                        <option value="keyboard">Keyboard Navigation</option>
+                        <option value="screen-reader">Screen Reader</option>
+                    </select>
+                </div>
+            </section>
+
+            <div class="export-controls">
+                <a href="{{ url_for('export_accessibility_report', format='pdf') }}" class="btn-export">Export PDF</a>
+                <a href="{{ url_for('export_accessibility_report', format='csv') }}" class="btn-export">Export CSV</a>
+            </div>
+
+            {% for category in issues_by_category %}
+            <section class="issue-section" role="region" aria-labelledby="section-{{ loop.index }}">
+                <h2 id="section-{{ loop.index }}" class="section-header">{{ category.name }} Issues</h2>
+
+                <ul class="issue-list">
+                    {% for issue in category.issues %}
+                    <li class="issue-item {{ issue.severity }}" data-severity="{{ issue.severity }}" data-category="{{ issue.category }}">
+                        <div class="issue-header">
+                            <h3 class="issue-title">{{ issue.title }}</h3>
+                            <div class="issue-meta">
+                                <span class="issue-severity severity-{{ issue.severity }}">{{ issue.severity|title }} Priority</span>
+                                <span class="issue-category category-{{ issue.category }}">{{ issue.category|title }}</span>
+                            </div>
+                        </div>
+
+                        <div class="issue-body">
+                            <p class="issue-description">{{ issue.description }}</p>
+
+                            {% if issue.element_path %}
+                            <div class="issue-location">
+                                <strong>Element:</strong> {{ issue.element_path }}
+                            </div>
+                            {% endif %}
+
+                            {% if issue.current_value %}
+                            <div class="issue-location">
+                                <strong>Current Value:</strong> {{ issue.current_value }}
+                            </div>
+                            {% endif %}
+
+                            <div class="issue-recommendation">
+                                <h4 class="recommendation-title">Recommended Fix:</h4>
+                                <p>{{ issue.recommendation }}</p>
+                            </div>
+
+                            {% if issue.wcag_reference %}
+                            <div class="wcag-reference">
+                                <strong>WCAG Reference:</strong>
+                                <a href="{{ issue.wcag_url }}" class="wcag-link" target="_blank" rel="noopener">
+                                    {{ issue.wcag_reference }}
+                                    <span class="sr-only"> (opens in new tab)</span>
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </section>
+            {% endfor %}
+
+            {% if not issues_by_category %}
+            <section class="no-issues" role="region">
+                <h2>No Accessibility Issues Found</h2>
+                <p>Great news! No accessibility issues were detected in the current audit scope.</p>
+            </section>
+            {% endif %}
+        </main>
+    </div>
+
+    <script>
+        function filterIssues(filterType, value) {
+            const issues = document.querySelectorAll('.issue-item');
+
+            issues.forEach(issue => {
+                const shouldShow = value === 'all' ||
+                    (filterType === 'severity' && issue.dataset.severity === value) ||
+                    (filterType === 'category' && issue.dataset.category === value);
+
+                issue.style.display = shouldShow ? 'block' : 'none';
+            });
+
+            updateSectionVisibility();
+        }
+
+        function updateSectionVisibility() {
+            const sections = document.querySelectorAll('.issue-section');
+
+            sections.forEach(section => {
+                const visibleIssues = section.querySelectorAll('.issue-item[style="display: block"], .issue-item:not([style*="none"])');
+                section.style.display = visibleIssues.length > 0 ? 'block' : 'none';
+            });
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.getElementById('severity-filter').value = 'all';
+                document.getElementById('category-filter').value = 'all';
+                filterIssues('severity', 'all');
+            }
+        });
+    </script>
+</body>
+</html>
