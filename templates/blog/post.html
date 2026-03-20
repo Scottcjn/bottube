@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ post.title }} - BoTTube Blog</title>
+    <meta name="description" content="{{ post.excerpt or post.content[:150] }}...">
+    <meta name="author" content="{{ post.author_name }}">
+    <meta name="keywords" content="{{ post.tags }}">
+
+    <!-- Open Graph tags -->
+    <meta property="og:title" content="{{ post.title }}">
+    <meta property="og:description" content="{{ post.excerpt or post.content[:150] }}...">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:site_name" content="BoTTube Blog">
+    {% if post.featured_image %}
+    <meta property="og:image" content="{{ url_for('static', filename='images/' + post.featured_image) }}">
+    {% endif %}
+    <meta property="article:author" content="{{ post.author_name }}">
+    <meta property="article:published_time" content="{{ post.created_at }}">
+    {% if post.tags %}
+    <meta property="article:tag" content="{{ post.tags }}">
+    {% endif %}
+
+    <!-- Twitter Card tags -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ post.title }}">
+    <meta name="twitter:description" content="{{ post.excerpt or post.content[:150] }}...">
+    {% if post.featured_image %}
+    <meta name="twitter:image" content="{{ url_for('static', filename='images/' + post.featured_image) }}">
+    {% endif %}
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="canonical" href="{{ request.url }}">
+</head>
+<body>
+    {% include 'partials/header.html' %}
+
+    <main class="blog-post-main">
+        <div class="container">
+            <!-- Breadcrumb Navigation -->
+            <nav class="breadcrumb" aria-label="breadcrumb">
+                <ol class="breadcrumb-list">
+                    <li class="breadcrumb-item">
+                        <a href="{{ url_for('index') }}">Home</a>
+                    </li>
+                    <li class="breadcrumb-item">
+                        <a href="{{ url_for('blog.index') }}">Blog</a>
+                    </li>
+                    <li class="breadcrumb-item active" aria-current="page">
+                        {{ post.title }}
+                    </li>
+                </ol>
+            </nav>
+
+            <article class="blog-post">
+                <header class="post-header">
+                    <h1 class="post-title">{{ post.title }}</h1>
+
+                    <div class="post-meta">
+                        <div class="author-info">
+                            {% if post.author_avatar %}
+                            <img src="{{ url_for('static', filename='images/avatars/' + post.author_avatar) }}"
+                                 alt="{{ post.author_name }}" class="author-avatar">
+                            {% endif %}
+                            <span class="author-name">{{ post.author_name }}</span>
+                        </div>
+
+                        <time class="publish-date" datetime="{{ post.created_at }}">
+                            {{ post.created_at.strftime('%B %d, %Y') }}
+                        </time>
+
+                        {% if post.tags %}
+                        <div class="post-tags">
+                            {% for tag in post.tags.split(',') %}
+                            <span class="tag">{{ tag.strip() }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <div class="reading-time">
+                            {{ (post.content | length / 200) | round | int }} min read
+                        </div>
+                    </div>
+
+                    {% if post.featured_image %}
+                    <div class="featured-image">
+                        <img src="{{ url_for('static', filename='images/' + post.featured_image) }}"
+                             alt="{{ post.title }}" class="img-fluid">
+                    </div>
+                    {% endif %}
+                </header>
+
+                <div class="post-content">
+                    {{ post.content | safe }}
+                </div>
+
+                <!-- Social Share Buttons -->
+                <div class="social-share">
+                    <h4>Share this post</h4>
+                    <div class="share-buttons">
+                        <a href="https://twitter.com/intent/tweet?text={{ post.title | urlencode }}&url={{ request.url | urlencode }}"
+                           target="_blank" class="share-btn twitter">
+                            <svg class="icon"><use xlink:href="#icon-twitter"></use></svg>
+                            Twitter
+                        </a>
+
+                        <a href="https://www.facebook.com/sharer/sharer.php?u={{ request.url | urlencode }}"
+                           target="_blank" class="share-btn facebook">
+                            <svg class="icon"><use xlink:href="#icon-facebook"></use></svg>
+                            Facebook
+                        </a>
+
+                        <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ request.url | urlencode }}"
+                           target="_blank" class="share-btn linkedin">
+                            <svg class="icon"><use xlink:href="#icon-linkedin"></use></svg>
+                            LinkedIn
+                        </a>
+
+                        <a href="mailto:?subject={{ post.title | urlencode }}&body={{ request.url | urlencode }}"
+                           class="share-btn email">
+                            <svg class="icon"><use xlink:href="#icon-email"></use></svg>
+                            Email
+                        </a>
+
+                        <button onclick="copyToClipboard('{{ request.url }}')" class="share-btn copy">
+                            <svg class="icon"><use xlink:href="#icon-link"></use></svg>
+                            Copy Link
+                        </button>
+                    </div>
+                </div>
+
+                <footer class="post-footer">
+                    <div class="author-bio">
+                        {% if post.author_avatar %}
+                        <img src="{{ url_for('static', filename='images/avatars/' + post.author_avatar) }}"
+                             alt="{{ post.author_name }}" class="author-bio-avatar">
+                        {% endif %}
+                        <div class="bio-content">
+                            <h4>{{ post.author_name }}</h4>
+                            {% if post.author_bio %}
+                            <p>{{ post.author_bio }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </footer>
+            </article>
+
+            <!-- Related Posts Section -->
+            {% if related_posts %}
+            <section class="related-posts">
+                <h3>Related Posts</h3>
+                <div class="related-posts-grid">
+                    {% for related_post in related_posts[:3] %}
+                    <article class="related-post-card">
+                        {% if related_post.featured_image %}
+                        <a href="{{ url_for('blog.post', slug=related_post.slug) }}" class="related-post-image">
+                            <img src="{{ url_for('static', filename='images/' + related_post.featured_image) }}"
+                                 alt="{{ related_post.title }}">
+                        </a>
+                        {% endif %}
+
+                        <div class="related-post-content">
+                            <h4>
+                                <a href="{{ url_for('blog.post', slug=related_post.slug) }}">
+                                    {{ related_post.title }}
+                                </a>
+                            </h4>
+
+                            <div class="related-post-meta">
+                                <time datetime="{{ related_post.created_at }}">
+                                    {{ related_post.created_at.strftime('%B %d, %Y') }}
+                                </time>
+                            </div>
+
+                            {% if related_post.excerpt %}
+                            <p class="related-post-excerpt">{{ related_post.excerpt }}</p>
+                            {% endif %}
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            <!-- Navigation to Previous/Next Posts -->
+            <nav class="post-navigation">
+                {% if prev_post %}
+                <div class="nav-previous">
+                    <a href="{{ url_for('blog.post', slug=prev_post.slug) }}" class="nav-link">
+                        <span class="nav-label">← Previous</span>
+                        <span class="nav-title">{{ prev_post.title }}</span>
+                    </a>
+                </div>
+                {% endif %}
+
+                {% if next_post %}
+                <div class="nav-next">
+                    <a href="{{ url_for('blog.post', slug=next_post.slug) }}" class="nav-link">
+                        <span class="nav-label">Next →</span>
+                        <span class="nav-title">{{ next_post.title }}</span>
+                    </a>
+                </div>
+                {% endif %}
+            </nav>
+        </div>
+    </main>
+
+    {% include 'partials/footer.html' %}
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                const btn = event.target.closest('.copy');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '<svg class="icon"><use xlink:href="#icon-check"></use></svg>Copied!';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            });
+        }
+
+        // Add smooth scrolling to anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth' });
+                }
+            });
+        });
+    </script>
+
+    <!-- SVG Icons -->
+    <svg style="display: none;">
+        <symbol id="icon-twitter" viewBox="0 0 24 24">
+            <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"/>
+        </symbol>
+        <symbol id="icon-facebook" viewBox="0 0 24 24">
+            <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
+        </symbol>
+        <symbol id="icon-linkedin" viewBox="0 0 24 24">
+            <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/>
+            <rect x="2" y="9" width="4" height="12"/>
+            <circle cx="4" cy="4" r="2"/>
+        </symbol>
+        <symbol id="icon-email" viewBox="0 0 24 24">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+        </symbol>
+        <symbol id="icon-link" viewBox="0 0 24 24">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24">
+            <polyline points="20,6 9,17 4,12"/>
+        </symbol>
+    </svg>
+</body>
+</html>
