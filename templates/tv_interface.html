@@ -87,209 +87,188 @@
         .video-card {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
-            padding: 15px;
+            overflow: hidden;
             cursor: pointer;
             transition: all 0.3s ease;
         }
 
-        .video-card:hover,
-        .video-card.focused {
-            background: rgba(255, 255, 255, 0.2);
+        .video-card:hover {
             transform: scale(1.05);
+            background: rgba(255, 255, 255, 0.2);
         }
 
         .video-thumbnail {
             width: 100%;
             height: 180px;
             background: #333;
-            border-radius: 8px;
-            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            color: #666;
+        }
+
+        .video-info {
+            padding: 15px;
         }
 
         .video-title {
             font-size: 1.2rem;
-            margin-bottom: 5px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            font-weight: bold;
+            margin-bottom: 8px;
+            line-height: 1.4;
         }
 
         .video-meta {
-            font-size: 0.9rem;
             color: #ccc;
+            font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
     <div class="tv-container">
         <div class="header">
-            <div class="logo">BoTTube TV</div>
+            <div class="logo">📺 BoTTube</div>
         </div>
-        
+
         <div class="main-content">
             <div class="sidebar">
-                <div class="nav-item focused" data-section="trending">Trending</div>
-                <div class="nav-item" data-section="recent">Recent</div>
-                <div class="nav-item" data-section="categories">Categories</div>
-                <div class="nav-item" data-section="search">Search</div>
+                <div class="nav-item focused" data-section="home">🏠 Home</div>
+                <div class="nav-item" data-section="trending">🔥 Trending</div>
+                <div class="nav-item" data-section="recent">⏰ Recent</div>
+                <div class="nav-item" data-section="categories">📂 Categories</div>
+                <div class="nav-item" data-section="search">🔍 Search</div>
             </div>
-            
+
             <div class="content-area">
-                <div class="video-grid" id="video-grid">
-                    <!-- Video cards will be populated here -->
-                </div>
+                <div id="content">Loading...</div>
             </div>
         </div>
     </div>
 
     <script>
-        // TV interface JavaScript
-        let currentSection = 'trending';
-        let focusedElement = null;
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            loadSection('trending');
-            setupNavigation();
-        });
-        
-        function setupNavigation() {
-            document.addEventListener('keydown', handleRemoteInput);
-            
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    selectSection(this.dataset.section);
-                });
+        let currentFocus = 0;
+        let currentSection = 'home';
+        let videoData = [];
+
+        // Navigation handling
+        const navItems = document.querySelectorAll('.nav-item');
+
+        function updateNavFocus() {
+            navItems.forEach((item, index) => {
+                if (index === currentFocus) {
+                    item.classList.add('focused');
+                } else {
+                    item.classList.remove('focused');
+                }
             });
         }
-        
-        function handleRemoteInput(event) {
-            switch(event.key) {
+
+        function loadSection(section) {
+            const content = document.getElementById('content');
+            content.innerHTML = 'Loading...';
+
+            fetch(`/tv/${section}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (section === 'home') {
+                        displayHomeContent(data);
+                    } else {
+                        displayVideoGrid(data);
+                    }
+                })
+                .catch(error => {
+                    content.innerHTML = 'Error loading content';
+                    console.error('Error:', error);
+                });
+        }
+
+        function displayHomeContent(data) {
+            const content = document.getElementById('content');
+            let html = '<h2>Trending Videos</h2>';
+            html += '<div class="video-grid">';
+
+            data.trending.forEach(video => {
+                html += createVideoCard(video);
+            });
+
+            html += '</div><br><h2>Recent Videos</h2><div class="video-grid">';
+
+            data.recent.forEach(video => {
+                html += createVideoCard(video);
+            });
+
+            html += '</div>';
+            content.innerHTML = html;
+        }
+
+        function displayVideoGrid(data) {
+            const content = document.getElementById('content');
+            let html = '<div class="video-grid">';
+
+            data.forEach(video => {
+                html += createVideoCard(video);
+            });
+
+            html += '</div>';
+            content.innerHTML = html;
+        }
+
+        function createVideoCard(video) {
+            return `
+                <div class="video-card" data-video-id="${video.id}">
+                    <div class="video-thumbnail">📹</div>
+                    <div class="video-info">
+                        <div class="video-title">${video.title}</div>
+                        <div class="video-meta">
+                            ${video.username} • ${video.view_count} views
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            switch(e.key) {
                 case 'ArrowUp':
-                    event.preventDefault();
-                    navigateUp();
+                    if (currentFocus > 0) {
+                        currentFocus--;
+                        updateNavFocus();
+                    }
                     break;
                 case 'ArrowDown':
-                    event.preventDefault();
-                    navigateDown();
-                    break;
-                case 'ArrowLeft':
-                    event.preventDefault();
-                    navigateLeft();
-                    break;
-                case 'ArrowRight':
-                    event.preventDefault();
-                    navigateRight();
+                    if (currentFocus < navItems.length - 1) {
+                        currentFocus++;
+                        updateNavFocus();
+                    }
                     break;
                 case 'Enter':
-                    event.preventDefault();
-                    selectCurrentItem();
+                    const selectedItem = navItems[currentFocus];
+                    const section = selectedItem.dataset.section;
+                    if (section !== currentSection) {
+                        currentSection = section;
+                        loadSection(section);
+                    }
                     break;
             }
-        }
-        
-        function selectSection(section) {
-            currentSection = section;
-            
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.classList.remove('focused');
-            });
-            
-            document.querySelector(`[data-section="${section}"]`).classList.add('focused');
-            loadSection(section);
-        }
-        
-        function loadSection(section) {
-            const grid = document.getElementById('video-grid');
-            
-            switch(section) {
-                case 'trending':
-                    loadTrendingVideos();
-                    break;
-                case 'recent':
-                    loadRecentVideos();
-                    break;
-                case 'categories':
-                    loadCategories();
-                    break;
-                case 'search':
-                    showSearchInterface();
-                    break;
-            }
-        }
-        
-        async function loadTrendingVideos() {
-            try {
-                const response = await fetch('/api/tv/videos/trending');
-                const data = await response.json();
-                displayVideos(data.videos || []);
-            } catch (error) {
-                console.error('Error loading trending videos:', error);
-            }
-        }
-        
-        async function loadRecentVideos() {
-            try {
-                const response = await fetch('/api/tv/videos/recent');
-                const data = await response.json();
-                displayVideos(data.videos || []);
-            } catch (error) {
-                console.error('Error loading recent videos:', error);
-            }
-        }
-        
-        function displayVideos(videos) {
-            const grid = document.getElementById('video-grid');
-            grid.innerHTML = '';
-            
-            videos.forEach((video, index) => {
-                const card = document.createElement('div');
-                card.className = 'video-card';
-                card.dataset.videoId = video.id;
-                
-                card.innerHTML = `
-                    <div class="video-thumbnail"></div>
-                    <div class="video-title">${video.title}</div>
-                    <div class="video-meta">${video.username} • ${video.views} views</div>
-                `;
-                
-                if (index === 0) {
-                    card.classList.add('focused');
-                    focusedElement = card;
+        });
+
+        // Mouse navigation
+        navItems.forEach((item, index) => {
+            item.addEventListener('click', function() {
+                currentFocus = index;
+                updateNavFocus();
+                const section = item.dataset.section;
+                if (section !== currentSection) {
+                    currentSection = section;
+                    loadSection(section);
                 }
-                
-                card.addEventListener('click', function() {
-                    playVideo(video.id);
-                });
-                
-                grid.appendChild(card);
             });
-        }
-        
-        function playVideo(videoId) {
-            window.location.href = `/tv/player/${videoId}`;
-        }
-        
-        function navigateUp() {
-            // Navigation logic for TV remote
-        }
-        
-        function navigateDown() {
-            // Navigation logic for TV remote
-        }
-        
-        function navigateLeft() {
-            // Navigation logic for TV remote
-        }
-        
-        function navigateRight() {
-            // Navigation logic for TV remote
-        }
-        
-        function selectCurrentItem() {
-            if (focusedElement && focusedElement.dataset.videoId) {
-                playVideo(focusedElement.dataset.videoId);
-            }
-        }
+        });
+
+        // Initialize
+        loadSection('home');
     </script>
 </body>
 </html>
