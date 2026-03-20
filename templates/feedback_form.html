@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>First Impression Feedback - BoTTube</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .feedback-container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+        }
+        .form-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .char-counter {
+            font-size: 0.875rem;
+            color: #6c757d;
+            text-align: right;
+            margin-top: 0.25rem;
+        }
+        .char-counter.valid {
+            color: #198754;
+        }
+        .char-counter.invalid {
+            color: #dc3545;
+        }
+        .reward-badge {
+            background: linear-gradient(45deg, #6f42c1, #e83e8c);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            display: inline-block;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="feedback-container">
+            <div class="text-center mb-4">
+                <h1 class="display-5">BoTTube First Impression</h1>
+                <div class="reward-badge">🎁 Reward: 1 RTC</div>
+                <p class="lead">Tell us what you think — your honest feedback matters!</p>
+            </div>
+
+            <form method="POST" id="feedbackForm">
+                <div class="form-section">
+                    <h4>Quick Questions</h4>
+
+                    <div class="mb-3">
+                        <label for="first_reaction" class="form-label">What was your first reaction when the page loaded?</label>
+                        <textarea class="form-control" id="first_reaction" name="first_reaction" rows="3" required></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="clarity_seconds" class="form-label">Did you understand what BoTTube is within 10 seconds?</label>
+                        <select class="form-select" id="clarity_seconds" name="clarity_seconds" required>
+                            <option value="">Select...</option>
+                            <option value="yes_immediately">Yes, immediately clear</option>
+                            <option value="yes_within_10">Yes, within 10 seconds</option>
+                            <option value="took_longer">Took longer than 10 seconds</option>
+                            <option value="still_confused">Still not entirely clear</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="confusion_points" class="form-label">What was confusing or unclear?</label>
+                        <textarea class="form-control" id="confusion_points" name="confusion_points" rows="3" placeholder="Be specific about any confusing elements..."></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="first_video" class="form-label">What was the first video you clicked and why?</label>
+                        <textarea class="form-control" id="first_video" name="first_video" rows="2" required></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="return_likelihood" class="form-label">Would you come back? Why or why not?</label>
+                        <select class="form-select" id="return_likelihood" name="return_likelihood" required>
+                            <option value="">Select...</option>
+                            <option value="definitely">Definitely - I love it</option>
+                            <option value="probably">Probably - seems useful</option>
+                            <option value="maybe">Maybe - need to see more</option>
+                            <option value="probably_not">Probably not - not for me</option>
+                            <option value="definitely_not">Definitely not - didn't like it</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>Overall Impression</h4>
+                    <p class="text-muted mb-3">Write your honest first impression. Minimum 50 words required.</p>
+
+                    <div class="mb-3">
+                        <textarea class="form-control" id="overall_impression" name="overall_impression" rows="6"
+                                placeholder="Share your honest thoughts about BoTTube. What stood out? What could be better? Would you recommend it to others?"
+                                required></textarea>
+                        <div class="char-counter" id="wordCounter">0 words (minimum 50 required)</div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>Contact Info</h4>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="contact_name" class="form-label">Your Name</label>
+                            <input type="text" class="form-control" id="contact_name" name="contact_name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="contact_email" class="form-label">Email Address</label>
+                            <input type="email" class="form-control" id="contact_email" name="contact_email" required>
+                        </div>
+                    </div>
+                    <small class="text-muted">We'll contact you about the RTC reward if your feedback is selected.</small>
+                </div>
+
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg" id="submitBtn" disabled>
+                        Submit Feedback & Claim 1 RTC
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function countWords(text) {
+            return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+        }
+
+        function updateWordCounter() {
+            const textarea = document.getElementById('overall_impression');
+            const counter = document.getElementById('wordCounter');
+            const submitBtn = document.getElementById('submitBtn');
+            const wordCount = countWords(textarea.value);
+
+            counter.textContent = `${wordCount} words (minimum 50 required)`;
+
+            if (wordCount >= 50) {
+                counter.className = 'char-counter valid';
+                submitBtn.disabled = false;
+            } else {
+                counter.className = 'char-counter invalid';
+                submitBtn.disabled = true;
+            }
+        }
+
+        document.getElementById('overall_impression').addEventListener('input', updateWordCounter);
+
+        document.getElementById('feedbackForm').addEventListener('submit', function(e) {
+            const wordCount = countWords(document.getElementById('overall_impression').value);
+            if (wordCount < 50) {
+                e.preventDefault();
+                alert('Please write at least 50 words in your overall impression.');
+                return false;
+            }
+        });
+
+        // Initialize counter
+        updateWordCounter();
+    </script>
+</body>
+</html>
