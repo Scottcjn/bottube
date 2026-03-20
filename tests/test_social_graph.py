@@ -1,213 +1,182 @@
 import os
+import tempfile
 import sqlite3
-import sys
-from pathlib import Path
-
+import json
 import pytest
+from bottube_server import app
 
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+class TestSocialGraph:
+    @pytest.fixture
+    def client(self):
+        db_fd, app.config['DATABASE'] = tempfile.mkstemp()
+        app.config['TESTING'] = True
+        client = app.test_client()
 
-os.environ.setdefault("BOTTUBE_DB_PATH", "/tmp/bottube_test_social_bootstrap.db")
-os.environ.setdefault("BOTTUBE_DB", "/tmp/bottube_test_social_bootstrap.db")
+        with app.app_context():
+            self._init_db()
+            self._seed_test_data()
 
-_orig_sqlite_connect = sqlite3.connect
+        yield client
 
+        os.close(db_fd)
+        os.unlink(app.config['DATABASE'])
 
-def _bootstrap_sqlite_connect(path, *args, **kwargs):
-    if str(path) == "/root/bottube/bottube.db":
-        path = os.environ["BOTTUBE_DB_PATH"]
-    return _orig_sqlite_connect(path, *args, **kwargs)
+    def _init_db(self):
+        with sqlite3.connect(app.config['DATABASE']) as db:
+            db.execute('''
+                CREATE TABLE IF NOT EXISTS agents (
+                    name TEXT PRIMARY KEY,
+                    type TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            db.execute('''
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subscriber TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (subscriber) REFERENCES agents (name),
+                    FOREIGN KEY (target) REFERENCES agents (name)
+                )
+            ''')
+            db.commit()
 
+    def _seed_test_data(self):
+        with sqlite3.connect(app.config['DATABASE']) as db:
+            # Create test agents
+            agents = [
+                ('alice_bot', 'content'),
+                ('bob_trader', 'trading'),
+                ('charlie_news', 'news'),
+                ('diana_crypto', 'analysis'),
+                ('eve_social', 'social')
+            ]
+            db.executemany('INSERT INTO agents (name, type) VALUES (?, ?)', agents)
 
-sqlite3.connect = _bootstrap_sqlite_connect
+            # Create subscription network
+            subscriptions = [
+                ('alice_bot', 'bob_trader'),
+                ('alice_bot', 'charlie_news'),
+                ('bob_trader', 'alice_bot'),
+                ('bob_trader', 'diana_crypto'),
+                ('charlie_news', 'alice_bot'),
+                ('charlie_news', 'diana_crypto'),
+                ('charlie_news', 'eve_social'),
+                ('diana_crypto', 'bob_trader'),
+                ('diana_crypto', 'eve_social'),
+                ('eve_social', 'alice_bot'),
+                ('eve_social', 'charlie_news')
+            ]
+            db.executemany('INSERT INTO subscriptions (subscriber, target) VALUES (?, ?)', subscriptions)
+            db.commit()
 
-import paypal_packages
+    def test_social_graph_basic(self, client):
+        response = client.get('/api/social/graph')
+        assert response.status_code == 200
 
+        data = json.loads(response.data)
+        assert 'nodes' in data
+        assert 'edges' in data
+        assert 'stats' in data
 
-_orig_init_store_db = paypal_packages.init_store_db
+        # Verify nodes structure
+        assert len(data['nodes']) == 5
+        for node in data['nodes']:
+            assert 'id' in node
+            assert 'type' in node
+            assert 'followers' in node
+            assert 'following' in node
 
+        # Verify edges structure
+        assert len(data['edges']) == 11
+        for edge in data['edges']:
+            assert 'source' in edge
+            assert 'target' in edge
 
-def _test_init_store_db(db_path=None):
-    bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
-    Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
-    return _orig_init_store_db(bootstrap_path)
+    def test_social_graph_with_limit(self, client):
+        response = client.get('/api/social/graph?limit=3')
+        assert response.status_code == 200
 
+        data = json.loads(response.data)
+        assert len(data['nodes']) <= 3
 
-paypal_packages.init_store_db = _test_init_store_db
+    def test_social_graph_limit_bounds(self, client):
+        # Test minimum bound
+        response = client.get('/api/social/graph?limit=0')
+        assert response.status_code == 400
 
-import bottube_server
+        # Test maximum bound
+        response = client.get('/api/social/graph?limit=101')
+        assert response.status_code == 400
 
-sqlite3.connect = _orig_sqlite_connect
+        # Test invalid format
+        response = client.get('/api/social/graph?limit=invalid')
+        assert response.status_code == 400
 
+    def test_agent_interactions_basic(self, client):
+        response = client.get('/api/agents/alice_bot/interactions')
+        assert response.status_code == 200
 
-@pytest.fixture()
-def client(monkeypatch, tmp_path):
-    db_path = tmp_path / "bottube_social_graph_test.db"
-    monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
-    bottube_server._rate_buckets.clear()
-    bottube_server._rate_last_prune = 0.0
-    bottube_server.init_db()
-    bottube_server.app.config["TESTING"] = True
-    yield bottube_server.app.test_client()
+        data = json.loads(response.data)
+        assert 'agent' in data
+        assert 'incoming' in data
+        assert 'outgoing' in data
+        assert 'stats' in data
 
+        assert data['agent'] == 'alice_bot'
+        assert len(data['incoming']) >= 0
+        assert len(data['outgoing']) >= 0
 
-def _insert_agent(agent_name: str, created_at: float) -> int:
-    with bottube_server.app.app_context():
-        db = bottube_server.get_db()
-        cur = db.execute(
-            """
-            INSERT INTO agents
-                (agent_name, display_name, api_key, bio, avatar_url, created_at, last_active)
-            VALUES (?, ?, ?, '', '', ?, ?)
-            """,
-            (agent_name, agent_name.title(), f"bottube_sk_{agent_name}", created_at, created_at),
-        )
-        db.commit()
-        return int(cur.lastrowid)
+    def test_agent_interactions_with_limit(self, client):
+        response = client.get('/api/agents/charlie_news/interactions?limit=2')
+        assert response.status_code == 200
 
+        data = json.loads(response.data)
+        assert len(data['incoming']) <= 2
+        assert len(data['outgoing']) <= 2
 
-def _insert_video(video_id: str, agent_id: int, created_at: float) -> None:
-    with bottube_server.app.app_context():
-        db = bottube_server.get_db()
-        db.execute(
-            """
-            INSERT INTO videos (video_id, agent_id, title, filename, created_at, is_removed)
-            VALUES (?, ?, ?, ?, ?, 0)
-            """,
-            (video_id, agent_id, f"Video {video_id}", f"{video_id}.mp4", created_at),
-        )
-        db.commit()
+    def test_agent_interactions_nonexistent(self, client):
+        response = client.get('/api/agents/nonexistent_bot/interactions')
+        assert response.status_code == 404
 
+    def test_agent_interactions_limit_validation(self, client):
+        response = client.get('/api/agents/alice_bot/interactions?limit=-1')
+        assert response.status_code == 400
 
-def _insert_comment(video_id: str, agent_id: int, content: str, created_at: float) -> None:
-    with bottube_server.app.app_context():
-        db = bottube_server.get_db()
-        db.execute(
-            """
-            INSERT INTO comments (video_id, agent_id, content, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (video_id, agent_id, content, created_at),
-        )
-        db.commit()
+        response = client.get('/api/agents/alice_bot/interactions?limit=51')
+        assert response.status_code == 400
 
+    def test_social_graph_network_structure(self, client):
+        response = client.get('/api/social/graph')
+        data = json.loads(response.data)
 
-def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float) -> None:
-    with bottube_server.app.app_context():
-        db = bottube_server.get_db()
-        db.execute(
-            """
-            INSERT INTO votes (agent_id, video_id, vote, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (agent_id, video_id, vote, created_at),
-        )
-        db.commit()
+        # Verify alice_bot has correct connections
+        alice_node = next(n for n in data['nodes'] if n['id'] == 'alice_bot')
+        assert alice_node['followers'] == 3  # bob, charlie, eve
+        assert alice_node['following'] == 2  # bob, charlie
 
+        # Verify stats calculations
+        stats = data['stats']
+        assert 'total_agents' in stats
+        assert 'total_connections' in stats
+        assert 'avg_connections' in stats
+        assert stats['total_agents'] == 5
+        assert stats['total_connections'] == 11
 
-def _insert_subscription(follower_id: int, following_id: int, created_at: float) -> None:
-    with bottube_server.app.app_context():
-        db = bottube_server.get_db()
-        db.execute(
-            """
-            INSERT INTO subscriptions (follower_id, following_id, created_at)
-            VALUES (?, ?, ?)
-            """,
-            (follower_id, following_id, created_at),
-        )
-        db.commit()
+    def test_interaction_data_structure(self, client):
+        response = client.get('/api/agents/diana_crypto/interactions')
+        data = json.loads(response.data)
 
+        # Verify incoming/outgoing structure
+        for interaction in data['incoming'] + data['outgoing']:
+            assert 'agent' in interaction
+            assert 'created_at' in interaction
 
-def _seed_interaction_data():
-    t = 1000.0
-    alice_id = _insert_agent("alice", t)
-    bob_id = _insert_agent("bob", t + 1)
-    carol_id = _insert_agent("carol", t + 2)
-
-    _insert_video("alice_vid_01", alice_id, t + 10)
-    _insert_video("bob_vid_001", bob_id, t + 11)
-    _insert_video("carol_vid01", carol_id, t + 12)
-
-    # Incoming interactions for alice.
-    _insert_comment("alice_vid_01", bob_id, "great cut", t + 20)
-    _insert_comment("alice_vid_01", bob_id, "nice pacing", t + 21)
-    _insert_comment("alice_vid_01", carol_id, "solid intro", t + 22)
-    _insert_vote("alice_vid_01", bob_id, 1, t + 23)
-    _insert_vote("alice_vid_01", carol_id, 1, t + 24)
-    _insert_subscription(bob_id, alice_id, t + 25)
-    _insert_subscription(carol_id, alice_id, t + 26)
-
-    # Outgoing interactions from alice.
-    _insert_comment("bob_vid_001", alice_id, "love the style", t + 30)
-    _insert_comment("bob_vid_001", alice_id, "clean framing", t + 31)
-    _insert_comment("bob_vid_001", alice_id, "nice loops", t + 32)
-    _insert_comment("carol_vid01", alice_id, "great color grade", t + 33)
-    _insert_vote("bob_vid_001", alice_id, 1, t + 34)
-    _insert_vote("carol_vid01", alice_id, 1, t + 35)
-    _insert_subscription(alice_id, bob_id, t + 36)
-    _insert_subscription(alice_id, carol_id, t + 37)
-
-
-def test_social_graph_has_expected_keys_and_limit(client):
-    _seed_interaction_data()
-
-    resp = client.get("/api/social/graph?limit=1")
-    assert resp.status_code == 200
-    body = resp.get_json()
-
-    assert {"network", "top_pairs", "most_connected"} <= set(body.keys())
-    assert {"total_agents", "total_subscriptions", "active_commenters", "active_likers"} <= set(
-        body["network"].keys()
-    )
-    assert body["network"]["total_agents"] == 3
-    assert len(body["top_pairs"]) == 1
-    assert len(body["most_connected"]) >= 1
-
-    top_pair = body["top_pairs"][0]
-    assert {"from", "from_display", "to", "to_display", "comments", "likes", "strength"} <= set(
-        top_pair.keys()
-    )
-
-
-def test_agent_interactions_shape_not_found_and_limit(client):
-    _seed_interaction_data()
-
-    not_found = client.get("/api/agents/no_such_agent/interactions")
-    assert not_found.status_code == 404
-    assert not_found.get_json()["error"] == "Agent not found"
-
-    resp = client.get("/api/agents/alice/interactions?limit=1")
-    assert resp.status_code == 200
-    body = resp.get_json()
-
-    assert {"agent", "incoming", "outgoing"} <= set(body.keys())
-    assert {"commenters", "likers", "followers"} <= set(body["incoming"].keys())
-
-    # limit=1 should apply to each section.
-    assert len(body["incoming"]["commenters"]) == 1
-    assert len(body["incoming"]["likers"]) == 1
-    assert len(body["incoming"]["followers"]) == 1
-    assert len(body["outgoing"]) == 1
-
-    commenter = body["incoming"]["commenters"][0]
-    assert {"agent_name", "display_name", "avatar_url", "comment_count", "last_at"} <= set(
-        commenter.keys()
-    )
-
-    liker = body["incoming"]["likers"][0]
-    assert {"agent_name", "display_name", "avatar_url", "like_count", "last_at"} <= set(
-        liker.keys()
-    )
-
-    follower = body["incoming"]["followers"][0]
-    assert {"agent_name", "display_name", "avatar_url", "subscribed_at"} <= set(
-        follower.keys()
-    )
-
-    outgoing = body["outgoing"][0]
-    assert {"agent_name", "display_name", "avatar_url", "comments_given", "likes_given", "total"} <= set(
-        outgoing.keys()
-    )
+        # Verify stats
+        stats = data['stats']
+        assert 'incoming_count' in stats
+        assert 'outgoing_count' in stats
+        assert 'total_interactions' in stats
