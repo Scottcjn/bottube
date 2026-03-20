@@ -68,15 +68,13 @@ def trending_videos():
         LIMIT ? OFFSET ?
     ''', (limit, offset))
 
-    videos = cursor.fetchall()
-    video_list = []
+    videos = []
+    for row in cursor.fetchall():
+        video_data = format_video_for_tv(row)
+        if video_data:
+            videos.append(video_data)
 
-    for video in videos:
-        formatted = format_video_for_tv(video)
-        if formatted:
-            video_list.append(formatted)
-
-    return {'videos': video_list, 'total': len(video_list)}
+    return {'videos': videos}
 
 
 @tv_api.route('/api/tv/videos/recent')
@@ -97,53 +95,13 @@ def recent_videos():
         LIMIT ? OFFSET ?
     ''', (limit, offset))
 
-    videos = cursor.fetchall()
-    video_list = []
+    videos = []
+    for row in cursor.fetchall():
+        video_data = format_video_for_tv(row)
+        if video_data:
+            videos.append(video_data)
 
-    for video in videos:
-        formatted = format_video_for_tv(video)
-        if formatted:
-            video_list.append(formatted)
-
-    return {'videos': video_list, 'total': len(video_list)}
-
-
-@tv_api.route('/api/tv/videos/<int:video_id>')
-@tv_json_response
-def get_video(video_id):
-    """Get specific video data for TV interface"""
-    video_data = get_video_data(video_id)
-    if not video_data:
-        return {'error': 'Video not found'}, 404
-
-    formatted = format_video_for_tv(video_data)
-    return {'video': formatted}
-
-
-@tv_api.route('/api/tv/categories')
-@tv_json_response
-def get_categories():
-    """Get video categories for TV interface"""
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute('''
-        SELECT DISTINCT category, COUNT(*) as video_count
-        FROM videos
-        WHERE category IS NOT NULL AND category != ''
-        GROUP BY category
-        ORDER BY video_count DESC
-    ''')
-
-    categories = cursor.fetchall()
-    category_list = []
-
-    for cat in categories:
-        category_list.append({
-            'name': cat[0],
-            'video_count': cat[1]
-        })
-
-    return {'categories': category_list}
+    return {'videos': videos}
 
 
 @tv_api.route('/api/tv/search')
@@ -155,7 +113,7 @@ def search_videos():
     offset = request.args.get('offset', 0, type=int)
 
     if not query:
-        return {'videos': [], 'total': 0}
+        return {'videos': []}
 
     db = get_db()
     cursor = db.cursor()
@@ -165,16 +123,59 @@ def search_videos():
         FROM videos v
         JOIN users u ON v.user_id = u.id
         WHERE v.title LIKE ? OR v.description LIKE ?
-        ORDER BY v.view_count DESC, v.created_at DESC
+        ORDER BY v.view_count DESC
         LIMIT ? OFFSET ?
     ''', (f'%{query}%', f'%{query}%', limit, offset))
 
-    videos = cursor.fetchall()
-    video_list = []
+    videos = []
+    for row in cursor.fetchall():
+        video_data = format_video_for_tv(row)
+        if video_data:
+            videos.append(video_data)
 
-    for video in videos:
-        formatted = format_video_for_tv(video)
-        if formatted:
-            video_list.append(formatted)
+    return {'videos': videos, 'query': query}
 
-    return {'videos': video_list, 'total': len(video_list), 'query': query}
+
+@tv_api.route('/api/tv/video/<int:video_id>')
+@tv_json_response
+def get_video_details(video_id):
+    """Get detailed video information"""
+    video_row = get_video_data(video_id)
+    if not video_row:
+        return {'error': 'Video not found'}, 404
+
+    video_data = format_video_for_tv(video_row)
+    return {'video': video_data}
+
+
+@tv_api.route('/api/tv/thumbnail/<int:video_id>')
+def get_thumbnail(video_id):
+    """Get video thumbnail"""
+    # Placeholder for thumbnail generation
+    from flask import send_file
+    import io
+    import base64
+
+    # Return a simple placeholder image
+    placeholder = base64.b64decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    )
+    return send_file(io.BytesIO(placeholder), mimetype='image/png')
+
+
+@tv_api.route('/api/tv/stream/<int:video_id>')
+def stream_video(video_id):
+    """Stream video for TV playback"""
+    video_row = get_video_data(video_id)
+    if not video_row:
+        return {'error': 'Video not found'}, 404
+
+    file_path = video_row[5]  # file_path from query
+    if not file_path:
+        return {'error': 'Video file not found'}, 404
+
+    try:
+        from flask import send_file
+        return send_file(file_path, as_attachment=False)
+    except FileNotFoundError:
+        return {'error': 'Video file not accessible'}, 404
