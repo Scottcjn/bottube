@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 def generate_aria_label(element_type, context=None, action=None):
     """Generate appropriate aria-label for UI elements"""
     labels = {
@@ -58,4 +60,17 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     if duration:
         alt_parts.append(f"Duration: {duration}")
 
-    return ", ".join(alt_parts) if alt_parts else "Video thumbnail"
+    if alt_parts:
+        return ", ".join(alt_parts)
+
+    return "Video thumbnail"
+
+
+def generate_skip_link():
+    """Generate skip to main content link HTML"""
+    return '<a href="#main-content" class="skip-link">Skip to main content</a>'
+
+
+def add_sr_only_text(text):
+    """Wrap text in screen reader only class"""
+    return f'<span class="sr-only">{text}</span>'
