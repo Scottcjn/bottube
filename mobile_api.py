@@ -73,7 +73,7 @@ def mobile_register():
 
     db = get_db()
 
-    # Check if user already exists
+    # Check if user exists
     existing_user = db.execute(
         'SELECT id FROM users WHERE username = ? OR email = ?',
         (username, email)
@@ -84,57 +84,100 @@ def mobile_register():
 
     # Create new user
     hashed_password = hashlib.sha256(password.encode()).hexdigest()
-    cursor = db.cursor()
-    cursor.execute(
-        'INSERT INTO users (username, email, password, rtc_balance) VALUES (?, ?, ?, ?)',
-        (username, email, hashed_password, 0)
-    )
-    db.commit()
-    user_id = cursor.lastrowid
 
-    # Generate token
-    token = jwt.encode({
-        'user_id': user_id,
-        'username': username,
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)
-    }, 'your-secret-key', algorithm='HS256')
+    try:
+        db.execute(
+            'INSERT INTO users (username, email, password, rtc_balance) VALUES (?, ?, ?, ?)',
+            (username, email, hashed_password, 0)
+        )
+        db.commit()
+
+        # Get the newly created user
+        user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+
+        token = jwt.encode({
+            'user_id': user['id'],
+            'username': user['username'],
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)
+        }, 'your-secret-key', algorithm='HS256')
+
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': user['id'],
+                'username': user['username'],
+                'email': user['email'],
+                'rtc_balance': user.get('rtc_balance', 0)
+            }
+        }), 201
+
+    except sqlite3.Error as e:
+        return jsonify({'error': 'Failed to create user'}), 500
+
+
+@mobile_api.route('/user/profile', methods=['GET'])
+@token_required
+def get_profile():
+    db = get_db()
+    user = db.execute(
+        'SELECT id, username, email, rtc_balance FROM users WHERE id = ?',
+        (g.user_id,)
+    ).fetchone()
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
 
     return jsonify({
-        'token': token,
         'user': {
-            'id': user_id,
-            'username': username,
-            'email': email,
-            'rtc_balance': 0
+            'id': user['id'],
+            'username': user['username'],
+            'email': user['email'],
+            'rtc_balance': user.get('rtc_balance', 0)
         }
-    }), 201
+    })
+
+
+@mobile_api.route('/user/balance', methods=['GET'])
+@token_required
+def get_balance():
+    db = get_db()
+    user = db.execute(
+        'SELECT rtc_balance FROM users WHERE id = ?',
+        (g.user_id,)
+    ).fetchone()
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify({
+        'rtc_balance': user.get('rtc_balance', 0)
+    })
 
 
 @mobile_api.route('/videos', methods=['GET'])
 @token_required
 def get_videos():
     db = get_db()
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    category = request.args.get('category')
 
-    offset = (page - 1) * per_page
-    query = 'SELECT * FROM videos'
-    params = []
+    page = int(request.args.get('page', 1))
+    limit = min(int(request.args.get('limit', 10)), 50)  # Max 50 per page
+    offset = (page - 1) * limit
 
-    if category:
-        query += ' WHERE category = ?'
-        params.append(category)
+    videos = db.execute(
+        'SELECT * FROM videos ORDER BY created_at DESC LIMIT ? OFFSET ?',
+        (limit, offset)
+    ).fetchall()
 
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
-    params.extend([per_page, offset])
-
-    videos = db.execute(query, params).fetchall()
+    total_videos = db.execute('SELECT COUNT(*) FROM videos').fetchone()[0]
 
     return jsonify({
         'videos': [dict(video) for video in videos],
-        'page': page,
-        'per_page': per_page
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_videos,
+            'pages': (total_videos + limit - 1) // limit
+        }
     })
 
 
@@ -148,67 +191,3 @@ def get_video(video_id):
         return jsonify({'error': 'Video not found'}), 404
 
     return jsonify({'video': dict(video)})
-
-
-@mobile_api.route('/user/profile', methods=['GET'])
-@token_required
-def get_profile():
-    db = get_db()
-    user = db.execute('SELECT * FROM users WHERE id = ?', (g.user_id,)).fetchone()
-
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-
-    return jsonify({
-        'user': {
-            'id': user['id'],
-            'username': user['username'],
-            'email': user['email'],
-            'rtc_balance': user.get('rtc_balance', 0),
-            'created_at': user.get('created_at')
-        }
-    })
-
-
-@mobile_api.route('/user/videos', methods=['GET'])
-@token_required
-def get_user_videos():
-    db = get_db()
-    videos = db.execute(
-        'SELECT * FROM videos WHERE user_id = ? ORDER BY created_at DESC',
-        (g.user_id,)
-    ).fetchall()
-
-    return jsonify({
-        'videos': [dict(video) for video in videos]
-    })
-
-
-@mobile_api.route('/upload', methods=['POST'])
-@token_required
-def upload_video():
-    # This would handle video upload
-    # For now, return a placeholder
-    return jsonify({
-        'message': 'Video upload endpoint - implementation needed',
-        'status': 'placeholder'
-    }), 501
-
-
-@mobile_api.route('/search', methods=['GET'])
-@token_required
-def search_videos():
-    query = request.args.get('q', '')
-    if not query:
-        return jsonify({'error': 'Search query required'}), 400
-
-    db = get_db()
-    videos = db.execute(
-        'SELECT * FROM videos WHERE title LIKE ? OR description LIKE ? ORDER BY created_at DESC',
-        (f'%{query}%', f'%{query}%')
-    ).fetchall()
-
-    return jsonify({
-        'videos': [dict(video) for video in videos],
-        'query': query
-    })
