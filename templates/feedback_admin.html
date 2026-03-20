@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback Admin - BoTTube</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .feedback-admin {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .admin-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: var(--primary-color);
+            border-radius: 8px;
+            color: white;
+        }
+
+        .filters {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-weight: 500;
+            color: #555;
+            font-size: 0.9em;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .feedback-list {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .feedback-item {
+            border-bottom: 1px solid #eee;
+            padding: 20px;
+        }
+
+        .feedback-item:last-child {
+            border-bottom: none;
+        }
+
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .feedback-meta {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .feedback-rating {
+            display: flex;
+            gap: 2px;
+        }
+
+        .star {
+            color: #ffd700;
+            font-size: 16px;
+        }
+
+        .star.empty {
+            color: #ddd;
+        }
+
+        .feedback-text {
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .feedback-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tag {
+            background: var(--secondary-color);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+        }
+
+        .export-btn {
+            background: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .export-btn:hover {
+            background: #218838;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .page-btn {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .page-btn.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .no-feedback {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    {% include 'header.html' %}
+
+    <div class="feedback-admin">
+        <div class="admin-header">
+            <div>
+                <h1>First Impression Feedback</h1>
+                <p>Manage and analyze user feedback responses</p>
+            </div>
+            <button class="export-btn" onclick="exportFeedback()">Export CSV</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number">{{ stats.total_responses }}</div>
+                <div class="stat-label">Total Responses</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{{ "%.1f"|format(stats.avg_rating) }}</div>
+                <div class="stat-label">Average Rating</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{{ stats.today_responses }}</div>
+                <div class="stat-label">Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{{ stats.week_responses }}</div>
+                <div class="stat-label">This Week</div>
+            </div>
+        </div>
+
+        <form method="GET" class="filters">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Rating</label>
+                    <select name="rating">
+                        <option value="">All Ratings</option>
+                        <option value="5" {% if request.args.get('rating') == '5' %}selected{% endif %}>5 Stars</option>
+                        <option value="4" {% if request.args.get('rating') == '4' %}selected{% endif %}>4 Stars</option>
+                        <option value="3" {% if request.args.get('rating') == '3' %}selected{% endif %}>3 Stars</option>
+                        <option value="2" {% if request.args.get('rating') == '2' %}selected{% endif %}>2 Stars</option>
+                        <option value="1" {% if request.args.get('rating') == '1' %}selected{% endif %}>1 Star</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>Date Range</label>
+                    <select name="date_range">
+                        <option value="">All Time</option>
+                        <option value="today" {% if request.args.get('date_range') == 'today' %}selected{% endif %}>Today</option>
+                        <option value="week" {% if request.args.get('date_range') == 'week' %}selected{% endif %}>This Week</option>
+                        <option value="month" {% if request.args.get('date_range') == 'month' %}selected{% endif %}>This Month</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>Search</label>
+                    <input type="text" name="search" value="{{ request.args.get('search', '') }}" placeholder="Search feedback text...">
+                </div>
+
+                <div class="filter-group">
+                    <label>&nbsp;</label>
+                    <button type="submit" class="export-btn">Filter</button>
+                </div>
+            </div>
+        </form>
+
+        <div class="feedback-list">
+            {% if feedback_list %}
+                {% for feedback in feedback_list %}
+                <div class="feedback-item">
+                    <div class="feedback-header">
+                        <div class="feedback-meta">
+                            <strong>{{ feedback.user_email or 'Anonymous' }}</strong>
+                            <br>
+                            {{ feedback.created_at.strftime('%B %d, %Y at %I:%M %p') }}
+                        </div>
+                        <div class="feedback-rating">
+                            {% for i in range(1, 6) %}
+                                <span class="star {% if i <= feedback.rating %}filled{% else %}empty{% endif %}">★</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="feedback-text">
+                        <strong>First Reaction:</strong> {{ feedback.first_reaction }}<br>
+                        <strong>Understanding:</strong> {{ feedback.understood_purpose }}<br>
+                        <strong>Confusion:</strong> {{ feedback.confusion_points or 'None mentioned' }}<br>
+                        <strong>First Video:</strong> {{ feedback.first_video_clicked }}<br>
+                        <strong>Would Return:</strong> {{ feedback.would_return }}
+                    </div>
+
+                    {% if feedback.additional_comments %}
+                    <div class="feedback-text">
+                        <strong>Additional Comments:</strong> {{ feedback.additional_comments }}
+                    </div>
+                    {% endif %}
+
+                    <div class="feedback-tags">
+                        <span class="tag">{{ feedback.rating }}/5 Stars</span>
+                        {% if feedback.understood_purpose == 'Yes' %}
+                            <span class="tag">Clear Purpose</span>
+                        {% elif feedback.understood_purpose == 'No' %}
+                            <span class="tag">Unclear Purpose</span>
+                        {% endif %}
+                        {% if feedback.would_return == 'Yes' %}
+                            <span class="tag">Would Return</span>
+                        {% elif feedback.would_return == 'No' %}
+                            <span class="tag">Would Not Return</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-feedback">
+                    <h3>No feedback found</h3>
+                    <p>No feedback responses match your current filters.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if pagination %}
+        <div class="pagination">
+            {% if pagination.has_prev %}
+                <a href="{{ url_for('feedback_admin', page=pagination.prev_num, **request.args) }}" class="page-btn">← Previous</a>
+            {% endif %}
+
+            {% for page_num in pagination.iter_pages() %}
+                {% if page_num %}
+                    {% if page_num != pagination.page %}
+                        <a href="{{ url_for('feedback_admin', page=page_num, **request.args) }}" class="page-btn">{{ page_num }}</a>
+                    {% else %}
+                        <span class="page-btn active">{{ page_num }}</span>
+                    {% endif %}
+                {% else %}
+                    <span class="page-btn">…</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if pagination.has_next %}
+                <a href="{{ url_for('feedback_admin', page=pagination.next_num, **request.args) }}" class="page-btn">Next →</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function exportFeedback() {
+            const params = new URLSearchParams(window.location.search);
+            params.set('export', 'csv');
+            window.location.href = '{{ url_for("feedback_admin") }}?' + params.toString();
+        }
+    </script>
+
+    {% include 'footer.html' %}
+</body>
+</html>
