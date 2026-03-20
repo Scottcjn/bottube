@@ -63,11 +63,10 @@ def get_eligible_creators():
         LEFT JOIN subscriptions s ON u.id = s.user_id
         LEFT JOIN videos v ON u.id = v.user_id
         LEFT JOIN video_interactions vi ON v.id = vi.video_id
-        WHERE v.uploaded_at >= ? OR v.uploaded_at IS NULL
-        GROUP BY u.id, u.username, u.created_at
-        HAVING
-            subscriber_count >= 100
-            AND video_count >= 3
+        WHERE u.created_at < ?
+        GROUP BY u.id
+        HAVING subscriber_count >= 100
+            AND video_count >= 5
             AND last_upload >= ?
         ORDER BY total_views DESC
     ''', (thirty_days_ago.isoformat(), thirty_days_ago.isoformat()))
@@ -89,51 +88,31 @@ def dashboard():
 
 @fund_admin_bp.route('/distribute', methods=['POST'])
 @require_admin
-def distribute_funds():
-    """Trigger monthly fund distribution"""
-    from creator_fund import CreatorFund
-
-    target_month = request.form.get('month', datetime.now().month)
-    target_year = request.form.get('year', datetime.now().year)
-
+def process_distribution():
+    """Process monthly fund distribution"""
     try:
-        target_month = int(target_month)
-        target_year = int(target_year)
-    except ValueError:
-        flash('Invalid month or year provided', 'error')
+        month = int(request.form.get('month', datetime.now().month))
+        year = int(request.form.get('year', datetime.now().year))
+
+        from creator_fund import CreatorFund
+        fund = CreatorFund()
+
+        result = fund.process_monthly_distribution(month, year)
+
+        if 'error' in result:
+            flash(f"Distribution failed: {result['error']}", 'error')
+        else:
+            flash(
+                f"Successfully distributed {result['total_distributed']} RTC "
+                f"to {result['creator_count']} creators",
+                'success'
+            )
+
         return redirect(url_for('fund_admin.dashboard'))
 
-    fund = CreatorFund()
-    distributions = fund.calculate_monthly_distribution(target_month, target_year)
-
-    if not distributions:
-        flash('No eligible creators found for distribution', 'warning')
+    except Exception as e:
+        flash(f"Distribution error: {str(e)}", 'error')
         return redirect(url_for('fund_admin.dashboard'))
-
-    if fund.process_distribution(distributions):
-        total_amount = sum(d['final_amount'] for d in distributions)
-        flash(f'Successfully distributed {total_amount:.2f} RTC to {len(distributions)} creators', 'success')
-    else:
-        flash('Error processing fund distribution', 'error')
-
-    return redirect(url_for('fund_admin.dashboard'))
-
-
-@fund_admin_bp.route('/preview/<int:month>/<int:year>')
-@require_admin
-def preview_distribution(month, year):
-    """Preview fund distribution without processing"""
-    from creator_fund import CreatorFund
-
-    fund = CreatorFund()
-    distributions = fund.calculate_monthly_distribution(month, year)
-
-    return jsonify({
-        'success': True,
-        'distributions': distributions,
-        'total_amount': sum(d['final_amount'] for d in distributions),
-        'total_creators': len(distributions)
-    })
 
 
 @fund_admin_bp.route('/history')
@@ -144,11 +123,16 @@ def distribution_history():
 
     cursor = db.execute('''
         SELECT
-            d.*,
-            u.username
-        FROM creator_fund_distributions d
-        JOIN users u ON d.user_id = u.id
-        ORDER BY d.year DESC, d.month DESC, d.amount DESC
+            cfd.month,
+            cfd.year,
+            cfd.amount,
+            cfd.created_at,
+            u.username,
+            cfd.eligible_views,
+            cfd.total_views
+        FROM creator_fund_distributions cfd
+        JOIN users u ON cfd.user_id = u.id
+        ORDER BY cfd.year DESC, cfd.month DESC, cfd.amount DESC
     ''')
 
     distributions = [dict(row) for row in cursor.fetchall()]
@@ -157,35 +141,67 @@ def distribution_history():
                          distributions=distributions)
 
 
-@fund_admin_bp.route('/eligibility/refresh')
+@fund_admin_bp.route('/creator/<int:user_id>')
 @require_admin
-def refresh_eligibility():
-    """Refresh eligibility status for all creators"""
+def creator_details(user_id):
+    """View detailed creator fund information"""
     from creator_fund import CreatorFund
+    fund = CreatorFund()
 
+    # Get creator info
     db = get_db()
-    cursor = db.execute('SELECT id FROM users WHERE active = 1')
-    user_ids = [row['id'] for row in cursor.fetchall()]
+    creator = db.execute('''
+        SELECT id, username, created_at
+        FROM users WHERE id = ?
+    ''', (user_id,)).fetchone()
 
-    fund = CreatorFund()
-    updated_count = 0
+    if not creator:
+        flash('Creator not found', 'error')
+        return redirect(url_for('fund_admin.dashboard'))
 
-    for user_id in user_ids:
-        is_eligible, _ = fund.check_eligibility(user_id)
-        if is_eligible:
-            updated_count += 1
+    # Check eligibility
+    is_eligible, stats = fund.check_eligibility(user_id)
 
-    flash(f'Refreshed eligibility for {len(user_ids)} users. {updated_count} are currently eligible.', 'success')
-    return redirect(url_for('fund_admin.dashboard'))
+    # Get earnings history
+    earnings = fund.get_creator_earnings(user_id)
+
+    return render_template('admin/creator_details.html',
+                         creator=dict(creator),
+                         is_eligible=is_eligible,
+                         stats=stats,
+                         earnings=earnings)
 
 
-@fund_admin_bp.route('/stats')
+@fund_admin_bp.route('/api/eligibility/<int:user_id>')
 @require_admin
-def fund_statistics():
-    """View detailed fund statistics"""
+def check_eligibility_api(user_id):
+    """API endpoint to check creator eligibility"""
     from creator_fund import CreatorFund
-
     fund = CreatorFund()
-    stats = fund.get_fund_statistics()
 
-    return jsonify(stats)
+    is_eligible, stats = fund.check_eligibility(user_id)
+
+    return jsonify({
+        'eligible': is_eligible,
+        'stats': stats
+    })
+
+
+@fund_admin_bp.route('/api/simulate')
+@require_admin
+def simulate_distribution():
+    """Simulate fund distribution without processing"""
+    month = int(request.args.get('month', datetime.now().month))
+    year = int(request.args.get('year', datetime.now().year))
+
+    from creator_fund import CreatorFund
+    fund = CreatorFund()
+
+    distributions = fund.calculate_monthly_distribution(month, year)
+    total_amount = sum(d['amount'] for d in distributions)
+
+    return jsonify({
+        'distributions': distributions,
+        'total_amount': round(total_amount, 2),
+        'creator_count': len(distributions)
+    })
