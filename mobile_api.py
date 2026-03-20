@@ -69,7 +69,7 @@ def mobile_register():
     password = data.get('password')
 
     if not username or not email or not password:
-        return jsonify({'error': 'Username, email, and password required'}), 400
+        return jsonify({'error': 'Username, email and password required'}), 400
 
     db = get_db()
 
@@ -83,20 +83,18 @@ def mobile_register():
         return jsonify({'error': 'User already exists'}), 409
 
     # Create new user
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    hashed_password = hashlib.sha256(password.encode()).hexdigest()
     try:
         db.execute(
             'INSERT INTO users (username, email, password, rtc_balance) VALUES (?, ?, ?, ?)',
-            (username, email, password_hash, 0)
+            (username, email, hashed_password, 0)
         )
         db.commit()
 
-        # Get the created user
-        user = db.execute(
-            'SELECT * FROM users WHERE username = ?',
-            (username,)
-        ).fetchone()
+        # Get the new user
+        user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
 
+        # Create token
         token = jwt.encode({
             'user_id': user['id'],
             'username': user['username'],
@@ -121,10 +119,7 @@ def mobile_register():
 @token_required
 def get_profile():
     db = get_db()
-    user = db.execute(
-        'SELECT id, username, email, rtc_balance FROM users WHERE id = ?',
-        (g.user_id,)
-    ).fetchone()
+    user = db.execute('SELECT * FROM users WHERE id = ?', (g.user_id,)).fetchone()
 
     if not user:
         return jsonify({'error': 'User not found'}), 404
@@ -140,11 +135,10 @@ def get_profile():
 
 
 @mobile_api.route('/videos', methods=['GET'])
-@token_required
 def get_videos():
     db = get_db()
     videos = db.execute(
-        'SELECT * FROM videos ORDER BY upload_date DESC LIMIT 50'
+        'SELECT id, title, description, youtube_url, created_at FROM videos ORDER BY created_at DESC LIMIT 50'
     ).fetchall()
 
     video_list = []
@@ -153,22 +147,17 @@ def get_videos():
             'id': video['id'],
             'title': video['title'],
             'description': video['description'],
-            'filename': video['filename'],
-            'upload_date': video['upload_date'],
-            'user_id': video['user_id']
+            'youtube_url': video['youtube_url'],
+            'created_at': video['created_at']
         })
 
     return jsonify({'videos': video_list})
 
 
 @mobile_api.route('/videos/<int:video_id>', methods=['GET'])
-@token_required
 def get_video(video_id):
     db = get_db()
-    video = db.execute(
-        'SELECT * FROM videos WHERE id = ?',
-        (video_id,)
-    ).fetchone()
+    video = db.execute('SELECT * FROM videos WHERE id = ?', (video_id,)).fetchone()
 
     if not video:
         return jsonify({'error': 'Video not found'}), 404
@@ -178,8 +167,16 @@ def get_video(video_id):
             'id': video['id'],
             'title': video['title'],
             'description': video['description'],
-            'filename': video['filename'],
-            'upload_date': video['upload_date'],
-            'user_id': video['user_id']
+            'youtube_url': video['youtube_url'],
+            'created_at': video['created_at']
         }
+    })
+
+
+@mobile_api.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'ok',
+        'version': '1.0.0',
+        'timestamp': datetime.datetime.utcnow().isoformat()
     })
