@@ -63,11 +63,11 @@ class RecommendationEngine:
     def cosine_similarity(self, vec1, vec2):
         dot_product = sum(
             vec1.get(word, 0) * vec2.get(word, 0)
-            for word in set(vec1.keys()).union(set(vec2.keys()))
+            for word in set(vec1.keys()) | set(vec2.keys())
         )
 
-        norm1 = math.sqrt(sum(val ** 2 for val in vec1.values()))
-        norm2 = math.sqrt(sum(val ** 2 for val in vec2.values()))
+        norm1 = math.sqrt(sum(v**2 for v in vec1.values()))
+        norm2 = math.sqrt(sum(v**2 for v in vec2.values()))
 
         if norm1 == 0 or norm2 == 0:
             return 0
@@ -75,97 +75,70 @@ class RecommendationEngine:
         return dot_product / (norm1 * norm2)
 
     def get_content_recommendations(self, user_id, limit=10):
-        """Get recommendations based on content similarity to user's watch history"""
+        """Get content-based recommendations using TF-IDF similarity"""
         db = get_db()
 
         # Get user's watch history
-        history_cursor = db.execute("""
-            SELECT DISTINCT v.id, v.title, v.description, v.tags
-            FROM view_history vh
-            JOIN videos v ON vh.video_id = v.id
+        cursor = db.execute("""
+            SELECT v.id, v.title, v.description, v.tags
+            FROM videos v
+            JOIN view_history vh ON v.id = vh.video_id
             WHERE vh.user_id = ?
             ORDER BY vh.watched_at DESC
-            LIMIT 20
+            LIMIT 10
         """, (user_id,))
-        watched_videos = [dict(row) for row in history_cursor.fetchall()]
 
+        watched_videos = cursor.fetchall()
         if not watched_videos:
-            return self.get_trending_videos(limit)
+            return []
 
-        # Get all available videos (excluding watched ones)
-        watched_ids = [v['id'] for v in watched_videos]
-        placeholders = ','.join('?' * len(watched_ids))
-        candidates_cursor = db.execute(f"""
-            SELECT id, title, description, tags
+        watched_video_ids = [v['id'] for v in watched_videos]
+
+        # Get all videos except watched ones
+        placeholders = ','.join('?' * len(watched_video_ids))
+        cursor = db.execute(f"""
+            SELECT id, title, description, tags, upload_date
             FROM videos
             WHERE id NOT IN ({placeholders})
-            AND is_active = 1
             ORDER BY upload_date DESC
             LIMIT 100
-        """, watched_ids)
-        candidate_videos = [dict(row) for row in candidates_cursor.fetchall()]
+        """, watched_video_ids)
 
+        candidate_videos = cursor.fetchall()
         if not candidate_videos:
             return []
 
-        # Compute TF-IDF for all videos
-        all_videos = watched_videos + candidate_videos
+        # Compute TF-IDF vectors for all videos
+        all_videos = list(watched_videos) + list(candidate_videos)
         tfidf_vectors = self.compute_tf_idf(all_videos)
 
-        # Create user profile vector (average of watched videos)
+        # Calculate average vector for watched videos (user profile)
         user_vector = defaultdict(float)
         for video in watched_videos:
-            video_vector = tfidf_vectors.get(video['id'], {})
+            video_vector = tfidf_vectors[video['id']]
             for word, score in video_vector.items():
                 user_vector[word] += score
 
         # Normalize user vector
-        if user_vector:
-            total_watched = len(watched_videos)
-            user_vector = {word: score / total_watched for word, score in user_vector.items()}
+        for word in user_vector:
+            user_vector[word] /= len(watched_videos)
 
-        # Calculate similarities and score candidates
+        # Score candidate videos by similarity to user profile
         recommendations = []
         for video in candidate_videos:
-            video_vector = tfidf_vectors.get(video['id'], {})
-            similarity = self.cosine_similarity(user_vector, video_vector)
+            video_vector = tfidf_vectors[video['id']]
+            similarity = self.cosine_similarity(dict(user_vector), video_vector)
 
-            recommendations.append({
-                'video_id': video['id'],
-                'score': similarity,
-                'type': 'content_based'
-            })
+            if similarity > 0:
+                recommendations.append({
+                    'id': video['id'],
+                    'title': video['title'],
+                    'description': video['description'],
+                    'tags': video['tags'],
+                    'upload_date': video['upload_date'],
+                    'similarity_score': similarity
+                })
 
-        # Sort by score and return top recommendations
-        recommendations.sort(key=lambda x: x['score'], reverse=True)
-        return recommendations[:limit]
-
-    def get_trending_videos(self, limit=10):
-        """Get trending videos as fallback recommendations"""
-        db = get_db()
-        cursor = db.execute("""
-            SELECT v.id as video_id,
-                   (COALESCE(v.views, 0) + COALESCE(v.likes, 0) * 2) as score
-            FROM videos v
-            WHERE v.is_active = 1
-            AND v.upload_date >= datetime('now', '-30 days')
-            ORDER BY score DESC
-            LIMIT ?
-        """, (limit,))
-
-        return [{
-            'video_id': row['video_id'],
-            'score': row['score'],
-            'type': 'trending'
-        } for row in cursor.fetchall()]
-
-    def get_recommendations_for_user(self, user_id, limit=10):
-        """Main method to get personalized recommendations for a user"""
-        recommendations = self.get_content_recommendations(user_id, limit)
-
-        if len(recommendations) < limit:
-            # Fill remaining slots with trending videos
-            trending = self.get_trending_videos(limit - len(recommendations))
-            recommendations.extend(trending)
-
+        # Sort by similarity score and return top recommendations
+        recommendations.sort(key=lambda x: x['similarity_score'], reverse=True)
         return recommendations[:limit]
