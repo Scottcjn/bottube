@@ -85,16 +85,8 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    margin-top: 10px;
-}
-
-.stats-error {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 10px;
-    color: #ff6b6b;
+    color: #888;
+    font-size: 12px;
 }
 
 .loading-spinner {
@@ -106,6 +98,15 @@
     animation: spin 1s linear infinite;
 }
 
+.stats-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: #e74c3c;
+    font-size: 12px;
+}
+
 .retry-btn {
     background: #333;
     color: #fff;
@@ -113,11 +114,11 @@
     padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .retry-btn:hover {
-    background: #444;
+    background: #555;
 }
 
 @keyframes pulse {
@@ -128,5 +129,16 @@
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+    .stats-container {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .stat-separator {
+        display: none;
+    }
 }
 </style>
