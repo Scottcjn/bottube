@@ -53,8 +53,16 @@
 {%- set _ = alt_parts.append('Duration: ' + duration) -%}
 {%- endif -%}
 {%- if alt_parts -%}
-{{ alt_parts | join(' ') }}
+{{ alt_parts | join(', ') }}
 {%- else -%}
 Video thumbnail
 {%- endif -%}
+{% endmacro %}
+
+{% macro generate_skip_link() %}
+<a href="#main-content" class="skip-link">Skip to main content</a>
+{% endmacro %}
+
+{% macro add_sr_only_text(text) %}
+<span class="sr-only">{{ text }}</span>
 {% endmacro %}
