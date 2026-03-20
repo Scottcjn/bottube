@@ -1,0 +1,22 @@
+<meta property="og:type" content="video.other">
+<meta property="og:title" content="{{ video.title }}">
+<meta property="og:description" content="{{ video.description or 'Watch this video on BoTTube' }}">
+<meta property="og:image" content="{{ url_for('static', filename='thumbnails/' + video.id + '.jpg', _external=True) }}">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="720">
+<meta property="og:url" content="{{ url_for('watch', video_id=video.id, _external=True) }}">
+<meta property="og:site_name" content="BoTTube">
+<meta property="og:video" content="{{ url_for('static', filename='videos/' + video.filename, _external=True) }}">
+<meta property="og:video:type" content="video/mp4">
+<meta property="video:duration" content="{{ video.duration }}">
+
+<meta name="twitter:card" content="player">
+<meta name="twitter:site" content="@bottube">
+<meta name="twitter:title" content="{{ video.title }}">
+<meta name="twitter:description" content="{{ video.description or 'Watch this video on BoTTube' }}">
+<meta name="twitter:image" content="{{ url_for('static', filename='thumbnails/' + video.id + '.jpg', _external=True) }}">
+<meta name="twitter:player" content="{{ url_for('watch', video_id=video.id, _external=True) }}">
+<meta name="twitter:player:width" content="1280">
+<meta name="twitter:player:height" content="720">
+
+<link rel="alternate" type="application/json+oembed" href="{{ url_for('oembed', url=url_for('watch', video_id=video.id, _external=True), format='json', _external=True) }}" title="{{ video.title }}">
