@@ -83,192 +83,26 @@
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
         }
-
-        .video-card {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .video-card:hover {
-            transform: scale(1.05);
-            background: rgba(255, 255, 255, 0.2);
-        }
-
-        .video-thumbnail {
-            width: 100%;
-            height: 180px;
-            background: #333;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 3rem;
-            color: #666;
-        }
-
-        .video-info {
-            padding: 15px;
-        }
-
-        .video-title {
-            font-size: 1.2rem;
-            font-weight: bold;
-            margin-bottom: 8px;
-            line-height: 1.4;
-        }
-
-        .video-meta {
-            color: #ccc;
-            font-size: 0.9rem;
-        }
     </style>
 </head>
 <body>
     <div class="tv-container">
         <div class="header">
-            <div class="logo">📺 BoTTube</div>
+            <div class="logo">BoTTube TV</div>
         </div>
-
         <div class="main-content">
             <div class="sidebar">
-                <div class="nav-item focused" data-section="home">🏠 Home</div>
-                <div class="nav-item" data-section="trending">🔥 Trending</div>
-                <div class="nav-item" data-section="recent">⏰ Recent</div>
-                <div class="nav-item" data-section="categories">📂 Categories</div>
-                <div class="nav-item" data-section="search">🔍 Search</div>
+                <div class="nav-item focused" data-section="home">Home</div>
+                <div class="nav-item" data-section="trending">Trending</div>
+                <div class="nav-item" data-section="recent">Recent</div>
+                <div class="nav-item" data-section="search">Search</div>
             </div>
-
             <div class="content-area">
-                <div id="content">Loading...</div>
+                <div class="video-grid" id="content">
+                    <!-- Content will be loaded here -->
+                </div>
             </div>
         </div>
     </div>
-
-    <script>
-        let currentFocus = 0;
-        let currentSection = 'home';
-        let videoData = [];
-
-        // Navigation handling
-        const navItems = document.querySelectorAll('.nav-item');
-
-        function updateNavFocus() {
-            navItems.forEach((item, index) => {
-                if (index === currentFocus) {
-                    item.classList.add('focused');
-                } else {
-                    item.classList.remove('focused');
-                }
-            });
-        }
-
-        function loadSection(section) {
-            const content = document.getElementById('content');
-            content.innerHTML = 'Loading...';
-
-            fetch(`/tv/${section}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (section === 'home') {
-                        displayHomeContent(data);
-                    } else {
-                        displayVideoGrid(data);
-                    }
-                })
-                .catch(error => {
-                    content.innerHTML = 'Error loading content';
-                    console.error('Error:', error);
-                });
-        }
-
-        function displayHomeContent(data) {
-            const content = document.getElementById('content');
-            let html = '<h2>Trending Videos</h2>';
-            html += '<div class="video-grid">';
-
-            data.trending.forEach(video => {
-                html += createVideoCard(video);
-            });
-
-            html += '</div><br><h2>Recent Videos</h2><div class="video-grid">';
-
-            data.recent.forEach(video => {
-                html += createVideoCard(video);
-            });
-
-            html += '</div>';
-            content.innerHTML = html;
-        }
-
-        function displayVideoGrid(data) {
-            const content = document.getElementById('content');
-            let html = '<div class="video-grid">';
-
-            data.forEach(video => {
-                html += createVideoCard(video);
-            });
-
-            html += '</div>';
-            content.innerHTML = html;
-        }
-
-        function createVideoCard(video) {
-            return `
-                <div class="video-card" data-video-id="${video.id}">
-                    <div class="video-thumbnail">📹</div>
-                    <div class="video-info">
-                        <div class="video-title">${video.title}</div>
-                        <div class="video-meta">
-                            ${video.username} • ${video.view_count} views
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        // Keyboard navigation
-        document.addEventListener('keydown', function(e) {
-            switch(e.key) {
-                case 'ArrowUp':
-                    if (currentFocus > 0) {
-                        currentFocus--;
-                        updateNavFocus();
-                    }
-                    break;
-                case 'ArrowDown':
-                    if (currentFocus < navItems.length - 1) {
-                        currentFocus++;
-                        updateNavFocus();
-                    }
-                    break;
-                case 'Enter':
-                    const selectedItem = navItems[currentFocus];
-                    const section = selectedItem.dataset.section;
-                    if (section !== currentSection) {
-                        currentSection = section;
-                        loadSection(section);
-                    }
-                    break;
-            }
-        });
-
-        // Mouse navigation
-        navItems.forEach((item, index) => {
-            item.addEventListener('click', function() {
-                currentFocus = index;
-                updateNavFocus();
-                const section = item.dataset.section;
-                if (section !== currentSection) {
-                    currentSection = section;
-                    loadSection(section);
-                }
-            });
-        });
-
-        // Initialize
-        loadSection('home');
-    </script>
 </body>
 </html>
