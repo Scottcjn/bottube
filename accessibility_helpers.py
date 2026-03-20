@@ -58,30 +58,41 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     if duration:
         alt_parts.append(f"Duration: {duration}")
 
-    if alt_parts:
-        return ", ".join(alt_parts)
-
-    return "Video thumbnail"
+    return ", ".join(alt_parts) if alt_parts else "Video thumbnail"
 
 
-def add_skip_links():
-    """Generate skip navigation links for screen readers"""
-    skip_links = [
-        {'href': '#main-content', 'text': 'Skip to main content'},
-        {'href': '#navigation', 'text': 'Skip to navigation'},
-        {'href': '#search', 'text': 'Skip to search'}
-    ]
-    return skip_links
-
-
-def get_heading_level(section_type):
-    """Return appropriate heading level for semantic structure"""
-    heading_levels = {
-        'page_title': 'h1',
-        'section_title': 'h2',
-        'subsection_title': 'h3',
-        'video_title': 'h2',
-        'comment_section': 'h3',
-        'sidebar_section': 'h3'
+def generate_status_announcement(message_type, details=None):
+    """Generate screen reader announcements for status changes"""
+    announcements = {
+        'subscribed': f"Successfully subscribed to {details}" if details else "Successfully subscribed",
+        'unsubscribed': f"Unsubscribed from {details}" if details else "Successfully unsubscribed",
+        'tip_sent': f"Tip of {details} RTC sent successfully" if details else "Tip sent successfully",
+        'comment_posted': "Comment posted successfully",
+        'upvoted': "Comment upvoted",
+        'downvoted': "Comment downvoted",
+        'error': f"Error: {details}" if details else "An error occurred",
+        'loading': f"Loading {details}" if details else "Loading content"
     }
-    return heading_levels.get(section_type, 'h2')
+
+    return announcements.get(message_type, message_type)
+
+
+def get_keyboard_shortcuts():
+    """Return keyboard shortcuts for video player accessibility"""
+    return {
+        'spacebar': 'Play/Pause video',
+        'k': 'Play/Pause video',
+        'f': 'Toggle fullscreen',
+        'escape': 'Exit fullscreen',
+        'm': 'Mute/Unmute',
+        'up_arrow': 'Increase volume',
+        'down_arrow': 'Decrease volume',
+        'left_arrow': 'Seek backward 10 seconds',
+        'right_arrow': 'Seek forward 10 seconds',
+        'j': 'Seek backward 10 seconds',
+        'l': 'Seek forward 10 seconds',
+        'comma': 'Previous frame (when paused)',
+        'period': 'Next frame (when paused)',
+        'home': 'Go to beginning',
+        'end': 'Go to end'
+    }
