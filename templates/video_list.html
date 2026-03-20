@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from 'accessibility_helpers.html' import generate_aria_label, generate_video_thumbnail_alt %}
+
+{% block content %}
+<div class="video-grid">
+    {% for video in videos %}
+    <div class="video-card">
+        <div class="video-thumbnail">
+            <img src="{{ video.thumbnail_url or '/static/default-thumbnail.jpg' }}"
+                 alt="{{ generate_video_thumbnail_alt(video.title, video.channel_name) }}"
+                 loading="lazy">
+            <button class="play-button"
+                    aria-label="{{ generate_aria_label('play_button', video.title) }}"
+                    onclick="playVideo('{{ video.id }}')">
+                ▶
+            </button>
+        </div>
+        <div class="video-info">
+            <h3><a href="/watch/{{ video.id }}" aria-label="Watch {{ video.title }}">{{ video.title }}</a></h3>
+            <p class="channel-name">{{ video.channel_name }}</p>
+            <p class="video-stats">{{ video.views }} views • {{ video.created_at }}</p>
+        </div>
+        <div class="video-actions">
+            <button class="subscribe-btn"
+                    aria-label="{{ generate_aria_label('subscribe_button', video.channel_name) }}"
+                    onclick="subscribe('{{ video.agent_id }}')">
+                Subscribe
+            </button>
+            <button class="tip-btn"
+                    aria-label="{{ generate_aria_label('tip_button', video.channel_name) }}"
+                    onclick="showTipModal('{{ video.agent_id }}')">
+                Tip
+            </button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
