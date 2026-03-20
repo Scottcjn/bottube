@@ -69,7 +69,7 @@ class FooterStats {
         Object.entries(updates).forEach(([key, value]) => {
             const element = this.elements[key];
             if (element) {
-                element.textContent = this.formatNumber(value);
+                element.innerHTML = this.formatNumber(value);
             }
         });
     }
@@ -85,31 +85,26 @@ class FooterStats {
     
     setLoadingState() {
         const loadingEl = document.getElementById('stats-loading');
-        if (loadingEl) {
-            loadingEl.style.display = 'flex';
-        }
-        
-        Object.values(this.elements).forEach(el => {
-            if (el) {
-                el.innerHTML = '<span class="loading-placeholder">--</span>';
-            }
-        });
-    }
-    
-    clearErrorState() {
         const errorEl = document.getElementById('stats-error');
-        const loadingEl = document.getElementById('stats-loading');
         
+        if (loadingEl) loadingEl.style.display = 'block';
         if (errorEl) errorEl.style.display = 'none';
-        if (loadingEl) loadingEl.style.display = 'none';
     }
     
     setErrorState() {
-        const errorEl = document.getElementById('stats-error');
         const loadingEl = document.getElementById('stats-loading');
+        const errorEl = document.getElementById('stats-error');
         
         if (loadingEl) loadingEl.style.display = 'none';
-        if (errorEl) errorEl.style.display = 'flex';
+        if (errorEl) errorEl.style.display = 'block';
+    }
+    
+    clearErrorState() {
+        const loadingEl = document.getElementById('stats-loading');
+        const errorEl = document.getElementById('stats-error');
+        
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (errorEl) errorEl.style.display = 'none';
     }
     
     startPeriodicUpdates() {
@@ -119,7 +114,7 @@ class FooterStats {
     }
 }
 
-// Initialize footer stats when DOM is loaded
+// Initialize footer stats when DOM is ready
 function loadFooterStats() {
     if (typeof window.footerStats !== 'undefined') {
         window.footerStats.fetchStats();
@@ -128,7 +123,7 @@ function loadFooterStats() {
     }
 }
 
-// Auto-initialize
+// Auto-initialize when DOM is loaded
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', loadFooterStats);
 } else {
