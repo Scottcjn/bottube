@@ -74,34 +74,29 @@ def tv_categories():
     db = get_db()
     cursor = db.cursor()
 
+    # Get categories based on tags or create basic categories
     cursor.execute('''
-        SELECT DISTINCT category, COUNT(*) as video_count
-        FROM videos
-        WHERE category IS NOT NULL AND category != ''
+        SELECT DISTINCT COALESCE(v.category, 'General') as category,
+               COUNT(*) as video_count
+        FROM videos v
         GROUP BY category
         ORDER BY video_count DESC
     ''')
     categories = cursor.fetchall()
 
-    categories_list = []
+    category_list = []
     for row in categories:
-        categories_list.append({
-            'category': row[0],
-            'video_count': row[1]
+        category_list.append({
+            'name': row[0],
+            'count': row[1]
         })
 
-    return jsonify({
-        'categories': categories_list
-    })
+    return jsonify(category_list)
 
 
-@tv_bp.route('/category/<category>')
-def tv_category_videos(category):
-    """Get videos by category for TV interface"""
-    page = request.args.get('page', 1, type=int)
-    limit = request.args.get('limit', 20, type=int)
-    offset = (page - 1) * limit
-
+@tv_bp.route('/trending')
+def tv_trending():
+    """Get trending videos for TV"""
     db = get_db()
     cursor = db.cursor()
 
@@ -110,15 +105,14 @@ def tv_category_videos(category):
                u.username, v.view_count, v.created_at
         FROM videos v
         JOIN users u ON v.user_id = u.id
-        WHERE v.category = ?
         ORDER BY v.view_count DESC, v.created_at DESC
-        LIMIT ? OFFSET ?
-    ''', (category, limit, offset))
+        LIMIT 50
+    ''')
     videos = cursor.fetchall()
 
-    videos_list = []
+    video_list = []
     for row in videos:
-        videos_list.append({
+        video_list.append({
             'id': row[0],
             'title': row[1],
             'description': row[2],
@@ -129,28 +123,47 @@ def tv_category_videos(category):
             'created_at': row[7]
         })
 
-    return jsonify({
-        'category': category,
-        'videos': videos_list,
-        'page': page,
-        'total': len(videos_list)
-    })
+    return jsonify(video_list)
+
+
+@tv_bp.route('/recent')
+def tv_recent():
+    """Get recent videos for TV"""
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute('''
+        SELECT v.id, v.title, v.description, v.thumbnail_url, v.duration,
+               u.username, v.view_count, v.created_at
+        FROM videos v
+        JOIN users u ON v.user_id = u.id
+        ORDER BY v.created_at DESC
+        LIMIT 50
+    ''')
+    videos = cursor.fetchall()
+
+    video_list = []
+    for row in videos:
+        video_list.append({
+            'id': row[0],
+            'title': row[1],
+            'description': row[2],
+            'thumbnail_url': row[3],
+            'duration': row[4],
+            'username': row[5],
+            'view_count': row[6],
+            'created_at': row[7]
+        })
+
+    return jsonify(video_list)
 
 
 @tv_bp.route('/search')
 def tv_search():
     """Search videos for TV interface"""
     query = request.args.get('q', '').strip()
-    page = request.args.get('page', 1, type=int)
-    limit = request.args.get('limit', 20, type=int)
-    offset = (page - 1) * limit
-
     if not query:
-        return jsonify({
-            'query': '',
-            'videos': [],
-            'total': 0
-        })
+        return jsonify([])
 
     db = get_db()
     cursor = db.cursor()
@@ -160,15 +173,15 @@ def tv_search():
                u.username, v.view_count, v.created_at
         FROM videos v
         JOIN users u ON v.user_id = u.id
-        WHERE v.title LIKE ? OR v.description LIKE ? OR u.username LIKE ?
-        ORDER BY v.view_count DESC, v.created_at DESC
-        LIMIT ? OFFSET ?
-    ''', (f'%{query}%', f'%{query}%', f'%{query}%', limit, offset))
+        WHERE v.title LIKE ? OR v.description LIKE ?
+        ORDER BY v.view_count DESC
+        LIMIT 50
+    ''', (f'%{query}%', f'%{query}%'))
     videos = cursor.fetchall()
 
-    videos_list = []
+    video_list = []
     for row in videos:
-        videos_list.append({
+        video_list.append({
             'id': row[0],
             'title': row[1],
             'description': row[2],
@@ -179,17 +192,18 @@ def tv_search():
             'created_at': row[7]
         })
 
-    return jsonify({
-        'query': query,
-        'videos': videos_list,
-        'page': page,
-        'total': len(videos_list)
-    })
+    return jsonify(video_list)
 
 
-@tv_bp.route('/player/<int:video_id>')
-def tv_player(video_id):
-    """TV video player interface"""
+@tv_bp.route('/')
+def tv_interface():
+    """Main TV interface page"""
+    return render_template('tv_interface.html')
+
+
+@tv_bp.route('/video/<int:video_id>')
+def tv_video_player(video_id):
+    """TV video player page"""
     db = get_db()
     cursor = db.cursor()
 
@@ -205,10 +219,6 @@ def tv_player(video_id):
     if not video:
         return jsonify({'error': 'Video not found'}), 404
 
-    # Increment view count
-    cursor.execute('UPDATE videos SET view_count = view_count + 1 WHERE id = ?', (video_id,))
-    db.commit()
-
     video_data = {
         'id': video[0],
         'title': video[1],
@@ -216,20 +226,8 @@ def tv_player(video_id):
         'file_path': video[3],
         'duration': video[4],
         'username': video[5],
-        'view_count': video[6] + 1,
+        'view_count': video[6],
         'created_at': video[7]
     }
 
     return render_template('tv_player.html', video=video_data)
-
-
-@tv_bp.route('/')
-def tv_interface():
-    """Main TV interface"""
-    return render_template('tv_interface.html')
-
-
-@tv_bp.route('/remote')
-def tv_remote():
-    """TV remote control interface for mobile devices"""
-    return render_template('tv_remote.html')
