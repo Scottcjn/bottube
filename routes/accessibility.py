@@ -54,152 +54,116 @@ def report_issue():
         report_id = cursor.lastrowid
 
         return jsonify({
-            'message': 'Accessibility report submitted successfully',
-            'report_id': report_id,
-            'reward_eligible': True
+            'message': 'Accessibility issue reported successfully',
+            'report_id': report_id
         }), 201
 
     except sqlite3.Error as e:
-        return jsonify({'error': 'Database error occurred'}), 500
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 @accessibility_bp.route('/reports', methods=['GET'])
 def get_reports():
     if g.user is None:
         return jsonify({'error': 'Authentication required'}), 401
 
-    status_filter = request.args.get('status')
+    status = request.args.get('status', 'all')
     page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 100)
+    per_page = int(request.args.get('per_page', 20))
+    offset = (page - 1) * per_page
 
     db = get_db()
+    try:
+        # Build query based on filters
+        where_clause = ''
+        params = []
 
-    base_query = '''
-        SELECT ar.*, u.username
-        FROM accessibility_reports ar
-        JOIN users u ON ar.user_id = u.id
-    '''
+        if status != 'all':
+            where_clause = 'WHERE status = ?'
+            params.append(status)
 
-    params = []
-    if status_filter:
-        base_query += ' WHERE ar.status = ?'
-        params.append(status_filter)
+        # Get total count
+        count_query = f'SELECT COUNT(*) FROM accessibility_reports {where_clause}'
+        total = db.execute(count_query, params).fetchone()[0]
 
-    base_query += ' ORDER BY ar.created_at DESC LIMIT ? OFFSET ?'
-    params.extend([per_page, (page - 1) * per_page])
+        # Get reports with pagination
+        reports_query = f'''
+            SELECT ar.*, u.username
+            FROM accessibility_reports ar
+            JOIN users u ON ar.user_id = u.id
+            {where_clause}
+            ORDER BY ar.created_at DESC
+            LIMIT ? OFFSET ?
+        '''
+        params.extend([per_page, offset])
+        reports = db.execute(reports_query, params).fetchall()
 
-    reports = db.execute(base_query, params).fetchall()
-
-    report_list = []
-    for report in reports:
-        report_list.append({
-            'id': report['id'],
-            'user_id': report['user_id'],
-            'username': report['username'],
-            'issue_type': report['issue_type'],
-            'description': report['description'],
-            'page_url': report['page_url'],
-            'severity': report['severity'],
-            'status': report['status'],
-            'created_at': report['created_at'],
-            'resolved_at': report['resolved_at']
+        return jsonify({
+            'reports': [dict(report) for report in reports],
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page
         })
 
-    return jsonify({
-        'reports': report_list,
-        'page': page,
-        'per_page': per_page
-    })
+    except sqlite3.Error as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
 
-@accessibility_bp.route('/reports/<int:report_id>/status', methods=['PUT'])
-def update_report_status():
+@accessibility_bp.route('/reports/<int:report_id>', methods=['GET'])
+def get_report(report_id):
+    if g.user is None:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    db = get_db()
+    try:
+        report = db.execute(
+            '''SELECT ar.*, u.username
+               FROM accessibility_reports ar
+               JOIN users u ON ar.user_id = u.id
+               WHERE ar.id = ?''',
+            (report_id,)
+        ).fetchone()
+
+        if not report:
+            return jsonify({'error': 'Report not found'}), 404
+
+        return jsonify(dict(report))
+
+    except sqlite3.Error as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+@accessibility_bp.route('/reports/<int:report_id>/status', methods=['PATCH'])
+def update_report_status(report_id):
     if g.user is None:
         return jsonify({'error': 'Authentication required'}), 401
 
     data = request.get_json()
     if not data or 'status' not in data:
-        return jsonify({'error': 'Status field required'}), 400
+        return jsonify({'error': 'Status is required'}), 400
 
     new_status = data['status']
-    valid_statuses = ['pending', 'verified', 'invalid', 'duplicate', 'resolved']
-
+    valid_statuses = ['pending', 'in_progress', 'resolved', 'dismissed']
     if new_status not in valid_statuses:
         return jsonify({'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'}), 400
 
     db = get_db()
+    try:
+        # Check if report exists
+        report = db.execute(
+            'SELECT id FROM accessibility_reports WHERE id = ?',
+            (report_id,)
+        ).fetchone()
 
-    update_fields = ['status = ?']
-    params = [new_status]
+        if not report:
+            return jsonify({'error': 'Report not found'}), 404
 
-    if new_status == 'resolved':
-        update_fields.append('resolved_at = ?')
-        params.append(datetime.utcnow())
+        # Update status
+        db.execute(
+            'UPDATE accessibility_reports SET status = ?, updated_at = ? WHERE id = ?',
+            (new_status, datetime.utcnow(), report_id)
+        )
+        db.commit()
 
-    params.append(report_id)
+        return jsonify({'message': 'Report status updated successfully'})
 
-    result = db.execute(
-        f'UPDATE accessibility_reports SET {", ".join(update_fields)} WHERE id = ?',
-        params
-    )
-
-    if result.rowcount == 0:
-        return jsonify({'error': 'Report not found'}), 404
-
-    db.commit()
-
-    return jsonify({
-        'message': f'Report status updated to {new_status}',
-        'reward_processed': new_status == 'verified'
-    })
-
-@accessibility_bp.route('/stats', methods=['GET'])
-def get_accessibility_stats():
-    if g.user is None:
-        return jsonify({'error': 'Authentication required'}), 401
-
-    db = get_db()
-
-    stats = {}
-
-    # Total reports by status
-    status_counts = db.execute('''
-        SELECT status, COUNT(*) as count
-        FROM accessibility_reports
-        GROUP BY status
-    ''').fetchall()
-
-    stats['by_status'] = {row['status']: row['count'] for row in status_counts}
-
-    # Reports by type
-    type_counts = db.execute('''
-        SELECT issue_type, COUNT(*) as count
-        FROM accessibility_reports
-        GROUP BY issue_type
-    ''').fetchall()
-
-    stats['by_type'] = {row['issue_type']: row['count'] for row in type_counts}
-
-    # Reports by severity
-    severity_counts = db.execute('''
-        SELECT severity, COUNT(*) as count
-        FROM accessibility_reports
-        GROUP BY severity
-    ''').fetchall()
-
-    stats['by_severity'] = {row['severity']: row['count'] for row in severity_counts}
-
-    # Top reporters
-    top_reporters = db.execute('''
-        SELECT u.username, COUNT(*) as report_count
-        FROM accessibility_reports ar
-        JOIN users u ON ar.user_id = u.id
-        GROUP BY u.id, u.username
-        ORDER BY report_count DESC
-        LIMIT 10
-    ''').fetchall()
-
-    stats['top_reporters'] = [
-        {'username': row['username'], 'count': row['report_count']}
-        for row in top_reporters
-    ]
-
-    return jsonify(stats)
+    except sqlite3.Error as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
