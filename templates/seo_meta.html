@@ -1,0 +1,81 @@
+{%- macro render_meta_tags(video=None, page_title=None, description=None, canonical_url=None, image_url=None) -%}
+    {%- set title = page_title or (video.title if video else 'BoTTube - AI-Powered Video Discovery') -%}
+    {%- set desc = description or (video.description[:160] + '...' if video and video.description and video.description|length > 160 else (video.description if video and video.description else 'Discover amazing videos with AI-powered recommendations and transcriptions.')) -%}
+    {%- set canonical = canonical_url or request.url -%}
+    {%- set og_image = image_url or (video.thumbnail_url if video else url_for('static', filename='images/bottube-og.png', _external=True)) -%}
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="{{ desc|escape }}">
+    <meta name="robots" content="index, follow">
+
+    <title>{{ title|escape }}</title>
+    <link rel="canonical" href="{{ canonical }}">
+
+    <!-- OpenGraph -->
+    <meta property="og:type" content="{{ 'video.other' if video else 'website' }}">
+    <meta property="og:title" content="{{ title|escape }}">
+    <meta property="og:description" content="{{ desc|escape }}">
+    <meta property="og:url" content="{{ canonical }}">
+    <meta property="og:image" content="{{ og_image }}">
+    <meta property="og:site_name" content="BoTTube">
+
+    {%- if video %}
+    <meta property="og:video:type" content="text/html">
+    <meta property="og:video:url" content="{{ url_for('video_detail', video_id=video.id, _external=True) }}">
+    {%- if video.duration %}
+    <meta property="video:duration" content="{{ video.duration }}">
+    {%- endif %}
+    {%- endif %}
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="{{ 'player' if video else 'summary_large_image' }}">
+    <meta name="twitter:title" content="{{ title|escape }}">
+    <meta name="twitter:description" content="{{ desc|escape }}">
+    <meta name="twitter:image" content="{{ og_image }}">
+
+    {%- if video %}
+    <meta name="twitter:player" content="{{ url_for('video_detail', video_id=video.id, _external=True) }}">
+    <meta name="twitter:player:width" content="1280">
+    <meta name="twitter:player:height" content="720">
+    {%- endif %}
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {%- if video %}
+    {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "name": {{ title|tojson }},
+        "description": {{ desc|tojson }},
+        "thumbnailUrl": {{ og_image|tojson }},
+        "uploadDate": {{ video.created_at.isoformat() if video.created_at else ''|tojson }},
+        "url": {{ url_for('video_detail', video_id=video.id, _external=True)|tojson }},
+        {%- if video.duration %}
+        "duration": "PT{{ video.duration }}S",
+        {%- endif %}
+        "publisher": {
+            "@type": "Organization",
+            "name": "BoTTube",
+            "url": {{ url_for('index', _external=True)|tojson }}
+        }
+    }
+    {%- else %}
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "BoTTube",
+        "url": {{ url_for('index', _external=True)|tojson }},
+        "description": {{ desc|tojson }},
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "{{ url_for('search', _external=True) }}?q={search_term_string}"
+            },
+            "query-input": "required name=search_term_string"
+        }
+    }
+    {%- endif %}
+    </script>
+{%- endmacro -%}
