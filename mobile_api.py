@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from flask import Blueprint, request, jsonify, g, session
 import sqlite3
 import bcrypt
@@ -60,12 +61,11 @@ def mobile_login():
                 'user': {
                     'id': user['id'],
                     'username': user['username'],
-                    'email': user['email'],
-                    'rtc_balance': user.get('rtc_balance', 0)
+                    'email': user.get('email', '')
                 }
             })
         except KeyError:
-            return jsonify({'error': 'Server configuration error'}), 500
+            return jsonify({'error': 'JWT_SECRET environment variable not set'}), 500
     else:
         return jsonify({'error': 'Invalid credentials'}), 401
 
@@ -77,51 +77,54 @@ def mobile_register():
         return jsonify({'error': 'Invalid JSON'}), 400
 
     username = data.get('username')
-    email = data.get('email')
     password = data.get('password')
+    email = data.get('email')
 
-    if not username or not email or not password:
-        return jsonify({'error': 'Username, email, and password required'}), 400
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
 
-    if len(password) < 8:
-        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
 
     db = get_db()
 
-    # Check if user already exists
-    existing_user = db.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email)).fetchone()
+    # Check if username exists
+    existing_user = db.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
     if existing_user:
-        return jsonify({'error': 'User already exists'}), 409
+        return jsonify({'error': 'Username already exists'}), 409
 
     # Hash password with bcrypt
-    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     try:
-        db.execute('INSERT INTO users (username, email, password, rtc_balance) VALUES (?, ?, ?, ?)',
-                  (username, email, password_hash.decode('utf-8'), 0))
+        db.execute(
+            'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
+            (username, password_hash, email or '')
+        )
         db.commit()
 
-        user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        # Get the new user
+        new_user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
 
+        # Generate token
         jwt_secret = os.environ['JWT_SECRET']
         token = jwt.encode({
-            'user_id': user['id'],
-            'username': user['username'],
+            'user_id': new_user['id'],
+            'username': new_user['username'],
             'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=2)
         }, jwt_secret, algorithm='HS256')
 
         return jsonify({
             'token': token,
             'user': {
-                'id': user['id'],
-                'username': user['username'],
-                'email': user['email'],
-                'rtc_balance': user.get('rtc_balance', 0)
+                'id': new_user['id'],
+                'username': new_user['username'],
+                'email': new_user.get('email', '')
             }
         }), 201
     except KeyError:
-        return jsonify({'error': 'Server configuration error'}), 500
-    except sqlite3.Error:
+        return jsonify({'error': 'JWT_SECRET environment variable not set'}), 500
+    except sqlite3.Error as e:
         return jsonify({'error': 'Registration failed'}), 500
 
 
@@ -129,24 +132,40 @@ def mobile_register():
 @token_required
 def get_videos():
     db = get_db()
-    videos = db.execute('''
-        SELECT v.*, u.username as creator_username
-        FROM videos v
-        JOIN users u ON v.creator_id = u.id
-        ORDER BY v.upload_date DESC
-        LIMIT 20
-    ''').fetchall()
+
+    # Get query parameters
+    page = max(1, int(request.args.get('page', 1)))
+    limit = min(50, max(1, int(request.args.get('limit', 20))))
+    search = request.args.get('search', '').strip()
+
+    offset = (page - 1) * limit
+
+    if search:
+        videos = db.execute(
+            'SELECT * FROM videos WHERE title LIKE ? OR description LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            (f'%{search}%', f'%{search}%', limit, offset)
+        ).fetchall()
+
+        total = db.execute(
+            'SELECT COUNT(*) as count FROM videos WHERE title LIKE ? OR description LIKE ?',
+            (f'%{search}%', f'%{search}%')
+        ).fetchone()['count']
+    else:
+        videos = db.execute(
+            'SELECT * FROM videos ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            (limit, offset)
+        ).fetchall()
+
+        total = db.execute('SELECT COUNT(*) as count FROM videos').fetchone()['count']
 
     return jsonify({
-        'videos': [{
-            'id': video['id'],
-            'title': video['title'],
-            'description': video['description'],
-            'creator_username': video['creator_username'],
-            'upload_date': video['upload_date'],
-            'view_count': video.get('view_count', 0),
-            'like_count': video.get('like_count', 0)
-        } for video in videos]
+        'videos': [dict(video) for video in videos],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'pages': (total + limit - 1) // limit
+        }
     })
 
 
@@ -154,27 +173,12 @@ def get_videos():
 @token_required
 def get_video(video_id):
     db = get_db()
-    video = db.execute('''
-        SELECT v.*, u.username as creator_username
-        FROM videos v
-        JOIN users u ON v.creator_id = u.id
-        WHERE v.id = ?
-    ''', (video_id,)).fetchone()
+    video = db.execute('SELECT * FROM videos WHERE id = ?', (video_id,)).fetchone()
 
     if not video:
         return jsonify({'error': 'Video not found'}), 404
 
-    return jsonify({
-        'video': {
-            'id': video['id'],
-            'title': video['title'],
-            'description': video['description'],
-            'creator_username': video['creator_username'],
-            'upload_date': video['upload_date'],
-            'view_count': video.get('view_count', 0),
-            'like_count': video.get('like_count', 0)
-        }
-    })
+    return jsonify({'video': dict(video)})
 
 
 @mobile_api.route('/videos/<int:video_id>/like', methods=['POST'])
@@ -187,42 +191,57 @@ def like_video(video_id):
     if not video:
         return jsonify({'error': 'Video not found'}), 404
 
-    # Check if user already liked this video
-    existing_like = db.execute('SELECT id FROM video_likes WHERE user_id = ? AND video_id = ?',
-                              (g.user_id, video_id)).fetchone()
+    # Check if already liked
+    existing_like = db.execute(
+        'SELECT id FROM video_likes WHERE user_id = ? AND video_id = ?',
+        (g.user_id, video_id)
+    ).fetchone()
 
     if existing_like:
         return jsonify({'error': 'Already liked'}), 409
 
     try:
-        db.execute('INSERT INTO video_likes (user_id, video_id) VALUES (?, ?)',
-                  (g.user_id, video_id))
+        db.execute(
+            'INSERT INTO video_likes (user_id, video_id, created_at) VALUES (?, ?, ?)',
+            (g.user_id, video_id, datetime.datetime.now())
+        )
         db.commit()
 
-        # Update like count
-        like_count = db.execute('SELECT COUNT(*) as count FROM video_likes WHERE video_id = ?',
-                               (video_id,)).fetchone()['count']
+        # Get updated like count
+        like_count = db.execute(
+            'SELECT COUNT(*) as count FROM video_likes WHERE video_id = ?',
+            (video_id,)
+        ).fetchone()['count']
 
-        return jsonify({'message': 'Video liked', 'like_count': like_count})
+        return jsonify({
+            'message': 'Video liked successfully',
+            'like_count': like_count
+        })
     except sqlite3.Error:
         return jsonify({'error': 'Failed to like video'}), 500
 
 
-@mobile_api.route('/user/profile', methods=['GET'])
+@mobile_api.route('/profile', methods=['GET'])
 @token_required
 def get_profile():
     db = get_db()
-    user = db.execute('SELECT id, username, email, rtc_balance FROM users WHERE id = ?',
-                     (g.user_id,)).fetchone()
+    user = db.execute(
+        'SELECT id, username, email, created_at FROM users WHERE id = ?',
+        (g.user_id,)
+    ).fetchone()
 
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
+    # Get user's video count
+    video_count = db.execute(
+        'SELECT COUNT(*) as count FROM videos WHERE uploader_id = ?',
+        (g.user_id,)
+    ).fetchone()['count']
+
     return jsonify({
-        'user': {
-            'id': user['id'],
-            'username': user['username'],
-            'email': user['email'],
-            'rtc_balance': user.get('rtc_balance', 0)
+        'user': dict(user),
+        'stats': {
+            'video_count': video_count
         }
     })
