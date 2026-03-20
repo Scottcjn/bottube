@@ -76,66 +76,55 @@ class APIMiddleware:
         return response
 
     def handle_cors(self):
-        origin = request.headers.get('Origin')
-        allowed_origins = [
-            'http://localhost:19006',  # Expo dev server
-            'exp://localhost:19000',   # Expo app
-            'capacitor://localhost',   # Capacitor apps
-            'ionic://localhost',       # Ionic apps
-        ]
-
-        # Allow any localhost origin for development
-        if origin and ('localhost' in origin or origin in allowed_origins):
-            g.cors_origin = origin
-        else:
-            g.cors_origin = None
+        """Handle CORS preflight headers"""
+        pass
 
     def add_cors_headers(self, response):
-        if hasattr(g, 'cors_origin') and g.cors_origin:
-            response.headers['Access-Control-Allow-Origin'] = g.cors_origin
-
+        """Add CORS headers to response"""
+        response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Max-Age'] = '3600'
         return response
 
     def apply_rate_limit(self):
+        """Apply rate limiting based on IP address"""
         client_ip = request.remote_addr
-        current_time = time.time()
+        current_time = datetime.now()
 
         # Get current request count for this IP
-        request_data = rate_limit_store.get(client_ip, {'count': 0, 'reset_time': current_time + 60})
+        request_data = rate_limit_store.get(client_ip, {'count': 0, 'reset_time': current_time})
 
-        # Reset counter if time window has passed
-        if current_time > request_data['reset_time']:
-            request_data = {'count': 1, 'reset_time': current_time + 60}
-        else:
-            request_data['count'] += 1
+        # Reset count if window has passed
+        if current_time >= request_data['reset_time']:
+            request_data = {'count': 0, 'reset_time': current_time + timedelta(minutes=15)}
 
-        # Check if rate limit exceeded (100 requests per minute)
-        if request_data['count'] > 100:
+        # Check if limit exceeded (100 requests per 15 minutes)
+        if request_data['count'] >= 100:
             raise TooManyRequests('Rate limit exceeded')
 
-        # Store updated count
+        # Increment count
+        request_data['count'] += 1
         rate_limit_store.set(client_ip, request_data)
 
     def handle_jwt_auth(self):
+        """Handle JWT authentication for protected routes"""
         # Skip auth for login/register endpoints
-        if request.path in ['/api/mobile/auth/login', '/api/mobile/auth/register']:
+        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
             return
 
-        token = request.headers.get('Authorization')
-        if token and token.startswith('Bearer '):
-            try:
-                token = token[7:]
-                jwt_secret = os.environ.get('JWT_SECRET', 'fallback-secret-key')
-                data = jwt.decode(token, jwt_secret, algorithms=['HS256'])
-                g.user_id = data['user_id']
-                g.username = data['username']
-            except jwt.InvalidTokenError:
-                g.user_id = None
-                g.username = None
+        # Check for JWT token in mobile API routes
+        if request.path.startswith('/api/mobile/'):
+            token = request.headers.get('Authorization')
+            if token and token.startswith('Bearer '):
+                try:
+                    token = token[7:]
+                    jwt_secret = os.environ['JWT_SECRET']
+                    data = jwt.decode(token, jwt_secret, algorithms=['HS256'])
+                    g.user_id = data.get('user_id')
+                    g.username = data.get('username')
+                except (jwt.InvalidTokenError, KeyError):
+                    pass
 
     def set_api_version(self):
+        """Set API version in response headers"""
         g.api_version = '1.0'
