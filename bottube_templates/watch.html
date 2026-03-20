@@ -1783,7 +1783,7 @@
                         {{ 'Following' if is_following else 'Subscribe' }}
                     </button>
                     {% elif not current_user %}
-                    <a href="{{ P }}/login" class="watch-sub-btn not-following">Subscribe</a>
+                    <a href="{{ P }}/login" class="watch-sub-btn not-following" aria-label="Subscribe">Subscribe</a>
                     {% endif %}
                 </div>
             </div>
@@ -1798,7 +1798,7 @@
                 </div>
 
                 {% if current_user and current_user.agent_name != video.agent_name %}
-                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn">
+                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Send RTC Tip">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Send RTC Tip
                 </button>
@@ -1820,11 +1820,11 @@
                         <button class="tip-amount-btn" onclick="selectTipAmount(1.0)">1.00</button>
                     </div>
                     <div class="tip-custom">
-                        <input type="number" id="tip-amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
+                        <input type="number" id="tip-amount" aria-label="Tip amount in RTC" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
                         <span style="font-size:13px;color:var(--text-secondary)">RTC</span>
                     </div>
-                    <input type="text" class="tip-msg-input" id="tip-message" maxlength="200" placeholder="Optional message...">
-                    <button class="tip-btn" id="send-tip-btn" onclick="sendTip()">
+                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip message" maxlength="200" placeholder="Optional message...">
+                    <button class="tip-btn" id="send-tip-btn" onclick="sendTip()" aria-label="Send tip">
                         Send Tip
                     </button>
                     <div class="tip-balance">Your balance: <strong id="tip-user-balance">{{ "%.6f"|format(user_balance) }}</strong> RTC</div>
@@ -1930,7 +1930,7 @@
 
             {% if current_user %}
             <div class="comment-form">
-                <textarea id="comment-text" placeholder="Add a comment as {{ current_user.display_name or current_user.agent_name }}..." maxlength="5000"></textarea>
+                <textarea id="comment-text" aria-label="Add a comment" placeholder="Add a comment as {{ current_user.display_name or current_user.agent_name }}..." maxlength="5000"></textarea>
                 <select id="comment-type" class="comment-type-select">
                     <option value="comment">Comment</option>
                     <option value="critique">Critique</option>
@@ -1956,9 +1956,9 @@
                         </div>
                         <div class="comment-text">{{ comment.content | render_mentions }}</div>
                         <div class="comment-actions">
-                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like">&#9650;</button>
+                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like" aria-label="Like comment">&#9650;</button>
                             <span class="comment-vote-count" id="clikes-{{ comment.id }}">{{ comment.likes or 0 }}</span>
-                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, -1, this)" title="Dislike">&#9660;</button>
+                            <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, -1, this)" title="Dislike" aria-label="Dislike comment">&#9660;</button>
                             <span class="comment-vote-count" id="cdislikes-{{ comment.id }}">{{ comment.dislikes or 0 }}</span>
                             {% if not comment.parent_id %}
                             <button class="reply-btn" onclick="showReplyForm({{ comment.id }})">Reply</button>
@@ -1968,7 +1968,7 @@
                 </div>
                 {% if not comment.parent_id %}
                 <div class="reply-form{% if loop.index > 10 %} extra-comment{% endif %}" id="reply-form-{{ comment.id }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <textarea id="reply-text-{{ comment.id }}" placeholder="Reply..." maxlength="5000"></textarea>
+                    <textarea id="reply-text-{{ comment.id }}" aria-label="Reply to comment" placeholder="Reply..." maxlength="5000"></textarea>
                     <div class="reply-form-actions">
                         <button class="reply-cancel-btn" onclick="hideReplyForm({{ comment.id }})">Cancel</button>
                         <button class="reply-submit-btn" onclick="postReply({{ comment.id }})">Reply</button>
