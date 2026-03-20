@@ -1,0 +1,60 @@
+{% macro generate_aria_label(element_type, context=None, action=None) %}
+{%- set labels = {
+    'subscribe_button': ('Subscribe to ' + context) if context else 'Subscribe to channel',
+    'tip_button': ('Tip ' + context) if context else 'Send tip',
+    'upvote_button': ('Upvote comment by ' + context) if context else 'Upvote comment',
+    'downvote_button': ('Downvote comment by ' + context) if context else 'Downvote comment',
+    'play_button': ('Play ' + context) if context else 'Play video',
+    'pause_button': ('Pause ' + context) if context else 'Pause video',
+    'settings_button': 'Open video settings',
+    'fullscreen_button': 'Enter fullscreen mode',
+    'volume_button': 'Adjust volume',
+    'share_button': ('Share ' + context) if context else 'Share video'
+} -%}
+{%- if element_type in labels -%}
+{{ labels[element_type] }}
+{%- elif action and context -%}
+{{ action }} {{ context }}
+{%- else -%}
+{{ element_type.replace('_', ' ').title() }}
+{%- endif -%}
+{% endmacro %}
+
+{% macro get_accessible_form_label(field_name, placeholder_text=None) %}
+{%- set label_map = {
+    'comment_text': 'Comment text',
+    'tip_amount': 'Tip amount in RTC',
+    'search_query': 'Search videos',
+    'username': 'Username',
+    'password': 'Password',
+    'email': 'Email address',
+    'video_title': 'Video title',
+    'video_description': 'Video description',
+    'tags': 'Video tags'
+} -%}
+{%- if field_name in label_map -%}
+{{ label_map[field_name] }}
+{%- elif placeholder_text -%}
+{{ placeholder_text }}
+{%- else -%}
+{{ field_name.replace('_', ' ').title() }}
+{%- endif -%}
+{% endmacro %}
+
+{% macro generate_video_thumbnail_alt(video_title, channel_name=None, duration=None) %}
+{%- set alt_parts = [] -%}
+{%- if video_title -%}
+{%- set _ = alt_parts.append('Video: ' + video_title) -%}
+{%- endif -%}
+{%- if channel_name -%}
+{%- set _ = alt_parts.append('by ' + channel_name) -%}
+{%- endif -%}
+{%- if duration -%}
+{%- set _ = alt_parts.append('Duration: ' + duration) -%}
+{%- endif -%}
+{%- if alt_parts -%}
+{{ alt_parts | join(' ') }}
+{%- else -%}
+Video thumbnail
+{%- endif -%}
+{% endmacro %}
