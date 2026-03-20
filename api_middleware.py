@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import time
 import jwt
 import os
@@ -76,55 +77,31 @@ class APIMiddleware:
         return response
 
     def handle_cors(self):
-        """Handle CORS preflight headers"""
+        # Set CORS headers for preflight requests
         pass
 
     def add_cors_headers(self, response):
-        """Add CORS headers to response"""
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         return response
 
     def apply_rate_limit(self):
-        """Apply rate limiting based on IP address"""
-        client_ip = request.remote_addr
-        current_time = datetime.now()
-
-        # Get current request count for this IP
-        request_data = rate_limit_store.get(client_ip, {'count': 0, 'reset_time': current_time})
-
-        # Reset count if window has passed
-        if current_time >= request_data['reset_time']:
-            request_data = {'count': 0, 'reset_time': current_time + timedelta(minutes=15)}
-
-        # Check if limit exceeded (100 requests per 15 minutes)
-        if request_data['count'] >= 100:
-            raise TooManyRequests('Rate limit exceeded')
-
-        # Increment count
-        request_data['count'] += 1
-        rate_limit_store.set(client_ip, request_data)
-
-    def handle_jwt_auth(self):
-        """Handle JWT authentication for protected routes"""
-        # Skip auth for login/register endpoints
-        if request.endpoint in ['mobile_api.mobile_login', 'mobile_api.mobile_register']:
+        # Get client IP
+        client_ip = request.environ.get('REMOTE_ADDR')
+        if not client_ip:
             return
 
-        # Check for JWT token in mobile API routes
-        if request.path.startswith('/api/mobile/'):
-            token = request.headers.get('Authorization')
-            if token and token.startswith('Bearer '):
-                try:
-                    token = token[7:]
-                    jwt_secret = os.environ['JWT_SECRET']
-                    data = jwt.decode(token, jwt_secret, algorithms=['HS256'])
-                    g.user_id = data.get('user_id')
-                    g.username = data.get('username')
-                except (jwt.InvalidTokenError, KeyError):
-                    pass
+        # Check rate limit (100 requests per hour per IP)
+        current_count = rate_limit_store.get(client_ip, 0)
+        if current_count >= 100:
+            raise TooManyRequests('Rate limit exceeded')
+
+        rate_limit_store.set(client_ip, current_count + 1)
+
+    def handle_jwt_auth(self):
+        # JWT auth is handled in individual endpoints
+        pass
 
     def set_api_version(self):
-        """Set API version in response headers"""
-        g.api_version = '1.0'
+        g.api_version = 'v1'
