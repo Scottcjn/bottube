@@ -66,10 +66,10 @@ def get_eligible_creators():
         WHERE v.uploaded_at >= ?
         GROUP BY u.id, u.username, u.created_at
         HAVING subscriber_count >= 100
-           AND video_count >= 5
+           AND video_count >= 3
            AND last_upload >= ?
         ORDER BY total_views DESC
-    ''', (thirty_days_ago.strftime('%Y-%m-%d'), thirty_days_ago.strftime('%Y-%m-%d')))
+    ''', (thirty_days_ago.isoformat(), thirty_days_ago.isoformat()))
 
     return cursor.fetchall()
 
@@ -86,118 +86,115 @@ def dashboard():
                          eligible_creators=eligible_creators)
 
 
+@fund_admin_bp.route('/preview/<int:month>/<int:year>')
+@require_admin
+def preview_distribution(month, year):
+    """Preview monthly distribution without executing"""
+    from creator_fund import CreatorFund
+
+    fund = CreatorFund()
+    preview = fund.calculate_monthly_distribution(month, year)
+
+    return jsonify(preview)
+
+
 @fund_admin_bp.route('/distribute', methods=['POST'])
 @require_admin
-def distribute_funds():
+def execute_distribution():
     """Execute monthly fund distribution"""
-    try:
-        from creator_fund import CreatorFund
+    from creator_fund import CreatorFund
 
-        fund = CreatorFund()
-        current_date = datetime.now()
-        month = current_date.month
-        year = current_date.year
+    month = request.form.get('month', type=int)
+    year = request.form.get('year', type=int)
 
-        # Execute distribution
-        result = fund.distribute_monthly_fund(month, year)
+    if not month or not year:
+        flash('Month and year are required', 'error')
+        return redirect(url_for('fund_admin.dashboard'))
 
-        flash(f"Successfully distributed {result['total_distributed']:.2f} RTC to {result['recipients']} creators", 'success')
+    fund = CreatorFund()
+    result = fund.distribute_funds(month, year)
 
-        return jsonify({
-            'success': True,
-            'message': f"Distributed {result['total_distributed']:.2f} RTC",
-            'data': result
-        })
+    if 'error' in result:
+        flash(f'Distribution failed: {result["error"]}', 'error')
+    else:
+        flash(f'Successfully distributed {result["total_distributed"]} RTC to {len(result["distributions"])} creators', 'success')
 
-    except Exception as e:
-        flash(f"Distribution failed: {str(e)}", 'error')
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+    return redirect(url_for('fund_admin.dashboard'))
+
+
+@fund_admin_bp.route('/creators/<int:user_id>/earnings')
+@require_admin
+def creator_earnings(user_id):
+    """View specific creator's earnings history"""
+    from creator_fund import CreatorFund
+
+    fund = CreatorFund()
+    earnings = fund.get_creator_earnings(user_id)
+    is_eligible, eligibility = fund.check_eligibility(user_id)
+
+    db = get_db()
+    user = db.execute('SELECT username FROM users WHERE id = ?', (user_id,)).fetchone()
+
+    return render_template('admin/creator_earnings.html',
+                         user=user,
+                         earnings=earnings,
+                         is_eligible=is_eligible,
+                         eligibility=eligibility)
 
 
 @fund_admin_bp.route('/history')
 @require_admin
 def distribution_history():
-    """View fund distribution history"""
+    """View historical distributions"""
     db = get_db()
 
     distributions = db.execute('''
         SELECT
-            fd.id,
-            fd.month,
-            fd.year,
-            fd.amount,
-            fd.total_views,
-            fd.created_at,
+            d.month,
+            d.year,
+            d.amount,
+            d.created_at,
             u.username
-        FROM creator_fund_distributions fd
-        JOIN users u ON fd.user_id = u.id
-        ORDER BY fd.created_at DESC
-        LIMIT 100
+        FROM creator_fund_distributions d
+        JOIN users u ON d.user_id = u.id
+        ORDER BY d.year DESC, d.month DESC, d.amount DESC
     ''').fetchall()
+
+    # Group by month/year
+    grouped_distributions = {}
+    for dist in distributions:
+        month_key = f"{dist['year']}-{dist['month']:02d}"
+        if month_key not in grouped_distributions:
+            grouped_distributions[month_key] = {
+                'month': dist['month'],
+                'year': dist['year'],
+                'created_at': dist['created_at'],
+                'distributions': [],
+                'total_amount': 0
+            }
+
+        grouped_distributions[month_key]['distributions'].append(dist)
+        grouped_distributions[month_key]['total_amount'] += dist['amount']
 
     return render_template('admin/fund_history.html',
-                         distributions=distributions)
+                         grouped_distributions=grouped_distributions)
 
 
-@fund_admin_bp.route('/eligibility')
+@fund_admin_bp.route('/eligibility/refresh', methods=['POST'])
 @require_admin
-def check_eligibility():
-    """Check creator eligibility details"""
+def refresh_eligibility():
+    """Refresh eligibility cache for all creators"""
     from creator_fund import CreatorFund
 
-    fund = CreatorFund()
     db = get_db()
-
-    # Get all creators with basic stats
-    creators = db.execute('''
-        SELECT u.id, u.username,
-               COUNT(DISTINCT s.follower_id) as subscriber_count,
-               COUNT(DISTINCT v.id) as video_count
-        FROM users u
-        LEFT JOIN subscriptions s ON u.id = s.user_id
-        LEFT JOIN videos v ON u.id = v.user_id
-        GROUP BY u.id, u.username
-        ORDER BY subscriber_count DESC
-    ''').fetchall()
-
-    # Check eligibility for each
-    eligibility_results = []
-    for creator in creators:
-        is_eligible, details = fund.check_eligibility(creator['id'])
-        eligibility_results.append({
-            'user_id': creator['id'],
-            'username': creator['username'],
-            'is_eligible': is_eligible,
-            'details': details
-        })
-
-    return render_template('admin/fund_eligibility.html',
-                         eligibility_results=eligibility_results)
-
-
-@fund_admin_bp.route('/simulate')
-@require_admin
-def simulate_distribution():
-    """Simulate next month's distribution without executing"""
-    from creator_fund import CreatorFund
+    users = db.execute('SELECT id FROM users').fetchall()
 
     fund = CreatorFund()
-    current_date = datetime.now()
-    month = current_date.month
-    year = current_date.year
+    updated_count = 0
 
-    # Calculate what would be distributed
-    distributions = fund.calculate_monthly_distribution(month, year)
+    for user in users:
+        is_eligible, details = fund.check_eligibility(user['id'])
+        updated_count += 1
 
-    total_amount = sum(d['final_amount'] for d in distributions)
-    total_recipients = len(distributions)
-
-    return render_template('admin/fund_simulation.html',
-                         distributions=distributions,
-                         total_amount=total_amount,
-                         total_recipients=total_recipients,
-                         month=month,
-                         year=year)
+    flash(f'Updated eligibility for {updated_count} creators', 'success')
+    return redirect(url_for('fund_admin.dashboard'))
