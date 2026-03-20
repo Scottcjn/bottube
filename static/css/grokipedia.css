@@ -1,0 +1,240 @@
+/* Grokipedia mention components styles */
+.grokipedia-mention {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 24px 0;
+    position: relative;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.grokipedia-mention:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    border-color: #007bff;
+}
+
+.grokipedia-mention::before {
+    content: "🧠";
+    position: absolute;
+    top: -8px;
+    left: 16px;
+    background: #fff;
+    padding: 0 8px;
+    font-size: 18px;
+    color: #6c757d;
+}
+
+.grokipedia-link {
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.grokipedia-link:hover {
+    color: #0056b3;
+    border-bottom-color: #007bff;
+    text-decoration: none;
+}
+
+.grokipedia-link:visited {
+    color: #6f42c1;
+}
+
+.grokipedia-link::after {
+    content: " ↗";
+    font-size: 12px;
+    opacity: 0.7;
+    margin-left: 4px;
+    transition: opacity 0.2s ease;
+}
+
+.grokipedia-link:hover::after {
+    opacity: 1;
+}
+
+.grokipedia-badge {
+    display: inline-flex;
+    align-items: center;
+    background: #e3f2fd;
+    color: #1565c0;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-left: 8px;
+    transition: background-color 0.2s ease;
+}
+
+.grokipedia-badge:hover {
+    background: #bbdefb;
+}
+
+.press-links-section {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 24px;
+    margin: 32px 0;
+    border-left: 4px solid #28a745;
+}
+
+.press-links-title {
+    color: #495057;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+}
+
+.press-links-title::before {
+    content: "📰";
+    margin-right: 8px;
+    font-size: 20px;
+}
+
+.press-link-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #e9ecef;
+    transition: padding-left 0.2s ease;
+}
+
+.press-link-item:last-child {
+    border-bottom: none;
+}
+
+.press-link-item:hover {
+    padding-left: 8px;
+    background: rgba(40, 167, 69, 0.05);
+    border-radius: 6px;
+    margin: 0 -8px;
+    padding-right: 16px;
+}
+
+.press-link {
+    color: #28a745;
+    text-decoration: none;
+    font-weight: 500;
+    flex: 1;
+}
+
+.press-link:hover {
+    color: #1e7e34;
+    text-decoration: underline;
+}
+
+.external-indicator {
+    background: #6c757d;
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
+}
+
+.press-link-item:hover .external-indicator {
+    opacity: 1;
+    background: #28a745;
+}
+
+@media (max-width: 768px) {
+    .grokipedia-mention {
+        padding: 12px 16px;
+        margin: 16px 0;
+    }
+
+    .grokipedia-mention::before {
+        font-size: 16px;
+        top: -6px;
+        left: 12px;
+    }
+
+    .press-links-section {
+        padding: 16px;
+        margin: 20px 0;
+    }
+
+    .press-links-title {
+        font-size: 16px;
+    }
+
+    .press-link-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .external-indicator {
+        align-self: flex-end;
+        margin-left: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .grokipedia-badge {
+        display: block;
+        margin: 8px 0 0 0;
+        width: fit-content;
+    }
+
+    .grokipedia-link::after {
+        display: none;
+    }
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+    .grokipedia-mention {
+        background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+        border-color: #4a5568;
+        color: #e2e8f0;
+    }
+
+    .grokipedia-mention::before {
+        background: #2d3748;
+        color: #a0aec0;
+    }
+
+    .grokipedia-link {
+        color: #63b3ed;
+    }
+
+    .grokipedia-link:hover {
+        color: #90cdf4;
+    }
+
+    .grokipedia-badge {
+        background: #2c5aa0;
+        color: #e2e8f0;
+    }
+
+    .press-links-section {
+        background: #2d3748;
+        border-left-color: #48bb78;
+    }
+
+    .press-links-title {
+        color: #e2e8f0;
+    }
+
+    .press-link-item {
+        border-bottom-color: #4a5568;
+    }
+
+    .press-link {
+        color: #48bb78;
+    }
+
+    .press-link:hover {
+        color: #68d391;
+    }
+}

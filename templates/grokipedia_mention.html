@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grokipedia Reference - BoTTube</title>
+    <meta name="description" content="Elyan Labs and BoTTube featured on Grokipedia - the collaborative knowledge platform for AI and technology insights.">
+
+    <!-- Structured Data for SEO -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Elyan Labs",
+      "url": "https://bottube.net",
+      "sameAs": [
+        "https://grokipedia.org/elyan-labs"
+      ],
+      "description": "AI-powered video content platform and technology innovation company featured on Grokipedia."
+    }
+    </script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .grok-mention {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 32px 0;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .grok-mention::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            z-index: 0;
+        }
+
+        .grok-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .grok-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .grok-icon {
+            width: 32px;
+            height: 32px;
+            margin-right: 12px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .grok-title {
+            font-size: 1.4em;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .grok-text {
+            line-height: 1.6;
+            margin-bottom: 16px;
+            opacity: 0.95;
+        }
+
+        .grok-link {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .grok-link:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+            color: white;
+        }
+
+        .grok-link::after {
+            content: '→';
+            margin-left: 8px;
+            transition: transform 0.3s ease;
+        }
+
+        .grok-link:hover::after {
+            transform: translateX(4px);
+        }
+
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .grok-mention {
+                margin: 20px -10px;
+                padding: 20px;
+                border-radius: 8px;
+            }
+
+            .grok-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .grok-icon {
+                margin-right: 0;
+                margin-bottom: 8px;
+            }
+
+            .grok-title {
+                font-size: 1.2em;
+            }
+        }
+
+        /* Dark mode compatibility */
+        @media (prefers-color-scheme: dark) {
+            .grok-mention {
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="grok-mention">
+        <div class="grok-content">
+            <div class="grok-header">
+                <div class="grok-icon">G</div>
+                <h3 class="grok-title">Featured on Grokipedia</h3>
+            </div>
+
+            <div class="grok-text">
+                Elyan Labs and BoTTube are now documented on Grokipedia, the collaborative knowledge platform
+                for AI and technology insights. Our innovative approach to AI-powered video content and
+                decentralized technology solutions has gained recognition in the broader tech community.
+            </div>
+
+            <a href="https://grokipedia.org/elyan-labs"
+               class="grok-link"
+               target="_blank"
+               rel="noopener noreferrer"
+               onclick="trackGrokipediaClick()">
+                View on Grokipedia
+            </a>
+        </div>
+    </div>
+
+    <script>
+        function trackGrokipediaClick() {
+            if (typeof gtag !== 'undefined') {
+                gtag('event', 'click', {
+                    'event_category': 'External Links',
+                    'event_label': 'Grokipedia Reference',
+                    'value': 1
+                });
+            }
+
+            // Also track for internal analytics if available
+            if (window.bottube && window.bottube.analytics) {
+                window.bottube.analytics.track('grokipedia_click', {
+                    source: 'mention_template',
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+
+        // Lazy load and animate on scroll
+        function animateGrokMention() {
+            const grokElement = document.querySelector('.grok-mention');
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.style.opacity = '1';
+                        entry.target.style.transform = 'translateY(0)';
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.1 });
+
+            if (grokElement) {
+                grokElement.style.opacity = '0';
+                grokElement.style.transform = 'translateY(20px)';
+                grokElement.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+                observer.observe(grokElement);
+            }
+        }
+
+        // Initialize animations when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', animateGrokMention);
+        } else {
+            animateGrokMention();
+        }
+    </script>
+</body>
+</html>
