@@ -11,23 +11,6 @@ recommendations_api = Blueprint('recommendations_api', __name__)
 engine = RecommendationEngine()
 
 
-def calculate_engagement_score(views, likes, comments, upload_date):
-    """Calculate engagement score with time decay"""
-    if views == 0:
-        return 0
-
-    engagement_rate = (likes + comments * 2) / views
-
-    # Time decay factor (newer content gets boost)
-    try:
-        days_old = (datetime.now() - datetime.fromisoformat(upload_date)).days
-        time_factor = math.exp(-days_old / 7.0)  # 7-day half-life
-    except (ValueError, TypeError):
-        time_factor = 0.5
-
-    return engagement_rate * time_factor * 100
-
-
 def get_user_watch_history(user_id, limit=50):
     """Get user's recent watch history"""
     db = get_db()
@@ -60,177 +43,283 @@ def extract_keywords(text):
         'these', 'those', 'a', 'an'
     }
 
-    keywords = {word for word in words if len(word) > 2 and word not in stop_words}
+    keywords = set()
+    for word in words:
+        word = word.strip()
+        if len(word) > 2 and word not in stop_words:
+            keywords.add(word)
+
     return keywords
 
 
-@recommendations_api.route('/api/recommendations', methods=['GET'])
+def get_similar_users(user_id, min_overlap=3):
+    """Find users with similar viewing patterns"""
+    db = get_db()
+
+    # Get videos watched by current user
+    cursor = db.execute("""
+        SELECT video_id FROM view_history
+        WHERE user_id = ?
+    """, (user_id,))
+    user_videos = {row['video_id'] for row in cursor.fetchall()}
+
+    if len(user_videos) < min_overlap:
+        return []
+
+    # Find users who watched similar videos
+    cursor = db.execute("""
+        SELECT vh.user_id, COUNT(*) as overlap
+        FROM view_history vh
+        WHERE vh.video_id IN ({}) AND vh.user_id != ?
+        GROUP BY vh.user_id
+        HAVING COUNT(*) >= ?
+        ORDER BY overlap DESC
+        LIMIT 20
+    """.format(','.join('?' * len(user_videos))),
+                       list(user_videos) + [user_id, min_overlap])
+
+    return cursor.fetchall()
+
+
+def get_collaborative_recommendations(user_id, limit=20):
+    """Get recommendations based on similar users"""
+    similar_users = get_similar_users(user_id)
+    if not similar_users:
+        return []
+
+    # Get videos watched by current user to exclude
+    db = get_db()
+    cursor = db.execute("""
+        SELECT video_id FROM view_history WHERE user_id = ?
+    """, (user_id,))
+    watched_videos = {row['video_id'] for row in cursor.fetchall()}
+
+    # Get videos watched by similar users
+    similar_user_ids = [user['user_id'] for user in similar_users]
+    placeholders = ','.join('?' * len(similar_user_ids))
+
+    cursor = db.execute(f"""
+        SELECT v.id, v.title, v.description, v.category, v.upload_date,
+               v.views, v.likes, v.comments, COUNT(*) as recommendation_score
+        FROM view_history vh
+        JOIN videos v ON vh.video_id = v.id
+        WHERE vh.user_id IN ({placeholders})
+        AND vh.video_id NOT IN (SELECT video_id FROM view_history WHERE user_id = ?)
+        GROUP BY v.id
+        ORDER BY recommendation_score DESC, v.upload_date DESC
+        LIMIT ?
+    """, similar_user_ids + [user_id, limit])
+
+    recommendations = []
+    for row in cursor.fetchall():
+        video = dict(row)
+        video['reason'] = 'collaborative'
+        recommendations.append(video)
+
+    return recommendations
+
+
+def get_content_based_recommendations(user_id, limit=20):
+    """Get recommendations based on content similarity"""
+    db = get_db()
+    watch_history = get_user_watch_history(user_id, 20)
+
+    if not watch_history:
+        return []
+
+    # Extract keywords from watched videos
+    user_keywords = set()
+    user_categories = Counter()
+
+    for video in watch_history:
+        # Extract keywords from title, description, tags
+        text = f"{video['title']} {video['description'] or ''} {video.get('tags', '') or ''}"
+        keywords = extract_keywords(text)
+        user_keywords.update(keywords)
+
+        if video['category']:
+            user_categories[video['category']] += 1
+
+    # Get candidate videos (not watched, recent)
+    cursor = db.execute("""
+        SELECT v.id, v.title, v.description, v.tags, v.category,
+               v.upload_date, v.views, v.likes, v.comments
+        FROM videos v
+        WHERE v.id NOT IN (SELECT video_id FROM view_history WHERE user_id = ?)
+        AND v.upload_date > date('now', '-30 days')
+        ORDER BY v.upload_date DESC
+        LIMIT 200
+    """, (user_id,))
+
+    candidates = cursor.fetchall()
+    recommendations = []
+
+    for video in candidates:
+        score = 0
+
+        # Content similarity score
+        video_text = f"{video['title']} {video['description'] or ''} {video.get('tags', '') or ''}"
+        video_keywords = extract_keywords(video_text)
+        keyword_overlap = len(user_keywords.intersection(video_keywords))
+        score += keyword_overlap * 2
+
+        # Category preference
+        if video['category'] in user_categories:
+            score += user_categories[video['category']] * 3
+
+        # Engagement boost
+        if video['views'] > 0:
+            engagement = (video['likes'] + video['comments']) / video['views']
+            score += engagement * 10
+
+        if score > 0:
+            video_dict = dict(video)
+            video_dict['recommendation_score'] = score
+            video_dict['reason'] = 'content'
+            recommendations.append(video_dict)
+
+    # Sort by score and return top recommendations
+    recommendations.sort(key=lambda x: x['recommendation_score'], reverse=True)
+    return recommendations[:limit]
+
+
+def get_trending_videos(limit=20, time_window_days=7):
+    """Get trending videos based on recent engagement"""
+    db = get_db()
+    cursor = db.execute("""
+        SELECT v.id, v.title, v.description, v.category, v.upload_date,
+               v.views, v.likes, v.comments,
+               COUNT(vh.id) as recent_views
+        FROM videos v
+        LEFT JOIN view_history vh ON v.id = vh.video_id
+            AND vh.watched_at > date('now', '-{} days')
+        WHERE v.upload_date > date('now', '-30 days')
+        GROUP BY v.id
+        HAVING v.views > 0
+        ORDER BY recent_views DESC, (v.likes + v.comments) / v.views DESC
+        LIMIT ?
+    """.format(time_window_days), (limit,))
+
+    trending = []
+    for row in cursor.fetchall():
+        video = dict(row)
+        video['reason'] = 'trending'
+        trending.append(video)
+
+    return trending
+
+
+@recommendations_api.route('/api/recommendations')
 def get_recommendations():
-    """Get personalized video recommendations for the current user"""
+    """Main recommendation endpoint"""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id required'}), 400
+
+    limit = min(int(request.args.get('limit', 20)), 50)
+    rec_type = request.args.get('type', 'mixed')
+
     try:
-        # Check if user is logged in
-        if not g.user:
-            return jsonify({'error': 'Authentication required'}), 401
+        if rec_type == 'collaborative':
+            recommendations = get_collaborative_recommendations(user_id, limit)
+        elif rec_type == 'content':
+            recommendations = get_content_based_recommendations(user_id, limit)
+        elif rec_type == 'trending':
+            recommendations = get_trending_videos(limit)
+        else:  # mixed
+            # Combine different recommendation types
+            collab_recs = get_collaborative_recommendations(user_id, limit // 2)
+            content_recs = get_content_based_recommendations(user_id, limit // 2)
+            trending_recs = get_trending_videos(limit // 4)
 
-        user_id = g.user['id']
-        limit = min(int(request.args.get('limit', 10)), 50)  # Max 50 recommendations
+            # Merge and deduplicate
+            seen_videos = set()
+            recommendations = []
 
-        # Get recommendations from engine
-        recommendations = engine.get_recommendations_for_user(user_id, limit)
+            for rec_list in [collab_recs, content_recs, trending_recs]:
+                for video in rec_list:
+                    if video['id'] not in seen_videos:
+                        recommendations.append(video)
+                        seen_videos.add(video['id'])
 
-        if not recommendations:
-            return jsonify({'recommendations': [], 'message': 'No recommendations available'})
-
-        # Get full video details for recommended videos
-        video_ids = [rec['video_id'] for rec in recommendations]
-        placeholders = ','.join('?' * len(video_ids))
-
-        db = get_db()
-        cursor = db.execute(f"""
-            SELECT v.id, v.title, v.description, v.thumbnail_url,
-                   v.duration, v.views, v.likes, v.upload_date,
-                   v.uploader_id, u.username as uploader_name
-            FROM videos v
-            JOIN users u ON v.uploader_id = u.id
-            WHERE v.id IN ({placeholders})
-            AND v.is_active = 1
-        """, video_ids)
-
-        videos = {row['id']: dict(row) for row in cursor.fetchall()}
-
-        # Combine recommendation data with video details
-        result = []
-        for rec in recommendations:
-            video_id = rec['video_id']
-            if video_id in videos:
-                video_data = videos[video_id]
-                video_data.update({
-                    'recommendation_score': rec['score'],
-                    'recommendation_type': rec['type']
-                })
-                result.append(video_data)
+            # Sort by recommendation score if available, otherwise by upload date
+            recommendations.sort(
+                key=lambda x: (x.get('recommendation_score', 0), x['upload_date']),
+                reverse=True
+            )
+            recommendations = recommendations[:limit]
 
         return jsonify({
-            'recommendations': result,
-            'count': len(result)
+            'recommendations': recommendations,
+            'count': len(recommendations),
+            'type': rec_type
         })
 
     except Exception as e:
-        return jsonify({'error': 'Failed to get recommendations', 'details': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
 
-@recommendations_api.route('/api/recommendations/trending', methods=['GET'])
-def get_trending():
-    """Get trending videos (public endpoint)"""
+@recommendations_api.route('/api/recommendations/feedback', methods=['POST'])
+def record_feedback():
+    """Record user feedback on recommendations"""
+    data = request.get_json()
+    user_id = data.get('user_id')
+    video_id = data.get('video_id')
+    feedback_type = data.get('feedback_type')  # 'like', 'dislike', 'not_interested'
+
+    if not all([user_id, video_id, feedback_type]):
+        return jsonify({'error': 'Missing required fields'}), 400
+
     try:
-        limit = min(int(request.args.get('limit', 20)), 100)
-
         db = get_db()
+        db.execute("""
+            INSERT OR REPLACE INTO recommendations_feedback
+            (user_id, video_id, feedback_type, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, video_id, feedback_type, datetime.now().isoformat()))
+        db.commit()
+
+        return jsonify({'status': 'success'})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@recommendations_api.route('/api/recommendations/stats')
+def get_recommendation_stats():
+    """Get recommendation system statistics"""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id required'}), 400
+
+    try:
+        db = get_db()
+
+        # Get user's watch history count
         cursor = db.execute("""
-            SELECT v.id, v.title, v.description, v.thumbnail_url,
-                   v.duration, v.views, v.likes, v.upload_date,
-                   v.uploader_id, u.username as uploader_name,
-                   (COALESCE(v.views, 0) + COALESCE(v.likes, 0) * 2) as trending_score
-            FROM videos v
-            JOIN users u ON v.uploader_id = u.id
-            WHERE v.is_active = 1
-            AND v.upload_date >= datetime('now', '-7 days')
-            ORDER BY trending_score DESC
-            LIMIT ?
-        """, (limit,))
+            SELECT COUNT(*) as watch_count
+            FROM view_history
+            WHERE user_id = ?
+        """, (user_id,))
+        watch_count = cursor.fetchone()['watch_count']
 
-        trending_videos = [dict(row) for row in cursor.fetchall()]
+        # Get feedback count
+        cursor = db.execute("""
+            SELECT feedback_type, COUNT(*) as count
+            FROM recommendations_feedback
+            WHERE user_id = ?
+            GROUP BY feedback_type
+        """, (user_id,))
+        feedback_stats = {row['feedback_type']: row['count'] for row in cursor.fetchall()}
+
+        # Get similar users count
+        similar_users = get_similar_users(user_id)
 
         return jsonify({
-            'trending': trending_videos,
-            'count': len(trending_videos)
+            'watch_history_count': watch_count,
+            'similar_users_count': len(similar_users),
+            'feedback_stats': feedback_stats
         })
 
     except Exception as e:
-        return jsonify({'error': 'Failed to get trending videos', 'details': str(e)}), 500
-
-
-@recommendations_api.route('/api/recommendations/similar/<int:video_id>', methods=['GET'])
-def get_similar_videos(video_id):
-    """Get videos similar to a specific video"""
-    try:
-        limit = min(int(request.args.get('limit', 10)), 20)
-
-        db = get_db()
-
-        # Get the target video
-        target_cursor = db.execute("""
-            SELECT id, title, description, tags, category
-            FROM videos
-            WHERE id = ? AND is_active = 1
-        """, (video_id,))
-        target_video = target_cursor.fetchone()
-
-        if not target_video:
-            return jsonify({'error': 'Video not found'}), 404
-
-        # Get candidate videos from same category or with similar tags
-        candidates_cursor = db.execute("""
-            SELECT id, title, description, tags, category
-            FROM videos
-            WHERE id != ? AND is_active = 1
-            AND (category = ? OR tags LIKE '%' || ? || '%')
-            ORDER BY upload_date DESC
-            LIMIT 50
-        """, (video_id, target_video['category'], target_video['tags'] or ''))
-        candidate_videos = [dict(row) for row in candidates_cursor.fetchall()]
-
-        if not candidate_videos:
-            return jsonify({'similar': [], 'message': 'No similar videos found'})
-
-        # Use TF-IDF to find similar videos
-        all_videos = [dict(target_video)] + candidate_videos
-        tfidf_vectors = engine.compute_tf_idf(all_videos)
-        target_vector = tfidf_vectors.get(video_id, {})
-
-        similarities = []
-        for video in candidate_videos:
-            candidate_vector = tfidf_vectors.get(video['id'], {})
-            similarity = engine.cosine_similarity(target_vector, candidate_vector)
-            similarities.append({
-                'video_id': video['id'],
-                'similarity': similarity
-            })
-
-        # Sort by similarity and get top results
-        similarities.sort(key=lambda x: x['similarity'], reverse=True)
-        top_similar = similarities[:limit]
-
-        # Get full video details
-        if top_similar:
-            video_ids = [s['video_id'] for s in top_similar]
-            placeholders = ','.join('?' * len(video_ids))
-
-            details_cursor = db.execute(f"""
-                SELECT v.id, v.title, v.description, v.thumbnail_url,
-                       v.duration, v.views, v.likes, v.upload_date,
-                       v.uploader_id, u.username as uploader_name
-                FROM videos v
-                JOIN users u ON v.uploader_id = u.id
-                WHERE v.id IN ({placeholders})
-            """, video_ids)
-
-            video_details = {row['id']: dict(row) for row in details_cursor.fetchall()}
-
-            result = []
-            for sim in top_similar:
-                video_id = sim['video_id']
-                if video_id in video_details:
-                    video_data = video_details[video_id]
-                    video_data['similarity_score'] = sim['similarity']
-                    result.append(video_data)
-
-            return jsonify({
-                'similar': result,
-                'count': len(result)
-            })
-        else:
-            return jsonify({'similar': [], 'message': 'No similar videos found'})
-
-    except Exception as e:
-        return jsonify({'error': 'Failed to get similar videos', 'details': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
