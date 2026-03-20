@@ -1,12 +1,41 @@
 import time
 import jwt
+import os
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from werkzeug.exceptions import TooManyRequests
+from collections import defaultdict
+from datetime import datetime, timedelta
 import sqlite3
 
-# Rate limiting storage
-rate_limit_store = {}
+# Rate limiting storage with TTL cleanup
+class TTLDict:
+    def __init__(self, ttl_seconds=3600):
+        self.data = {}
+        self.ttl = ttl_seconds
+
+    def get(self, key, default=None):
+        self.cleanup()
+        return self.data.get(key, {}).get('value', default)
+
+    def set(self, key, value):
+        self.cleanup()
+        self.data[key] = {
+            'value': value,
+            'timestamp': datetime.now()
+        }
+
+    def cleanup(self):
+        now = datetime.now()
+        expired_keys = []
+        for key, item in self.data.items():
+            if now - item['timestamp'] > timedelta(seconds=self.ttl):
+                expired_keys.append(key)
+
+        for key in expired_keys:
+            del self.data[key]
+
+rate_limit_store = TTLDict(ttl_seconds=3600)
 
 
 class APIMiddleware:
@@ -66,53 +95,47 @@ class APIMiddleware:
             response.headers['Access-Control-Allow-Origin'] = g.cors_origin
 
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Max-Age'] = '86400'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        return response
 
     def apply_rate_limit(self):
-        client_ip = request.environ.get('REMOTE_ADDR')
+        client_ip = request.remote_addr
         current_time = time.time()
 
-        # Clean old entries
-        self.cleanup_rate_limit_store(current_time)
+        # Get current request count for this IP
+        request_data = rate_limit_store.get(client_ip, {'count': 0, 'reset_time': current_time + 60})
 
-        # Check rate limit
-        if client_ip in rate_limit_store:
-            requests = rate_limit_store[client_ip]
-            # Allow 100 requests per minute
-            if len([r for r in requests if current_time - r < 60]) >= 100:
-                raise TooManyRequests()
+        # Reset counter if time window has passed
+        if current_time > request_data['reset_time']:
+            request_data = {'count': 1, 'reset_time': current_time + 60}
+        else:
+            request_data['count'] += 1
 
-        # Record request
-        if client_ip not in rate_limit_store:
-            rate_limit_store[client_ip] = []
-        rate_limit_store[client_ip].append(current_time)
+        # Check if rate limit exceeded (100 requests per minute)
+        if request_data['count'] > 100:
+            raise TooManyRequests('Rate limit exceeded')
 
-    def cleanup_rate_limit_store(self, current_time):
-        for ip in list(rate_limit_store.keys()):
-            rate_limit_store[ip] = [t for t in rate_limit_store[ip] if current_time - t < 60]
-            if not rate_limit_store[ip]:
-                del rate_limit_store[ip]
+        # Store updated count
+        rate_limit_store.set(client_ip, request_data)
 
     def handle_jwt_auth(self):
-        # Only apply JWT auth to protected endpoints
-        protected_paths = ['/api/mobile/profile', '/api/mobile/protected']
-        if not any(request.path.startswith(path) for path in protected_paths):
+        # Skip auth for login/register endpoints
+        if request.path in ['/api/mobile/auth/login', '/api/mobile/auth/register']:
             return
 
         token = request.headers.get('Authorization')
-        if not token:
-            return
-
-        try:
-            if token.startswith('Bearer '):
+        if token and token.startswith('Bearer '):
+            try:
                 token = token[7:]
-            data = jwt.decode(token, 'your-secret-key', algorithms=['HS256'])
-            g.user_id = data['user_id']
-            g.username = data['username']
-        except jwt.InvalidTokenError:
-            pass
+                jwt_secret = os.environ.get('JWT_SECRET', 'fallback-secret-key')
+                data = jwt.decode(token, jwt_secret, algorithms=['HS256'])
+                g.user_id = data['user_id']
+                g.username = data['username']
+            except jwt.InvalidTokenError:
+                g.user_id = None
+                g.username = None
 
     def set_api_version(self):
-        g.api_version = 'v1'
+        g.api_version = '1.0'
