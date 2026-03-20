@@ -1,0 +1,38 @@
+[Unit]
+Description=BoTTube Daily Uploader Bot
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bottube
+Group=bottube
+WorkingDirectory=/opt/bottube
+Environment=PATH=/opt/bottube/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/opt/bottube
+Environment=BOTTUBE_CONFIG_FILE=/opt/bottube/config/daily_uploader.conf
+ExecStart=/opt/bottube/venv/bin/python /opt/bottube/daily_uploader.py
+Restart=always
+RestartSec=30
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bottube-daily-uploader
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bottube/uploads /opt/bottube/logs /tmp
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
