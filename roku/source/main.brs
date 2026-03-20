@@ -68,37 +68,18 @@ sub setupUI()
 end sub
 
 sub loadTrendingVideos()
-    request = CreateObject("roUrlTransfer")
-    request.SetUrl(m.api.baseUrl + "/tv/videos/trending")
-    request.SetRequest("GET")
-    response = request.GetToString()
-    
-    if response <> ""
-        json = ParseJson(response)
-        if json <> invalid and json.videos <> invalid
-            populateVideoGrid(json.videos)
-        end if
-    end if
+    m.task = CreateObject("roSGNode", "LoadVideosTask")
+    m.task.url = m.api.baseUrl + "/tv/videos/trending"
+    m.task.observeField("content", "onVideosLoaded")
+    m.task.control = "RUN"
 end sub
 
-sub populateVideoGrid(videos as object)
-    content = CreateObject("roSGNode", "ContentNode")
-    
-    for each video in videos
-        videoNode = content.createChild("ContentNode")
-        videoNode.title = video.title
-        videoNode.description = video.description
-        videoNode.hdPosterUrl = video.thumbnail_url
-        videoNode.id = video.id
-        videoNode.username = video.username
-        videoNode.viewCount = video.view_count
-    end for
-    
-    m.videoGrid.content = content
+sub onVideosLoaded()
+    m.videoGrid.content = m.task.content
 end sub
 
-sub onNavSelected()
-    selectedIndex = m.navBar.itemSelected
+sub onNavSelected(event as Object)
+    selectedIndex = event.GetData()
     
     if selectedIndex = 0
         loadTrendingVideos()
@@ -110,62 +91,21 @@ sub onNavSelected()
 end sub
 
 sub loadRecentVideos()
-    request = CreateObject("roUrlTransfer")
-    request.SetUrl(m.api.baseUrl + "/tv/videos/recent")
-    request.SetRequest("GET")
-    response = request.GetToString()
-    
-    if response <> ""
-        json = ParseJson(response)
-        if json <> invalid and json.videos <> invalid
-            populateVideoGrid(json.videos)
-        end if
-    end if
+    m.task = CreateObject("roSGNode", "LoadVideosTask")
+    m.task.url = m.api.baseUrl + "/tv/videos/recent"
+    m.task.observeField("content", "onVideosLoaded")
+    m.task.control = "RUN"
 end sub
 
 sub loadCategories()
     ' Placeholder for categories functionality
-    print "Categories not implemented yet"
 end sub
 
-sub onVideoSelected()
-    selectedVideo = m.videoGrid.content.getChild(m.videoGrid.itemSelected)
+sub onVideoSelected(event as Object)
+    selectedVideo = m.videoGrid.content.getChild(event.GetData())
     
-    if selectedVideo <> invalid
-        playVideo(selectedVideo.id)
-    end if
-end sub
-
-sub playVideo(videoId as integer)
-    request = CreateObject("roUrlTransfer")
-    request.SetUrl(m.api.baseUrl + "/tv/video/" + videoId.toStr())
-    request.SetRequest("GET")
-    response = request.GetToString()
-    
-    if response <> ""
-        json = ParseJson(response)
-        if json <> invalid and json.stream_url <> invalid
-            video = CreateObject("roVideoScreen")
-            port = CreateObject("roMessagePort")
-            video.SetMessagePort(port)
-            
-            videoContent = {
-                stream: { url: json.stream_url },
-                title: json.title,
-                description: json.description
-            }
-            
-            video.SetContent(videoContent)
-            video.show()
-            
-            while true
-                msg = wait(0, port)
-                if type(msg) = "roVideoScreenEvent"
-                    if msg.isScreenClosed()
-                        exit while
-                    end if
-                end if
-            end while
-        end if
-    end if
+    m.videoPlayer = CreateObject("roSGNode", "Video")
+    m.videoPlayer.content = selectedVideo
+    m.videoPlayer.control = "play"
+    m.top.appendChild(m.videoPlayer)
 end sub
