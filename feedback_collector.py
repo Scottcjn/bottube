@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from flask import Blueprint, request, render_template, redirect, url_for, flash, g, session
 import sqlite3
 from datetime import datetime
@@ -56,80 +57,45 @@ def handle_feedback_submission():
     if errors:
         for error in errors:
             flash(error, 'error')
-        return render_template('feedback_form.html',
-                             first_reaction=first_reaction,
-                             understood_purpose=understood_purpose,
-                             confusion_points=confusion_points,
-                             first_video=first_video,
-                             would_return=would_return,
-                             additional_comments=additional_comments,
-                             overall_impression=overall_impression)
+        return render_template('feedback_form.html')
 
-    # Store in database
-    try:
-        db = get_db()
-        user_id = g.user.get('id') if g.user else None
-        session_id = session.get('session_id', request.cookies.get('session'))
-        ip_addr = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    # Store feedback
+    db = get_db()
+    user_id = getattr(g, 'user', {}).get('id') if hasattr(g, 'user') else None
+    session_id = session.get('session_id', request.remote_addr)
+    ip_address = request.remote_addr
 
-        db.execute('''
-            INSERT INTO feedback (user_id, session_id, first_reaction, understood_purpose,
-                                confusion_points, first_video_clicked, would_return,
-                                additional_comments, overall_impression, ip_address)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, session_id, first_reaction, understood_purpose,
-              confusion_points, first_video, would_return, additional_comments,
-              overall_impression, ip_addr))
-        db.commit()
+    db.execute('''
+        INSERT INTO feedback (
+            user_id, session_id, first_reaction, understood_purpose,
+            confusion_points, first_video_clicked, would_return,
+            additional_comments, overall_impression, ip_address
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        user_id, session_id, first_reaction, understood_purpose,
+        confusion_points, first_video, would_return,
+        additional_comments, overall_impression, ip_address
+    ))
+    db.commit()
 
-        flash('Thank you for your feedback! Your insights help us improve BoTTube.', 'success')
-        return redirect(url_for('index'))
+    flash('Thank you for your feedback! Your insights help us improve BoTTube.', 'success')
+    return redirect(url_for('main.index'))
 
-    except sqlite3.Error as e:
-        flash('Sorry, there was an error saving your feedback. Please try again.', 'error')
-        return render_template('feedback_form.html',
-                             first_reaction=first_reaction,
-                             understood_purpose=understood_purpose,
-                             confusion_points=confusion_points,
-                             first_video=first_video,
-                             would_return=would_return,
-                             additional_comments=additional_comments,
-                             overall_impression=overall_impression)
-
-@feedback_bp.route('/admin/feedback')
-def view_feedback():
-    # Basic admin check - you might want to implement proper admin auth
-    if not g.user or not g.user.get('is_admin'):
-        flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+@feedback_bp.route('/feedback/admin')
+def feedback_admin():
+    # Simple auth check - in production, use proper admin authentication
+    if not session.get('is_admin'):
+        return redirect(url_for('main.login'))
 
     db = get_db()
-    feedback_entries = db.execute('''
-        SELECT id, user_id, first_reaction, understood_purpose, confusion_points,
-               first_video_clicked, would_return, additional_comments,
-               overall_impression, timestamp, ip_address
-        FROM feedback
+    feedback_items = db.execute('''
+        SELECT * FROM feedback
         ORDER BY timestamp DESC
     ''').fetchall()
 
-    return render_template('admin_feedback.html', feedback_entries=feedback_entries)
+    # Calculate basic stats
+    total_feedback = len(feedback_items)
 
-@feedback_bp.route('/admin/feedback/<int:feedback_id>')
-def view_single_feedback(feedback_id):
-    if not g.user or not g.user.get('is_admin'):
-        flash('Access denied.', 'error')
-        return redirect(url_for('index'))
-
-    db = get_db()
-    feedback = db.execute('''
-        SELECT * FROM feedback WHERE id = ?
-    ''', (feedback_id,)).fetchone()
-
-    if not feedback:
-        flash('Feedback not found.', 'error')
-        return redirect(url_for('feedback.view_feedback'))
-
-    return render_template('feedback_detail.html', feedback=feedback)
-
-# Initialize the feedback database when the module is imported
-init_feedback_db()
+    return render_template('feedback_admin.html',
+                         feedback_items=feedback_items,
+                         total_feedback=total_feedback)
