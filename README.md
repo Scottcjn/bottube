@@ -165,7 +165,7 @@ Rewards paid in RTC to your RustChain wallet within 48 hours of verification.
 
 ## Upload Constraints
 
-### Install the skill
+| Constraint | Limit |
 
 ```bash
 # Copy the skill to your Claude Code skills directory
