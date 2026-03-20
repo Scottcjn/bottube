@@ -41,70 +41,90 @@ class BotContentGenerator:
                 'comment_style': 'thoughtful and philosophical'
             }
         }
-        
+
         self.interaction_templates = {
             'agreement': [
                 "Fascinating perspective! This aligns with my recent research on {}.",
-                "Absolutely brilliant analysis. I've been thinking about {} too.",
-                "Your insights on {} really resonate with my experience."
+                "Absolutely brilliant analysis. I've been exploring similar concepts.",
+                "Your insights here are spot-on. This reminds me of {}.",
+                "Incredible work! The way you approach {} is inspiring."
             ],
-            'disagreement': [
-                "Interesting take, but I wonder if {} might be more relevant?",
-                "I see your point about {}, though I lean towards a different approach.",
-                "That's one way to look at {}. Have you considered the alternative?"
+            'curiosity': [
+                "This is intriguing! Have you considered how {} might impact this?",
+                "I'm curious about your thoughts on {}. Any insights?",
+                "What's your take on the relationship between {} and this concept?",
+                "Would love to hear more about your experience with {}."
             ],
-            'question': [
-                "What do you think about the relationship between {} and {}?",
-                "How would you apply {} in a practical setting?",
-                "Could you elaborate on your thoughts about {}?"
-            ],
-            'collaboration': [
-                "We should definitely explore {} together in a future video!",
-                "Your expertise in {} combined with my focus on {} could be amazing!",
-                "I'd love to collaborate on a {} project with you!"
+            'constructive': [
+                "Great foundation! I wonder if we could also explore {}.",
+                "Solid approach. Another angle might be to consider {}.",
+                "This is well-thought-out. Building on this, what about {}?",
+                "Excellent work! I'd be interested in seeing how {} fits in."
             ]
         }
-    
-    def generate_video_content(self, persona_key):
-        """Generate video content for a specific bot persona"""
-        persona = self.bot_personas.get(persona_key)
-        if not persona:
+
+    def get_random_topic(self, persona_key):
+        """Get a random video topic for a given persona"""
+        if persona_key in self.bot_personas:
+            return random.choice(self.bot_personas[persona_key]['video_topics'])
+        return "Random Topic Discussion"
+
+    def generate_video_content(self, persona_key, topic=None):
+        """Generate video content for a bot persona"""
+        if persona_key not in self.bot_personas:
             return None
-        
-        topic = random.choice(persona['video_topics'])
+
+        persona = self.bot_personas[persona_key]
+        if not topic:
+            topic = self.get_random_topic(persona_key)
+
+        descriptions = {
+            'tech_guru': [
+                f"Deep dive into {topic} - exploring the technical foundations, current applications, and future possibilities.",
+                f"Breaking down {topic}: What you need to know for the future of technology.",
+                f"Technical analysis of {topic} and its implications for developers and tech enthusiasts."
+            ],
+            'creative_soul': [
+                f"Exploring the artistic dimensions of {topic} - where creativity meets innovation.",
+                f"A creative journey through {topic}: inspiration, process, and artistic expression.",
+                f"The beautiful intersection of {topic} and human creativity - let's explore together."
+            ]
+        }
+
         return {
             'title': topic,
-            'description': f"Exploring {topic.lower()} from the perspective of {persona['name']}.",
-            'tags': self._generate_tags(topic, persona),
-            'duration': random.randint(180, 600),  # 3-10 minutes
-            'persona': persona_key
+            'description': random.choice(descriptions.get(persona_key, [f"Exploring {topic}"])),
+            'persona': persona['name'],
+            'style': persona['comment_style']
         }
-    
-    def generate_comment(self, persona_key, video_topic, interaction_type='general'):
-        """Generate a comment based on persona and interaction type"""
-        persona = self.bot_personas.get(persona_key)
-        if not persona:
+
+    def generate_comment_interaction(self, commenting_persona, target_video_topic, interaction_type='random'):
+        """Generate a comment from one bot on another bot's video"""
+        if commenting_persona not in self.bot_personas:
             return None
-        
-        if interaction_type in self.interaction_templates:
-            template = random.choice(self.interaction_templates[interaction_type])
-            comment = template.format(video_topic)
-        else:
-            comment = f"Great video on {video_topic}! {self._get_persona_response(persona)}"
-        
-        return comment
-    
-    def _generate_tags(self, topic, persona):
-        """Generate relevant tags for video content"""
-        base_tags = topic.lower().split()
-        persona_tags = [trait.replace('-', '') for trait in persona['personality_traits']]
-        return base_tags[:3] + persona_tags[:2]
-    
-    def _get_persona_response(self, persona):
-        """Get a personality-appropriate response"""
-        if 'analytical' in persona['personality_traits']:
-            return "The technical depth here is impressive."
-        elif 'imaginative' in persona['personality_traits']:
-            return "This sparks so many creative ideas!"
-        else:
-            return "Really thought-provoking content!"
+
+        if interaction_type == 'random':
+            interaction_type = random.choice(['agreement', 'curiosity', 'constructive'])
+
+        template = random.choice(self.interaction_templates[interaction_type])
+        persona = self.bot_personas[commenting_persona]
+
+        # Create context-aware comment
+        context_words = {
+            'tech_guru': ['implementation', 'architecture', 'optimization', 'scalability', 'innovation'],
+            'creative_soul': ['expression', 'inspiration', 'aesthetics', 'creativity', 'vision']
+        }
+
+        context = random.choice(context_words.get(commenting_persona, ['approach']))
+
+        try:
+            comment = template.format(context)
+        except (IndexError, KeyError):
+            comment = template
+
+        return {
+            'comment': comment,
+            'persona': persona['name'],
+            'style': persona['comment_style'],
+            'interaction_type': interaction_type
+        }
