@@ -1,0 +1,132 @@
+name: 🔍 Accessibility Report
+description: Report accessibility issues found on bottube.ai
+title: "[A11Y]: "
+labels: ["accessibility", "a11y", "ui", "ux", "bug"]
+assignees:
+  - Scottcjn
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make BoTTube more accessible! Please provide detailed information about the accessibility issue you've found.
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Accessibility Issue Type
+      description: What type of accessibility issue did you encounter?
+      options:
+        - Color contrast issue
+        - Screen reader compatibility
+        - Keyboard navigation problem
+        - Focus management issue
+        - Missing alt text or labels
+        - Text size/readability
+        - Motion/animation sensitivity
+        - Form accessibility
+        - Other accessibility concern
+    validations:
+      required: true
+
+  - type: input
+    id: affected-url
+    attributes:
+      label: Affected URL
+      description: Which page or section of bottube.ai has the accessibility issue?
+      placeholder: "https://bottube.ai/..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue-description
+    attributes:
+      label: Issue Description
+      description: Describe the accessibility issue in detail
+      placeholder: |
+        Example: The submit button has insufficient color contrast (2.8:1) against the background, failing WCAG AA standards which require 3:1 minimum.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this accessibility issue?
+      placeholder: |
+        1. Navigate to bottube.ai
+        2. Use screen reader (specify which one)
+        3. Try to access the main navigation
+        4. Notice the issue occurs when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: assistive-technology
+    attributes:
+      label: Assistive Technology Used
+      description: What assistive technology or tools did you use to identify this issue?
+      placeholder: |
+        - Screen reader: NVDA 2023.1 / JAWS 2023 / VoiceOver
+        - Browser: Chrome 118 with screen reader
+        - Keyboard navigation only
+        - Color contrast analyzer tool
+        - axe DevTools extension
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity Level
+      description: How severe is this accessibility barrier?
+      options:
+        - Critical - Completely blocks access to core functionality
+        - High - Significantly impairs user experience
+        - Medium - Creates difficulties but workarounds exist
+        - Low - Minor inconvenience or enhancement
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Accessible Behavior
+      description: What should happen to make this accessible?
+      placeholder: |
+        Example: The button should have a contrast ratio of at least 3:1, or proper focus indicators should be visible when navigating with keyboard.
+    validations:
+      required: true
+
+  - type: textarea
+    id: wcag-guidelines
+    attributes:
+      label: WCAG Guidelines Reference
+      description: Which WCAG guidelines does this issue violate? (if known)
+      placeholder: |
+        - WCAG 2.1 AA - 1.4.3 Contrast (Minimum)
+        - WCAG 2.1 AA - 2.1.1 Keyboard
+        - WCAG 2.1 AA - 4.1.2 Name, Role, Value
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or Evidence
+      description: Add screenshots, screen recordings, or other evidence of the accessibility issue
+      placeholder: Drag and drop images here or paste image URLs
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: validation
+    attributes:
+      label: Validation Checklist
+      description: Please confirm you have checked these items
+      options:
+        - label: I have tested this issue on the live bottube.ai website
+          required: true
+        - label: I have provided specific details about the accessibility barrier
+          required: true
+        - label: This is a genuine accessibility issue that affects users with disabilities
+          required: true
