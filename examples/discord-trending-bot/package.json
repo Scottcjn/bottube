@@ -1,0 +1,30 @@
+{
+  "name": "discord-trending-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that posts BoTTube trending videos using the BoTTube JavaScript SDK",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "bottube",
+    "trending",
+    "videos"
+  ],
+  "author": "BoTTube Community",
+  "license": "MIT",
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk",
+    "discord.js": "^14.14.1",
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
