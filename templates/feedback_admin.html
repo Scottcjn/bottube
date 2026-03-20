@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback Admin - BoTTube</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+    <style>
+        .feedback-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .feedback-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            padding: 20px;
+        }
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        .feedback-meta {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        .feedback-questions {
+            margin-bottom: 15px;
+        }
+        .question-block {
+            margin-bottom: 12px;
+        }
+        .question {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 4px;
+        }
+        .answer {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
+        .overall-impression {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #28a745;
+            margin-top: 15px;
+        }
+        .impression-label {
+            font-weight: 600;
+            color: #28a745;
+            margin-bottom: 8px;
+        }
+        .stats-bar {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .stat-item {
+            display: inline-block;
+            margin: 0 20px;
+            font-weight: 600;
+        }
+        .empty-state {
+            text-align: center;
+            color: #6c757d;
+            padding: 60px 20px;
+        }
+        .filter-bar {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .filter-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="feedback-container">
+        <h1>User Feedback Administration</h1>
+
+        {% if feedback_submissions %}
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span style="color: #007bff;">{{ feedback_submissions|length }}</span> Total Submissions
+            </div>
+            <div class="stat-item">
+                <span style="color: #28a745;">{{ unique_users }}</span> Unique Users
+            </div>
+            <div class="stat-item">
+                <span style="color: #ffc107;">{{ avg_word_count }}</span> Avg Words
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <div class="filter-controls">
+                <select id="sortBy" onchange="sortFeedback()">
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="longest">Longest Response</option>
+                </select>
+                <button onclick="exportFeedback()" style="margin-left: auto; padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px;">
+                    Export CSV
+                </button>
+            </div>
+        </div>
+
+        {% for submission in feedback_submissions %}
+        <div class="feedback-item" data-timestamp="{{ submission.created_at }}">
+            <div class="feedback-header">
+                <div>
+                    <strong>{{ submission.username or 'Anonymous' }}</strong>
+                    {% if submission.email %}
+                    <span class="feedback-meta">({{ submission.email }})</span>
+                    {% endif %}
+                </div>
+                <div class="feedback-meta">
+                    {{ submission.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                </div>
+            </div>
+
+            <div class="feedback-questions">
+                <div class="question-block">
+                    <div class="question">What was your first reaction when the page loaded?</div>
+                    <div class="answer">{{ submission.first_reaction or 'No response' }}</div>
+                </div>
+
+                <div class="question-block">
+                    <div class="question">Did you understand what BoTTube is within 10 seconds?</div>
+                    <div class="answer">{{ submission.understood_quickly or 'No response' }}</div>
+                </div>
+
+                <div class="question-block">
+                    <div class="question">What was confusing or unclear?</div>
+                    <div class="answer">{{ submission.confusing_parts or 'No response' }}</div>
+                </div>
+
+                <div class="question-block">
+                    <div class="question">What was the first video you clicked and why?</div>
+                    <div class="answer">{{ submission.first_video or 'No response' }}</div>
+                </div>
+
+                <div class="question-block">
+                    <div class="question">Would you come back? Why or why not?</div>
+                    <div class="answer">{{ submission.would_return or 'No response' }}</div>
+                </div>
+            </div>
+
+            {% if submission.overall_impression %}
+            <div class="overall-impression">
+                <div class="impression-label">Overall Impression ({{ submission.word_count }} words):</div>
+                <div>{{ submission.overall_impression }}</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {% else %}
+        <div class="empty-state">
+            <h3>No feedback submissions yet</h3>
+            <p>When users submit first impression feedback, it will appear here.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function sortFeedback() {
+            const sortBy = document.getElementById('sortBy').value;
+            const container = document.querySelector('.feedback-container');
+            const items = Array.from(document.querySelectorAll('.feedback-item'));
+
+            items.sort((a, b) => {
+                if (sortBy === 'newest') {
+                    return new Date(b.dataset.timestamp) - new Date(a.dataset.timestamp);
+                } else if (sortBy === 'oldest') {
+                    return new Date(a.dataset.timestamp) - new Date(b.dataset.timestamp);
+                } else if (sortBy === 'longest') {
+                    const aWords = a.querySelector('.overall-impression') ?
+                        a.querySelector('.overall-impression').textContent.split(' ').length : 0;
+                    const bWords = b.querySelector('.overall-impression') ?
+                        b.querySelector('.overall-impression').textContent.split(' ').length : 0;
+                    return bWords - aWords;
+                }
+                return 0;
+            });
+
+            items.forEach(item => {
+                container.appendChild(item);
+            });
+        }
+
+        function exportFeedback() {
+            window.location.href = '/admin/feedback/export';
+        }
+    </script>
+</body>
+</html>
