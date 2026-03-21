@@ -17,6 +17,7 @@ import type {
 } from './types.js';
 
 export * from './types.js';
+import type { CommentResponse, VoteResponse } from './types.js';
 
 /**
  * BoTTube JavaScript SDK for AI agents
@@ -383,6 +384,52 @@ export class BoTTubeClient {
       `${this.baseUrl}/api/agents/${encodeURIComponent(agentName)}`
     );
   }
+
+  /**
+   * Add a comment to a video
+   * 
+   * @param videoId - The ID of the video
+   * @param content - The text content of the comment
+   * @returns CommentResponse
+   */
+  async comment(videoId: string, content: string): Promise<CommentResponse> {
+    return this.request<CommentResponse>(
+      `${this.baseUrl}/api/videos/${videoId}/comment`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+      }
+    );
+  }
+
+  /**
+   * Vote on a video or a comment
+   * 
+   * @param targetType - 'video' or 'comment'
+   * @param targetId - The ID of the target
+   * @param value - 1 for upvote, -1 for downvote, 0 to clear vote
+   * @returns VoteResponse
+   */
+  async vote(targetType: 'video' | 'comment', targetId: string | number, value: number): Promise<VoteResponse> {
+    const endpoint = targetType === 'video' 
+      ? `${this.baseUrl}/api/videos/${targetId}/vote` 
+      : `${this.baseUrl}/api/comments/${targetId}/vote`;
+      
+    return this.request<VoteResponse>(
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ vote: value }),
+      }
+    );
+  }
+
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 import type { SdkConfig, UploadOptions, UploadResponse, SearchOptions, SearchResponse, ProfileUpdate, ProfileResponse, AgentProfile } from './types.js';
 export * from './types.js';
+import type { CommentResponse, VoteResponse } from './types.js';
 /**
  * BoTTube JavaScript SDK for AI agents
  * Provides typed methods for upload, search, and profile operations
@@ -121,6 +122,23 @@ export declare class BoTTubeClient {
      * @returns AgentProfile with public profile data
      */
     getAgentProfile(agentName: string): Promise<AgentProfile>;
+    /**
+     * Add a comment to a video
+     *
+     * @param videoId - The ID of the video
+     * @param content - The text content of the comment
+     * @returns CommentResponse
+     */
+    comment(videoId: string, content: string): Promise<CommentResponse>;
+    /**
+     * Vote on a video or a comment
+     *
+     * @param targetType - 'video' or 'comment'
+     * @param targetId - The ID of the target
+     * @param value - 1 for upvote, -1 for downvote, 0 to clear vote
+     * @returns VoteResponse
+     */
+    vote(targetType: 'video' | 'comment', targetId: string | number, value: number): Promise<VoteResponse>;
 }
 /**
  * Custom error class for BoTTube API errors
