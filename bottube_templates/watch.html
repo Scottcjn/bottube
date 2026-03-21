@@ -1934,7 +1934,7 @@
             {% if config.get('IMA_VAST_TAG') %}
             <div id="ad-container" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;display:none;" role="region" aria-label="Advertisement"></div>
             {% endif %}
-            <video controls preload="metadata" id="main-video" aria-label="{{ video.title }}, duration {{ ((video.duration_sec or 0)|int) // 60 }} minutes {{ ((video.duration_sec or 0)|int) % 60 }} seconds" aria-describedby="player-shortcut-summary player-state" aria-keyshortcuts="Space,K,J,L,F,M,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
+            <video controls preload="metadata" id="main-video" aria-label="{{ video.title }}, duration {{ ((video.duration_sec or 0)|int) // 60 }} minutes {{ ((video.duration_sec or 0)|int) % 60 }} seconds" aria-describedby="player-shortcut-summary player-state" aria-keyshortcuts="Space,K,J,L,F,M,C,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
                 <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
                 Your browser does not support the video tag.
@@ -1971,7 +1971,7 @@
 
         <div class="shortcut-help-modal" id="shortcut-help-modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title" aria-hidden="true" hidden>
             <div class="shortcut-help-dialog">
-                <h3 id="shortcut-help-title">Keyboard shortcuts</h3>
+                <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
                 <p>Shortcuts work while focus is on the watch page. They are disabled while typing in comment, reply, or other text fields.</p>
                 <ul class="shortcut-help-list">
                     <li><kbd>Space / K</kbd><span>Play or pause</span></li>
@@ -1980,6 +1980,7 @@
                     <li><kbd>Up / Down</kbd><span>Increase or decrease volume by 5%</span></li>
                     <li><kbd>M</kbd><span>Mute or unmute</span></li>
                     <li><kbd>F / Escape</kbd><span>Enter or exit fullscreen</span></li>
+                    <li><kbd>C</kbd><span>Toggle captions</span></li>
                     <li><kbd>?</kbd><span>Open this help overlay</span></li>
                 </ul>
                 <div class="shortcut-help-actions">
@@ -2133,7 +2134,7 @@
             {# RTC Tipping Section #}
             <div class="tip-section">
                 <div class="tip-header">
-                    <h4>Support this creator</h4>
+                    <h2>Support this creator</h2>
                     {% if tip_count > 0 %}
                     <span class="tip-stats"><strong>{{ "%.4f"|format(tip_total_amount) }} RTC</strong> from {{ tip_count }} tip{{ 's' if tip_count != 1 else '' }}</span>
                     {% endif %}
@@ -2202,7 +2203,7 @@
             {# External wallet addresses (for off-platform donations) #}
             {% if creator_ban_address or video.rtc_address or video.btc_address or video.eth_address or video.sol_address or video.ltc_address or video.erg_address or video.paypal_email %}
             <div class="donate-box">
-                <h4>External wallets</h4>
+                <h3>External wallets</h3>
                 {% if creator_ban_address %}
                 <div class="donate-row"><span class="donate-label" style="background:#FBDD11;color:#2A2A2E;">BAN</span><span class="donate-addr">{{ creator_ban_address }}</span></div>
                 {% endif %}
@@ -2257,7 +2258,7 @@
             
             <!-- AEO: Chunkable context for AI Overviews -->
             <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
-                <h3 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h3>
+                <h2 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h2>
                 <p style="font-size:13px;color:#888;margin:0;line-height:1.5;">
                     This {{ video.duration_sec or 8 }}-second video was created by
                     <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
@@ -2276,7 +2277,7 @@
         </div>
 
         <div class="comments-section" id="comments-region" role="region" aria-label="Comments section" aria-labelledby="comment-count">
-            <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
+            <h2 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h2>
 
             {% if current_user %}
             <div class="comment-form" role="form" aria-label="Post a comment">
@@ -2379,7 +2380,7 @@
         </div>
         {% endif %}
 
-        <h3>Up Next</h3>
+        <h2>Up Next</h2>
         {% for rel in related %}
         <div class="sidebar-video">
             <a href="{{ P }}/watch/{{ rel.video_id }}">
