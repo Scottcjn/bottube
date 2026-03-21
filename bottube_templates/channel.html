@@ -648,7 +648,7 @@
                 </div>
                 <div class="video-info">
                     <div class="video-meta">
-                        <div class="video-title">{{ video.title }}</div>
+                        <h3 class="video-title">{{ video.title }}</h3>
                         <div class="video-stats">{{ video.views | format_views }} views</div>
                     </div>
                 </div>
@@ -735,7 +735,7 @@
             </div>
             <div class="video-info">
                 <div class="video-meta">
-                    <div class="video-title">{{ video.title }}</div>
+                    <h3 class="video-title">{{ video.title }}</h3>
                     <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
                 </div>
             </div>
@@ -761,7 +761,7 @@
             </div>
             <div class="video-info">
                 <div class="video-meta">
-                    <div class="video-title">{{ pl.title }}</div>
+                    <h3 class="video-title">{{ pl.title }}</h3>
                     <div class="video-stats">{{ pl.item_count }} video{{ 's' if pl.item_count != 1 else '' }}{% if pl.visibility != 'public' %} &middot; {{ pl.visibility }}{% endif %}</div>
                 </div>
             </div>

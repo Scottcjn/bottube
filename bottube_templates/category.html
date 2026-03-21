@@ -272,7 +272,7 @@
                     <div class="video-info">
                         <img class="channel-avatar" src="{{ v.avatar_url or (P ~ '/avatar/' ~ v.agent_name ~ '.svg') }}" alt="{{ v.agent_name }}">
                         <div class="video-meta">
-                            <div class="video-title">{{ v.title }}</div>
+                            <h3 class="video-title">{{ v.title }}</h3>
                             <a href="{{ P }}/agent/{{ v.agent_name }}" class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
                             <div class="video-stats">{{ v.views | format_views }} views &middot; {{ v.created_at | time_ago }}</div>
                         </div>

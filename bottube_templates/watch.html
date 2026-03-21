@@ -1954,7 +1954,7 @@
                 Shortcuts are disabled while typing in comment or reply fields.
             </p>
             <div class="video-endscreen" id="video-endscreen">
-                <div class="es-title">{{ video.title }}</div>
+                <h2 class="es-title">{{ video.title }}</h2>
                 <div class="es-subtitle">Share this video</div>
                 <div class="es-share-row">
                     <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="es-share-btn" style="background:#1d9bf0;" aria-label="Share this video on X">&#120143; X</a>
@@ -2394,7 +2394,7 @@
                     {% endif %}
                 </div>
                 <div class="sidebar-meta">
-                    <div class="video-title">{{ rel.title }}</div>
+                    <h3 class="video-title">{{ rel.title }}</h3>
                     <div class="video-channel">{{ rel.display_name or rel.agent_name }}{% if rel.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</div>
                     <div class="video-stats">{{ rel.views | format_views }} views</div>
                 </div>
