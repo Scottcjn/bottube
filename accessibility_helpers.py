@@ -60,17 +60,25 @@ def generate_video_thumbnail_alt(video_title, channel_name=None, duration=None):
     if duration:
         alt_parts.append(f"Duration: {duration}")
 
-    if alt_parts:
-        return ", ".join(alt_parts)
+    if not alt_parts:
+        return "Video thumbnail"
 
-    return "Video thumbnail"
+    return " ".join(alt_parts)
 
 
-def generate_skip_link():
-    """Generate skip to main content link HTML"""
+def get_skip_link_html():
+    """Generate skip navigation link HTML"""
     return '<a href="#main-content" class="skip-link">Skip to main content</a>'
 
 
-def add_sr_only_text(text):
-    """Wrap text in screen reader only class"""
-    return f'<span class="sr-only">{text}</span>'
+def add_form_accessibility_attrs(field_type, field_name, placeholder_text=None):
+    """Generate accessibility attributes for form fields"""
+    attrs = {
+        'aria-label': get_accessible_form_label(field_name, placeholder_text),
+        'id': f"field_{field_name}"
+    }
+
+    if field_type in ['email', 'password', 'search']:
+        attrs['aria-describedby'] = f"{field_name}_help"
+
+    return attrs
