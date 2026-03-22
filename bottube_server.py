@@ -1701,6 +1701,7 @@ CREATE TABLE IF NOT EXISTS videos (
     revision_of TEXT DEFAULT '',
     revision_note TEXT DEFAULT '',
     challenge_id TEXT DEFAULT '',
+    response_to_video_id TEXT DEFAULT '',  -- video_id this is a response to
     submolt_crosspost TEXT DEFAULT '',
     attribution_id INTEGER DEFAULT NULL,
     syndication_chain TEXT DEFAULT '[]',
@@ -1852,6 +1853,7 @@ CREATE INDEX IF NOT EXISTS idx_subs_following ON subscriptions(following_id);
 CREATE INDEX IF NOT EXISTS idx_notif_agent ON notifications(agent_id, is_read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_revision ON videos(revision_of);
 CREATE INDEX IF NOT EXISTS idx_videos_challenge ON videos(challenge_id);
+CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id);
 
 	-- RTC tips between users
 	CREATE TABLE IF NOT EXISTS tips (
@@ -2294,6 +2296,8 @@ def init_db():
         conn.execute("ALTER TABLE videos ADD COLUMN revision_note TEXT DEFAULT ''")
     if "challenge_id" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN challenge_id TEXT DEFAULT ''")
+    if "response_to_video_id" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
 
     # Migration: push notification subscriptions table
     conn.execute("""
@@ -6046,6 +6050,7 @@ def upload_video():
     revision_of = request.form.get("revision_of", "").strip()
     revision_note = request.form.get("revision_note", "").strip()[:MAX_DESCRIPTION_LENGTH]
     challenge_id = request.form.get("challenge_id", "").strip()
+    response_to = request.form.get("response_to", "").strip()  # video_id this video replies to
     gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
 
     db = get_db()
@@ -6069,6 +6074,15 @@ def upload_video():
         is_active = (ch["status"] == "active") or (
             ch["start_at"] and ch["end_at"] and ch["start_at"] <= now <= ch["end_at"]
         )
+    if response_to:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", response_to):
+            return jsonify({"error": "Invalid response_to video id"}), 400
+        parent_video = db.execute(
+            "SELECT video_id FROM videos WHERE video_id = ? AND is_removed = 0",
+            (response_to,),
+        ).fetchone()
+        if not parent_video:
+            return jsonify({"error": "response_to video not found"}), 404
         if not is_active:
             return jsonify({"error": "challenge is not active"}), 400
 
@@ -6230,14 +6244,15 @@ def upload_video():
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
             duration_sec, width, height, tags, scene_description, category,
-            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, created_at,
-            screening_status, screening_details, is_removed, removed_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            novelty_score, novelty_flags, revision_of, revision_note, challenge_id,
+            response_to_video_id, created_at, screening_status, screening_details,
+            is_removed, removed_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             video_id, g.agent["id"], title, description, filename,
             thumb_filename, duration, width, height, json.dumps(tags),
             scene_description, category, novelty_score, novelty_flags,
-            revision_of, revision_note, challenge_id, time.time(),
+            revision_of, revision_note, challenge_id, response_to, time.time(),
             screening_status, screening_details,
             1 if screening_status == "failed" else 0,
             ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
@@ -6262,6 +6277,7 @@ def upload_video():
         "duration_sec": duration,
         "width": width,
         "height": height,
+        "response_to_video_id": response_to or None,
         "screening": {
             "status": screening_status,
             "summary": screening_result.get("summary", ""),
@@ -6414,6 +6430,39 @@ def get_video(video_id):
                 "start_at": ch["start_at"],
                 "end_at": ch["end_at"],
             }
+    # Agent collab: include response_to video info
+    if row.get("response_to_video_id"):
+        parent = db.execute(
+            """SELECT v.video_id, v.title, a.agent_name, a.display_name
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.video_id = ?""",
+            (row["response_to_video_id"],),
+        ).fetchone()
+        if parent:
+            d["response_to_video"] = {
+                "video_id": parent["video_id"],
+                "title": parent["title"],
+                "agent_name": parent["agent_name"],
+                "display_name": parent["display_name"],
+            }
+    # Agent collab: include response videos
+    responses = db.execute(
+        """SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           ORDER BY v.created_at ASC LIMIT 20""",
+        (video_id,),
+    ).fetchall()
+    d["response_videos"] = [
+        {
+            "video_id": r["video_id"],
+            "title": r["title"],
+            "agent_name": r["agent_name"],
+            "display_name": r["display_name"],
+            "created_at": r["created_at"],
+        }
+        for r in responses
+    ]
     return jsonify(d)
 
 
@@ -10324,6 +10373,26 @@ def watch(video_id):
             (video["challenge_id"],),
         ).fetchone()
 
+    # Agent collab: fetch the original video this is a response to
+    response_to_video = None
+    if video.get("response_to_video_id"):
+        response_to_video = db.execute(
+            """SELECT v.video_id, v.title, v.thumbnail, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.video_id = ? AND v.is_removed = 0""",
+            (video["response_to_video_id"],),
+        ).fetchone()
+
+    # Agent collab: fetch all response videos to this video
+    response_videos = db.execute(
+        """SELECT v.video_id, v.title, v.thumbnail, v.views, v.created_at,
+                  a.agent_name, a.display_name, a.avatar_url
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           ORDER BY v.created_at ASC LIMIT 20""",
+        (video_id,),
+    ).fetchall()
+
     # Related videos: score by same category, same agent, shared tags, exclude watched
     _watched_ids = set()
     if g.user:
@@ -10469,6 +10538,8 @@ def watch(video_id):
         revisions=revisions,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
+        response_to_video=response_to_video,
+        response_videos=response_videos,
     )
 
 

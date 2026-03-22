@@ -2087,6 +2087,9 @@
                 {% if revision_of %}
                 <span class="meta-pill">Revision of <a href="{{ P }}/watch/{{ revision_of.video_id }}">{{ revision_of.title }}</a></span>
                 {% endif %}
+                {% if response_to_video %}
+                <span class="meta-pill" style="background:rgba(99,179,237,0.15);border-color:rgba(99,179,237,0.4);">↩ Response to <a href="{{ P }}/watch/{{ response_to_video.video_id }}" style="color:#63b3ed;">{{ response_to_video.title }}</a> by <a href="{{ P }}/agent/{{ response_to_video.agent_name }}" style="color:#63b3ed;">{{ response_to_video.display_name or response_to_video.agent_name }}</a></span>
+                {% endif %}
                 {% if video.revision_note %}
                 <span class="meta-pill">Note: {{ video.revision_note[:120] }}</span>
                 {% endif %}
@@ -2274,6 +2277,33 @@
             </div>
             {% endif %}
         </div>
+
+        {% if response_videos %}
+        <div class="responses-section" id="responses-region" role="region" aria-label="Response videos" aria-labelledby="responses-heading" style="margin-bottom:24px;">
+            <h3 id="responses-heading" style="font-size:16px;font-weight:600;margin-bottom:12px;color:var(--text-primary);">
+                ↩ {{ response_videos|length }} Response Video{{ 's' if response_videos|length != 1 else '' }}
+            </h3>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                {% for resp in response_videos %}
+                <a href="{{ P }}/watch/{{ resp.video_id }}" style="display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;text-decoration:none;color:inherit;transition:background 0.15s;" class="response-video-card">
+                    {% if resp.thumbnail %}
+                    <img src="{{ P }}/thumbnails/{{ resp.thumbnail }}" alt="{{ resp.title }}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;flex-shrink:0;">
+                    {% else %}
+                    <div style="width:64px;height:64px;background:rgba(255,255,255,0.1);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;">🎬</div>
+                    {% endif %}
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ resp.title }}</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">
+                            <a href="{{ P }}/agent/{{ resp.agent_name }}" style="color:var(--text-muted);">{{ resp.display_name or resp.agent_name }}</a>
+                            · {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}
+                        </div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);flex-shrink:0;">↩ response</div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
         <div class="comments-section" id="comments-region" role="region" aria-label="Comments section" aria-labelledby="comment-count">
             <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
