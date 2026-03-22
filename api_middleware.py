@@ -87,21 +87,23 @@ class APIMiddleware:
         return response
 
     def apply_rate_limit(self):
-        # Get client IP
-        client_ip = request.environ.get('REMOTE_ADDR')
-        if not client_ip:
-            return
+        # Get client identifier (IP address)
+        client_id = request.remote_addr
+        current_time = datetime.now()
 
-        # Check rate limit (100 requests per hour per IP)
-        current_count = rate_limit_store.get(client_ip, 0)
+        # Get current request count for this client
+        current_count = rate_limit_store.get(client_id, 0)
+
+        # Rate limit: 100 requests per hour
         if current_count >= 100:
             raise TooManyRequests('Rate limit exceeded')
 
-        rate_limit_store.set(client_ip, current_count + 1)
+        # Increment counter
+        rate_limit_store.set(client_id, current_count + 1)
 
     def handle_jwt_auth(self):
-        # JWT auth is handled in individual endpoints
+        # JWT auth is handled per-route, not globally
         pass
 
     def set_api_version(self):
-        g.api_version = 'v1'
+        g.api_version = '1.0'
