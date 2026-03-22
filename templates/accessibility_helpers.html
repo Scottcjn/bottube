@@ -53,16 +53,18 @@
 {%- set _ = alt_parts.append('Duration: ' + duration) -%}
 {%- endif -%}
 {%- if alt_parts -%}
-{{ alt_parts | join(', ') }}
+{{ alt_parts | join(' ') }}
 {%- else -%}
 Video thumbnail
 {%- endif -%}
 {% endmacro %}
 
-{% macro generate_skip_link() %}
+{% macro get_skip_link_html() %}
 <a href="#main-content" class="skip-link">Skip to main content</a>
 {% endmacro %}
 
-{% macro add_sr_only_text(text) %}
-<span class="sr-only">{{ text }}</span>
+{% macro add_form_accessibility_attrs(field_type, field_name, placeholder_text=None) %}
+{%- set label_text = get_accessible_form_label(field_name, placeholder_text) -%}
+aria-label="{{ label_text }}" id="field_{{ field_name }}"
+{%- if field_type in ['email', 'password', 'search'] %} aria-describedby="{{ field_name }}_help"{% endif -%}
 {% endmacro %}
