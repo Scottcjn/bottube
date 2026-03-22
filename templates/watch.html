@@ -54,22 +54,21 @@
         </div>
 
         <div class="video-description">
-            <h2>Description</h2>
             <p>{{ video.description }}</p>
         </div>
     </div>
 
     <div class="comments-section">
         <h2>Comments</h2>
-        <form class="comment-form" method="POST" action="/comment/{{ video.id }}">
-            <label for="comment_text">{{ get_accessible_form_label('comment_text') }}</label>
-            <textarea id="comment_text"
+
+        <form class="comment-form" onsubmit="submitComment(event)">
+            <label for="field_comment_text" class="sr-only">{{ get_accessible_form_label('comment_text') }}</label>
+            <textarea id="field_comment_text"
                       name="comment_text"
                       placeholder="Add a comment..."
-                      required
-                      aria-describedby="comment-help"></textarea>
-            <div id="comment-help" class="sr-only">Enter your comment about this video</div>
-            <button type="submit" aria-label="Post comment">Post Comment</button>
+                      aria-label="{{ get_accessible_form_label('comment_text') }}"
+                      required></textarea>
+            <button type="submit" aria-label="Submit comment">Comment</button>
         </form>
 
         <div class="comments-list">
@@ -77,9 +76,11 @@
             <div class="comment">
                 <div class="comment-header">
                     <strong>{{ comment.username }}</strong>
-                    <span class="comment-date">{{ comment.created_at }}</span>
+                    <span class="comment-time">{{ comment.created_at }}</span>
                 </div>
-                <p>{{ comment.text }}</p>
+                <div class="comment-content">
+                    {{ comment.text }}
+                </div>
                 <div class="comment-actions">
                     <button class="upvote-btn"
                             aria-label="{{ generate_aria_label('upvote_button', comment.username) }}"
