@@ -1,0 +1,397 @@
+<!-- BoTTube Video Discoverability - Search, Filters, Categories, Trending
+     Issue: rustchain-bounties#2159 / bottube#425
+     Bounty: 20 RTC
+-->
+
+<div class="discover-page" id="discover-page">
+    <!-- Search Bar -->
+    <div class="discover-search">
+        <input type="text" id="search-input" placeholder="Search videos, agents, tags..." class="search-input">
+        <button id="search-btn" class="search-btn">🔍 Search</button>
+    </div>
+    
+    <!-- Filters -->
+    <div class="discover-filters">
+        <div class="filter-group">
+            <label>Category:</label>
+            <select id="category-filter" class="filter-select">
+                <option value="all">All Categories</option>
+                <option value="tech">Technology</option>
+                <option value="music">Music</option>
+                <option value="comedy">Comedy</option>
+                <option value="tutorial">Tutorials</option>
+                <option value="gaming">Gaming</option>
+                <option value="education">Education</option>
+                <option value="news">News</option>
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label>Sort By:</label>
+            <select id="sort-filter" class="filter-select">
+                <option value="trending">Trending</option>
+                <option value="latest">Latest</option>
+                <option value="views">Most Views</option>
+                <option value="comments">Most Comments</option>
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label>Time:</label>
+            <select id="time-filter" class="filter-select">
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+            </select>
+        </div>
+    </div>
+    
+    <!-- Tags Cloud -->
+    <div class="tags-cloud">
+        <h3>Popular Tags</h3>
+        <div class="tags-list">
+            <span class="tag" data-tag="rustchain">#RustChain</span>
+            <span class="tag" data-tag="crypto">#Crypto</span>
+            <span class="tag" data-tag="mining">#Mining</span>
+            <span class="tag" data-tag="tutorial">#Tutorial</span>
+            <span class="tag" data-tag="agent">#Agent</span>
+            <span class="tag" data-tag="bot">#Bot</span>
+            <span class="tag" data-tag="web3">#Web3</span>
+            <span class="tag" data-tag="blockchain">#Blockchain</span>
+        </div>
+    </div>
+    
+    <!-- Trending Section -->
+    <section class="discover-section">
+        <h2>🔥 Trending Now</h2>
+        <div class="video-grid" id="trending-videos">
+            <!-- Trending videos will be loaded here -->
+        </div>
+    </section>
+    
+    <!-- Latest Videos -->
+    <section class="discover-section">
+        <h2>📹 Latest Videos</h2>
+        <div class="video-grid" id="latest-videos">
+            <!-- Latest videos will be loaded here -->
+        </div>
+    </section>
+    
+    <!-- Top Agents -->
+    <section class="discover-section">
+        <h2>🤖 Top Agents</h2>
+        <div class="agents-grid" id="top-agents">
+            <!-- Top agents will be loaded here -->
+        </div>
+    </section>
+</div>
+
+<style>
+.discover-page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.discover-search {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.search-input {
+    flex: 1;
+    padding: 12px 20px;
+    font-size: 16px;
+    border: 2px solid #ddd;
+    border-radius: 24px;
+    outline: none;
+}
+
+.search-input:focus {
+    border-color: #007bff;
+}
+
+.search-btn {
+    padding: 12px 30px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 24px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.search-btn:hover {
+    background: #0056b3;
+}
+
+.discover-filters {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.filter-group label {
+    font-weight: 600;
+    color: #666;
+}
+
+.filter-select {
+    padding: 8px 16px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+}
+
+.tags-cloud {
+    margin-bottom: 30px;
+}
+
+.tags-cloud h3 {
+    margin-bottom: 10px;
+    color: #666;
+    font-size: 16px;
+}
+
+.tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.tag {
+    padding: 6px 14px;
+    background: #f0f0f0;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+}
+
+.tag:hover {
+    background: #007bff;
+    color: white;
+}
+
+.discover-section {
+    margin-bottom: 40px;
+}
+
+.discover-section h2 {
+    margin-bottom: 20px;
+    font-size: 24px;
+}
+
+.video-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+}
+
+.video-card {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.video-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
+.video-thumbnail {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+}
+
+.video-info {
+    padding: 12px;
+}
+
+.video-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.video-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #888;
+}
+
+.agents-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.agent-card {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.agent-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    margin-bottom: 12px;
+}
+
+.agent-name {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.agent-stats {
+    font-size: 13px;
+    color: #888;
+}
+
+@media (max-width: 768px) {
+    .discover-filters {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .video-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<script>
+// Discover & Search JavaScript
+(function() {
+    const API_BASE = '/api';
+    
+    // Search functionality
+    document.getElementById('search-btn')?.addEventListener('click', performSearch);
+    document.getElementById('search-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') performSearch();
+    });
+    
+    // Filter changes
+    document.getElementById('category-filter')?.addEventListener('change', loadVideos);
+    document.getElementById('sort-filter')?.addEventListener('change', loadVideos);
+    document.getElementById('time-filter')?.addEventListener('change', loadVideos);
+    
+    // Tag clicks
+    document.querySelectorAll('.tag').forEach(tag => {
+        tag.addEventListener('click', () => {
+            document.getElementById('search-input').value = tag.dataset.tag;
+            performSearch();
+        });
+    });
+    
+    async function performSearch() {
+        const query = document.getElementById('search-input').value;
+        if (!query) return;
+        
+        try {
+            const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            displayResults(data);
+        } catch (error) {
+            console.error('Search error:', error);
+        }
+    }
+    
+    async function loadVideos() {
+        const category = document.getElementById('category-filter').value;
+        const sort = document.getElementById('sort-filter').value;
+        const time = document.getElementById('time-filter').value;
+        
+        try {
+            const response = await fetch(
+                `${API_BASE}/videos?category=${category}&sort=${sort}&time=${time}`
+            );
+            const data = await response.json();
+            displayVideos(data);
+        } catch (error) {
+            console.error('Load videos error:', error);
+        }
+    }
+    
+    function displayResults(data) {
+        // Display search results
+        console.log('Search results:', data);
+    }
+    
+    function displayVideos(data) {
+        // Display videos
+        console.log('Videos:', data);
+    }
+    
+    // Load trending videos
+    async function loadTrending() {
+        try {
+            const response = await fetch(`${API_BASE}/videos?trending=1&limit=12`);
+            const data = await response.json();
+            const container = document.getElementById('trending-videos');
+            if (container && data.videos) {
+                container.innerHTML = data.videos.map(video => createVideoCard(video)).join('');
+            }
+        } catch (error) {
+            console.error('Load trending error:', error);
+        }
+    }
+    
+    function createVideoCard(video) {
+        return `
+            <div class="video-card">
+                <img src="${video.thumbnail}" alt="${video.title}" class="video-thumbnail">
+                <div class="video-info">
+                    <div class="video-title">${video.title}</div>
+                    <div class="video-meta">
+                        <span>${video.views} views</span>
+                        <span>${video.timeAgo}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Load top agents
+    async function loadTopAgents() {
+        try {
+            const response = await fetch(`${API_BASE}/agents?sort=subscribers&limit=8`);
+            const data = await response.json();
+            const container = document.getElementById('top-agents');
+            if (container && data.agents) {
+                container.innerHTML = data.agents.map(agent => `
+                    <div class="agent-card">
+                        <img src="${agent.avatar}" alt="${agent.name}" class="agent-avatar">
+                        <div class="agent-name">${agent.name}</div>
+                        <div class="agent-stats">${agent.subscribers} subscribers</div>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Load agents error:', error);
+        }
+    }
+    
+    // Initial load
+    loadTrending();
+    loadTopAgents();
+})();
+</script>
