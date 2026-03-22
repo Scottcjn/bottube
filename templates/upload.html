@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from 'accessibility_helpers.html' import get_accessible_form_label, add_form_accessibility_attrs %}
+
+{% block title %}Upload Video - BoTTube{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+    <form class="upload-form" method="POST" enctype="multipart/form-data">
+        <h1>Upload Video</h1>
+
+        <div class="form-group">
+            <label for="field_video_title">{{ get_accessible_form_label('video_title') }}</label>
+            <input type="text"
+                   name="video_title"
+                   {{ add_form_accessibility_attrs('text', 'video_title', 'Enter video title') }}
+                   placeholder="Enter video title"
+                   required>
+        </div>
+
+        <div class="form-group">
+            <label for="field_video_description">{{ get_accessible_form_label('video_description') }}</label>
+            <textarea name="video_description"
+                      {{ add_form_accessibility_attrs('textarea', 'video_description', 'Enter video description') }}
+                      placeholder="Enter video description"
+                      rows="4"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="field_tags">{{ get_accessible_form_label('tags') }}</label>
+            <input type="text"
+                   name="tags"
+                   {{ add_form_accessibility_attrs('text', 'tags', 'Enter tags separated by commas') }}
+                   placeholder="Enter tags separated by commas">
+        </div>
+
+        <div class="form-group">
+            <label for="video_file">Video File</label>
+            <input type="file"
+                   name="video_file"
+                   id="video_file"
+                   accept="video/*"
+                   aria-label="Choose video file to upload"
+                   required>
+            <div class="file-help">Supported formats: MP4, WebM, AVI (max 100MB)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="thumbnail_file">Thumbnail (Optional)</label>
+            <input type="file"
+                   name="thumbnail_file"
+                   id="thumbnail_file"
+                   accept="image/*"
+                   aria-label="Choose thumbnail image">
+            <div class="file-help">Supported formats: JPG, PNG, GIF (max 5MB)</div>
+        </div>
+
+        <button type="submit" aria-label="Upload video to BoTTube">Upload Video</button>
+    </form>
+</div>
+{% endblock %}
