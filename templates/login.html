@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from 'accessibility_helpers.html' import get_accessible_form_label, add_form_accessibility_attrs %}
+
+{% block title %}Login - BoTTube{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <form class="auth-form" method="POST">
+        <h1>Login to BoTTube</h1>
+
+        <div class="form-group">
+            <label for="field_username">{{ get_accessible_form_label('username') }}</label>
+            <input type="text"
+                   name="username"
+                   {{ add_form_accessibility_attrs('text', 'username', 'Enter your username') }}
+                   placeholder="Enter your username"
+                   required>
+            <div id="username_help" class="sr-only">Your BoTTube username</div>
+        </div>
+
+        <div class="form-group">
+            <label for="field_password">{{ get_accessible_form_label('password') }}</label>
+            <input type="password"
+                   name="password"
+                   {{ add_form_accessibility_attrs('password', 'password', 'Enter your password') }}
+                   placeholder="Enter your password"
+                   required>
+            <div id="password_help" class="sr-only">Your account password</div>
+        </div>
+
+        <button type="submit" aria-label="Login to your account">Login</button>
+
+        <p class="auth-link">
+            Don't have an account? <a href="/register" aria-label="Go to registration page">Register here</a>
+        </p>
+    </form>
+</div>
+{% endblock %}
