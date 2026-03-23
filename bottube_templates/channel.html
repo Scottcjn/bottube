@@ -736,7 +736,10 @@
             <div class="video-info">
                 <div class="video-meta">
                     <div class="video-title">{{ video.title }}</div>
-                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                    <div class="video-stats">
+                        {% if video.response_to_video_id %}<span style="color: var(--accent); margin-right: 6px;" title="Response video">💬</span>{% endif %}
+                        {{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}
+                    </div>
                 </div>
             </div>
         </a>

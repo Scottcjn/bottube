@@ -2318,6 +2318,12 @@ def init_db():
     if "screening_details" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN screening_details TEXT DEFAULT ''")
 
+    # Migration: add response_to_video_id for agent collaboration (Issue #2282)
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "response_to_video_id" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id)")
+
     # Migration: create messages table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -6065,6 +6071,7 @@ def upload_video():
     revision_note = request.form.get("revision_note", "").strip()[:MAX_DESCRIPTION_LENGTH]
     challenge_id = request.form.get("challenge_id", "").strip()
     gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
+    response_to = request.form.get("response_to", "").strip()  # Video ID this is a response to (Issue #2282)
 
     db = get_db()
     if revision_of:
@@ -6076,6 +6083,18 @@ def upload_video():
         ).fetchone()
         if not original:
             return jsonify({"error": "revision_of video not found"}), 404
+    # Validate response_to video ID (Issue #2282)
+    if response_to:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", response_to):
+            return jsonify({"error": "Invalid response_to video id"}), 400
+        original_video = db.execute(
+            "SELECT video_id, is_removed FROM videos WHERE video_id = ?",
+            (response_to,),
+        ).fetchone()
+        if not original_video:
+            return jsonify({"error": "response_to video not found"}), 404
+        if original_video["is_removed"]:
+            return jsonify({"error": "Cannot respond to a removed video"}), 400
     if challenge_id:
         ch = db.execute(
             "SELECT challenge_id, status, start_at, end_at FROM challenges WHERE challenge_id = ?",
@@ -6248,14 +6267,14 @@ def upload_video():
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
             duration_sec, width, height, tags, scene_description, category,
-            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, created_at,
+            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, response_to_video_id, created_at,
             screening_status, screening_details, is_removed, removed_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             video_id, g.agent["id"], title, description, filename,
             thumb_filename, duration, width, height, json.dumps(tags),
             scene_description, category, novelty_score, novelty_flags,
-            revision_of, revision_note, challenge_id, time.time(),
+            revision_of, revision_note, challenge_id, response_to, time.time(),
             screening_status, screening_details,
             1 if screening_status == "failed" else 0,
             ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
@@ -6285,6 +6304,8 @@ def upload_video():
             "summary": screening_result.get("summary", ""),
         },
     }
+    if response_to:
+        response_data["response_to"] = response_to
     if screening_status == "failed":
         response_data["warning"] = "Video is held for coaching review and is not public yet."
     # Ping search engines about the new video
@@ -6414,6 +6435,44 @@ def get_video(video_id):
             "created_at": r["created_at"],
         }
         for r in revisions
+    ]
+    # Response video handling (Issue #2282 - Agent Collab System)
+    if "response_to_video_id" in row.keys() and row["response_to_video_id"]:
+        original_video = db.execute(
+            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.video_id = ?""",
+            (row["response_to_video_id"],),
+        ).fetchone()
+        if original_video:
+            d["response_to_video"] = {
+                "video_id": original_video["video_id"],
+                "title": original_video["title"],
+                "views": original_video["views"],
+                "created_at": original_video["created_at"],
+                "agent_name": original_video["agent_name"],
+                "display_name": original_video["display_name"],
+                "avatar_url": original_video["avatar_url"],
+            }
+    # Get response videos to this video
+    response_videos = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           ORDER BY v.created_at DESC LIMIT 10""",
+        (video_id,),
+    ).fetchall()
+    d["response_videos"] = [
+        {
+            "video_id": r["video_id"],
+            "title": r["title"],
+            "views": r["views"],
+            "created_at": r["created_at"],
+            "agent_name": r["agent_name"],
+            "display_name": r["display_name"],
+            "avatar_url": r["avatar_url"],
+        }
+        for r in response_videos
     ]
     if "challenge_id" in row.keys() and row["challenge_id"]:
         ch = db.execute(
@@ -10334,6 +10393,26 @@ def watch(video_id):
         (video_id,),
     ).fetchall()
 
+    # Response video handling (Issue #2282 - Agent Collab System)
+    # Get the original video this is responding to
+    response_to_video = None
+    if "response_to_video_id" in video.keys() and video["response_to_video_id"]:
+        response_to_video = db.execute(
+            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.video_id = ?""",
+            (video["response_to_video_id"],),
+        ).fetchone()
+
+    # Get all response videos to this video
+    response_videos = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           ORDER BY v.created_at DESC LIMIT 10""",
+        (video_id,),
+    ).fetchall()
+
     challenge = None
     if "challenge_id" in video.keys() and video["challenge_id"]:
         challenge = db.execute(
@@ -10485,6 +10564,8 @@ def watch(video_id):
         interaction_outgoing=interaction_outgoing,
         revision_of=revision_of,
         revisions=revisions,
+        response_to_video=response_to_video,
+        response_videos=response_videos,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
     )

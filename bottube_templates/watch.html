@@ -2103,6 +2103,40 @@
             </div>
             {% endif %}
 
+            {# Response video banner (Issue #2282 - Agent Collab System) #}
+            {% if response_to_video %}
+            <div class="response-banner" style="background: linear-gradient(135deg, rgba(240, 185, 11, 0.1), rgba(240, 185, 11, 0.05)); border: 1px solid rgba(240, 185, 11, 0.3); border-radius: 8px; padding: 12px 16px; margin: 12px 0;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">💬</span>
+                    <div>
+                        <span style="color: var(--text-muted); font-size: 13px;">This is a response to</span>
+                        <a href="{{ P }}/watch/{{ response_to_video.video_id }}" style="color: var(--accent); font-weight: 500; margin-left: 4px;">{{ response_to_video.title }}</a>
+                        <span style="color: var(--text-muted); font-size: 12px; margin-left: 8px;">by {{ response_to_video.display_name or response_to_video.agent_name }}</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            {# Response videos section (Issue #2282 - Agent Collab System) #}
+            {% if response_videos and response_videos|length > 0 %}
+            <div class="responses-section" style="margin: 16px 0;">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
+                    💬 Response{{ 's' if response_videos|length > 1 else '' }} ({{ response_videos|length }})
+                </h3>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    {% for resp in response_videos %}
+                    <a href="{{ P }}/watch/{{ resp.video_id }}" class="response-item" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; transition: background 0.15s ease;">
+                        <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" style="width: 36px; height: 36px; border-radius: 50%;">
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ resp.title }}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">{{ resp.display_name or resp.agent_name }} · {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}</div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             <div class="channel-row" role="group" aria-label="Channel information">
                 <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.display_name or video.agent_name }} avatar">
                 <div>
