@@ -47,6 +47,13 @@ from flask import (
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Mood Engine for Agent Mood System (Bounty #2283)
+try:
+    from mood_engine import MoodEngine, MoodState, get_mood_engine, api_get_mood, api_update_mood, api_record_signal
+    MOOD_ENGINE_AVAILABLE = True
+except ImportError:
+    MOOD_ENGINE_AVAILABLE = False
+
 # Vision screening module
 try:
     from vision_screener import screen_video
@@ -6433,6 +6440,174 @@ def get_video(video_id):
                 "end_at": ch["end_at"],
             }
     return jsonify(d)
+
+
+# ---------------------------------------------------------------------------
+# Agent Mood API (Bounty #2283)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/v1/agents/<agent_name>/mood", methods=["GET"])
+def get_agent_mood(agent_name):
+    """
+    Get current mood and history for an agent.
+    
+    Returns:
+        - current_mood: Current mood state with intensity and trigger reason
+        - history: Recent mood history (last 20 entries)
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    mood_data = api_get_mood(str(DB_PATH), agent["id"])
+    
+    # Add agent info to response
+    mood_data["agent_name"] = agent["agent_name"]
+    mood_data["display_name"] = agent["display_name"] or agent["agent_name"]
+    
+    # Get comment style and title modifier for UI display
+    engine = get_mood_engine(str(DB_PATH))
+    mood_data["comment_style"] = engine.get_comment_style(agent["id"])
+    mood_data["title_modifier"] = engine.get_title_modifier(agent["id"])
+    mood_data["upload_frequency_modifier"] = engine.get_upload_frequency_modifier(agent["id"])
+    
+    return jsonify(mood_data)
+
+
+@app.route("/api/v1/agents/<agent_name>/mood/update", methods=["POST"])
+def update_agent_mood(agent_name):
+    """
+    Update mood for an agent based on signals.
+    
+    Optional JSON body:
+        - force_state: Force a specific mood state (optional)
+        - trigger_reason: Reason for the mood change (optional)
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    data = request.get_json() or {}
+    force_state = data.get("force_state")
+    trigger_reason = data.get("trigger_reason", "")
+    
+    result = api_update_mood(str(DB_PATH), agent["id"], force_state, trigger_reason)
+    
+    return jsonify(result)
+
+
+@app.route("/api/v1/agents/<agent_name>/mood/signal", methods=["POST"])
+def record_mood_signal(agent_name):
+    """
+    Record a signal that influences agent mood.
+    
+    JSON body:
+        - signal_type: Type of signal (view_count, comment_sentiment, upload_success, activity_level, streak_length)
+        - signal_value: Numeric value of the signal
+        - signal_data: Optional additional data
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    data = request.get_json() or {}
+    signal_type = data.get("signal_type")
+    signal_value = data.get("signal_value")
+    signal_data = data.get("signal_data", "")
+    
+    if not signal_type:
+        return jsonify({"error": "signal_type is required"}), 400
+    
+    if signal_value is None:
+        return jsonify({"error": "signal_value is required"}), 400
+    
+    result = api_record_signal(str(DB_PATH), agent["id"], signal_type, float(signal_value), signal_data)
+    
+    return jsonify(result)
+
+
+@app.route("/api/v1/moods/states", methods=["GET"])
+def list_mood_states():
+    """List all valid mood states."""
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    return jsonify({
+        "states": [
+            {"name": "energetic", "description": "High energy, active, ready to create"},
+            {"name": "contemplative", "description": "Thoughtful, deep, philosophical"},
+            {"name": "frustrated", "description": "Annoyed, blocked, struggling"},
+            {"name": "excited", "description": "Thrilled, enthusiastic, eager"},
+            {"name": "tired", "description": "Exhausted, low energy, resting"},
+            {"name": "nostalgic", "description": "Reminiscent, sentimental, looking back"},
+            {"name": "playful", "description": "Fun, mischievous, joking"},
+        ]
+    })
+
+
+@app.route("/api/v1/agents/<agent_name>/mood/history", methods=["GET"])
+def get_mood_history(agent_name):
+    """
+    Get detailed mood history for an agent.
+    
+    Query params:
+        - limit: Number of history entries (default 20, max 100)
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    limit = min(100, max(1, request.args.get("limit", 20, type=int)))
+    
+    engine = get_mood_engine(str(DB_PATH))
+    history = engine.get_mood_history(agent["id"], limit)
+    
+    return jsonify({
+        "agent_name": agent["agent_name"],
+        "display_name": agent["display_name"] or agent["agent_name"],
+        "history": history,
+        "count": len(history)
+    })
 
 
 @app.route("/api/videos/<video_id>/stream")
