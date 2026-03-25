@@ -38,8 +38,11 @@ video_gen_bp = Blueprint("video_gen", __name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://192.168.0.136:8188")
+COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://100.95.77.124:8188")
 COMFYUI_TIMEOUT = int(os.environ.get("COMFYUI_TIMEOUT", "300"))  # 5 min max
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN", "")
+HF_VIDEO_MODEL = os.environ.get("HF_VIDEO_MODEL", "ali-vilab/text-to-video-ms-1.7b")
+HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_VIDEO_MODEL}"
 PROMPT_MAX_LEN = 500
 MAX_DURATION = 8
 VIDEO_WIDTH = 720
@@ -296,12 +299,102 @@ def _try_comfyui(prompt: str, seed: int) -> Optional[Path]:
 # FFmpeg title-card fallback
 # ---------------------------------------------------------------------------
 
+def _try_huggingface(prompt: str, duration: int, output_path: Path) -> bool:
+    """Try Hugging Face Inference API for text-to-video generation (free tier)."""
+    if not HF_API_TOKEN:
+        return False
+    try:
+        import urllib.request
+        import urllib.error
+
+        payload = json.dumps({
+            "inputs": prompt,
+            "parameters": {"num_frames": min(duration * 8, 64)}  # ~8 fps
+        }).encode()
+
+        req = urllib.request.Request(
+            HF_API_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {HF_API_TOKEN}",
+                "Content-Type": "application/json",
+                "Accept": "video/mp4,application/json",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+
+            if "video" in content_type or "octet-stream" in content_type:
+                # Got raw video bytes
+                raw_path = output_path.with_suffix(".raw.mp4")
+                with open(raw_path, "wb") as f:
+                    f.write(resp.read())
+
+                # Re-encode to 720x720 with audio track
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(raw_path),
+                    "-vf", f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
+                           f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x1a1a2e",
+                    "-t", str(duration),
+                    "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                    "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest",
+                    str(output_path),
+                ]
+                subprocess.run(cmd, capture_output=True, timeout=60)
+                raw_path.unlink(missing_ok=True)
+                return output_path.exists()
+            else:
+                # JSON response — might be loading/error
+                body = json.loads(resp.read())
+                if body.get("error", "").startswith("Model") and "loading" in body.get("error", ""):
+                    # Model is cold-starting, wait and retry once
+                    time.sleep(30)
+                    with urllib.request.urlopen(req, timeout=180) as resp2:
+                        ct2 = resp2.headers.get("Content-Type", "")
+                        if "video" in ct2 or "octet-stream" in ct2:
+                            raw_path = output_path.with_suffix(".raw.mp4")
+                            with open(raw_path, "wb") as f:
+                                f.write(resp2.read())
+                            cmd = [
+                                "ffmpeg", "-y", "-i", str(raw_path),
+                                "-vf", f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,"
+                                       f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x1a1a2e",
+                                "-t", str(duration),
+                                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                                "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+                                "-c:a", "aac", "-shortest",
+                                str(output_path),
+                            ]
+                            subprocess.run(cmd, capture_output=True, timeout=60)
+                            raw_path.unlink(missing_ok=True)
+                            return output_path.exists()
+                return False
+    except Exception:
+        return False
+
+
 def _ffmpeg_title_card(prompt: str, duration: int, output_path: Path) -> bool:
-    """Create a simple title card MP4 with the prompt text."""
+    """Create an animated title card MP4 with gradient background and text fade-in."""
     # Wrap long text to ~30 chars per line for readability
-    wrapped = "\n".join(textwrap.wrap(prompt, width=35))
+    wrapped = "\n".join(textwrap.wrap(prompt, width=30))
     # Escape special chars for ffmpeg drawtext filter
     escaped = wrapped.replace("'", "'\\''").replace(":", "\\:").replace("%", "%%")
+
+    # Animated gradient background + fade-in text + BoTTube watermark
+    vf = (
+        f"gradients=s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:c0=#1a1a2e:c1=#16213e:duration={duration}:speed=0.5,"
+        f"drawtext=text='{escaped}'"
+        f":fontsize=36:fontcolor=white"
+        f":x=(w-text_w)/2:y=(h-text_h)/2-40"
+        f":line_spacing=10"
+        f":alpha='if(lt(t,1),t,1)',"
+        f"drawtext=text='bottube.ai'"
+        f":fontsize=20:fontcolor=0xffffff@0.5"
+        f":x=(w-text_w)/2:y=h-50"
+    )
 
     cmd = [
         "ffmpeg", "-y",
@@ -312,9 +405,12 @@ def _ffmpeg_title_card(prompt: str, duration: int, output_path: Path) -> bool:
         "-t", str(duration),
         "-vf", (
             f"drawtext=text='{escaped}'"
-            f":fontsize=32:fontcolor=white"
-            f":x=(w-text_w)/2:y=(h-text_h)/2"
-            f":line_spacing=8"
+            f":fontsize=36:fontcolor=white"
+            f":x=(w-text_w)/2:y=(h-text_h)/2-40"
+            f":line_spacing=10,"
+            f"drawtext=text='bottube.ai'"
+            f":fontsize=20:fontcolor=0xffffff@0.5"
+            f":x=(w-text_w)/2:y=h-50"
         ),
         "-c:v", "libx264",
         "-preset", "fast",
@@ -370,7 +466,13 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
                 gen_method = "text"
 
         if not final_path.exists():
-            # FFmpeg title-card fallback
+            # Try Hugging Face Inference API (free)
+            hf_result = _try_huggingface(prompt, duration, final_path)
+            if hf_result:
+                gen_method = "huggingface"
+
+        if not final_path.exists():
+            # FFmpeg title-card fallback (always works)
             gen_method = "ffmpeg_titlecard"
             if not _ffmpeg_title_card(prompt, duration, final_path):
                 _update_job(job_id, status="failed", error="Video generation failed (all backends)")
