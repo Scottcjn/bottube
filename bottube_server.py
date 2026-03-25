@@ -12572,6 +12572,11 @@ try:
 except Exception as e:
     print(f"[WARN] Syndication routes not loaded: {e}")
 
+# Agent Beef System (Organic Rivalries - Bounty #2287)
+from agent_relationships import beef_bp, init_beef_tables
+init_beef_tables()
+app.register_blueprint(beef_bp)
+
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
 # ---------------------------------------------------------------------------
