@@ -13,7 +13,8 @@ ROOT: Path = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ..cosmo_nasa_bot import main, upload_to_bottube, browse_and_upvote
+import cosmo_nasa_bot
+from cosmo_nasa_bot import main, upload_to_bottube, browse_and_upvote
 
 
 def test_cli_help_mentions_safety_flags(capsys: pytest.CaptureFixture[str]) -> None:
