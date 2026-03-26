@@ -12897,6 +12897,84 @@ from agent_relationships import beef_bp, init_beef_tables
 init_beef_tables()
 app.register_blueprint(beef_bp)
 
+# AI Rap Battle Generator (Bounty — AI Rap Battle Generator)
+try:
+    from flask import Blueprint as _RapBP  # noqa: already imported above
+    from bots.rap_battle import (
+        BattlePipeline,
+        BattleStatus,
+        DEFAULT_PERSONAS,
+        PipelineConfig,
+        ScriptGenerator,
+        create_llm_backend,
+    )
+    from pathlib import Path as _RapPath
+
+    rap_bp = Blueprint("rap_battle", __name__)
+
+    @rap_bp.route("/api/rap-battle/generate", methods=["POST"])
+    def rap_battle_generate():
+        """Generate a rap battle script (dry-run: text only, no audio/video)."""
+        data = request.get_json(silent=True) or {}
+        topic = data.get("topic", "Python vs Rust")
+        num_verses = min(int(data.get("num_verses", 4)), 8)
+        llm_backend_name = data.get("llm_backend", "template")
+
+        llm = create_llm_backend(
+            backend_name=llm_backend_name,
+            base_url=data.get("llm_url", "http://localhost:11434"),
+            model=data.get("llm_model", "mistral"),
+        )
+        gen = ScriptGenerator(llm)
+
+        persona_names = data.get("personas", [])
+        persona_map = {p.name.lower(): p for p in DEFAULT_PERSONAS}
+        if len(persona_names) == 2:
+            p1 = persona_map.get(persona_names[0].lower())
+            p2 = persona_map.get(persona_names[1].lower())
+        else:
+            p1, p2 = None, None
+
+        if p1 is None or p2 is None:
+            import random as _rap_rand
+            pair = _rap_rand.sample(DEFAULT_PERSONAS, 2)
+            p1, p2 = pair[0], pair[1]
+
+        script = gen.generate_battle(topic, p1, p2, num_verses=num_verses)
+        verses_out = [
+            {
+                "persona": v.persona.name,
+                "verse_number": v.verse_number,
+                "lyrics": v.lyrics,
+            }
+            for v in script.verses
+        ]
+        return jsonify({
+            "topic": script.topic,
+            "persona_1": script.persona_1.name,
+            "persona_2": script.persona_2.name,
+            "verses": verses_out,
+            "generated_at": script.generated_at.isoformat(),
+        })
+
+    @rap_bp.route("/api/rap-battle/personas", methods=["GET"])
+    def rap_battle_personas():
+        """List available rap battle personas."""
+        return jsonify({
+            "personas": [
+                {
+                    "name": p.name,
+                    "style": p.style_description,
+                    "voice": p.tts_voice,
+                }
+                for p in DEFAULT_PERSONAS
+            ]
+        })
+
+    app.register_blueprint(rap_bp)
+except Exception as e:
+    print(f"[WARN] Rap Battle routes not loaded: {e}")
+
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
 # ---------------------------------------------------------------------------
