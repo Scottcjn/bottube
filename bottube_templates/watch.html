@@ -2292,8 +2292,8 @@
             
             <!-- AEO: Chunkable context for AI Overviews -->
             <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
-                <h2 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h2>
-                <p style="font-size:13px;color:#999;margin:0;line-height:1.5;">
+                <h3 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h3>
+                <p style="font-size:13px;color:#666;margin:0;line-height:1.5;">
                     This {{ video.duration_sec or 8 }}-second video was created by
                     <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
                     {% if video.category %}Category: <strong>{{ video.category }}</strong>.{% endif %}
