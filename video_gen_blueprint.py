@@ -30,6 +30,8 @@ import urllib.error
 
 from flask import Blueprint, current_app, g, jsonify, request
 
+from video_providers import ProviderRegistry
+
 # ---------------------------------------------------------------------------
 # Blueprint
 # ---------------------------------------------------------------------------
@@ -74,6 +76,21 @@ _GEN_COOLDOWN = 60
 _jobs: Dict[str, dict] = {}
 _JOBS_TTL = 3600
 _jobs_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Provider registry with auto-failover
+# ---------------------------------------------------------------------------
+_provider_registry = ProviderRegistry()
+
+
+def _init_provider_registry():
+    """Register all backends. Called once after functions are defined (bottom of module)."""
+    _provider_registry.register("hf_sdxl_video", _try_hf_image_to_video, requires_key_env="HF_API_TOKEN")
+    _provider_registry.register("huggingface", _try_huggingface, requires_key_env="HF_API_TOKEN")
+    _provider_registry.register("gemini", _try_gemini, requires_key_env="GEMINI_API_KEY")
+    _provider_registry.register("stability", _try_stability, requires_key_env="STABILITY_API_KEY")
+    _provider_registry.register("fal", _try_fal, requires_key_env="FAL_API_KEY")
+    _provider_registry.register("replicate", _try_replicate, requires_key_env="REPLICATE_API_TOKEN")
 
 
 # ---------------------------------------------------------------------------
@@ -782,27 +799,19 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
                 # Conversion failed, fall through to ffmpeg fallback
                 gen_method = "text"
 
-        # Cascade through all free-tier backends
-        free_backends = [
-            ("hf_sdxl_video", _try_hf_image_to_video),
-            ("huggingface", _try_huggingface),
-            ("gemini", _try_gemini),
-            ("stability", _try_stability),
-            ("fal", _try_fal),
-            ("replicate", _try_replicate),
-        ]
-        # Rotate starting backend based on job_id hash for load distribution
-        start_idx = hash(job_id) % len(free_backends)
-        rotated = free_backends[start_idx:] + free_backends[:start_idx]
-
-        for backend_name, backend_fn in rotated:
+        # Cascade through backends via provider registry (auto-failover)
+        for backend_name, backend_fn in _provider_registry.get_ordered(job_id):
             if final_path.exists():
                 break
+            t0 = time.time()
             try:
                 if backend_fn(prompt, duration, final_path):
                     gen_method = backend_name
+                    _provider_registry.report_success(backend_name, time.time() - t0)
+                else:
+                    _provider_registry.report_failure(backend_name)
             except Exception:
-                pass
+                _provider_registry.report_failure(backend_name)
 
         if not final_path.exists():
             # FFmpeg title-card fallback (always works)
@@ -957,3 +966,16 @@ def generation_status(job_id):
         result["ok"] = True  # still in progress
 
     return jsonify(result)
+
+
+@video_gen_bp.route("/api/generate-video/providers")
+def provider_status():
+    """Return health and latency info for all video generation backends."""
+    _provider_registry.health_check()
+    return jsonify({"providers": _provider_registry.status()})
+
+
+# ---------------------------------------------------------------------------
+# Initialize provider registry (must be after all _try_* functions are defined)
+# ---------------------------------------------------------------------------
+_init_provider_registry()

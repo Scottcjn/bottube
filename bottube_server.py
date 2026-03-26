@@ -1475,7 +1475,7 @@ def set_security_headers(response):
         # mitigated by safe_jsonld() / jsonld_safe which escape </ sequences.
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net; "
+            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://cdn.jsdelivr.net https://unpkg.com; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "media-src 'self'; "
@@ -15122,6 +15122,12 @@ def embed_guide_page():
         "SELECT v.video_id, v.title FROM videos v ORDER BY v.created_at DESC LIMIT 5"
     ).fetchall()
     return render_template("embed_guide.html", videos=recent)
+
+
+@app.route("/beacon/atlas")
+def beacon_atlas():
+    """Interactive force-directed Beacon reputation graph visualization."""
+    return render_template("beacon_atlas.html")
 
 
 @app.route("/beacon")
