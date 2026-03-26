@@ -233,7 +233,7 @@ html, body {
 .grade-B { background: rgba(0, 255, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan); }
 .grade-C { background: rgba(255, 176, 0, 0.15); color: var(--amber); border: 1px solid var(--amber); }
 .grade-D { background: rgba(255, 68, 68, 0.15); color: var(--red); border: 1px solid var(--red); }
-.grade-F { background: rgba(85, 85, 85, 0.2); color: #999; border: 1px solid #555; }
+.grade-F { background: rgba(85, 85, 85, 0.2); color: #666; border: 1px solid #555; }
 
 /* Progress bars */
 .bar-row {
@@ -305,7 +305,7 @@ html, body {
 .state-renewed { color: var(--cyan); background: rgba(0, 255, 255, 0.1); }
 .state-offered { color: var(--amber); background: rgba(255, 176, 0, 0.1); }
 .state-listed { color: var(--text-dim); background: rgba(100, 100, 100, 0.1); }
-.state-expired { color: #999; background: rgba(80, 80, 80, 0.1); }
+.state-expired { color: #666; background: rgba(80, 80, 80, 0.1); }
 .state-breached { color: var(--red); background: rgba(255, 68, 68, 0.15); }
 
 /* Calibration rows */
