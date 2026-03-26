@@ -492,11 +492,16 @@ class AudioGenerator:
         silence_path = output_path.parent / "silence.mp3"
 
         # Generate 0.5s silence
-        subprocess.run([
+        silence_result = subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi",
             "-i", "anullsrc=r=24000:cl=mono",
             "-t", "0.5", "-q:a", "9", str(silence_path),
         ], capture_output=True, timeout=30)
+        if silence_result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg silence generation failed (rc={silence_result.returncode}): "
+                f"{silence_result.stderr[:500] if silence_result.stderr else 'no stderr'}"
+            )
 
         with open(concat_list, "w") as f:
             for i, audio in enumerate(verse_audios):
@@ -505,11 +510,16 @@ class AudioGenerator:
                     f.write(f"file '{silence_path.resolve()}'\n")
 
         concat_out = output_path.parent / "vocals_concat.mp3"
-        subprocess.run([
+        concat_result = subprocess.run([
             "ffmpeg", "-y", "-f", "concat", "-safe", "0",
             "-i", str(concat_list),
             "-c", "copy", str(concat_out),
         ], capture_output=True, timeout=60)
+        if concat_result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg concat failed (rc={concat_result.returncode}): "
+                f"{concat_result.stderr[:500] if concat_result.stderr else 'no stderr'}"
+            )
 
         if beat_path and beat_path.exists():
             self._apply_beat(concat_out, beat_path, output_path)
@@ -538,7 +548,7 @@ class AudioGenerator:
             duration = float(info.get("format", {}).get("duration", 60.0))
 
         # Mix: loop beat to vocals length, reduce beat volume
-        subprocess.run([
+        mix_result = subprocess.run([
             "ffmpeg", "-y",
             "-stream_loop", "-1", "-i", str(beat_path),
             "-i", str(vocals_path),
@@ -550,6 +560,11 @@ class AudioGenerator:
             "-ac", "1", "-ar", "24000",
             str(output_path),
         ], capture_output=True, timeout=120)
+        if mix_result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg beat overlay failed (rc={mix_result.returncode}): "
+                f"{mix_result.stderr[:500] if mix_result.stderr else 'no stderr'}"
+            )
 
 
 # ---------------------------------------------------------------------------

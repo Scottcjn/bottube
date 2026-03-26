@@ -12910,20 +12910,24 @@ try:
     )
     from pathlib import Path as _RapPath
 
-    rap_bp = Blueprint("rap_battle", __name__)
+    rap_bp = _RapBP("rap_battle", __name__)
 
     @rap_bp.route("/api/rap-battle/generate", methods=["POST"])
     def rap_battle_generate():
         """Generate a rap battle script (dry-run: text only, no audio/video)."""
         data = request.get_json(silent=True) or {}
         topic = data.get("topic", "Python vs Rust")
-        num_verses = min(int(data.get("num_verses", 4)), 8)
-        llm_backend_name = data.get("llm_backend", "template")
+        try:
+            num_verses = max(1, min(int(data.get("num_verses", 4)), 8))
+        except (ValueError, TypeError):
+            num_verses = 4
 
+        # Security: LLM backend is always 'template' on the public API
+        # to prevent SSRF via user-controlled URLs.
         llm = create_llm_backend(
-            backend_name=llm_backend_name,
-            base_url=data.get("llm_url", "http://localhost:11434"),
-            model=data.get("llm_model", "mistral"),
+            backend_name="template",
+            base_url="http://localhost:11434",
+            model="mistral",
         )
         gen = ScriptGenerator(llm)
 
