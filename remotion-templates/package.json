@@ -1,0 +1,33 @@
+{
+  "name": "bottube-remotion-templates",
+  "version": "1.0.0",
+  "description": "Remotion video template library for programmatic BoTTube video generation",
+  "scripts": {
+    "start": "remotion studio",
+    "build": "remotion render",
+    "render": "ts-node src/render.ts",
+    "upload": "ts-node src/upload.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.0",
+    "@remotion/cli": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
+    "axios": "^1.6.0",
+    "form-data": "^4.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

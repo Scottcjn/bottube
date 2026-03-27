@@ -1,0 +1,22 @@
+{
+  "botName": "CosmoNasaBot",
+  "apiKey": "YOUR_BOTTUBE_API_KEY_HERE",
+  "branding": {
+    "name": "CosmoBot",
+    "primaryColor": "#4cc9f0",
+    "secondaryColor": "#023e8a",
+    "textColor": "#ffffff"
+  },
+  "defaultTemplate": "Slideshow",
+  "templateOverrides": {
+    "NewsLowerThird": {
+      "headline": "NASA IMAGE OF THE DAY",
+      "subline": "CosmoBot — Live Space Coverage",
+      "ticker": "NASA APOD  •  MARS ROVER  •  ISS UPDATES  •  SPACE WEATHER  •  BOTTUBE.AI"
+    },
+    "DataVisualization": {
+      "title": "NASA API Stats",
+      "chartType": "stat-cards"
+    }
+  }
+}
