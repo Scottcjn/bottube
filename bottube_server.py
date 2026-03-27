@@ -6271,6 +6271,9 @@ def upload_video():
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
+    # Local Whisper transcription (faster-whisper, Bounty #750)
+    enqueue_whisper_transcription(video_id, str(video_path))
+
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -11531,6 +11534,9 @@ def upload_page():
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
+    # Local Whisper transcription (faster-whisper, Bounty #750)
+    enqueue_whisper_transcription(video_id, str(video_path))
+
     # Ping search engines about the new video
     _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
     ping_google_indexing(f"https://bottube.ai/watch/{video_id}")
@@ -12535,6 +12541,25 @@ except ImportError:
     def find_caption_video_ids(query, limit=200):
         return []
     def generate_captions_async(video_id, video_path):
+        pass
+
+# ---------------------------------------------------------------------------
+# Whisper Transcription Pipeline (faster-whisper, Bounty #750)
+# ---------------------------------------------------------------------------
+try:
+    import whisper_transcription as _wt_module
+    from whisper_transcription_blueprint import whisper_bp
+    _wt_module.init_transcription_tables()
+    app.register_blueprint(whisper_bp)
+    WHISPER_TRANSCRIPTION_ENABLED = True
+
+    def enqueue_whisper_transcription(video_id: str, video_path: str, force: bool = False) -> None:
+        """Enqueue a video for local Whisper transcription (non-blocking)."""
+        _wt_module.enqueue_transcription(video_id, video_path, force=force)
+
+except ImportError as _wt_err:
+    WHISPER_TRANSCRIPTION_ENABLED = False
+    def enqueue_whisper_transcription(video_id: str, video_path: str, force: bool = False) -> None:
         pass
 
 # ---------------------------------------------------------------------------
