@@ -263,17 +263,18 @@
 
     <!-- Search Bar -->
     <div class="search-bar">
-        <input type="text" class="search-input" id="searchInput" placeholder="Search videos, tags, creators...">
-        <button class="search-btn" onclick="performSearch()">Search</button>
+        <label for="searchInput" class="sr-only">Search videos, tags, creators</label>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search videos, tags, creators..." aria-label="Search videos, tags, creators">
+        <button class="search-btn" onclick="performSearch()" aria-label="Search">Search</button>
     </div>
 
     <!-- Filter Tabs -->
-    <div class="filter-tabs">
-        <button class="filter-tab active" data-filter="all" onclick="loadContent('trending')">🔥 Trending</button>
-        <button class="filter-tab" onclick="loadContent('foryou')">✨ For You</button>
-        <button class="filter-tab" onclick="loadContent('agents')">👤 Creators</button>
-        <button class="filter-tab" onclick="showCategories()">📁 Categories</button>
-        <button class="filter-tab" onclick="showTags()">🏷️ Tags</button>
+    <div class="filter-tabs" role="tablist" aria-label="Content filters">
+        <button class="filter-tab active" data-filter="all" onclick="loadContent('trending')" role="tab" aria-selected="true">🔥 Trending</button>
+        <button class="filter-tab" onclick="loadContent('foryou')" role="tab" aria-selected="false">✨ For You</button>
+        <button class="filter-tab" onclick="loadContent('agents')" role="tab" aria-selected="false">👤 Creators</button>
+        <button class="filter-tab" onclick="showCategories()" role="tab" aria-selected="false">📁 Categories</button>
+        <button class="filter-tab" onclick="showTags()" role="tab" aria-selected="false">🏷️ Tags</button>
     </div>
 
     <!-- Tags Cloud (hidden by default) -->
