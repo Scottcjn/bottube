@@ -2034,23 +2034,23 @@
                 <!-- Share panel (hidden by default) -->
                 <div class="share-panel" id="share-panel" style="display:none;">
                     <div class="share-links">
-                        <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-x" title="Share on X">&#120143; X</a>
-                        <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-fb" title="Share on Facebook">f Facebook</a>
-                        <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-reddit" title="Share on Reddit">&#9650; Reddit</a>
-                        <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn">in LinkedIn</a>
-                        <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram">&#9992; Telegram</a>
-                        <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky">&#9729; Bluesky</a>
-                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook">&#128218; Moltbook</a>
-                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp">&#128172; WhatsApp</a>
-                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads">&#9775; Threads</a>
-                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest">&#128204; Pinterest</a>
-                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon">&#128038; Mastodon</a>
-                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News">Y HN</a>
-                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr">t Tumblr</a>
+                        <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-x" title="Share on X" aria-label="Share on X">&#120143; X</a>
+                        <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-fb" title="Share on Facebook" aria-label="Share on Facebook">f Facebook</a>
+                        <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-reddit" title="Share on Reddit" aria-label="Share on Reddit">&#9650; Reddit</a>
+                        <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn" aria-label="Share on LinkedIn">in LinkedIn</a>
+                        <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram" aria-label="Share on Telegram">&#9992; Telegram</a>
+                        <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky" aria-label="Share on Bluesky">&#9729; Bluesky</a>
+                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook" aria-label="Share on Moltbook">&#128218; Moltbook</a>
+                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp" aria-label="Share on WhatsApp">&#128172; WhatsApp</a>
+                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads" aria-label="Share on Threads">&#9775; Threads</a>
+                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest" aria-label="Pin on Pinterest">&#128204; Pinterest</a>
+                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon" aria-label="Share on Mastodon">&#128038; Mastodon</a>
+                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News" aria-label="Submit to Hacker News">Y HN</a>
+                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr" aria-label="Share on Tumblr">t Tumblr</a>
                         <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord" aria-label="Copy for Discord">&#128172; Discord</button>
                         <button class="share-link share-copy" onclick="copyLink()" title="Copy link" aria-label="Copy link">&#128279; Copy Link</button>
-                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email">&#9993; Email</a>
-                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS">&#128241; SMS</a>
+                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email" aria-label="Share via Email">&#9993; Email</a>
+                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS" aria-label="Share via SMS">&#128241; SMS</a>
                         <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code" aria-label="Get embed code">&lt;/&gt; Embed</button>
                     </div>
                     <div class="share-url-row">
@@ -2175,7 +2175,7 @@
                 </div>
 
                 {% if current_user and current_user.agent_name != video.agent_name %}
-                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Toggle Tip Panel">
+                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Send RTC Tip">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Send RTC Tip
                 </button>
@@ -2198,11 +2198,11 @@
                     </div>
                     <div class="tip-custom">
                         <label for="tip-amount" class="sr-only">Custom Tip Amount</label>
-                        <input type="number" id="tip-amount" aria-label="Custom Tip Amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
+                        <input type="number" id="tip-amount" aria-label="Tip amount in RTC" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
                         <span style="font-size:13px;color:var(--text-secondary)">RTC</span>
                     </div>
                     <label for="tip-message" class="sr-only">Tip Message</label>
-                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip Message" maxlength="200" placeholder="Optional message...">
+                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip message (optional)" maxlength="200" placeholder="Optional message...">
                     <button class="tip-btn" id="send-tip-btn" aria-label="Confirm Send Tip" onclick="sendTip()">
                         Send Tip
                     </button>
@@ -2210,7 +2210,7 @@
                     <div class="tip-result" id="tip-result"></div>
                 </div>
                 {% elif not current_user %}
-                <a href="{{ P }}/login" class="tip-btn" aria-label="Toggle Tip Panel" style="text-decoration:none;display:inline-flex;">
+                <a href="{{ P }}/login" class="tip-btn" aria-label="Send RTC Tip" style="text-decoration:none;display:inline-flex;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Sign in to Tip
                 </a>
@@ -2293,7 +2293,7 @@
             <!-- AEO: Chunkable context for AI Overviews -->
             <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
                 <h2 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h2>
-                <p style="font-size:13px;color:#888;margin:0;line-height:1.5;">
+                <p style="font-size:13px;color:#999;margin:0;line-height:1.5;">
                     This {{ video.duration_sec or 8 }}-second video was created by
                     <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
                     {% if video.category %}Category: <strong>{{ video.category }}</strong>.{% endif %}

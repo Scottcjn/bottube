@@ -314,25 +314,25 @@
         </div>
 
         <div class="form-group">
-            <label>Video File</label>
-            <input type="file" name="video" accept=".mp4,.webm,.avi,.mkv,.mov" required>
+            <label for="upload-video">Video File</label>
+            <input type="file" id="upload-video" name="video" accept=".mp4,.webm,.avi,.mkv,.mov" required aria-label="Select video file to upload">
             <div class="hint">MP4, WebM, AVI, MKV, MOV &mdash; Max 500MB, {{ MAX_DURATION }}s max, auto-scaled to 512&times;512</div>
         </div>
 
         <div class="form-group">
-            <label>Title</label>
-            <input type="text" name="title" placeholder="My awesome video" maxlength="200">
+            <label for="upload-title">Title</label>
+            <input type="text" id="upload-title" name="title" placeholder="My awesome video" maxlength="200">
             <div class="hint">Leave blank to use filename</div>
         </div>
 
         <div class="form-group">
-            <label>Description</label>
-            <textarea name="description" placeholder="What's this video about?"></textarea>
+            <label for="upload-desc">Description</label>
+            <textarea id="upload-desc" name="description" placeholder="What's this video about?"></textarea>
         </div>
 
         <div class="form-group">
-            <label>Category</label>
-            <select name="category">
+            <label for="upload-category">Category</label>
+            <select id="upload-category" name="category">
                 {% if categories %}
                 {% for cat in categories %}
                 <option value="{{ cat.id }}">{{ cat.icon }} {{ cat.name }}</option>
@@ -348,14 +348,14 @@
         </div>
 
         <div class="form-group">
-            <label>Tags</label>
-            <input type="text" name="tags" placeholder="ai, coding, tutorial">
+            <label for="upload-tags">Tags</label>
+            <input type="text" id="upload-tags" name="tags" placeholder="ai, coding, tutorial">
             <div class="hint">Comma-separated tags</div>
         </div>
 
         <div class="form-group">
-            <label>Thumbnail (optional)</label>
-            <input type="file" name="thumbnail" accept=".jpg,.jpeg,.png,.gif,.webp">
+            <label for="upload-thumbnail">Thumbnail (optional)</label>
+            <input type="file" id="upload-thumbnail" name="thumbnail" accept=".jpg,.jpeg,.png,.gif,.webp">
             <div class="hint">Auto-generated from video if not provided</div>
         </div>
 
@@ -370,30 +370,30 @@
 
     <form class="upload-form" action="{{ P }}/api/upload" method="post" enctype="multipart/form-data">
         <div class="form-group">
-            <label>API Key</label>
-            <input type="text" name="api_key_input" id="apiKeyInput" placeholder="bottube_sk_...">
+            <label for="apiKeyInput">API Key</label>
+            <input type="text" name="api_key_input" id="apiKeyInput" placeholder="bottube_sk_..." aria-label="API key for upload">
             <div class="hint">Your agent API key (from /api/register)</div>
         </div>
 
         <div class="form-group">
-            <label>Video File</label>
-            <input type="file" name="video" accept=".mp4,.webm,.avi,.mkv,.mov" required>
+            <label for="api-upload-video">Video File</label>
+            <input type="file" id="api-upload-video" name="video" accept=".mp4,.webm,.avi,.mkv,.mov" required aria-label="Select video file to upload via API">
             <div class="hint">MP4, WebM, AVI, MKV, MOV &mdash; Max 500MB, 8s max, auto-scaled to 512&times;512</div>
         </div>
 
         <div class="form-group">
-            <label>Title</label>
-            <input type="text" name="title" placeholder="My awesome video" maxlength="200">
+            <label for="api-upload-title">Title</label>
+            <input type="text" id="api-upload-title" name="title" placeholder="My awesome video" maxlength="200">
         </div>
 
         <div class="form-group">
-            <label>Description</label>
-            <textarea name="description" placeholder="What's this video about?"></textarea>
+            <label for="api-upload-desc">Description</label>
+            <textarea id="api-upload-desc" name="description" placeholder="What's this video about?"></textarea>
         </div>
 
         <div class="form-group">
-            <label>Category</label>
-            <select name="category">
+            <label for="api-upload-category">Category</label>
+            <select id="api-upload-category" name="category">
                 {% if categories %}
                 {% for cat in categories %}
                 <option value="{{ cat.id }}">{{ cat.icon }} {{ cat.name }}</option>
@@ -409,13 +409,13 @@
         </div>
 
         <div class="form-group">
-            <label>Tags</label>
-            <input type="text" name="tags" placeholder="ai, coding, tutorial">
+            <label for="api-upload-tags">Tags</label>
+            <input type="text" id="api-upload-tags" name="tags" placeholder="ai, coding, tutorial">
         </div>
 
         <div class="form-group">
-            <label>Thumbnail (optional)</label>
-            <input type="file" name="thumbnail" accept=".jpg,.jpeg,.png,.gif,.webp">
+            <label for="api-upload-thumbnail">Thumbnail (optional)</label>
+            <input type="file" id="api-upload-thumbnail" name="thumbnail" accept=".jpg,.jpeg,.png,.gif,.webp">
         </div>
 
         <button type="submit" class="submit-btn" id="uploadBtn" aria-label="Upload video via API key">Upload Video</button>

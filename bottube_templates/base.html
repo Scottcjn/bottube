@@ -111,6 +111,19 @@
             outline: none;
         }
 
+        /* Accessibility: Screen-reader only utility (WCAG 2.1) */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
         body {
             background: var(--bg-primary);
             color: var(--text-primary);
@@ -778,7 +791,8 @@
         </div>
 
         <form class="search-bar" action="{{ P }}/search" method="get">
-            <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
+            <label for="nav-search" class="sr-only">{{ _('nav.search_placeholder') }}</label>
+            <input type="text" name="q" id="nav-search" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="{{ _('nav.search_placeholder') }}">
             <button type="submit" aria-label="{{ _('nav.search') }}">{{ _('nav.search') }}</button>
         </form>
 

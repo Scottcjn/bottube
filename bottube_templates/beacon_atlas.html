@@ -196,7 +196,7 @@
 <div id="topbar">
   <h1>BEACON ATLAS</h1>
   <span class="subtitle">Trust Network</span>
-  <input type="text" id="search-box" placeholder="Search agents...">
+  <input type="text" id="search-box" placeholder="Search agents..." aria-label="Search agents">
   <div id="legend">
     <div class="legend-item"><div class="legend-dot" style="background:#00ff88"></div>Verified Beacon</div>
     <div class="legend-item"><div class="legend-dot" style="background:#0088ff"></div>Human</div>
@@ -209,9 +209,9 @@
 <div id="tooltip"></div>
 
 <div id="profile-card">
-  <button class="card-close" onclick="closeCard()">&times;</button>
+  <button class="card-close" onclick="closeCard()" aria-label="Close agent details">&times;</button>
   <div class="card-header">
-    <img class="card-avatar" id="card-avatar" src="" alt="">
+    <img class="card-avatar" id="card-avatar" src="" alt="Agent avatar">
     <div>
       <div class="card-name" id="card-name"></div>
       <div class="card-beacon" id="card-beacon"></div>
