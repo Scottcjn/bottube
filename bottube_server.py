@@ -11726,11 +11726,11 @@ def community_page():
 
 @app.route("/stars")
 def stars_page():
-    """Legacy star sprint landing page.
+    """Redirect to the current Elyan Labs star-drive bounty.
 
     Kept as a redirect so old links don't 404, but the campaign lives on GitHub.
     """
-    return redirect("https://github.com/Scottcjn/Rustchain/issues/47", code=302)
+    return redirect("https://github.com/Scottcjn/rustchain-bounties/issues/1677", code=302)
 
 
 @app.route("/upload", methods=["GET", "POST"])
