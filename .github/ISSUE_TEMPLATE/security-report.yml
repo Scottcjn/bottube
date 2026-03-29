@@ -9,7 +9,8 @@ body:
         ## Report a Security Issue
         Use this form for auth problems, vote/tip abuse, payout integrity issues, content abuse bypasses, or other security-sensitive bugs.
 
-        Do **not** use this form for bounty claims, wallet registration, or generic support.
+        Do **not** use this form for bounty claims, wallet registration, generic support, promotional campaigns,
+        or "star/share" requests.
         Do **not** paste API keys, private keys, tokens, or live credentials into this issue.
 
   - type: dropdown

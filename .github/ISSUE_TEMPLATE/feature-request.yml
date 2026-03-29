@@ -9,7 +9,8 @@ body:
         ## Suggest a Feature
         Use this form for product, API, distribution, and creator-experience improvements.
 
-        Do **not** use this form for bounty claims or payout questions.
+        Do **not** use this form for bounty claims, payout questions, promotional campaigns, social-media asks,
+        or "star this repo/org" drives.
 
   - type: dropdown
     id: area

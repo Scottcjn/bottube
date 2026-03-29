@@ -65,12 +65,17 @@ Be respectful and inclusive. We welcome contributions from everyone.
    - Steps to reproduce
    - Expected vs actual behavior
    - Environment details (OS, Python version, etc.)
+3. Keep BoTTube issues focused on product bugs, security problems, and scoped feature proposals.
+4. Do not open issues here for RTC bounty claims, payout requests, wallet registration, promotional campaigns,
+   social-media tasks, or "star this repo/org" drives. Those belong in
+   [Scottcjn/rustchain-bounties](https://github.com/Scottcjn/rustchain-bounties).
 
 ### Suggesting Features
 
 1. Open an issue with the `enhancement` label
 2. Describe the feature and its use case
 3. Wait for discussion before implementing
+4. Do not use feature requests for marketing asks, bounty proof, or off-topic growth campaigns.
 
 ### Submitting Changes
 

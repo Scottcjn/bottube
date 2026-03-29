@@ -9,7 +9,8 @@ body:
         ## Report a Bug
         Use this form for real product bugs in BoTTube.
 
-        Do **not** use this repo for bounty claims, payout requests, or wallet registration.
+        Do **not** use this repo for bounty claims, payout requests, wallet registration, promotional campaigns,
+        social-media tasks, or "star our repos" requests.
         Those now belong in `Scottcjn/rustchain-bounties`.
 
   - type: dropdown
