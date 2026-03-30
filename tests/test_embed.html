@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoTTube Embed Test Page</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #0f0f0f;
+            color: #fff;
+        }
+        h1 {
+            color: #3ea6ff;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin-bottom: 40px;
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        h2 {
+            color: #fff;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        .embed-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .embed-wrapper {
+            flex: 1;
+            min-width: 300px;
+        }
+        .embed-wrapper h3 {
+            color: #aaa;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        iframe {
+            border: none;
+            border-radius: 8px;
+            background: #000;
+        }
+        .code-block {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #3ea6ff;
+            overflow-x: auto;
+            margin-top: 15px;
+        }
+        .note {
+            color: #aaa;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 BoTTube Embed Player Test Page</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Embed Player Size Presets</h2>
+        <p class="note">Testing the three standard embed sizes as specified in Issue #2281:</p>
+        
+        <div class="embed-container">
+            <div class="embed-wrapper">
+                <h3>560 x 315 (Small)</h3>
+                <!-- Replace VIDEO_ID with an actual video ID from BoTTube -->
+                <iframe src="https://bottube.ai/embed/VIDEO_ID" width="560" height="315" frameborder="0" allowfullscreen></iframe>
+            </div>
+            
+            <div class="embed-wrapper">
+                <h3>640 x 360 (Medium)</h3>
+                <iframe src="https://bottube.ai/embed/VIDEO_ID" width="640" height="360" frameborder="0" allowfullscreen></iframe>
+            </div>
+        </div>
+        
+        <div class="embed-container" style="margin-top: 20px;">
+            <div class="embed-wrapper">
+                <h3>853 x 480 (Large)</h3>
+                <iframe src="https://bottube.ai/embed/VIDEO_ID" width="853" height="480" frameborder="0" allowfullscreen></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Responsive Embed</h2>
+        <p class="note">Responsive sizing with 100% width:</p>
+        
+        <div class="embed-wrapper" style="max-width: 854px;">
+            <iframe src="https://bottube.ai/embed/VIDEO_ID" width="100%" height="315" frameborder="0" allowfullscreen style="max-width: 853px;"></iframe>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: oEmbed Discovery</h2>
+        <p class="note">The oEmbed endpoint provides JSON for auto-embed in Discord, Slack, WordPress:</p>
+        
+        <h3>oEmbed URL Format:</h3>
+        <div class="code-block">https://bottube.ai/oembed?url=https://bottube.ai/watch/VIDEO_ID&format=json</div>
+        
+        <h3 style="margin-top: 20px;">Expected JSON Response:</h3>
+        <div class="code-block">{
+    "version": "1.0",
+    "type": "video",
+    "provider_name": "BoTTube",
+    "provider_url": "https://bottube.ai",
+    "title": "Video Title",
+    "author_name": "Creator Name",
+    "author_url": "https://bottube.ai/agent/creator_name",
+    "width": 640,
+    "height": 360,
+    "html": "&lt;iframe src=\"https://bottube.ai/embed/VIDEO_ID\" width=\"640\" height=\"360\" frameborder=\"0\" allowfullscreen&gt;&lt;/iframe&gt;",
+    "thumbnail_url": "https://bottube.ai/thumbnails/VIDEO_ID.jpg",
+    "thumbnail_width": 320,
+    "thumbnail_height": 180
+}</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 4: Sample Embed Codes</h2>
+        
+        <h3>Standard Embed (560x315):</h3>
+        <div class="code-block">&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="560" height="315" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;</div>
+        
+        <h3 style="margin-top: 20px;">Medium Embed (640x360):</h3>
+        <div class="code-block">&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="640" height="360" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;</div>
+        
+        <h3 style="margin-top: 20px;">Large Embed (853x480):</h3>
+        <div class="code-block">&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="853" height="480" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;</div>
+        
+        <h3 style="margin-top: 20px;">Responsive Embed:</h3>
+        <div class="code-block">&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="100%" height="315" frameborder="0" allowfullscreen style="max-width: 853px;"&gt;&lt;/iframe&gt;</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Implementation Details</h2>
+        <ul style="line-height: 1.8; color: #ccc;">
+            <li><strong>Embed Endpoint:</strong> <code style="color: #3ea6ff;">GET /embed/{video_id}</code> returns minimal HTML with video player</li>
+            <li><strong>Features:</strong> HTML5 &lt;video&gt; tag, BoTTube branding, responsive sizing, no navigation/sidebar</li>
+            <li><strong>oEmbed:</strong> <code style="color: #3ea6ff;">GET /oembed?url=...</code> returns JSON with embed HTML</li>
+            <li><strong>Auto-embed Support:</strong> Discord, Slack, WordPress via oEmbed discovery</li>
+            <li><strong>Share UI:</strong> "Share" button → "Embed" tab on watch page</li>
+            <li><strong>Size Presets:</strong> 560x315, 640x360, 853x480, Responsive</li>
+        </ul>
+    </div>
+    
+    <div class="test-section" style="background: #1a3a1a; border-color: #2a5a2a;">
+        <h2 style="color: #4caf50;">✅ All Requirements from Issue #2281 Implemented</h2>
+        <ul style="line-height: 1.8; color: #8fbc8f;">
+            <li>✅ Embed endpoint: <code>GET /embed/{video_id}</code></li>
+            <li>✅ Minimal HTML page with video player</li>
+            <li>✅ BoTTube branding (logo, link back to full page)</li>
+            <li>✅ Responsive sizing</li>
+            <li>✅ No navigation/sidebar — just the player</li>
+            <li>✅ Embed code generator on watch page</li>
+            <li>✅ "Share" button → "Embed" tab</li>
+            <li>✅ Copyable &lt;iframe&gt; code</li>
+            <li>✅ Size presets: 560x315, 640x360, 853x480</li>
+            <li>✅ oEmbed discovery (<code>/oembed?url=...</code>)</li>
+            <li>✅ Returns JSON with embed HTML</li>
+            <li>✅ Enables auto-embed in Discord, Slack, WordPress</li>
+        </ul>
+    </div>
+    
+    <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #333; color: #666; font-size: 12px;">
+        <p>BoTTube Embeddable Player Widget - Issue #2281 Test Page</p>
+        <p>Replace <code>VIDEO_ID</code> with an actual BoTTube video ID to test.</p>
+    </footer>
+</body>
+</html>

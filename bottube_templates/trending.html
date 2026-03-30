@@ -21,7 +21,7 @@
 {% block extra_css %}
 <style>
     /* ═══════════════════════════════════════════════════════════════
-       TRENDING PAGE POLISH
+       TRENDING PAGE POLISH + ISSUE #425 ENHANCEMENTS
        ═══════════════════════════════════════════════════════════════ */
 
     /* Header with Fire Animation */
@@ -53,6 +53,96 @@
         color: var(--text-muted);
         font-size: 14px;
         margin-top: 4px;
+    }
+
+    /* Category Filter Bar (Issue #425) */
+    .category-filter-bar {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding: 16px 0;
+        margin-bottom: 24px;
+        scrollbar-width: thin;
+    }
+
+    .category-filter-chip {
+        flex-shrink: 0;
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: all 0.15s;
+        white-space: nowrap;
+    }
+
+    .category-filter-chip:hover,
+    .category-filter-chip.active {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+
+    /* Rising Section (Issue #425) */
+    .rising-section {
+        margin-bottom: 40px;
+    }
+
+    .rising-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+
+    .rising-header h2 {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .rising-icon {
+        font-size: 20px;
+        animation: riseBounce 1s ease-in-out infinite;
+    }
+
+    @keyframes riseBounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+    }
+
+    .rising-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 16px;
+    }
+
+    .rising-card {
+        position: relative;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .rising-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--accent);
+    }
+
+    .velocity-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 12px;
+        z-index: 2;
     }
 
     .trending-grid {
@@ -209,6 +299,9 @@
         .empty-state {
             padding: 48px 16px;
         }
+        .category-filter-bar {
+            padding: 12px 0;
+        }
     }
 </style>
 {% endblock %}
@@ -242,6 +335,47 @@
     <h1>Trending</h1>
     <p>Videos ranked by views, likes, comments, and freshness in the last 24 hours</p>
 </div>
+
+<!-- Category Filter (Issue #425) -->
+<div class="category-filter-bar" role="navigation" aria-label="Filter trending by category">
+    <a href="{{ P }}/trending" class="category-filter-chip {{ 'active' if not current_category }}">All</a>
+    {% for cat in categories %}
+    <a href="{{ P }}/trending?category={{ cat.id }}" class="category-filter-chip {{ 'active' if current_category == cat.id }}">{{ cat.icon }} {{ cat.name }}</a>
+    {% endfor %}
+</div>
+
+<!-- Rising Section (Issue #425) -->
+{% if rising_videos and not current_category %}
+<div class="rising-section">
+    <div class="rising-header">
+        <span class="rising-icon">📈</span>
+        <h2>Rising</h2>
+        <span style="font-size:13px;color:var(--text-muted);">Fastest growing videos right now</span>
+    </div>
+    <div class="rising-grid">
+        {% for v in rising_videos[:8] %}
+        <a href="{{ P }}/watch/{{ v.video_id }}" class="rising-card">
+            <div class="thumb-wrap">
+                <span class="velocity-badge">🔥 Rising</span>
+                {% if v.thumbnail %}
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                {% else %}
+                <div class="thumb-placeholder">&#9654;</div>
+                {% endif %}
+                {% if v.duration_sec > 0 %}
+                <span class="duration-badge">{{ v.duration_sec | format_duration }}</span>
+                {% endif %}
+            </div>
+            <div class="video-info" style="padding:12px;">
+                <div class="video-title" style="font-size:14px;margin-bottom:4px;">{{ v.title }}</div>
+                <div class="video-stats" style="font-size:12px;color:var(--text-muted);">{{ v.views | format_views }} views</div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+<hr style="border:none;border-top:1px solid var(--border);margin:32px 0;">
+{% endif %}
 
 {% if videos %}
 <div class="trending-grid">

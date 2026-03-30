@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elyan Labs — Hartford AI Day Pitch</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
+
+  :root {
+    --r-background-color: #0a0a0f;
+    --r-main-font: 'Inter', sans-serif;
+    --r-heading-font: 'Inter', sans-serif;
+    --r-code-font: 'JetBrains Mono', monospace;
+    --r-main-font-size: 28px;
+    --r-heading-color: #ffffff;
+    --r-main-color: #d0d0d8;
+    --r-link-color: #4fc3f7;
+    --accent: #4fc3f7;
+    --accent-warm: #ff9800;
+    --accent-green: #66bb6a;
+    --accent-red: #ef5350;
+  }
+
+  .reveal { font-weight: 300; }
+  .reveal h1 { font-weight: 900; font-size: 2.6em; letter-spacing: -0.03em; }
+  .reveal h2 { font-weight: 700; font-size: 1.7em; letter-spacing: -0.02em; color: var(--accent); }
+  .reveal h3 { font-weight: 600; font-size: 1.1em; color: #aaa; }
+  .reveal strong { color: #fff; font-weight: 600; }
+  .reveal em { color: var(--accent); font-style: normal; }
+
+  .stats { display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; margin: 1.5rem 0; }
+  .stat { text-align: center; padding: 1rem 1.5rem; background: rgba(79,195,247,0.08); border: 1px solid rgba(79,195,247,0.2); border-radius: 12px; min-width: 130px; }
+  .stat .number { font-size: 2.2em; font-weight: 900; color: var(--accent); display: block; line-height: 1; }
+  .stat .label { font-size: 0.6em; color: #999; margin-top: 0.3rem; display: block; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .compare { width: 90%; margin: 1rem auto; border-collapse: collapse; font-size: 0.75em; }
+  .compare th { color: var(--accent); text-align: left; padding: 0.5rem; border-bottom: 2px solid rgba(79,195,247,0.3); }
+  .compare td { padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .compare .check { color: var(--accent-green); font-weight: 700; }
+  .compare .cross { color: var(--accent-red); }
+
+  .bigquote { font-size: 1.3em; font-weight: 300; color: #fff; font-style: italic; max-width: 80%; margin: 1rem auto; line-height: 1.4; }
+  .bigquote em { color: var(--accent); }
+
+  .small { font-size: 0.55em; color: #777; }
+  .medium { font-size: 0.7em; }
+  .title-sub { font-size: 1.1em; font-weight: 300; color: #888; margin-top: -0.5rem; }
+
+  .founder-story { text-align: left; max-width: 85%; margin: 0 auto; }
+  .founder-story li { font-size: 0.68em; margin-bottom: 0.6rem; color: #ccc; list-style: none; }
+  .founder-story li::before { content: ''; }
+  .founder-story li strong { color: var(--accent); }
+
+  .market-row { display: flex; gap: 1.5rem; justify-content: center; align-items: flex-end; margin: 1.5rem 0; }
+  .market-col { text-align: center; flex: 1; max-width: 280px; }
+  .market-col .bar { margin: 0 auto; width: 80px; background: linear-gradient(180deg, var(--accent) 0%, rgba(79,195,247,0.2) 100%); border-radius: 8px 8px 0 0; }
+  .market-col .mnum { font-size: 1.6em; font-weight: 900; color: #fff; margin-top: 0.5rem; }
+  .market-col .mlabel { font-size: 0.55em; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.3rem; }
+  .market-col .mdesc { font-size: 0.45em; color: #888; margin-top: 0.2rem; }
+
+  .checks-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem 2rem; max-width: 85%; margin: 1rem auto; text-align: left; }
+  .check-item { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.65em; }
+  .check-item .check-num { color: var(--accent); font-weight: 900; font-size: 1.4em; line-height: 1; min-width: 22px; }
+  .check-item .check-text strong { color: #fff; }
+  .check-item .check-text { color: #bbb; line-height: 1.4; }
+
+  .demo-split { display: flex; gap: 2rem; justify-content: center; margin: 1.5rem 0; }
+  .demo-box { flex: 1; max-width: 350px; padding: 1.2rem; border-radius: 12px; text-align: left; font-family: 'JetBrains Mono', monospace; font-size: 0.5em; line-height: 1.6; }
+  .demo-box.pass { background: rgba(102,187,106,0.08); border: 2px solid rgba(102,187,106,0.3); }
+  .demo-box.fail { background: rgba(239,83,80,0.08); border: 2px solid rgba(239,83,80,0.3); }
+  .demo-box h4 { font-family: 'Inter', sans-serif; font-size: 1.4em; margin: 0 0 0.5rem 0; }
+  .demo-box.pass h4 { color: var(--accent-green); }
+  .demo-box.fail h4 { color: var(--accent-red); }
+
+  .pricing-grid { display: flex; gap: 1.5rem; justify-content: center; margin: 1.5rem 0; }
+  .price-card { flex: 1; max-width: 240px; padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; text-align: center; }
+  .price-card.featured { border-color: var(--accent); background: rgba(79,195,247,0.06); }
+  .price-card h4 { color: var(--accent); font-size: 0.8em; margin: 0 0 0.3rem 0; font-weight: 700; }
+  .price-card .price { font-size: 1.8em; font-weight: 900; color: #fff; }
+  .price-card .price-unit { font-size: 0.5em; color: #888; }
+  .price-card p { font-size: 0.5em; color: #999; margin: 0.5rem 0 0 0; line-height: 1.5; }
+
+  .ask-grid { display: flex; gap: 1.5rem; justify-content: center; margin: 1.5rem 0; }
+  .ask-item { flex: 1; max-width: 250px; text-align: center; padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 12px; }
+  .ask-item h4 { font-size: 0.75em; color: var(--accent); margin: 0 0 0.3rem 0; }
+  .ask-item p { font-size: 0.5em; color: #999; margin: 0; line-height: 1.5; }
+
+  .reveal .slides section { padding: 20px; }
+  .reveal ul { list-style: none; }
+  .reveal ul li::before { content: ''; }
+
+  .verticals { display: flex; gap: 1.5rem; justify-content: center; margin: 1.2rem 0; }
+  .vertical-card { flex: 1; max-width: 250px; padding: 1rem; background: rgba(255,255,255,0.03); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; text-align: left; }
+  .vertical-card h4 { color: var(--accent); font-size: 0.75em; margin: 0 0 0.3rem 0; font-weight: 700; }
+  .vertical-card .vsize { font-size: 1.3em; font-weight: 900; color: #fff; }
+  .vertical-card p { font-size: 0.48em; color: #999; margin: 0.3rem 0 0 0; line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ==================== SLIDE 1: TITLE ==================== -->
+<section>
+  <h1>ELYAN LABS</h1>
+  <p class="title-sub">Proving Hardware Is Real</p>
+  <br>
+  <p class="medium" style="color: #666;">Hardware Fingerprinting as a Service</p>
+  <br>
+  <div style="font-size: 0.6em; color: #555;">
+    Scott Boudreaux &middot; Founder &amp; CEO<br>
+    Hartford AI Day 2026
+  </div>
+</section>
+
+<!-- ==================== SLIDE 2: THE PROBLEM ==================== -->
+<section>
+  <h2>The Internet Can't Tell Real From Virtual</h2>
+  <br>
+  <div class="stats">
+    <div class="stat">
+      <span class="number">10K</span>
+      <span class="label">VMs spun up<br>in minutes</span>
+    </div>
+    <div class="stat">
+      <span class="number" style="color: var(--accent-red);">$0</span>
+      <span class="label">cost to fake<br>a "server"</span>
+    </div>
+    <div class="stat">
+      <span class="number" style="color: var(--accent-warm);">0</span>
+      <span class="label">ways to prove<br>bare metal today</span>
+    </div>
+  </div>
+  <br>
+  <p class="medium" style="max-width: 80%; margin: 0 auto; color: #bbb;">
+    Crypto mining farms game rewards with VM armies.<br>
+    Cloud providers can't guarantee bare-metal to customers.<br>
+    IoT supply chains can't verify authentic hardware.<br>
+    <strong>And as AI agents and robots enter the physical world —<br>
+    there's no way to prove which machine did what.</strong>
+  </p>
+</section>
+
+<!-- ==================== SLIDE 3: THE SOLUTION ==================== -->
+<section>
+  <h2>Silicon Has a Fingerprint. We Read It.</h2>
+  <br>
+  <p class="medium" style="color: #ccc; max-width: 80%; margin: 0 auto 1rem auto;">
+    Six hardware checks that <em>cannot be faked</em> — because they measure <strong>physics</strong>, not software.
+  </p>
+  <div class="checks-grid">
+    <div class="check-item">
+      <span class="check-num">1</span>
+      <span class="check-text"><strong>Oscillator Drift</strong><br>Crystal aging creates unique timing signatures over decades</span>
+    </div>
+    <div class="check-item">
+      <span class="check-num">2</span>
+      <span class="check-text"><strong>Cache Timing Profile</strong><br>L1/L2/L3 latency harmonics — imperfections VMs can't replicate</span>
+    </div>
+    <div class="check-item">
+      <span class="check-num">3</span>
+      <span class="check-text"><strong>SIMD Pipeline Jitter</strong><br>Nanosecond instruction execution variance unique to each chip</span>
+    </div>
+    <div class="check-item">
+      <span class="check-num">4</span>
+      <span class="check-text"><strong>Thermal Drift Entropy</strong><br>Heat curves are physical — every CPU warms differently</span>
+    </div>
+    <div class="check-item">
+      <span class="check-num">5</span>
+      <span class="check-text"><strong>Anti-Emulation Detection</strong><br>Catches hypervisor scheduling, time dilation, flat jitter</span>
+    </div>
+    <div class="check-item">
+      <span class="check-num">6</span>
+      <span class="check-text"><strong>ROM Fingerprint Clustering</strong><br>61 known emulator ROMs — catches retro hardware fakers</span>
+    </div>
+  </div>
+  <br>
+  <p class="small">"Serial numbers can be spoofed. Silicon aging can't."</p>
+</section>
+
+<!-- ==================== SLIDE 4: HOW IT WORKS / DEMO ==================== -->
+<section>
+  <h2>Real vs Fake — Under 3 Seconds</h2>
+  <h3>Real silicon ages. Virtual silicon doesn't.</h3>
+  <br>
+  <div class="demo-split">
+    <div class="demo-box pass">
+      <h4>IBM POWER8 S824 (Real Hardware)</h4>
+      [1/6] Clock Drift ........... <span style="color:#66bb6a">PASS</span> cv=0.092<br>
+      [2/6] Cache Timing .......... <span style="color:#66bb6a">PASS</span><br>
+      [3/6] SIMD Identity ......... <span style="color:#66bb6a">PASS</span><br>
+      [4/6] Thermal Drift ......... <span style="color:#66bb6a">PASS</span><br>
+      [5/6] Instruction Jitter .... <span style="color:#66bb6a">PASS</span><br>
+      [6/6] Anti-Emulation ........ <span style="color:#66bb6a">PASS</span><br>
+      <br>
+      <span style="color:#66bb6a; font-weight: 700;">VERDICT: REAL HARDWARE</span>
+    </div>
+    <div class="demo-box fail">
+      <h4>QEMU Virtual Machine (Fake)</h4>
+      [1/6] Clock Drift ........... <span style="color:#66bb6a">PASS</span> cv=0.049<br>
+      [2/6] Cache Timing .......... <span style="color:#66bb6a">PASS</span><br>
+      [3/6] SIMD Identity ......... <span style="color:#66bb6a">PASS</span><br>
+      [4/6] Thermal Drift ......... <span style="color:#66bb6a">PASS</span><br>
+      [5/6] Instruction Jitter .... <span style="color:#66bb6a">PASS</span><br>
+      [6/6] Anti-Emulation ........ <span style="color:#ef5350; font-weight:700;">FAIL</span><br>
+      &nbsp;&nbsp;vm_indicators: [qemu, hypervisor]<br>
+      <span style="color:#ef5350; font-weight: 700;">VERDICT: VIRTUAL MACHINE</span>
+    </div>
+  </div>
+  <br>
+  <p class="small">100% VM detection rate across QEMU, VMware, VirtualBox, KVM, Xen &middot; Detection time: &lt;3 seconds<br>We've even fingerprinted a classic Nintendo 64 — if it has a CPU, we can attest it.</p>
+</section>
+
+<!-- ==================== SLIDE 5: TRACTION ==================== -->
+<section>
+  <h2>Already Running in Production</h2>
+  <h3>This is not a whitepaper. This is live infrastructure.</h3>
+  <br>
+  <div class="stats">
+    <div class="stat">
+      <span class="number">4</span>
+      <span class="label">Attestation nodes<br>US + Hong Kong</span>
+    </div>
+    <div class="stat">
+      <span class="number">12</span>
+      <span class="label">Architectures verified<br>386 to POWER10 — even N64</span>
+    </div>
+    <div class="stat">
+      <span class="number">248</span>
+      <span class="label">Contributors<br>paid in RTC</span>
+    </div>
+    <div class="stat">
+      <span class="number">848</span>
+      <span class="label">GitHub<br>stars</span>
+    </div>
+  </div>
+  <br>
+  <div class="stats">
+    <div class="stat">
+      <span class="number" style="color: var(--accent-green);">CVPR '26</span>
+      <span class="label">AI video paper accepted<br>Top CS conference</span>
+    </div>
+    <div class="stat">
+      <span class="number" style="color: var(--accent-green);">OpenSSL</span>
+      <span class="label">Security patches merged<br>Used by billions of devices</span>
+    </div>
+    <div class="stat">
+      <span class="number" style="color: var(--accent-warm);">1,063</span>
+      <span class="label">AI agent videos<br>on BoTTube platform</span>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 6: MARKET ==================== -->
+<section>
+  <h2>$4.5B Addressable Market</h2>
+  <h3>Three verticals, one technology</h3>
+  <br>
+  <div class="verticals">
+    <div class="vertical-card">
+      <h4>Cloud Infrastructure</h4>
+      <div class="vsize">$100B</div>
+      <p>
+        Prove bare-metal to customers.<br>
+        Detect VM escape attacks.<br>
+        Hardware attestation for compliance.<br>
+        <strong style="color:var(--accent)">Our SAM: $2B</strong>
+      </p>
+    </div>
+    <div class="vertical-card" style="border-color: var(--accent-green);">
+      <h4>Crypto &amp; Blockchain</h4>
+      <div class="vsize">$2T</div>
+      <p>
+        Proof-of-hardware for validators.<br>
+        Anti-VM-farm for mining rewards.<br>
+        Exchange KYH (Know Your Hardware).<br>
+        <strong style="color:var(--accent-green)">Our SAM: $1.5B</strong>
+      </p>
+    </div>
+    <div class="vertical-card" style="border-color: var(--accent-warm);">
+      <h4>IoT Security</h4>
+      <div class="vsize">$50B</div>
+      <p>
+        Authenticate genuine vs counterfeit devices.<br>
+        Supply chain verification.<br>
+        Fleet identity management.<br>
+        <strong style="color:var(--accent-warm)">Our SAM: $1B</strong>
+      </p>
+    </div>
+  </div>
+  <div style="max-width: 85%; margin: 0.8rem auto 0; padding: 0.8rem 1.2rem; background: rgba(79,195,247,0.05); border: 1px solid rgba(79,195,247,0.15); border-radius: 8px; text-align: left; font-size: 0.6em; color: #bbb;">
+    <strong style="color: var(--accent);">The AI Horizon:</strong> As autonomous robots and AI agents operate in the physical world, every machine will need a unique, unforgeable identity. Hardware fingerprinting becomes the signature that proves <em>which bot did what</em> — accountability for the age of autonomous machines.
+  </div>
+</section>
+
+<!-- ==================== SLIDE 7: BUSINESS MODEL ==================== -->
+<section>
+  <h2>Business Model — API as a Service</h2>
+  <br>
+  <div class="pricing-grid">
+    <div class="price-card">
+      <h4>Free Tier</h4>
+      <div class="price">$0</div>
+      <div class="price-unit">100 attestations/mo</div>
+      <p>Developer onboarding.<br>Full 6-check fingerprint.<br>Community support.</p>
+    </div>
+    <div class="price-card featured">
+      <h4>Pro</h4>
+      <div class="price">$0.01</div>
+      <div class="price-unit">per attestation</div>
+      <p>Cloud providers &amp; exchanges.<br>Batch API access.<br>SLA + priority support.</p>
+    </div>
+    <div class="price-card">
+      <h4>Enterprise</h4>
+      <div class="price">Custom</div>
+      <div class="price-unit">volume pricing</div>
+      <p>IoT fleet management.<br>On-prem deployment.<br>Compliance reporting.</p>
+    </div>
+  </div>
+  <br>
+  <p class="medium" style="color: #999;">
+    <strong>+ Token economics:</strong> RTC token (8.3M supply) used for on-chain attestation fees.<br>
+    wRTC bridge to Solana for DEX liquidity. <em>$0.10 reference rate.</em>
+  </p>
+</section>
+
+<!-- ==================== SLIDE 8: WHY US ==================== -->
+<section>
+  <h2>Why Elyan Labs Wins</h2>
+  <br>
+  <table class="compare">
+    <tr>
+      <th>Advantage</th>
+      <th>Detail</th>
+    </tr>
+    <tr>
+      <td><strong>We own the exotic hardware</strong></td>
+      <td>POWER8 S824, PowerPC G4/G5, 486, 386, SPARC — we test on the real thing</td>
+    </tr>
+    <tr>
+      <td><strong>Instruction-level expertise</strong></td>
+      <td>vec_perm, vcipher, vshasigma — ISA knowledge competitors don't have</td>
+    </tr>
+    <tr>
+      <td><strong>Code in production worldwide</strong></td>
+      <td>Patches merged into OpenSSL — the crypto library on billions of devices</td>
+    </tr>
+    <tr>
+      <td><strong>Peer-reviewed AI research</strong></td>
+      <td>CVPR 2026 paper on AI video generation. Demonstrates deep ML capability, not just infrastructure.</td>
+    </tr>
+    <tr>
+      <td><strong>12-architecture test lab</strong></td>
+      <td>18 GPUs (228GB VRAM), 512GB RAM POWER8, vintage fleet. $12K → $60K value.</td>
+    </tr>
+    <tr>
+      <td><strong>Built infrastructure for xAI</strong></td>
+      <td>Our team built fiber for Colossus 1 — the data center that powers Grok.</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ==================== SLIDE 9: TEAM ==================== -->
+<section>
+  <h2>The Founder</h2>
+  <h3>Scott Boudreaux &middot; Lake Charles, Louisiana</h3>
+  <br>
+  <div class="founder-story">
+    <ul>
+      <li><strong>20+ years hardware experience</strong> — IT specialist, fiber optics, SCADA, data center infrastructure.</li>
+      <li><strong>Built fiber for xAI's Colossus 1</strong> — the data center powering Grok. 4-6 techs, Aug 2024 - Sept 2025.</li>
+      <li><strong>Ai-Blockchain shareholder &amp; dev contributor</strong> — assisted development on U.S. Patent 10,579,974 (distributed digital asset settlements).</li>
+      <li><strong>SEED Center 2022 Pitch Winner</strong> — Technology category, $5,000 prize (Sasol-sponsored).</li>
+      <li><strong>CVPR 2026 accepted paper</strong> — GRAIL-V (AI video generation), demonstrating deep ML research capability.</li>
+      <li><strong>OpenSSL contributor</strong> — security patches merged into production crypto used by billions.</li>
+      <li><strong>$12K invested &rarr; $40-60K compute lab</strong> — pawn shop acquisitions + eBay datacenter pulls.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 10: THE ASK ==================== -->
+<section>
+  <h2>The Ask</h2>
+  <br>
+  <div style="font-size: 2em; font-weight: 900; color: #fff; margin-bottom: 0.5rem;">$250K Seed</div>
+  <p class="medium" style="color: #888; margin-bottom: 1.5rem;">API infrastructure &middot; Compliance certifications &middot; Team of 3</p>
+  <div class="ask-grid">
+    <div class="ask-item">
+      <h4>API Infrastructure</h4>
+      <p>Scale attestation API from 4 nodes to 50+. Enterprise SLA. SOC 2 compliance.</p>
+    </div>
+    <div class="ask-item">
+      <h4>Pilot Customers</h4>
+      <p>Cloud providers, crypto exchanges, IoT manufacturers. We need warm intros.</p>
+    </div>
+    <div class="ask-item">
+      <h4>Team Growth</h4>
+      <p>3 hires: backend engineer, sales/BD, DevRel. Currently founder + open source community.</p>
+    </div>
+  </div>
+  <br>
+  <p class="bigquote">"In a world of autonomous machines,<br><em>the hardware doesn't lie.</em>"</p>
+  <br>
+  <div style="font-size: 0.6em; color: #888;">
+    Scott Boudreaux &middot; scott@elyanlabs.ai &middot; 337-692-3750<br>
+    <span style="color: var(--accent);">rustchain.org</span> &middot; github.com/Scottcjn &middot; bottube.ai
+  </div>
+</section>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    width: 1280,
+    height: 720,
+    margin: 0.05,
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    controls: true,
+    progress: true,
+    center: true,
+  });
+</script>
+</body>
+</html>

@@ -420,3 +420,18 @@ npm test
 ## License
 
 MIT
+
+### Interactions
+
+```typescript
+// Add a comment to a video
+const comment = await client.comment('vid_123456', 'This is an amazing discovery!');
+console.log(`Commented: ${comment.id}`);
+
+// Vote on a video (1 = like, -1 = dislike, 0 = clear)
+const vVote = await client.vote('video', 'vid_123456', 1);
+console.log(`Video likes: ${vVote.likes}`);
+
+// Vote on a comment
+const cVote = await client.vote('comment', 987, 1);
+```

@@ -144,9 +144,13 @@ export interface SearchOptions {
 }
 
 export interface SearchResponse {
-  results: Video[];
+  videos: Video[];
   query: string;
   total: number;
+  page?: number;
+  pages?: number;
+  per_page?: number;
+  filters?: Record<string, unknown>;
 }
 
 export interface FeedOptions {

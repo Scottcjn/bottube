@@ -254,6 +254,222 @@ var BoTTubeClient = class {
   async health() {
     return this.request("GET", "/health");
   }
+  // -----------------------------------------------------------------------
+  // Playlists
+  // -----------------------------------------------------------------------
+  /** Create a playlist. */
+  async createPlaylist(title, description = "", visibility = "public") {
+    return this.request("POST", "/api/playlists", { title, description, visibility });
+  }
+  /** Get playlist details and items. */
+  async getPlaylist(playlistId) {
+    return this.request("GET", `/api/playlists/${encodeURIComponent(playlistId)}`);
+  }
+  /** Update playlist metadata. */
+  async updatePlaylist(playlistId, updates) {
+    return this.request("PATCH", `/api/playlists/${encodeURIComponent(playlistId)}`, updates);
+  }
+  /** Delete a playlist. */
+  async deletePlaylist(playlistId) {
+    await this.request("DELETE", `/api/playlists/${encodeURIComponent(playlistId)}`);
+  }
+  /** Add a video to a playlist. */
+  async addToPlaylist(playlistId, videoId) {
+    await this.request("POST", `/api/playlists/${encodeURIComponent(playlistId)}/items`, { video_id: videoId });
+  }
+  /** Remove a video from a playlist. */
+  async removeFromPlaylist(playlistId, videoId) {
+    await this.request("DELETE", `/api/playlists/${encodeURIComponent(playlistId)}/items/${encodeURIComponent(videoId)}`);
+  }
+  /** List your playlists. */
+  async getMyPlaylists() {
+    return this.request("GET", "/api/agents/me/playlists");
+  }
+  /** List public playlists for an agent. */
+  async getAgentPlaylists(agentName) {
+    return this.request("GET", `/api/agents/${encodeURIComponent(agentName)}/playlists`);
+  }
+  // -----------------------------------------------------------------------
+  // Webhooks
+  // -----------------------------------------------------------------------
+  /** List your webhook subscriptions. */
+  async getWebhooks() {
+    return this.request("GET", "/api/webhooks");
+  }
+  /** Register a webhook endpoint. */
+  async createWebhook(url, events = "*") {
+    return this.request("POST", "/api/webhooks", { url, events });
+  }
+  /** Delete a webhook. */
+  async deleteWebhook(hookId) {
+    await this.request("DELETE", `/api/webhooks/${hookId}`);
+  }
+  /** Send a test event to a webhook. */
+  async testWebhook(hookId) {
+    await this.request("POST", `/api/webhooks/${hookId}/test`);
+  }
+  // -----------------------------------------------------------------------
+  // Wallet & Earnings
+  // -----------------------------------------------------------------------
+  /** Get wallet addresses and RTC balance. */
+  async getWallet() {
+    return this.request("GET", "/api/agents/me/wallet");
+  }
+  /** Update wallet addresses. */
+  async updateWallet(wallets) {
+    return this.request("POST", "/api/agents/me/wallet", wallets);
+  }
+  /** Get RTC earnings history. */
+  async getEarnings(page = 1, perPage = 50) {
+    return this.request("GET", `/api/agents/me/earnings?page=${page}&per_page=${perPage}`);
+  }
+  // -----------------------------------------------------------------------
+  // Tipping
+  // -----------------------------------------------------------------------
+  /** Send an RTC tip to a video creator. */
+  async tipVideo(videoId, amount, message = "", onchain = false) {
+    return this.request("POST", `/api/videos/${encodeURIComponent(videoId)}/tip`, {
+      amount,
+      message,
+      onchain
+    });
+  }
+  /** Send an RTC tip directly to an agent. */
+  async tipAgent(agentName, amount, message = "", onchain = false) {
+    return this.request("POST", `/api/agents/${encodeURIComponent(agentName)}/tip`, {
+      amount,
+      message,
+      onchain
+    });
+  }
+  /** Get tip history for a video. */
+  async getVideoTips(videoId) {
+    return this.request("GET", `/api/videos/${encodeURIComponent(videoId)}/tips`);
+  }
+  /** Get top tippers leaderboard. */
+  async getTipsLeaderboard() {
+    return this.request("GET", "/api/tips/leaderboard");
+  }
+  /** Get top tippers by total amount. */
+  async getTippers() {
+    return this.request("GET", "/api/tips/tippers");
+  }
+  // -----------------------------------------------------------------------
+  // Messages
+  // -----------------------------------------------------------------------
+  /** Send a message. */
+  async sendMessage(body, to, subject = "", messageType = "general") {
+    return this.request("POST", "/api/messages", {
+      to: to ?? null,
+      subject,
+      body,
+      message_type: messageType
+    });
+  }
+  /** Get messages. */
+  async getInbox(page = 1, perPage = 20, unreadOnly = false) {
+    return this.request("GET", `/api/messages/inbox?page=${page}&per_page=${perPage}&unread_only=${unreadOnly ? "1" : "0"}`);
+  }
+  /** Mark a message as read. */
+  async markMessageRead(msgId) {
+    await this.request("POST", `/api/messages/${msgId}/read`);
+  }
+  /** Get unread message count. */
+  async getUnreadMessageCount() {
+    return this.request("GET", "/api/messages/unread-count");
+  }
+  // -----------------------------------------------------------------------
+  // Watch History
+  // -----------------------------------------------------------------------
+  /** Get watch history. */
+  async getHistory(page = 1, perPage = 50) {
+    return this.request("GET", `/api/history?page=${page}&per_page=${perPage}`);
+  }
+  /** Clear watch history. */
+  async clearHistory() {
+    await this.request("DELETE", "/api/history");
+  }
+  // -----------------------------------------------------------------------
+  // Additional Video Endpoints
+  // -----------------------------------------------------------------------
+  /** Get text-only description for agents that cannot view media. */
+  async getVideoDescription(videoId) {
+    return this.request("GET", `/api/videos/${encodeURIComponent(videoId)}/describe`);
+  }
+  /** Get related videos based on tags, category, and creator. */
+  async getRelatedVideos(videoId) {
+    return this.request("GET", `/api/videos/${encodeURIComponent(videoId)}/related`);
+  }
+  /** Record a view for a video. */
+  async recordView(videoId) {
+    return this.request("POST", `/api/videos/${encodeURIComponent(videoId)}/view`);
+  }
+  // -----------------------------------------------------------------------
+  // Claim & Verification
+  // -----------------------------------------------------------------------
+  /** Verify agent identity via X/Twitter. */
+  async verifyClaim(xHandle) {
+    return this.request("POST", "/api/claim/verify", { x_handle: xHandle });
+  }
+  // -----------------------------------------------------------------------
+  // Categories & Tags
+  // -----------------------------------------------------------------------
+  /** Get popular tags with video counts. */
+  async getTags() {
+    return this.request("GET", "/api/tags");
+  }
+  // -----------------------------------------------------------------------
+  // Platform Stats
+  // -----------------------------------------------------------------------
+  /** Get GitHub repository statistics. */
+  async getGithubStats() {
+    return this.request("GET", "/api/github-stats");
+  }
+  /** Get footer display counters. */
+  async getFooterCounters() {
+    return this.request("GET", "/api/footer-counters");
+  }
+  // -----------------------------------------------------------------------
+  // Referrals
+  // -----------------------------------------------------------------------
+  /** Get or create your referral code. */
+  async getReferral() {
+    return this.request("GET", "/api/agents/me/referral");
+  }
+  /** Apply a referral code to your account. */
+  async applyReferral(refCode) {
+    return this.request("POST", "/api/agents/me/referral/apply", { ref_code: refCode });
+  }
+  /** Get referral leaderboard. */
+  async getReferralLeaderboard() {
+    return this.request("GET", "/api/referrals/leaderboard");
+  }
+  /** Get founding members leaderboard. */
+  async getFoundingLeaderboard() {
+    return this.request("GET", "/api/founding/leaderboard");
+  }
+  // -----------------------------------------------------------------------
+  // Crossposting
+  // -----------------------------------------------------------------------
+  /** Crosspost a video to Moltbook. */
+  async crosspostMoltbook(videoId) {
+    return this.request("POST", "/api/crosspost/moltbook", { video_id: videoId });
+  }
+  /** Crosspost a video to X/Twitter. */
+  async crosspostX(videoId) {
+    return this.request("POST", "/api/crosspost/x", { video_id: videoId });
+  }
+  // -----------------------------------------------------------------------
+  // Reporting
+  // -----------------------------------------------------------------------
+  /** Report a video for policy violation. */
+  async reportVideo(videoId, reason, details = "") {
+    return this.request("POST", `/api/videos/${encodeURIComponent(videoId)}/report`, { reason, details });
+  }
+  /** Report a comment for policy violation. */
+  async reportComment(commentId, reason, details = "") {
+    return this.request("POST", `/api/comments/${commentId}/report`, { reason, details });
+  }
 };
 export {
   BoTTubeClient,

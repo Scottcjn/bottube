@@ -138,7 +138,7 @@
     <div class="card">
       <h2>Public Info</h2>
       <p>Live limits, fees, and aggregate bridge stats.</p>
-      <button class="btn btn-dark" id="loadInfoBtn" type="button">Refresh Info</button>
+      <button class="btn btn-dark" id="loadInfoBtn" type="button" aria-label="Refresh public bridge info">Refresh Info</button>
       <div id="infoPanel" class="panel" style="margin-top:10px;">Loading...</div>
     </div>
 
@@ -149,7 +149,7 @@
       <input id="apiKeyInput" type="password" placeholder="bottube_sk_..." autocomplete="off">
       <label for="txSigInput">Transaction Signature (Solana)</label>
       <input id="txSigInput" type="text" placeholder="5X... (Base58 signature)">
-      <button class="btn btn-primary" id="depositBtn" type="button">Verify Transaction</button>
+      <button class="btn btn-primary" id="depositBtn" type="button" aria-label="Verify Solana transaction and credit account">Verify Transaction</button>
       <div id="depositPanel" class="panel" style="margin-top:10px;">Awaiting signature...</div>
       <div class="warn">🔒 Verification is secure. Ensure your bound Solana wallet matches the sender address.</div>
     </div>
@@ -161,7 +161,7 @@
       <input id="withdrawAddressInput" type="text" placeholder="Your Solana public key">
       <label for="withdrawAmountInput">Amount to Withdraw (wRTC)</label>
       <input id="withdrawAmountInput" type="number" min="0" step="0.000001" placeholder="Minimum: 1 wRTC">
-      <button class="btn btn-primary" id="withdrawBtn" type="button">Queue Vault Withdrawal</button>
+      <button class="btn btn-primary" id="withdrawBtn" type="button" aria-label="Queue vault withdrawal to Solana">Queue Vault Withdrawal</button>
       <div id="withdrawPanel" class="panel" style="margin-top:10px;">Queue is currently active.</div>
       <a class="link-btn" href="{{ wrtc_buy_url }}" target="_blank" rel="noopener">Get wRTC on Raydium ↗</a>
     </div>
@@ -170,7 +170,7 @@
       <h2>History</h2>
       <p>Latest verified deposits and queued/sent withdrawals for the authenticated account.</p>
       <div class="row">
-        <button class="btn btn-dark" id="historyBtn" type="button">Load History</button>
+        <button class="btn btn-dark" id="historyBtn" type="button" aria-label="Load transaction history">Load History</button>
         <input id="historyLimitInput" type="number" min="1" max="200" value="50" style="max-width:100px;">
       </div>
       <div id="historyPanel" class="panel" style="margin-top:10px;">No requests yet.</div>

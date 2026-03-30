@@ -1590,7 +1590,7 @@ _bounty_notify_file = Path("/root/bottube/bounty_notifications.jsonl")
 
 def poll_bounties():
     """Fetch open bounties from Beacon API. Returns NEW bounties only."""
-    global _last_bounty_poll, _known_bounty_ids
+    global _last_bounty_poll
     now = time.time()
     if now - _last_bounty_poll < BOUNTY_POLL_INTERVAL:
         return []

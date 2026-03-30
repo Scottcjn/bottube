@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Pending Collaboration Invites{% endblock %}
+
+{% block extra_css %}
+<style>
+    .invites-container {
+        max-width: 900px;
+        margin: 48px auto;
+        padding: 0 16px;
+    }
+
+    .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 12px;
+    }
+
+    .tab {
+        padding: 8px 16px;
+        border-radius: var(--radius);
+        text-decoration: none;
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+
+    .tab:hover {
+        background: var(--bg-hover);
+        color: var(--text-primary);
+    }
+
+    .tab.active {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .invite-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        transition: border-color 0.2s;
+    }
+
+    .invite-card:hover {
+        border-color: var(--accent);
+    }
+
+    .invite-icon {
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        flex-shrink: 0;
+    }
+
+    .invite-content {
+        flex: 1;
+    }
+
+    .invite-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
+
+    .invite-meta {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+    }
+
+    .invite-meta span {
+        margin-right: 16px;
+    }
+
+    .invite-message {
+        font-size: 14px;
+        color: var(--text-secondary);
+        background: var(--bg-secondary);
+        padding: 12px;
+        border-radius: var(--radius);
+        margin-bottom: 16px;
+    }
+
+    .invite-type-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 4px;
+        background: rgba(102, 126, 234, 0.2);
+        color: #667eea;
+        margin-left: 8px;
+    }
+
+    .invite-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn:active {
+        transform: scale(0.98);
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .btn-primary:hover {
+        background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+        background: var(--bg-hover);
+    }
+
+    .btn-danger {
+        background: rgba(255, 68, 68, 0.2);
+        color: #ff4444;
+        border: 1px solid rgba(255, 68, 68, 0.3);
+    }
+
+    .btn-danger:hover {
+        background: rgba(255, 68, 68, 0.3);
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 64px 24px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+    }
+
+    .empty-state h2 {
+        font-size: 18px;
+        margin-bottom: 8px;
+    }
+
+    .empty-state p {
+        color: var(--text-muted);
+        margin-bottom: 20px;
+    }
+
+    .expiry-warning {
+        font-size: 12px;
+        color: #ffc107;
+        margin-top: 8px;
+    }
+
+    .expiry-expired {
+        font-size: 12px;
+        color: #ff4444;
+        margin-top: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="invites-container">
+    <h1 style="margin-bottom: 24px;">📬 Collaboration Invites</h1>
+
+    <div class="tabs">
+        <a href="/collaborations" class="tab">My Collaborations</a>
+        <a href="/collaborations/invites" class="tab active">Pending Invites</a>
+    </div>
+
+    {% if invites %}
+    <p style="color: var(--text-muted); margin-bottom: 20px;">
+        {{ invites|length }} pending invite{{ 's' if invites|length != 1 else '' }}
+    </p>
+
+    {% for invite in invites %}
+    <div class="invite-card {% if invite.is_expired %}expired{% endif %}">
+        <div class="invite-icon">
+            {% if invite.collab_type == 'duet' %}
+            🎭
+            {% elif invite.collab_type == 'co-upload' %}
+            🤝
+            {% else %}
+            🎵
+            {% endif %}
+        </div>
+        <div class="invite-content">
+            <div class="invite-title">
+                {{ invite.collab_title }}
+                <span class="invite-type-badge">{{ invite.collab_type }}</span>
+            </div>
+            <div class="invite-meta">
+                <span>From <strong>{{ invite.inviter_display }}</strong> (@{{ invite.inviter_name }})</span>
+                <span>•</span>
+                <span>Invited {{ invite.created_at|format_time_ago }}</span>
+            </div>
+
+            {% if invite.message %}
+            <div class="invite-message">
+                "{{ invite.message }}"
+            </div>
+            {% endif %}
+
+            {% if invite.is_expired %}
+            <div class="expiry-expired">⚠️ This invite has expired</div>
+            {% else %}
+            <div class="expiry-warning">⏰ Expires in {{ invite.expires_at|format_time_until }}</div>
+            {% endif %}
+
+            <div class="invite-actions">
+                {% if not invite.is_expired %}
+                <button class="btn btn-primary" onclick="respondToInvite('{{ invite.invite_id }}', 'accept')">
+                    ✅ Accept
+                </button>
+                <button class="btn btn-danger" onclick="respondToInvite('{{ invite.invite_id }}', 'decline')">
+                    ❌ Decline
+                </button>
+                {% endif %}
+                <a href="/collaboration/{{ invite.collaboration_id }}" class="btn btn-secondary">
+                    👁️ View Details
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📬</div>
+        <h2>No pending invites</h2>
+        <p>You don't have any collaboration invites at the moment.</p>
+        <a href="/collaborations" class="btn btn-primary">View My Collaborations</a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    function respondToInvite(inviteId, action) {
+        if (!confirm(`Are you sure you want to ${action} this collaboration invite?`)) {
+            return;
+        }
+
+        fetch(`/api/collaborations/invites/${inviteId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': localStorage.getItem('bottube_api_key') || ''
+            },
+            body: JSON.stringify({ action: action })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.ok) {
+                if (action === 'accept') {
+                    window.location.href = `/collaboration/${data.collaboration_id}`;
+                } else {
+                    location.reload();
+                }
+            } else {
+                alert('Error: ' + (data.error || 'Failed to respond to invite'));
+            }
+        })
+        .catch(err => {
+            alert('Error responding to invite: ' + err);
+        });
+    }
+</script>
+{% endblock %}

@@ -180,14 +180,14 @@
 
     <!-- Tabs -->
     <div class="gen-tabs">
-        <button class="gen-tab active" onclick="switchTab('video')" id="tab-video">
+        <button class="gen-tab active" onclick="switchTab('video')" id="tab-video" aria-label="Switch to video generation tab" role="tab" aria-selected="true">
             Video <span class="tab-badge free">FREE</span>
         </button>
-        <button class="gen-tab" onclick="switchTab('image')" id="tab-image">
+        <button class="gen-tab" onclick="switchTab('image')" id="tab-image" aria-label="Switch to image generation tab" role="tab" aria-selected="false">
             Image <span class="tab-badge free">FREE</span>
         </button>
         {% if current_user %}
-        <button class="gen-tab" onclick="switchTab('history')" id="tab-history">
+        <button class="gen-tab" onclick="switchTab('history')" id="tab-history" aria-label="Switch to generation history tab" role="tab" aria-selected="false">
             My History
         </button>
         {% endif %}
@@ -224,7 +224,7 @@
                     </div>
                 </div>
 
-                <button class="gen-btn" onclick="generateVideo()" id="btn-gen-video">
+                <button class="gen-btn" onclick="generateVideo()" id="btn-gen-video" aria-label="Generate video from prompt">
                     <span>&#9654;</span> Generate Video
                 </button>
             </div>
@@ -236,7 +236,7 @@
                 <div class="result-actions">
                     <a class="gen-btn secondary" id="video-download" href="#" download>Download</a>
                     {% if current_user %}
-                    <button class="gen-btn" onclick="uploadToBottube('video')">Upload to BoTTube</button>
+                    <button class="gen-btn" onclick="uploadToBottube('video')" aria-label="Upload generated video to BoTTube">Upload to BoTTube</button>
                     {% endif %}
                 </div>
             </div>
@@ -272,7 +272,7 @@
                 <label for="img-prompt">Prompt</label>
                 <textarea id="img-prompt" placeholder="A photorealistic oil painting of a steampunk robot reading a book in a cozy Victorian library, warm candlelight, detailed brass gears..." maxlength="2000"></textarea>
 
-                <button class="gen-btn" onclick="generateImage()" id="btn-gen-image">
+                <button class="gen-btn" onclick="generateImage()" id="btn-gen-image" aria-label="Generate image from prompt">
                     <span>&#127912;</span> Generate Image
                 </button>
             </div>
@@ -284,7 +284,7 @@
                 <div class="result-actions">
                     <a class="gen-btn secondary" id="image-download" href="#" download>Download</a>
                     {% if current_user %}
-                    <button class="gen-btn" onclick="uploadToBottube('image')">Use as Thumbnail</button>
+                    <button class="gen-btn" onclick="uploadToBottube('image')" aria-label="Use generated image as video thumbnail">Use as Thumbnail</button>
                     {% endif %}
                 </div>
             </div>

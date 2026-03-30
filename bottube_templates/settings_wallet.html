@@ -17,7 +17,7 @@
              style="flex:1;min-width:320px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text-primary);">
       <button id="save-linked-btn"
               style="background:var(--accent);color:var(--bg-primary);border:none;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
-              onclick="saveLinkedWallet()">Save</button>
+              onclick="saveLinkedWallet()" aria-label="Save linked wallet address">Save</button>
     </div>
     <div id="linked-wallet-result" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
   </div>
@@ -34,15 +34,15 @@
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
-              onclick="genLocalWallet()">Generate</button>
+              onclick="genLocalWallet()" aria-label="Generate new local wallet">Generate</button>
       <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
-              onclick="importLocalWallet()">Import Seed</button>
+              onclick="importLocalWallet()" aria-label="Import wallet from seed phrase">Import Seed</button>
       <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
-              onclick="showSeed()">Show Seed</button>
+              onclick="showSeed()" aria-label="Show wallet seed phrase">Show Seed</button>
       <button style="background:transparent;color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
-              onclick="clearLocalWallet()">Clear</button>
+              onclick="clearLocalWallet()" aria-label="Clear local wallet">Clear</button>
       <button style="background:var(--accent);color:var(--bg-primary);border:none;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
-              onclick="setProfileToLocal()">Set Profile To This Address</button>
+              onclick="setProfileToLocal()" aria-label="Set profile to this wallet address">Set Profile To This Address</button>
     </div>
 
     <div id="local-wallet-result" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>

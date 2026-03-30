@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block title %}My Collaborations{% endblock %}
+
+{% block extra_css %}
+<style>
+    .invites-container {
+        max-width: 900px;
+        margin: 48px auto;
+        padding: 0 16px;
+    }
+
+    .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 12px;
+    }
+
+    .tab {
+        padding: 8px 16px;
+        border-radius: var(--radius);
+        text-decoration: none;
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+
+    .tab:hover {
+        background: var(--bg-hover);
+        color: var(--text-primary);
+    }
+
+    .tab.active {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .section-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .collab-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        transition: border-color 0.2s;
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .collab-card:hover {
+        border-color: var(--accent);
+    }
+
+    .collab-icon {
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        flex-shrink: 0;
+    }
+
+    .collab-content {
+        flex: 1;
+    }
+
+    .collab-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
+
+    .collab-meta {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+    }
+
+    .collab-meta span {
+        margin-right: 16px;
+    }
+
+    .collab-type-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 4px;
+        background: rgba(102, 126, 234, 0.2);
+        color: #667eea;
+        margin-left: 8px;
+    }
+
+    .collab-status-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 4px;
+        background: rgba(43, 166, 64, 0.2);
+        color: #2ba640;
+        margin-left: 8px;
+    }
+
+    .collab-status-badge.closed {
+        background: rgba(158, 158, 158, 0.2);
+        color: #9e9e9e;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 64px 24px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+    }
+
+    .empty-state h2 {
+        font-size: 18px;
+        margin-bottom: 8px;
+    }
+
+    .empty-state p {
+        color: var(--text-muted);
+        margin-bottom: 20px;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn:active {
+        transform: scale(0.98);
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .btn-primary:hover {
+        background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+        background: var(--bg-hover);
+    }
+
+    .invite-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="invites-container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1>🤝 Collaborations</h1>
+        <a href="/collaborations/new" class="btn btn-primary">+ New Collaboration</a>
+    </div>
+
+    <div class="tabs">
+        <a href="/collaborations" class="tab active">My Collaborations</a>
+        <a href="/collaborations/invites" class="tab">Pending Invites</a>
+    </div>
+
+    {% if collaborations %}
+    <div class="section-title">
+        📁 Your Collaborations
+        <span style="font-size: 14px; font-weight: 400; color: var(--text-muted);">
+            ({{ collaborations|length }})
+        </span>
+    </div>
+
+    {% for collab in collaborations %}
+    <a href="/collaboration/{{ collab.collaboration_id }}" class="collab-card">
+        <div class="collab-icon">
+            {% if collab.type == 'duet' %}
+            🎭
+            {% elif collab.type == 'co-upload' %}
+            🤝
+            {% else %}
+            🎵
+            {% endif %}
+        </div>
+        <div class="collab-content">
+            <div class="collab-title">
+                {{ collab.title }}
+                <span class="collab-type-badge">{{ collab.type }}</span>
+                <span class="collab-status-badge {% if collab.status == 'closed' %}closed{% endif %}">{{ collab.status }}</span>
+            </div>
+            <div class="collab-meta">
+                {% if collab.description %}
+                <span>{{ collab.description[:100] }}{% if collab.description|length > 100 %}...{% endif %}</span>
+                {% endif %}
+                <span>•</span>
+                <span>{{ collab.participant_count }} participants</span>
+                <span>•</span>
+                <span>{{ collab.video_count }} videos</span>
+            </div>
+            <div class="collab-meta">
+                <span>Updated {{ collab.updated_at|format_time_ago }}</span>
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">🤝</div>
+        <h2>No collaborations yet</h2>
+        <p>Create your first collaboration or wait for invites from other creators.</p>
+        <a href="/collaborations/new" class="btn btn-primary">Create Collaboration</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

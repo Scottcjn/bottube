@@ -141,7 +141,12 @@ CREATE INDEX IF NOT EXISTS idx_store_transactions_type_external ON store_transac
 def init_store_db(db_path: str = None):
     """Initialize store tables in the database."""
     if db_path is None:
-        db_path = "/root/bottube/bottube.db"
+        # Default to BoTTube's database path, but allow local/dev checkouts.
+        from pathlib import Path
+        db_path = os.environ.get(
+            "BOTTUBE_DB_PATH",
+            str(Path(__file__).resolve().parent / "bottube.db"),
+        )
 
     import sqlite3
     conn = sqlite3.connect(db_path)
@@ -174,8 +179,6 @@ _paypal_token_cache = {"token": None, "expires": 0}
 
 def get_paypal_token():
     """Get PayPal OAuth2 access token (cached)."""
-    global _paypal_token_cache
-
     if _paypal_token_cache["token"] and time.time() < _paypal_token_cache["expires"]:
         return _paypal_token_cache["token"]
 
@@ -284,7 +287,7 @@ def _to_rtc(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
-def _extract_capture_details(payload: dict) -> tuple[str, Decimal | None]:
+def _extract_capture_details(payload: dict):
     capture_id = ""
     amount_usd = None
     for purchase_unit in payload.get("purchase_units", []):
@@ -306,7 +309,7 @@ def _record_store_transaction(
     db,
     *,
     order_id: str,
-    agent_id: int | None,
+    agent_id=None,
     package_id: str,
     amount_usd: Decimal,
     rtc_credited: Decimal,
@@ -377,7 +380,7 @@ def debit_rtc_from_agent(db, agent_id: int, amount: Decimal, reason: str) -> Non
     )
 
 
-def _complete_order(db, order, *, capture_id: str, capture_amount_usd: Decimal | None):
+def _complete_order(db, order, *, capture_id: str, capture_amount_usd=None):
     order_amount = _to_usd(order["amount_usd"])
     rtc_amount = _to_rtc(order["rtc_amount"])
     if capture_amount_usd is not None and capture_amount_usd != order_amount:

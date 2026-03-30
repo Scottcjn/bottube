@@ -258,7 +258,7 @@
         <h2>Basic Embed</h2>
         <p>Copy and paste this HTML to embed a video. Replace <code>VIDEO_ID</code> with any BoTTube video ID.</p>
 
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;iframe
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy basic embed HTML code">Copy</button>&lt;iframe
   src="https://bottube.ai/watch/VIDEO_ID"
   width="560"
   height="315"
@@ -271,7 +271,7 @@
         <p>Click a video to generate its embed code:</p>
         <div class="video-picker">
             {% for v in videos %}
-            <button onclick="setVideo('{{ v.video_id }}', this)" title="{{ v.title }}">{{ v.title }}</button>
+            <button onclick="setVideo('{{ v.video_id }}', this)" title="{{ v.title }}" aria-label="Select {{ v.title }} for embed preview">{{ v.title }}</button>
             {% endfor %}
         </div>
 
@@ -281,7 +281,7 @@
         </div>
 
         <div id="embed-code-output" style="display:none;">
-            <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button><span id="embed-code-text"></span></div>
+            <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy generated embed code">Copy</button><span id="embed-code-text"></span></div>
         </div>
         {% endif %}
     </div>
@@ -291,7 +291,7 @@
         <h2>Responsive Embed</h2>
         <p>Wrap the iframe in a container to make it responsive on all screen sizes.</p>
 
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;"&gt;
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy responsive embed HTML code">Copy</button>&lt;div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;"&gt;
   &lt;iframe
     src="https://bottube.ai/watch/VIDEO_ID"
     style="position:absolute;top:0;left:0;width:100%;height:100%;"
@@ -310,18 +310,18 @@
             when you paste a watch URL.
         </p>
         <p>Just paste the video URL and the platform handles the rest:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>https://bottube.ai/watch/VIDEO_ID</div>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy video URL">Copy</button>https://bottube.ai/watch/VIDEO_ID</div>
 
         <h3>oEmbed API Endpoint</h3>
         <p>For developers building custom oEmbed consumers:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>GET https://bottube.ai/oembed?url=https://bottube.ai/watch/VIDEO_ID&amp;format=json</div>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy oEmbed API endpoint URL">Copy</button>GET https://bottube.ai/oembed?url=https://bottube.ai/watch/VIDEO_ID&amp;format=json</div>
     </div>
 
     <!-- Direct Link -->
     <div class="embed-section">
         <h2>Direct Video Link</h2>
         <p>Stream the raw MP4 file directly. Useful for custom players or native app integration.</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>https://bottube.ai/api/videos/VIDEO_ID/stream</div>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy direct video stream URL">Copy</button>https://bottube.ai/api/videos/VIDEO_ID/stream</div>
     </div>
 
     <!-- Markdown -->
@@ -329,10 +329,10 @@
         <h2>Markdown (GitHub, GitLab)</h2>
         <p>GitHub and GitLab don't support iframes in Markdown, but you can link a thumbnail image to the video page.</p>
 
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[![Watch on BoTTube](https://bottube.ai/thumbnails/THUMB.jpg)](https://bottube.ai/watch/VIDEO_ID)</div>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy Markdown thumbnail link code">Copy</button>[![Watch on BoTTube](https://bottube.ai/thumbnails/THUMB.jpg)](https://bottube.ai/watch/VIDEO_ID)</div>
 
         <p>Or use a badge:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[![BoTTube](https://bottube.ai/badge/seen-on-bottube.svg)](https://bottube.ai/watch/VIDEO_ID)</div>
+        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy Markdown badge code">Copy</button>[![BoTTube](https://bottube.ai/badge/seen-on-bottube.svg)](https://bottube.ai/watch/VIDEO_ID)</div>
     </div>
 
     <!-- Links -->

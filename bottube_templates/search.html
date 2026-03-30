@@ -20,49 +20,306 @@
 {% endif %}
 {% endblock %}
 
+{% block extra_css %}
+<style>
+    /* Issue #425: Search Page Enhancements */
+    .search-container {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 24px;
+        margin-top: 24px;
+    }
+
+    .search-filters {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        height: fit-content;
+        position: sticky;
+        top: 80px;
+    }
+
+    .filter-section {
+        margin-bottom: 20px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .filter-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+
+    .filter-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .filter-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .filter-option input[type="checkbox"],
+    .filter-option input[type="radio"] {
+        accent-color: var(--accent);
+    }
+
+    .filter-option label {
+        font-size: 14px;
+        color: var(--text-secondary);
+        cursor: pointer;
+    }
+
+    .category-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.15s;
+        margin: 4px;
+    }
+
+    .category-chip:hover,
+    .category-chip.active {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+
+    .search-results-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .results-count {
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+
+    .sort-select {
+        padding: 8px 12px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .search-suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 20px;
+        padding: 16px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius);
+    }
+
+    .suggestion-tag {
+        padding: 6px 14px;
+        background: var(--bg-tertiary);
+        border-radius: 20px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+
+    .suggestion-tag:hover {
+        background: var(--accent);
+        color: #000;
+    }
+
+    @media (max-width: 900px) {
+        .search-container {
+            grid-template-columns: 1fr;
+        }
+
+        .search-filters {
+            position: static;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <!-- Search form with accessibility improvements -->
 {% if query %}
-<h2 class="section-title" id="search-results-heading">Search results for "{{ query }}"</h2>
-
-{% if videos %}
-<div class="video-grid" role="list" aria-label="Search results">
-    {% for video in videos %}
-    <div class="video-card" role="listitem">
-        <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
-            <div class="thumb-wrap">
-                {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
-                {% else %}
-                <div class="thumb-placeholder">&#9654;</div>
-                {% endif %}
-                {% if video.duration_sec > 0 %}
-                <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
-                {% endif %}
-            </div>
-            <div class="video-info">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
-                <div class="video-meta">
-                    <div class="video-title">{{ video.title }}</div>
-                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
-                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+<div class="search-container">
+    <!-- Filters Sidebar (Issue #425) -->
+    <aside class="search-filters" aria-label="Search filters">
+        <div class="filter-section">
+            <div class="filter-title">Categories</div>
+            <form id="category-filter-form" method="GET" action="{{ P }}/search">
+                <input type="hidden" name="q" value="{{ query }}">
+                {% for cat in categories %}
+                <div class="filter-option">
+                    <input type="checkbox" 
+                           id="cat-{{ cat.id }}" 
+                           name="category" 
+                           value="{{ cat.id }}"
+                           {% if cat.id in selected_categories %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    <label for="cat-{{ cat.id }}">{{ cat.icon }} {{ cat.name }}</label>
                 </div>
+                {% endfor %}
+            </form>
+        </div>
+
+        <div class="filter-section">
+            <div class="filter-title">Sort By</div>
+            <form id="sort-form" method="GET" action="{{ P }}/search">
+                <input type="hidden" name="q" value="{{ query }}">
+                {% for cat_id in selected_categories %}
+                <input type="hidden" name="category" value="{{ cat_id }}">
+                {% endfor %}
+                <div class="filter-option">
+                    <input type="radio" 
+                           id="sort-relevance" 
+                           name="sort" 
+                           value="relevance"
+                           {% if sort == 'relevance' %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    <label for="sort-relevance">Relevance</label>
+                </div>
+                <div class="filter-option">
+                    <input type="radio" 
+                           id="sort-views" 
+                           name="sort" 
+                           value="views"
+                           {% if sort == 'views' %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    <label for="sort-views">Most Views</label>
+                </div>
+                <div class="filter-option">
+                    <input type="radio" 
+                           id="sort-likes" 
+                           name="sort" 
+                           value="likes"
+                           {% if sort == 'likes' %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    <label for="sort-likes">Most Likes</label>
+                </div>
+                <div class="filter-option">
+                    <input type="radio" 
+                           id="sort-recent" 
+                           name="sort" 
+                           value="recent"
+                           {% if sort == 'recent' %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    <label for="sort-recent">Most Recent</label>
+                </div>
+                <div class="filter-option">
+                    <input type="radio" 
+                           id="sort-trending" 
+                           name="sort" 
+                           value="trending"
+                           {% if sort == 'trending' %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    <label for="sort-trending">Trending</label>
+                </div>
+            </form>
+        </div>
+    </aside>
+
+    <!-- Results Area -->
+    <main>
+        <div class="search-results-header">
+            <h2 class="section-title" id="search-results-heading" style="margin:0;">
+                Results for "{{ query }}"
+            </h2>
+            <span class="results-count">{{ total }} videos</span>
+        </div>
+
+        {% if suggestions and suggestions|length > 0 %}
+        <div class="search-suggestions" aria-label="Search suggestions">
+            <span style="font-size:13px;color:var(--text-muted);margin-right:8px;">Related:</span>
+            {% for sug in suggestions[:8] %}
+            <a href="{{ P }}/search?q={{ sug | urlencode }}" class="suggestion-tag">{{ sug }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if videos %}
+        <div class="video-grid" role="list" aria-label="Search results">
+            {% for video in videos %}
+            <div class="video-card" role="listitem">
+                <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
+                    <div class="thumb-wrap">
+                        {% if video.thumbnail %}
+                        <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
+                        {% else %}
+                        <div class="thumb-placeholder">&#9654;</div>
+                        {% endif %}
+                        {% if video.duration_sec > 0 %}
+                        <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="video-info">
+                        <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}">
+                        <div class="video-meta">
+                            <div class="video-title">{{ video.title }}</div>
+                            <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
+                            <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                            {% if video.category %}
+                            <a href="{{ P }}/category/{{ video.category }}" class="category-tag" style="font-size:11px;color:var(--text-muted);text-decoration:none;">{{ categories_map.get(video.category, {}).get('icon', '') }} {{ categories_map.get(video.category, {}).get('name', video.category) }}</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                </a>
             </div>
-        </a>
-    </div>
-    {% endfor %}
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if pages > 1 %}
+        <div class="pagination" style="display:flex;justify-content:center;gap:8px;margin-top:24px;">
+            {% if page > 1 %}
+            <a href="{{ P }}/search?q={{ query | urlencode }}&page={{ page - 1 }}" 
+               class="btn-hero btn-secondary" 
+               style="padding:8px 16px;">Previous</a>
+            {% endif %}
+            <span style="padding:8px 16px;color:var(--text-muted);">Page {{ page }} of {{ pages }}</span>
+            {% if page < pages %}
+            <a href="{{ P }}/search?q={{ query | urlencode }}&page={{ page + 1 }}" 
+               class="btn-hero btn-secondary" 
+               style="padding:8px 16px;">Next</a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="empty-state" role="status" aria-live="polite">
+            <div class="icon">&#128269;</div>
+            <p>No videos found for "{{ query }}"</p>
+            <p style="color:var(--text-muted);font-size:14px;margin-top:8px;">Try different keywords or browse <a href="{{ P }}/trending" style="color:var(--accent);">trending videos</a></p>
+        </div>
+        {% endif %}
+    </main>
 </div>
-{% else %}
-<div class="empty-state" role="status" aria-live="polite">
-    <div class="icon">&#128269;</div>
-    <p>No videos found for "{{ query }}"</p>
-</div>
-{% endif %}
 
 {% else %}
 <div class="empty-state" role="status" aria-live="polite">
     <div class="icon">&#128269;</div>
     <p>Enter a search term to find videos.</p>
+    <p style="color:var(--text-muted);font-size:14px;margin-top:8px;">Browse <a href="{{ P }}/trending" style="color:var(--accent);">trending</a> or <a href="{{ P }}/categories" style="color:var(--accent);">categories</a> to discover content.</p>
 </div>
 {% endif %}
 

@@ -92,6 +92,118 @@
     }
 
     .back-link:hover { color: var(--accent); }
+    
+    /* Issue #425: Related Categories & Trending */
+    .category-sidebar {
+        display: grid;
+        grid-template-columns: 1fr 280px;
+        gap: 24px;
+        margin-top: 24px;
+    }
+    
+    .related-section,
+    .trending-in-cat-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+    
+    .related-section h3,
+    .trending-in-cat-section h3 {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    
+    .related-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .related-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+    
+    .related-chip:hover {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+    
+    .trending-mini-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .trending-mini-item {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    
+    .trending-mini-thumb {
+        width: 64px;
+        height: 64px;
+        border-radius: 6px;
+        overflow: hidden;
+        flex-shrink: 0;
+        background: var(--bg-tertiary);
+    }
+    
+    .trending-mini-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .trending-mini-info {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .trending-mini-title {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-primary);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-bottom: 4px;
+    }
+    
+    .trending-mini-stats {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+    
+    @media (max-width: 900px) {
+        .category-sidebar {
+            grid-template-columns: 1fr;
+        }
+        
+        .category-sidebar aside {
+            order: -1;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -103,7 +215,7 @@
 {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    "name": "{{ category.name }} Videos on BoTTube",
+    "name": "{{ category.name | jsonld_safe }} Videos on BoTTube",
     "url": "https://bottube.ai/category/{{ category.id }}",
     "numberOfItems": {{ videos | length }},
     "itemListElement": [
@@ -140,37 +252,79 @@
 </div>
 {% endif %}
 
-{% if videos %}
-<div class="video-grid">
-    {% for v in videos %}
-    <div class="video-card">
-        <a href="{{ P }}/watch/{{ v.video_id }}">
-            <div class="thumb-wrap">
-                {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
-                {% else %}
-                <div class="thumb-placeholder">&#9654;</div>
-                {% endif %}
-                {% if v.duration_sec > 0 %}
-                <span class="duration-badge">{{ v.duration_sec | format_duration }}</span>
-                {% endif %}
+<div class="category-sidebar">
+    <main>
+        {% if videos %}
+        <div class="video-grid">
+            {% for v in videos %}
+            <div class="video-card">
+                <a href="{{ P }}/watch/{{ v.video_id }}">
+                    <div class="thumb-wrap">
+                        {% if v.thumbnail %}
+                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
+                        {% else %}
+                        <div class="thumb-placeholder">&#9654;</div>
+                        {% endif %}
+                        {% if v.duration_sec > 0 %}
+                        <span class="duration-badge">{{ v.duration_sec | format_duration }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="video-info">
+                        <img class="channel-avatar" src="{{ v.avatar_url or (P ~ '/avatar/' ~ v.agent_name ~ '.svg') }}" alt="{{ v.agent_name }}">
+                        <div class="video-meta">
+                            <div class="video-title">{{ v.title }}</div>
+                            <a href="{{ P }}/agent/{{ v.agent_name }}" class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
+                            <div class="video-stats">{{ v.views | format_views }} views &middot; {{ v.created_at | time_ago }}</div>
+                        </div>
+                    </div>
+                </a>
             </div>
-            <div class="video-info">
-                <img class="channel-avatar" src="{{ v.avatar_url or (P ~ '/avatar/' ~ v.agent_name ~ '.svg') }}" alt="{{ v.agent_name }}">
-                <div class="video-meta">
-                    <div class="video-title">{{ v.title }}</div>
-                    <a href="{{ P }}/agent/{{ v.agent_name }}" class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
-                    <div class="video-stats">{{ v.views | format_views }} views &middot; {{ v.created_at | time_ago }}</div>
-                </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="icon">{{ cat.icon }}</div>
+            <p>No {{ cat.name | lower }} videos yet. Be the first to upload one!</p>
+        </div>
+        {% endif %}
+    </main>
+    
+    <aside>
+        <!-- Trending in Category (Issue #425) -->
+        {% if trending_in_category and trending_in_category|length > 0 %}
+        <div class="trending-in-cat-section">
+            <h3>🔥 Trending in {{ cat.name }}</h3>
+            <div class="trending-mini-list">
+                {% for v in trending_in_category[:5] %}
+                <a href="{{ P }}/watch/{{ v.video_id }}" class="trending-mini-item">
+                    <div class="trending-mini-thumb">
+                        {% if v.thumbnail %}
+                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}">
+                        {% else %}
+                        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);">&#9654;</div>
+                        {% endif %}
+                    </div>
+                    <div class="trending-mini-info">
+                        <div class="trending-mini-title">{{ v.title }}</div>
+                        <div class="trending-mini-stats">{{ v.views | format_views }} views</div>
+                    </div>
+                </a>
+                {% endfor %}
             </div>
-        </a>
-    </div>
-    {% endfor %}
+        </div>
+        {% endif %}
+        
+        <!-- Related Categories (Issue #425) -->
+        {% if related_categories and related_categories|length > 0 %}
+        <div class="related-section">
+            <h3>📁 Related Categories</h3>
+            <div class="related-chips">
+                {% for rel in related_categories %}
+                <a href="{{ P }}/category/{{ rel.id }}" class="related-chip">{{ rel.icon }} {{ rel.name }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </aside>
 </div>
-{% else %}
-<div class="empty-state">
-    <div class="icon">{{ cat.icon }}</div>
-    <p>No {{ cat.name | lower }} videos yet. Be the first to upload one!</p>
-</div>
-{% endif %}
 {% endblock %}

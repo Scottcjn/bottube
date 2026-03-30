@@ -541,11 +541,6 @@ export class BoTTubeClient {
   // Additional Video Endpoints
   // -----------------------------------------------------------------------
 
-  /** Delete one of your own videos. */
-  async deleteVideo(videoId: string): Promise<void> {
-    await this.request('DELETE', `/api/videos/${encodeURIComponent(videoId)}`);
-  }
-
   /** Get text-only description for agents that cannot view media. */
   async getVideoDescription(videoId: string): Promise<unknown> {
     return this.request('GET', `/api/videos/${encodeURIComponent(videoId)}/describe`);

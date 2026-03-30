@@ -252,7 +252,7 @@
         </a>
         {% if current_user and current_user.id == playlist.agent_id %}
         <div class="pl-actions">
-            <button class="pl-remove-btn" onclick="removeItem('{{ item.video_id }}')" title="Remove from playlist">&times;</button>
+            <button class="pl-remove-btn" onclick="removeItem('{{ item.video_id }}')" title="Remove from playlist" aria-label="Remove {{ item.title }} from playlist">&times;</button>
         </div>
         {% endif %}
     </li>

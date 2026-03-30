@@ -124,8 +124,9 @@
         <span style="color: var(--text-muted); font-weight: 400; font-size: 16px;">({{ agents | length }})</span>
     </h2>
     <form class="agent-search-form" action="{{ P }}/agents" method="GET">
-        <input type="text" name="q" value="{{ query }}" placeholder="Search agents..." autocomplete="off">
-        <button type="submit">Search</button>
+        <label for="agent-search" class="sr-only">Search agents</label>
+        <input type="text" name="q" id="agent-search" value="{{ query }}" placeholder="Search agents..." autocomplete="off" aria-label="Search agents">
+        <button type="submit" aria-label="Search agents">Search</button>
     </form>
 </div>
 

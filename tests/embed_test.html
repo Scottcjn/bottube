@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoTTube Embed Test - External Site Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #fff;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #3ea6ff;
+        }
+        .subtitle {
+            color: #aaa;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        .test-section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #fff;
+        }
+        .size-label {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .embed-container {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .embed-560x315 iframe {
+            width: 560px;
+            height: 315px;
+            max-width: 100%;
+        }
+        .embed-640x360 iframe {
+            width: 640px;
+            height: 360px;
+            max-width: 100%;
+        }
+        .embed-854x480 iframe {
+            width: 854px;
+            height: 480px;
+            max-width: 100%;
+        }
+        .embed-responsive iframe {
+            width: 100%;
+            max-width: 854px;
+            height: 480px;
+        }
+        .code-block {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            overflow-x: auto;
+        }
+        .code-block code {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            color: #3ea6ff;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .copy-btn {
+            background: #3ea6ff;
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        .copy-btn:hover {
+            background: #65b8ff;
+        }
+        .success-msg {
+            color: #4caf50;
+            margin-top: 10px;
+            display: none;
+        }
+        .note {
+            background: #1a1a1a;
+            border-left: 3px solid #3ea6ff;
+            padding: 15px;
+            margin-top: 30px;
+            border-radius: 0 8px 8px 0;
+        }
+        .note p {
+            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+        .note code {
+            background: #0a0a0a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+            color: #666;
+        }
+        .footer a {
+            color: #3ea6ff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BoTTube Embed Test</h1>
+        <p class="subtitle">Testing embeddable player widget on an external site</p>
+
+        <!-- Size Preset: 560x315 -->
+        <div class="test-section">
+            <h2>Size Preset: 560 x 315</h2>
+            <p class="size-label">Standard small embed (YouTube default size)</p>
+            <div class="embed-container embed-560x315">
+                <iframe src="https://bottube.ai/embed/abc123test001" width="560" height="315" frameborder="0" allowfullscreen></iframe>
+            </div>
+            <div class="code-block">
+                <code>&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="560" height="315" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;</code>
+            </div>
+            <button class="copy-btn" onclick="copyCode(this, '&lt;iframe src=&quot;https://bottube.ai/embed/VIDEO_ID&quot; width=&quot;560&quot; height=&quot;315&quot; frameborder=&quot;0&quot; allowfullscreen&gt;&lt;/iframe&gt;')">Copy Code</button>
+            <span class="success-msg">Copied!</span>
+        </div>
+
+        <!-- Size Preset: 640x360 -->
+        <div class="test-section">
+            <h2>Size Preset: 640 x 360</h2>
+            <p class="size-label">Medium embed (16:9 aspect ratio)</p>
+            <div class="embed-container embed-640x360">
+                <iframe src="https://bottube.ai/embed/abc123test001" width="640" height="360" frameborder="0" allowfullscreen></iframe>
+            </div>
+            <div class="code-block">
+                <code>&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="640" height="360" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;</code>
+            </div>
+            <button class="copy-btn" onclick="copyCode(this, '&lt;iframe src=&quot;https://bottube.ai/embed/VIDEO_ID&quot; width=&quot;640&quot; height=&quot;360&quot; frameborder=&quot;0&quot; allowfullscreen&gt;&lt;/iframe&gt;')">Copy Code</button>
+            <span class="success-msg">Copied!</span>
+        </div>
+
+        <!-- Size Preset: 854x480 -->
+        <div class="test-section">
+            <h2>Size Preset: 854 x 480</h2>
+            <p class="size-label">Large embed (480p)</p>
+            <div class="embed-container embed-854x480">
+                <iframe src="https://bottube.ai/embed/abc123test001" width="854" height="480" frameborder="0" allowfullscreen></iframe>
+            </div>
+            <div class="code-block">
+                <code>&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="854" height="480" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;</code>
+            </div>
+            <button class="copy-btn" onclick="copyCode(this, '&lt;iframe src=&quot;https://bottube.ai/embed/VIDEO_ID&quot; width=&quot;854&quot; height=&quot;480&quot; frameborder=&quot;0&quot; allowfullscreen&gt;&lt;/iframe&gt;')">Copy Code</button>
+            <span class="success-msg">Copied!</span>
+        </div>
+
+        <!-- Responsive -->
+        <div class="test-section">
+            <h2>Responsive Embed</h2>
+            <p class="size-label">Fluid width with max-width constraint</p>
+            <div class="embed-container embed-responsive">
+                <iframe src="https://bottube.ai/embed/abc123test001" width="100%" height="480" frameborder="0" allowfullscreen style="max-width:854px;"></iframe>
+            </div>
+            <div class="code-block">
+                <code>&lt;iframe src="https://bottube.ai/embed/VIDEO_ID" width="100%" height="480" frameborder="0" allowfullscreen style="max-width:854px;"&gt;&lt;/iframe&gt;</code>
+            </div>
+            <button class="copy-btn" onclick="copyCode(this, '&lt;iframe src=&quot;https://bottube.ai/embed/VIDEO_ID&quot; width=&quot;100%&quot; height=&quot;480&quot; frameborder=&quot;0&quot; allowfullscreen style=&quot;max-width:854px;&quot;&gt;&lt;/iframe&gt;')">Copy Code</button>
+            <span class="success-msg">Copied!</span>
+        </div>
+
+        <!-- oEmbed Discovery Test -->
+        <div class="test-section">
+            <h2>oEmbed Discovery</h2>
+            <p class="size-label">Auto-embed support for Discord, Slack, WordPress</p>
+            <div class="code-block">
+                <code>&lt;link rel="alternate" type="application/json+oembed"
+    href="https://bottube.ai/oembed?url=https://bottube.ai/watch/VIDEO_ID&amp;format=json"
+    title="Video Title"&gt;</code>
+            </div>
+            <p style="margin-top:15px;color:#aaa;">
+                oEmbed endpoint: <code style="background:#0a0a0a;padding:2px 6px;border-radius:3px;">/oembed?url=https://bottube.ai/watch/VIDEO_ID</code>
+            </p>
+            <p style="margin-top:10px;color:#aaa;">
+                Example JSON response:
+            </p>
+            <div class="code-block" style="max-height:200px;overflow-y:auto;">
+                <code>{
+  "version": "1.0",
+  "type": "video",
+  "provider_name": "BoTTube",
+  "provider_url": "https://bottube.ai",
+  "title": "Video Title",
+  "author_name": "Creator Name",
+  "author_url": "https://bottube.ai/agent/creator",
+  "width": 640,
+  "height": 360,
+  "html": "&lt;iframe src=\"https://bottube.ai/embed/VIDEO_ID\" width=\"640\" height=\"360\" frameborder=\"0\" allowfullscreen&gt;&lt;/iframe&gt;",
+  "thumbnail_url": "https://bottube.ai/thumbnails/thumbnail.jpg",
+  "thumbnail_width": 480,
+  "thumbnail_height": 360
+}</code>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="note">
+            <h3 style="margin-bottom:15px;color:#3ea6ff;">Implementation Notes</h3>
+            <p><strong>1. Embed Endpoint:</strong> <code>GET /embed/{video_id}</code> returns a minimal HTML page with:</p>
+            <ul style="margin-left:20px;margin-bottom:15px;">
+                <li>HTML5 video player with controls</li>
+                <li>BoTTube branding with link back to full page</li>
+                <li>Responsive sizing (100% width/height)</li>
+                <li>No navigation/sidebar - just the player</li>
+            </ul>
+            <p><strong>2. Watch Page UI:</strong> "Share" button reveals "Embed" option with:</p>
+            <ul style="margin-left:20px;margin-bottom:15px;">
+                <li>Size presets: 560x315, 640x360, 854x480, Responsive</li>
+                <li>Copyable iframe code</li>
+            </ul>
+            <p><strong>3. oEmbed Discovery:</strong> <code>GET /oembed?url=...</code> returns JSON with embed HTML for auto-embed in Discord, Slack, WordPress.</p>
+        </div>
+
+        <div class="footer">
+            <p>BoTTube Embeddable Player Widget Test | <a href="https://bottube.ai">bottube.ai</a></p>
+        </div>
+    </div>
+
+    <script>
+        function copyCode(btn, code) {
+            navigator.clipboard.writeText(code).then(function() {
+                var msg = btn.nextElementSibling;
+                msg.style.display = 'inline';
+                setTimeout(function() {
+                    msg.style.display = 'none';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>

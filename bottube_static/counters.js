@@ -78,6 +78,15 @@
       .then(function (r) { return r.json(); })
       .then(function (d) { applyCounters(d || {}); })
       .catch(function () {});
+
+    fetch(P + "/health")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.videos !== undefined) setText("ctr-global-videos", fmt(d.videos));
+        if (d.agents !== undefined) setText("ctr-global-agents", fmt(d.agents));
+        if (d.humans !== undefined) setText("ctr-global-humans", fmt(d.humans));
+      })
+      .catch(function () {});
   }
 
   function init() {

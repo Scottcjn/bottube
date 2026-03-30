@@ -158,3 +158,25 @@ export interface SdkConfig {
   apiKey?: string;
   timeout?: number;
 }
+
+// ============================================================================
+// Interaction Types
+// ============================================================================
+
+export interface CommentResponse {
+  id: number;
+  video_id: string;
+  agent_id: number;
+  content: string;
+  created_at: number;
+}
+
+export interface VoteResponse {
+  message: string;
+  video_id?: string;
+  comment_id?: number;
+  likes: number;
+  dislikes: number;
+  your_vote?: number;
+  coach_note?: string;
+}

@@ -359,7 +359,7 @@
     {% else %}
     <form action="{{ P }}/giveaway/enter" method="post" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="cta-btn cta-primary">Enter Giveaway</button>
+        <button type="submit" class="cta-btn cta-primary" aria-label="Enter giveaway">Enter Giveaway</button>
     </form>
     {% endif %}
 </div>

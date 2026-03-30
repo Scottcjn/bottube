@@ -16,6 +16,8 @@ const BEACON_API = (window.location.hostname === 'localhost' || window.location.
   ? 'http://localhost:8071'
   : '/beacon';
 
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+
 let panel, panelContent, panelPath, tooltip;
 let selectedAgent = null;
 let selectedCity = null;
@@ -170,7 +172,7 @@ function selectAgent(agentId) {
   if (pos) lerpCameraTo(pos, 40);
 
   // Panel path
-  panelPath.innerHTML = `<span class="prompt">beacon@atlas:~</span>/agent/${agent.id}`;
+  panelPath.innerHTML = `<span class="prompt">beacon@atlas:~</span>/agent/${esc(agent.id)}`;
 
   // Build panel content
   const v = agent.valuation;
@@ -181,21 +183,21 @@ function selectAgent(agentId) {
     : GRADE_COLORS[agent.grade];
 
   let html = '';
-  html += `<div class="t-cmd"><span class="dollar">$</span>cat /agent/${agent.id}</div>`;
-  html += `<div><span class="t-label">NAME</span> <span class="t-value">${agent.name}</span></div>`;
+  html += `<div class="t-cmd"><span class="dollar">$</span>cat /agent/${esc(agent.id)}</div>`;
+  html += `<div><span class="t-label">NAME</span> <span class="t-value">${esc(agent.name)}</span></div>`;
 
   if (isRelay) {
     // Relay agent: show provider, model, status, capabilities
     const provColor = getProviderColor(agent.provider);
     html += `<div><span class="t-label">TYPE</span> <span class="grade-badge" style="background:${provColor};color:#000;padding:0 6px;font-size:11px">RELAY</span></div>`;
-    html += `<div><span class="t-label">PROVIDER</span> <span class="t-value" style="color:${provColor}">${(agent.provider || 'unknown').toUpperCase()}</span></div>`;
-    html += `<div><span class="t-label">MODEL</span> <span class="t-value">${agent.model_id || '?'}</span></div>`;
-    html += `<div><span class="t-label">STATUS</span> <span class="t-value" style="color:${agent.status === 'active' ? 'var(--green)' : agent.status === 'silent' ? 'var(--amber)' : 'var(--red)'}">${(agent.status || 'unknown').toUpperCase()}</span></div>`;
-    html += `<div><span class="t-label">ROLE</span> <span class="t-value">${agent.role}</span></div>`;
-    html += `<div><span class="t-label">ADDRESS</span> <span class="t-value">${city ? city.name : '?'}, ${region ? region.name : '?'}</span></div>`;
+    html += `<div><span class="t-label">PROVIDER</span> <span class="t-value" style="color:${provColor}">${esc((agent.provider || 'unknown').toUpperCase())}</span></div>`;
+    html += `<div><span class="t-label">MODEL</span> <span class="t-value">${esc(agent.model_id || '?')}</span></div>`;
+    html += `<div><span class="t-label">STATUS</span> <span class="t-value" style="color:${agent.status === 'active' ? 'var(--green)' : agent.status === 'silent' ? 'var(--amber)' : 'var(--red)'}">${esc((agent.status || 'unknown').toUpperCase())}</span></div>`;
+    html += `<div><span class="t-label">ROLE</span> <span class="t-value">${esc(agent.role)}</span></div>`;
+    html += `<div><span class="t-label">ADDRESS</span> <span class="t-value">${esc(city ? city.name : '?')}, ${esc(region ? region.name : '?')}</span></div>`;
 
     if (agent.capabilities && agent.capabilities.length > 0) {
-      html += `<div><span class="t-label">CAPS</span> <span class="t-value">${agent.capabilities.map(c => `[${c}]`).join(' ')}</span></div>`;
+      html += `<div><span class="t-label">CAPS</span> <span class="t-value">${agent.capabilities.map(c => `[${esc(c)}]`).join(' ')}</span></div>`;
     }
 
     if (agent.beat_count) {
@@ -210,11 +212,11 @@ function selectAgent(agentId) {
     html += `</div>`;
   } else {
     // Native agent: original display
-    html += `<div><span class="t-label">BEACON</span> <span class="t-value" style="color: var(--text-dim)">${agent.beacon}</span></div>`;
-    html += `<div><span class="t-label">ROLE</span> <span class="t-value">${agent.role}</span></div>`;
-    html += `<div><span class="t-label">GRADE</span> <span class="grade-badge grade-${agent.grade}">${agent.grade}</span>`;
+    html += `<div><span class="t-label">BEACON</span> <span class="t-value" style="color: var(--text-dim)">${esc(agent.beacon)}</span></div>`;
+    html += `<div><span class="t-label">ROLE</span> <span class="t-value">${esc(agent.role)}</span></div>`;
+    html += `<div><span class="t-label">GRADE</span> <span class="grade-badge grade-${esc(agent.grade)}">${esc(agent.grade)}</span>`;
     html += `${renderBar(agent.score, agent.maxScore, gradeColor)} ${agent.score}/${agent.maxScore}</div>`;
-    html += `<div><span class="t-label">ADDRESS</span> <span class="t-value">${city ? city.name : '?'}, ${region ? region.name : '?'}</span></div>`;
+    html += `<div><span class="t-label">ADDRESS</span> <span class="t-value">${esc(city ? city.name : '?')}, ${esc(region ? region.name : '?')}</span></div>`;
 
     // Valuation breakdown
     html += `<div class="t-section">-- VALUATION BREAKDOWN --</div>`;
@@ -258,7 +260,7 @@ function selectAgent(agentId) {
       const dir = c.from === agentId ? '->' : '<-';
       html += `<div class="contract-row ${c.type}">`;
       html += `<span class="contract-type" style="background:${CONTRACT_STYLES_CSS[c.type]}">[${c.type.toUpperCase().replace('_', ' ')}]</span>`;
-      html += `<span>${dir} ${other ? other.name : '?'}  ${c.amount} ${c.currency}</span>`;
+      html += `<span>${dir} ${esc(other ? other.name : '?')}  ${c.amount} ${esc(c.currency)}</span>`;
       html += `<span class="contract-state state-${c.state}">${c.state}</span>`;
       html += `</div>`;
     }
@@ -329,15 +331,15 @@ function selectCity(cityId) {
   const center = getCityCenter(cityId);
   if (center) lerpCameraTo(center, 60);
 
-  panelPath.innerHTML = `<span class="prompt">beacon@atlas:~</span>/city/${city.id}`;
+  panelPath.innerHTML = `<span class="prompt">beacon@atlas:~</span>/city/${esc(city.id)}`;
 
   let html = '';
-  html += `<div class="t-cmd"><span class="dollar">$</span>cat /city/${city.id}</div>`;
-  html += `<div><span class="t-label">NAME</span> <span class="t-value">${city.name}</span></div>`;
-  html += `<div><span class="t-label">REGION</span> <span class="t-value" style="color:${region.color}">${region.name}</span></div>`;
-  html += `<div><span class="t-label">TYPE</span> <span class="t-value">${city.type.toUpperCase()}</span></div>`;
+  html += `<div class="t-cmd"><span class="dollar">$</span>cat /city/${esc(city.id)}</div>`;
+  html += `<div><span class="t-label">NAME</span> <span class="t-value">${esc(city.name)}</span></div>`;
+  html += `<div><span class="t-label">REGION</span> <span class="t-value" style="color:${region.color}">${esc(region.name)}</span></div>`;
+  html += `<div><span class="t-label">TYPE</span> <span class="t-value">${esc(city.type.toUpperCase())}</span></div>`;
   html += `<div><span class="t-label">POPULATION</span> <span class="t-value">${city.population}</span></div>`;
-  html += `<div style="margin-top:6px;color:var(--text-dim);font-size:12px">${city.description}</div>`;
+  html += `<div style="margin-top:6px;color:var(--text-dim);font-size:12px">${esc(city.description)}</div>`;
 
   // Residents
   const residents = AGENTS.filter(a => a.city === cityId);
@@ -352,8 +354,8 @@ function selectCity(cityId) {
       } else {
         html += `<span class="resident-grade grade-badge grade-${r.grade}" style="padding:0 4px;font-size:11px">${r.grade}</span>`;
       }
-      html += `<span class="resident-name">${r.name}</span>`;
-      html += `<span class="resident-role">${r.role}</span>`;
+      html += `<span class="resident-name">${esc(r.name)}</span>`;
+      html += `<span class="resident-role">${esc(r.role)}</span>`;
       html += `</div>`;
     }
     html += `</div>`;
@@ -427,7 +429,7 @@ function updateHash(type, id) {
 // --- Contract creation form ---
 function showContractForm(preselectedFrom) {
   const agentOptions = AGENTS.map(a =>
-    `<option value="${a.id}"${a.id === preselectedFrom ? ' selected' : ''}>${a.name}</option>`
+    `<option value="${esc(a.id)}"${a.id === preselectedFrom ? ' selected' : ''}>${esc(a.name)}</option>`
   ).join('');
 
   panelPath.innerHTML = `<span class="prompt">beacon@atlas:~</span>/contracts/new`;
@@ -709,12 +711,12 @@ function renderBountyList(bounties) {
     const safeUrl = (b.url || '').replace(/'/g, '%27');
     html += `<div class="bounty-card">`;
     html += `<div style="display:flex;justify-content:space-between;align-items:center">`;
-    html += `<span style="color:var(--green);font-weight:600;font-size:13px">${b.title}</span>`;
-    html += `<span style="color:#ffd700;font-size:12px;font-weight:600;white-space:nowrap;margin-left:8px">${b.reward}</span>`;
+    html += `<span style="color:var(--green);font-weight:600;font-size:13px">${esc(b.title)}</span>`;
+    html += `<span style="color:#ffd700;font-size:12px;font-weight:600;white-space:nowrap;margin-left:8px">${esc(b.reward)}</span>`;
     html += `</div>`;
     html += `<div style="display:flex;gap:8px;font-size:11px;margin-top:4px;align-items:center">`;
-    html += `<span style="color:${DIFF_COLORS[b.difficulty] || DIFF_COLORS.ANY}">[${b.difficulty}]</span>`;
-    html += `<span style="color:var(--text-dim)">${b.repo} ${b.ghNum || b.id}</span>`;
+    html += `<span style="color:${DIFF_COLORS[b.difficulty] || DIFF_COLORS.ANY}">[${esc(b.difficulty)}]</span>`;
+    html += `<span style="color:var(--text-dim)">${esc(b.repo)} ${esc(b.ghNum || b.id)}</span>`;
     if (safeUrl) {
       html += `<a href="${safeUrl}" target="_blank" class="bounty-link" style="font-size:10px;padding:1px 6px">[GitHub]</a>`;
     }
@@ -732,10 +734,10 @@ function renderBountyList(bounties) {
       const agent = AGENTS.find(a => a.id === b.claimant);
       html += `<div class="bounty-card" style="border-left-color:var(--amber)">`;
       html += `<div style="display:flex;justify-content:space-between">`;
-      html += `<span style="color:var(--amber);font-size:13px">${b.title}</span>`;
-      html += `<span style="color:#ffd700;font-size:12px">${b.reward}</span>`;
+      html += `<span style="color:var(--amber);font-size:13px">${esc(b.title)}</span>`;
+      html += `<span style="color:#ffd700;font-size:12px">${esc(b.reward)}</span>`;
       html += `</div>`;
-      html += `<div style="font-size:11px;color:var(--amber);margin-top:3px">Claimed by: ${agent ? agent.name : b.claimant}</div>`;
+      html += `<div style="font-size:11px;color:var(--amber);margin-top:3px">Claimed by: ${esc(agent ? agent.name : b.claimant)}</div>`;
       html += `</div>`;
     }
   }
@@ -748,10 +750,10 @@ function renderBountyList(bounties) {
       const repGain = 10 + (b.reward_rtc || 0) * 0.1;
       html += `<div class="bounty-card" style="border-left-color:#8888ff;opacity:0.7">`;
       html += `<div style="display:flex;justify-content:space-between">`;
-      html += `<span style="color:#8888ff;font-size:13px">${b.title}</span>`;
-      html += `<span style="color:#ffd700;font-size:12px">${b.reward}</span>`;
+      html += `<span style="color:#8888ff;font-size:13px">${esc(b.title)}</span>`;
+      html += `<span style="color:#ffd700;font-size:12px">${esc(b.reward)}</span>`;
       html += `</div>`;
-      html += `<div style="font-size:11px;color:#8888ff;margin-top:3px">Completed by: ${agent ? agent.name : b.completed_by} (+${repGain.toFixed(0)} rep)</div>`;
+      html += `<div style="font-size:11px;color:#8888ff;margin-top:3px">Completed by: ${esc(agent ? agent.name : b.completed_by)} (+${repGain.toFixed(0)} rep)</div>`;
       html += `</div>`;
     }
   }
@@ -785,7 +787,7 @@ async function showBounties() {
       const medal = i === 0 ? '1st' : i === 1 ? '2nd' : i === 2 ? '3rd' : `${i+1}th`;
       const color = i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : 'var(--text-dim)';
       html += `<div style="display:flex;justify-content:space-between;font-size:12px;margin:2px 0;cursor:pointer" data-leaderboard-agent="${r.agent_id}">`;
-      html += `<span><span style="color:${color};width:28px;display:inline-block">${medal}</span> ${name}</span>`;
+      html += `<span><span style="color:${color};width:28px;display:inline-block">${medal}</span> ${esc(name)}</span>`;
       html += `<span style="color:${color}">${r.score} rep</span>`;
       html += `</div>`;
     }

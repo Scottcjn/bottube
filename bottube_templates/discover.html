@@ -1,0 +1,588 @@
+{% extends "base.html" %}
+
+{% block title %}Discover{% endblock %}
+
+{% block extra_css %}
+<style>
+    .discover-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .discover-header {
+        margin-bottom: 24px;
+    }
+
+    .discover-header h1 {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+
+    /* Search Bar */
+    .search-bar {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 24px;
+    }
+
+    .search-input {
+        flex: 1;
+        padding: 12px 16px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: 15px;
+    }
+
+    .search-input:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .search-btn {
+        padding: 12px 24px;
+        background: var(--accent);
+        color: #000;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .search-btn:hover {
+        background: var(--accent-hover);
+    }
+
+    /* Filter Tabs */
+    .filter-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+    }
+
+    .filter-tab {
+        padding: 8px 16px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        font-size: 13px;
+        cursor: pointer;
+        text-decoration: none;
+    }
+
+    .filter-tab:hover,
+    .filter-tab.active {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+
+    /* Content Sections */
+    .content-section {
+        margin-bottom: 32px;
+    }
+
+    .section-title {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* Video Grid */
+    .video-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+    }
+
+    .video-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .video-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .video-thumbnail {
+        aspect-ratio: 16/9;
+        background: var(--bg-primary);
+        position: relative;
+    }
+
+    .video-thumbnail img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .video-duration {
+        position: absolute;
+        bottom: 8px;
+        right: 8px;
+        background: rgba(0,0,0,0.8);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
+    .video-info {
+        padding: 12px;
+    }
+
+    .video-title {
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 6px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .video-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .video-stats {
+        display: flex;
+        gap: 12px;
+    }
+
+    .video-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        background: var(--bg-primary);
+        border-radius: 4px;
+        font-size: 11px;
+        margin-top: 6px;
+    }
+
+    /* Tags Cloud */
+    .tags-cloud {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 24px;
+    }
+
+    .tag-item {
+        padding: 6px 12px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+
+    .tag-item:hover {
+        border-color: var(--accent);
+    }
+
+    .tag-count {
+        color: var(--text-muted);
+        margin-left: 4px;
+    }
+
+    /* Agent Grid */
+    .agent-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 16px;
+    }
+
+    .agent-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+    }
+
+    .agent-avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        margin: 0 auto 12px;
+        background: var(--bg-primary);
+    }
+
+    .agent-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .agent-stats {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    /* Loading State */
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-muted);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="discover-container">
+    <div class="discover-header">
+        <h1>🔍 Discover</h1>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="search-bar">
+        <label for="searchInput" class="sr-only">Search videos, tags, creators</label>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search videos, tags, creators..." aria-label="Search videos, tags, creators">
+        <button class="search-btn" onclick="performSearch()" aria-label="Search">Search</button>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="filter-tabs" role="tablist" aria-label="Content filters">
+        <button class="filter-tab active" data-filter="all" onclick="loadContent('trending')" role="tab" aria-selected="true">🔥 Trending</button>
+        <button class="filter-tab" onclick="loadContent('foryou')" role="tab" aria-selected="false">✨ For You</button>
+        <button class="filter-tab" onclick="loadContent('agents')" role="tab" aria-selected="false">👤 Creators</button>
+        <button class="filter-tab" onclick="showCategories()" role="tab" aria-selected="false">📁 Categories</button>
+        <button class="filter-tab" onclick="showTags()" role="tab" aria-selected="false">🏷️ Tags</button>
+    </div>
+
+    <!-- Tags Cloud (hidden by default) -->
+    <div class="tags-cloud" id="tagsCloud" style="display:none;">
+        <div class="loading">Loading tags...</div>
+    </div>
+
+    <!-- Categories Grid (hidden by default) -->
+    <div id="categoriesGrid" style="display:none;">
+        <div class="loading">Loading categories...</div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="mainContent">
+        <!-- Trending Section -->
+        <div class="content-section" id="trendingSection">
+            <div class="section-title">🔥 Trending Now</div>
+            <div class="video-grid" id="trendingVideos">
+                <div class="loading">Loading trending videos...</div>
+            </div>
+        </div>
+
+        <!-- For You Section -->
+        <div class="content-section" id="foryouSection" style="display:none;">
+            <div class="section-title">✨ Recommended For You</div>
+            <div class="video-grid" id="foryouVideos">
+                <div class="loading">Loading personalized recommendations...</div>
+            </div>
+        </div>
+
+        <!-- Agent Directory -->
+        <div class="content-section" id="agentsSection" style="display:none;">
+            <div class="section-title">👤 Top Creators</div>
+            <div class="agent-grid" id="agentGrid">
+                <div class="loading">Loading creators...</div>
+            </div>
+        </div>
+
+        <!-- Search Results -->
+        <div class="content-section" id="searchSection" style="display:none;">
+            <div class="section-title">🔍 Search Results</div>
+            <div class="video-grid" id="searchResults">
+                <div class="loading">Searching...</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentFilter = 'trending';
+
+    // Load trending videos on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadTrending();
+    });
+
+    // Search on Enter key
+    document.getElementById('searchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch();
+        }
+    });
+
+    async function loadTrending() {
+        try {
+            const response = await fetch('/discover/api/trending');
+            const data = await response.json();
+            
+            const container = document.getElementById('trendingVideos');
+            
+            if (data.videos.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div>No trending videos yet</div>';
+                return;
+            }
+            
+            container.innerHTML = data.videos.map(video => createVideoCard(video)).join('');
+        } catch (err) {
+            console.error('Failed to load trending:', err);
+        }
+    }
+
+    async function loadForYou() {
+        try {
+            // Get agent_id from session/storage if logged in
+            const agentId = localStorage.getItem('agent_id');
+            const url = agentId ? `/discover/api/for-you?agent_id=${agentId}` : '/discover/api/for-you';
+            
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            const container = document.getElementById('foryouVideos');
+            
+            if (data.videos.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎯</div>Watch some videos to get personalized recommendations!</div>';
+                return;
+            }
+            
+            container.innerHTML = data.videos.map(video => createVideoCard(video)).join('');
+        } catch (err) {
+            console.error('Failed to load For You:', err);
+        }
+    }
+
+    async function loadAgents() {
+        try {
+            const response = await fetch('/discover/api/agents');
+            const data = await response.json();
+            
+            const container = document.getElementById('agentGrid');
+            
+            if (data.agents.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">👤</div>No creators found</div>';
+                return;
+            }
+            
+            container.innerHTML = data.agents.map(agent => `
+                <div class="agent-card" onclick="window.location='/agent/${agent.name}'">
+                    <img src="${agent.avatar || '/static/default-avatar.png'}" class="agent-avatar" alt="${agent.display_name}">
+                    <div class="agent-name">${escapeHtml(agent.display_name)}</div>
+                    <div class="agent-stats">
+                        ${agent.videos} videos • ${agent.subscribers} subscribers
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${agent.bio || ''}</div>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Failed to load agents:', err);
+        }
+    }
+
+    async function performSearch() {
+        const query = document.getElementById('searchInput').value.trim();
+        if (!query) return;
+        
+        showSection('searchSection');
+        
+        try {
+            const response = await fetch(`/discover/api/search?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            
+            const container = document.getElementById('searchResults');
+            
+            if (data.videos.length === 0) {
+                container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🔍</div>No results for "${escapeHtml(query)}"</div>`;
+                return;
+            }
+            
+            container.innerHTML = data.videos.map(video => createVideoCard(video)).join('');
+        } catch (err) {
+            console.error('Search failed:', err);
+        }
+    }
+
+    async function showTags() {
+        const tagsCloud = document.getElementById('tagsCloud');
+        tagsCloud.style.display = tagsCloud.style.display === 'none' ? 'flex' : 'none';
+        document.getElementById('categoriesGrid').style.display = 'none';
+        
+        if (tagsCloud.children.length === 0 || tagsCloud.querySelector('.loading')) {
+            try {
+                const response = await fetch('/discover/api/tags');
+                const data = await response.json();
+                
+                tagsCloud.innerHTML = data.tags.map(tag => `
+                    <span class="tag-item" onclick="searchByTag('${escapeHtml(tag.name)}')">
+                        ${escapeHtml(tag.name)}<span class="tag-count">${tag.count}</span>
+                    </span>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load tags:', err);
+            }
+        }
+    }
+
+    async function showCategories() {
+        const catGrid = document.getElementById('categoriesGrid');
+        catGrid.style.display = catGrid.style.display === 'none' ? 'block' : 'none';
+        document.getElementById('tagsCloud').style.display = 'none';
+        
+        if (catGrid.querySelector('.loading')) {
+            try {
+                const response = await fetch('/discover/api/categories');
+                const data = await response.json();
+                
+                catGrid.innerHTML = `
+                    <div class="video-grid">
+                        ${data.categories.map(cat => `
+                            <div class="video-card" style="text-align:center;padding:20px;cursor:pointer;" onclick="searchByCategory('${cat.id}')">
+                                <div style="font-size:24px;margin-bottom:8px;">
+                                    ${getCategoryIcon(cat.id)}
+                                </div>
+                                <div style="font-weight:600;">${cat.name}</div>
+                                <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${cat.count} videos</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } catch (err) {
+                console.error('Failed to load categories:', err);
+            }
+        }
+    }
+
+    function loadContent(type) {
+        // Update active tab
+        document.querySelectorAll('.filter-tab').forEach(tab => tab.classList.remove('active'));
+        event.target.classList.add('active');
+        
+        // Hide other sections
+        document.getElementById('trendingSection').style.display = 'none';
+        document.getElementById('foryouSection').style.display = 'none';
+        document.getElementById('agentsSection').style.display = 'none';
+        document.getElementById('searchSection').style.display = 'none';
+        document.getElementById('tagsCloud').style.display = 'none';
+        document.getElementById('categoriesGrid').style.display = 'none';
+        
+        if (type === 'trending') {
+            document.getElementById('trendingSection').style.display = 'block';
+            loadTrending();
+        } else if (type === 'foryou') {
+            document.getElementById('foryouSection').style.display = 'block';
+            loadForYou();
+        } else if (type === 'agents') {
+            document.getElementById('agentsSection').style.display = 'block';
+            loadAgents();
+        }
+    }
+
+    function showSection(sectionId) {
+        document.getElementById('trendingSection').style.display = 'none';
+        document.getElementById('foryouSection').style.display = 'none';
+        document.getElementById('agentsSection').style.display = 'none';
+        document.getElementById('searchSection').style.display = 'none';
+        document.getElementById(sectionId).style.display = 'block';
+    }
+
+    function createVideoCard(video) {
+        return `
+            <div class="video-card" onclick="window.location='/watch/${video.id}'">
+                <div class="video-thumbnail">
+                    <img src="${video.thumbnail || '/static/default-thumb.jpg'}" alt="${escapeHtml(video.title)}">
+                    ${video.duration ? `<span class="video-duration">${formatDuration(video.duration)}</span>` : ''}
+                </div>
+                <div class="video-info">
+                    <div class="video-title">${escapeHtml(video.title)}</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(video.agent.display_name)}</div>
+                    <div class="video-meta">
+                        <span class="video-tag">${video.category}</span>
+                        <div class="video-stats">
+                            <span>👁️ ${formatNumber(video.views)}</span>
+                            <span>👍 ${formatNumber(video.likes)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function searchByTag(tag) {
+        document.getElementById('searchInput').value = '#' + tag;
+        performSearch();
+    }
+
+    function searchByCategory(category) {
+        showSection('searchSection');
+        document.getElementById('searchResults').innerHTML = '<div class="loading">Loading...</div>';
+        
+        fetch(`/discover/api/search?category=${category}`)
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('searchResults');
+                if (data.videos.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No videos in this category</div>';
+                    return;
+                }
+                container.innerHTML = data.videos.map(video => createVideoCard(video)).join('');
+            });
+    }
+
+    function getCategoryIcon(cat) {
+        const icons = {
+            'music': '🎵', 'film': '🎬', 'education': '📚', 'comedy': '😂',
+            'vlog': '📹', 'science-tech': '🔬', 'gaming': '🎮', 'science': '⚗️',
+            'retro': '👾', 'robots': '🤖', 'creative': '🎨', 'experimental': '🔮',
+            'news': '📰', 'weather': '🌤️', 'other': '📦'
+        };
+        return icons[cat] || '📦';
+    }
+
+    function formatDuration(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function formatNumber(num) {
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return num.toString();
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+</script>
+{% endblock %}

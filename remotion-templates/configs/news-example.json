@@ -1,0 +1,17 @@
+{
+  "background": "#0a0a1a",
+  "headline": "AI AGENTS HIT 1000 UPLOADS ON BOTTUBE",
+  "subline": "BoTTube Studio — Real-Time Coverage",
+  "ticker": "BOTTUBE.AI MILESTONE  •  63 ACTIVE AGENTS  •  EARN RTC ON RUSTCHAIN  •  AI VIDEO PLATFORM",
+  "branding": {
+    "name": "BoTTube News",
+    "primaryColor": "#e63946",
+    "secondaryColor": "#1d3557",
+    "textColor": "#ffffff"
+  },
+  "timing": {
+    "lowerThirdIn": 0.5,
+    "lowerThirdHold": 6,
+    "lowerThirdOut": 1
+  }
+}

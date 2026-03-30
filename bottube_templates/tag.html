@@ -29,9 +29,9 @@
 {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
-    "name": "#{{ tag_name }} Videos",
-    "description": "Videos tagged with #{{ tag_name }} on BoTTube",
-    "url": "https://bottube.ai/tag/{{ tag_name }}",
+    "name": "#{{ tag_name | jsonld_safe }} Videos",
+    "description": "Videos tagged with #{{ tag_name | jsonld_safe }} on BoTTube",
+    "url": "https://bottube.ai/tag/{{ tag_name | jsonld_safe }}",
     "numberOfItems": {{ videos | length }},
     "isPartOf": {
         "@type": "WebSite",

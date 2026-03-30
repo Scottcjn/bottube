@@ -289,27 +289,27 @@
 
     <!-- Chain Tabs -->
     <div class="chain-tabs" role="tablist">
-        <button class="chain-tab active" onclick="switchChain('wrtc')" role="tab">
+        <button class="chain-tab active" onclick="switchChain('wrtc')" role="tab" aria-label="Select wRTC (Solana) bridge" aria-selected="true">
             <span class="chain-icon">&#9788;</span> wRTC (Solana)
             <span class="chain-badge badge-live">Live</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('ergo')" role="tab">
+        <button class="chain-tab" onclick="switchChain('ergo')" role="tab" aria-label="Select ERG (Ergo) bridge" aria-selected="false">
             <span class="chain-icon">&#9830;</span> ERG (Ergo)
             <span class="chain-badge badge-live">Live</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('btc')" role="tab">
+        <button class="chain-tab" onclick="switchChain('btc')" role="tab" aria-label="Select BTC bridge (coming soon)" aria-selected="false">
             <span class="chain-icon">&#8383;</span> BTC
             <span class="chain-badge badge-soon">Soon</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('ltc')" role="tab">
+        <button class="chain-tab" onclick="switchChain('ltc')" role="tab" aria-label="Select LTC bridge (coming soon)" aria-selected="false">
             <span class="chain-icon">&#321;</span> LTC
             <span class="chain-badge badge-soon">Soon</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('doge')" role="tab">
+        <button class="chain-tab" onclick="switchChain('doge')" role="tab" aria-label="Select DOGE bridge (coming soon)" aria-selected="false">
             <span class="chain-icon">&#208;</span> DOGE
             <span class="chain-badge badge-soon">Soon</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('base')" role="tab">
+        <button class="chain-tab" onclick="switchChain('base')" role="tab" aria-label="Select wRTC (Base L2) bridge" aria-selected="false">
             <span class="chain-icon">&#9830;</span> wRTC (Base L2)
             <span class="chain-badge badge-live">Live</span>
         </button>
@@ -349,7 +349,7 @@
                 <label style="font-size:12px;color:var(--text-muted);">Token Contract</label>
                 <div class="copy-row" style="max-width:500px;margin:6px auto 0;">
                     <span class="addr">{{ wrtc_mint }}</span>
-                    <button class="copy-btn" onclick="copyText('{{ wrtc_mint }}', this)">Copy</button>
+                    <button class="copy-btn" onclick="copyText('{{ wrtc_mint }}', this)" aria-label="Copy wRTC token contract address">Copy</button>
                 </div>
             </div>
         </div>
@@ -365,14 +365,14 @@
                 <label>Reserve Wallet (send wRTC here)</label>
                 <div class="copy-row">
                     <span class="addr">{{ reserve_wallet }}</span>
-                    <button class="copy-btn" onclick="copyText('{{ reserve_wallet }}', this)">Copy</button>
+                    <button class="copy-btn" onclick="copyText('{{ reserve_wallet }}', this)" aria-label="Copy reserve wallet address">Copy</button>
                 </div>
             </div>
             <div class="field-group">
                 <label>Transaction Signature (Solana)</label>
                 <input type="text" id="wrtc-deposit-tx" placeholder="5X... (Base58 signature)">
             </div>
-            <button class="btn-primary" id="wrtc-deposit-btn" onclick="submitWrtcDeposit()">Verify Transaction</button>
+            <button class="btn-primary" id="wrtc-deposit-btn" onclick="submitWrtcDeposit()" aria-label="Verify wRTC deposit transaction">Verify Transaction</button>
             <div class="fee-info">No deposit fee. Minimum deposit: 1 wRTC. Credits appear after on-chain confirmation. Security: sender wallet must match your bound Solana address.</div>
             <div class="result-box" id="wrtc-deposit-result"></div>
             {% else %}
@@ -399,7 +399,7 @@
                 <label>Amount to Withdraw (wRTC)</label>
                 <input type="number" id="wrtc-withdraw-amount" placeholder="10.0" min="10" step="0.1">
             </div>
-            <button class="btn-primary" id="wrtc-withdraw-btn" onclick="submitWrtcWithdraw()">Queue Vault Withdrawal</button>
+            <button class="btn-primary" id="wrtc-withdraw-btn" onclick="submitWrtcWithdraw()" aria-label="Queue vault withdrawal for wRTC">Queue Vault Withdrawal</button>
             <div class="fee-info">Withdrawal fee: 0.5 wRTC. Minimum: 10 wRTC. Processed within 1 hour.</div>
             <div class="result-box" id="wrtc-withdraw-result"></div>
             {% else %}
@@ -468,14 +468,14 @@
                 <label>Platform ERG Address (send ERG here)</label>
                 <div class="copy-row">
                     <span class="addr" id="ergo-addr">{{ ergo_address }}</span>
-                    <button class="copy-btn" onclick="copyText('{{ ergo_address }}', this)">Copy</button>
+                    <button class="copy-btn" onclick="copyText('{{ ergo_address }}', this)" aria-label="Copy platform ERG deposit address">Copy</button>
                 </div>
             </div>
             <div class="field-group">
                 <label>Ergo Transaction ID</label>
                 <input type="text" id="ergo-deposit-tx" placeholder="Paste your Ergo transaction ID...">
             </div>
-            <button class="btn-primary btn-ergo" id="ergo-deposit-btn" onclick="submitErgoDeposit()">Verify &amp; Credit</button>
+            <button class="btn-primary btn-ergo" id="ergo-deposit-btn" onclick="submitErgoDeposit()" aria-label="Verify ERG deposit and credit account">Verify &amp; Credit</button>
             <div class="fee-info">Deposit fee: 1%. Minimum: 0.1 ERG. Rate: 1 ERG = 8 RTC. Verified via Ergo Explorer.</div>
             <div class="result-box" id="ergo-deposit-result"></div>
             {% else %}
@@ -499,7 +499,7 @@
                 <label>Amount (RTC to convert)</label>
                 <input type="number" id="ergo-withdraw-amount" placeholder="16.0" min="8" step="0.1">
             </div>
-            <button class="btn-primary btn-ergo" id="ergo-withdraw-btn" onclick="submitErgoWithdraw()">Request Withdrawal</button>
+            <button class="btn-primary btn-ergo" id="ergo-withdraw-btn" onclick="submitErgoWithdraw()" aria-label="Request ERG withdrawal">Request Withdrawal</button>
             <div class="fee-info">Withdrawal fee: 0.5 RTC. Minimum: 8 RTC (= 1 ERG). Rate: 8 RTC = 1 ERG.</div>
             <div class="result-box" id="ergo-withdraw-result"></div>
             {% else %}
@@ -734,6 +734,9 @@ function copyText(text, btn) {
     });
 }
 
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+function sanitizeTxSig(s) { return /^[a-zA-Z0-9]+$/.test(s) ? s : ''; }
+
 // ─── Show result ────────────────────────────────────────────
 function showResult(id, ok, msg) {
     const el = document.getElementById(id);
@@ -818,12 +821,14 @@ async function loadWrtcHistory() {
             html += "<table class='history-table'><tr><th>Type</th><th>Amount</th><th>TX</th><th>Status</th><th>Date</th></tr>";
             for (const d of data.deposits) {
                 const date = new Date(d.created_at * 1000).toLocaleDateString();
-                const txShort = d.tx_signature.slice(0, 12) + "...";
-                html += `<tr><td style="color:var(--green)">Deposit</td><td>${d.amount} wRTC</td><td><a href="https://solscan.io/tx/${d.tx_signature}" target="_blank">${txShort}</a></td><td class="status-${d.status}">${d.status}</td><td>${date}</td></tr>`;
+                const safeTx = sanitizeTxSig(d.tx_signature);
+                const txShort = safeTx.slice(0, 12) + "...";
+                html += `<tr><td style="color:var(--green)">Deposit</td><td>${esc(d.amount)} wRTC</td><td>${safeTx ? `<a href="https://solscan.io/tx/${safeTx}" target="_blank">${txShort}</a>` : '—'}</td><td class="status-${esc(d.status)}">${esc(d.status)}</td><td>${date}</td></tr>`;
             }
             for (const w of data.withdrawals) {
                 const date = new Date(w.created_at * 1000).toLocaleDateString();
-                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${w.amount} wRTC</td><td>${w.tx_signature ? '<a href="https://solscan.io/tx/' + w.tx_signature + '" target="_blank">View</a>' : '—'}</td><td class="status-${w.status}">${w.status}</td><td>${date}</td></tr>`;
+                const safeWTx = w.tx_signature ? sanitizeTxSig(w.tx_signature) : '';
+                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${esc(w.amount)} wRTC</td><td>${safeWTx ? '<a href="https://solscan.io/tx/' + safeWTx + '" target="_blank">View</a>' : '—'}</td><td class="status-${esc(w.status)}">${esc(w.status)}</td><td>${date}</td></tr>`;
             }
             html += "</table>";
         }
@@ -899,11 +904,11 @@ async function loadErgoHistory() {
             html += "<table class='history-table'><tr><th>Type</th><th>ERG</th><th>RTC</th><th>Status</th><th>Date</th></tr>";
             for (const d of (data.deposits || [])) {
                 const date = new Date(d.created_at * 1000).toLocaleDateString();
-                html += `<tr><td style="color:var(--green)">Deposit</td><td>${d.erg_amount || '—'} ERG</td><td>${d.rtc_credited || '—'} RTC</td><td class="status-${d.status}">${d.status}</td><td>${date}</td></tr>`;
+                html += `<tr><td style="color:var(--green)">Deposit</td><td>${esc(d.erg_amount || '—')} ERG</td><td>${esc(d.rtc_credited || '—')} RTC</td><td class="status-${esc(d.status)}">${esc(d.status)}</td><td>${date}</td></tr>`;
             }
             for (const w of (data.withdrawals || [])) {
                 const date = new Date(w.created_at * 1000).toLocaleDateString();
-                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${w.erg_amount || '—'} ERG</td><td>${w.rtc_amount || '—'} RTC</td><td class="status-${w.status}">${w.status}</td><td>${date}</td></tr>`;
+                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${esc(w.erg_amount || '—')} ERG</td><td>${esc(w.rtc_amount || '—')} RTC</td><td class="status-${esc(w.status)}">${esc(w.status)}</td><td>${date}</td></tr>`;
             }
             html += "</table>";
         } else {

@@ -1,0 +1,37 @@
+{
+  "name": "bottube-dashboard",
+  "version": "1.0.0",
+  "description": "A practical dashboard utility for BoTTube - upload, search, and profile management",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx tests/check.ts",
+    "lint": "eslint src/**/*.ts tests/**/*.ts"
+  },
+  "keywords": [
+    "bottube",
+    "dashboard",
+    "video",
+    "sdk"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bottube-sdk": "file:../js-sdk",
+    "dotenv": "^16.3.1",
+    "ora": "^7.0.1",
+    "kleur": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.6.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

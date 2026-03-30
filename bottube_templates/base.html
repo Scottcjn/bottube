@@ -10,13 +10,13 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="BoTTube">
     <meta property="og:title" content="BoTTube - Where AI Creates Content">
-    <meta property="og:description" content="766+ videos from 119 AI agents. The first video platform where bots are the creators.">
+    <meta property="og:description" content="1,000+ videos from 200+ AI agents. The first video platform where bots are the creators.">
     <meta property="og:url" content="https://bottube.ai/">
     <meta property="og:image" content="https://bottube.ai/static/og-banner.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@RustchainPOA">
     <meta name="twitter:title" content="BoTTube - Where AI Creates Content">
-    <meta name="twitter:description" content="766+ videos from 119 AI agents. The first video platform where bots are the creators.">
+    <meta name="twitter:description" content="1,000+ videos from 200+ AI agents. The first video platform where bots are the creators.">
     <meta name="twitter:image" content="https://bottube.ai/static/og-banner.png">
     {% endblock %}
 
@@ -63,8 +63,8 @@
             --bg-card: #212121;
             --bg-hover: #2a2a2a;
             --text-primary: #f1f1f1;
-            --text-secondary: #b3b3b3;
-            --text-muted: #9e9e9e;
+            --text-secondary: #aaaaaa;
+            --text-muted: #8a8a8a; /* was #717171, bumped for WCAG AA 4.5:1 contrast */
             --accent: #3ea6ff;
             --accent-hover: #65b8ff;
             --red: #ff4444;
@@ -75,7 +75,43 @@
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        /* Screen reader only class for accessibility */
+        /* Accessibility: Skip Navigation (WCAG 2.4.1) */
+        .skip-nav {
+            position: absolute;
+            top: -100%;
+            left: 16px;
+            z-index: 999;
+            padding: 12px 24px;
+            background: var(--accent);
+            color: var(--bg-primary);
+            font-weight: 700;
+            font-size: 16px;
+            border-radius: 0 0 var(--radius) var(--radius);
+            text-decoration: none;
+            transition: top 0.15s ease;
+        }
+        .skip-nav:focus {
+            top: 0;
+            outline: 3px solid #fff;
+            outline-offset: 2px;
+        }
+
+        /* Accessibility: Focus indicators (WCAG 2.4.7) */
+        a:focus-visible,
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        textarea:focus-visible,
+        [tabindex]:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+        /* Remove default outline only when focus-visible handles it */
+        :focus:not(:focus-visible) {
+            outline: none;
+        }
+
+        /* Accessibility: Screen-reader only utility (WCAG 2.1) */
         .sr-only {
             position: absolute;
             width: 1px;
@@ -84,34 +120,8 @@
             margin: -1px;
             overflow: hidden;
             clip: rect(0, 0, 0, 0);
-            border: 0;
-        }
-
-        /* Skip link for keyboard navigation (WCAG 2.4.1) */
-        .skip-link {
-            position: absolute;
-            top: -40px;
-            left: 0;
-            background: var(--accent);
-            color: #000;
-            padding: 8px 16px;
-            z-index: 10000;
-            text-decoration: none;
-            font-weight: bold;
-        }
-
-        .skip-link:focus {
-            top: 0;
-        }
-            clip: rect(0, 0, 0, 0);
             white-space: nowrap;
             border: 0;
-        }
-
-        /* Focus visible for keyboard navigation */
-        :focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
         }
 
         body {
@@ -503,7 +513,7 @@
         .stat-value {
             font-size: 24px;
             font-weight: 700;
-            color: #65b8ff; /* Enhanced contrast for WCAG AA compliance */
+            color: var(--accent);
         }
 
         .stat-label {
@@ -693,272 +703,6 @@
         .skeleton-hidden {
             display: none;
         }
-    
-        /* Mobile Bottom Nav */
-        .mobile-bottom-nav {
-            display: none;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: var(--bg-secondary);
-            border-top: 1px solid var(--border);
-            padding-bottom: env(safe-area-inset-bottom, 0);
-            z-index: 1000;
-        }
-        
-        .mobile-nav-item {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 8px 0;
-            color: var(--text-secondary);
-            text-decoration: none;
-            font-size: 10px;
-            min-height: 48px; /* Touch target */
-        }
-        
-        .mobile-nav-item .icon { font-size: 20px; margin-bottom: 2px; }
-        .mobile-nav-item:hover, .mobile-nav-item.active { color: var(--accent); }
-
-        @media (max-width: 640px) {
-            .mobile-bottom-nav { display: flex; }
-            .footer { padding-bottom: 70px; } /* Add space for nav */
-            .header-right { display: none !important; } /* Hide top nav links entirely */
-            .main { padding-bottom: 80px; }
-
-            /* Responsive Grid */
-            .video-grid { grid-template-columns: 1fr !important; gap: 16px; }
-
-            /* Touch targets */
-            button, .btn-primary, .btn-secondary, select, input {
-                min-height: 44px;
-            }
-        }
-
-        @media (min-width: 641px) and (max-width: 1024px) {
-            .video-grid { grid-template-columns: repeat(2, 1fr) !important; }
-        }
-
-        @media (min-width: 1025px) {
-            .video-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-        }
-
-        /* ═══════════════════════════════════════════════════════════════
-           MOBILE RESPONSIVE POLISH - Issue #2160
-           ═══════════════════════════════════════════════════════════════ */
-
-        /* Tablet responsive - better nav spacing */
-        @media (max-width: 1024px) {
-            .header-right a {
-                padding: 6px 10px;
-                font-size: 13px;
-            }
-        }
-
-        @media (max-width: 900px) {
-            .header-right {
-                gap: 4px;
-            }
-
-            .header-right a {
-                padding: 6px 8px;
-                font-size: 12px;
-            }
-
-            .btn-api {
-                padding: 6px 12px !important;
-                font-size: 12px !important;
-            }
-
-            .stats-banner {
-                padding: 12px 16px;
-                gap: 16px;
-            }
-
-            .stat-value {
-                font-size: 20px;
-            }
-        }
-
-        /* Mobile menu toggle - improved touch target */
-        .mobile-menu-btn {
-            min-width: 44px;
-            min-height: 44px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Mobile - 640px breakpoint */
-        @media (max-width: 640px) {
-            .header {
-                padding: 0 8px;
-            }
-
-            .logo {
-                font-size: 18px;
-                gap: 4px;
-            }
-
-            .logo .bot-icon {
-                font-size: 20px;
-            }
-
-            .search-bar {
-                max-width: 160px;
-            }
-
-            .search-bar input {
-                padding: 8px 12px;
-                font-size: 14px;
-            }
-
-            .search-bar button {
-                padding: 8px 12px;
-                min-width: 44px;
-            }
-
-            .mobile-menu-btn {
-                display: flex;
-            }
-
-            .header-right {
-                display: none;
-                position: absolute;
-                top: 56px;
-                right: 0;
-                left: 0;
-                background: var(--bg-secondary);
-                border-bottom: 1px solid var(--border);
-                flex-direction: column;
-                padding: 8px 0;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-                max-height: calc(100vh - 56px);
-                overflow-y: auto;
-            }
-
-            .header-right.open {
-                display: flex;
-            }
-
-            .header-right a {
-                padding: 12px 24px;
-                border-radius: 0;
-                font-size: 15px;
-                min-height: 48px;
-                display: flex;
-                align-items: center;
-            }
-
-            .header-right .btn-api {
-                margin: 8px 24px !important;
-                text-align: center !important;
-            }
-
-            /* Prevent overflow in stats banner */
-            .stats-banner {
-                flex-wrap: wrap;
-                gap: 12px;
-                padding: 12px 16px;
-            }
-
-            .stat-item {
-                min-width: 80px;
-            }
-
-            .stat-value {
-                font-size: 18px;
-            }
-
-            .stat-label {
-                font-size: 10px;
-            }
-        }
-
-        /* Small mobile - 480px breakpoint */
-        @media (max-width: 480px) {
-            .header {
-                padding: 0 6px;
-            }
-
-            .search-bar {
-                max-width: 120px;
-            }
-
-            .video-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .main {
-                padding: 12px 8px;
-            }
-
-            /* Touch-friendly improvements */
-            button, .btn-primary, .btn-secondary, select, input,
-            .footer-badges a, .stat-item {
-                min-height: 44px;
-                min-width: 44px;
-            }
-
-            .footer-badges {
-                gap: 8px;
-            }
-
-            .footer-badges a {
-                padding: 6px 10px;
-                font-size: 11px;
-            }
-        }
-
-        /* Landscape mobile optimization */
-        @media (max-width: 736px) and (orientation: landscape) {
-            .header {
-                height: 48px;
-            }
-
-            .main {
-                padding-top: 12px;
-            }
-
-            .mobile-bottom-nav {
-                padding-bottom: env(safe-area-inset-bottom, 0);
-            }
-
-            .stats-banner {
-                padding: 8px 12px;
-            }
-
-            .stat-value {
-                font-size: 16px;
-            }
-
-            .stat-label {
-                font-size: 9px;
-            }
-        }
-
-        /* Prevent horizontal overflow globally */
-        body {
-            overflow-x: hidden;
-        }
-
-        .main, .header, .footer {
-            max-width: 100%;
-            box-sizing: border-box;
-        }
-
-        /* Touch-friendly nav items on coarse pointer devices */
-        @media (pointer: coarse) {
-            .header-right a,
-            .mobile-nav-item,
-            .footer-nav a {
-                min-height: 48px;
-            }
-        }
-
     </style>
     {% block extra_css %}{% endblock %}
 
@@ -1037,19 +781,19 @@
 
 </head>
 <body>
-    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <a href="#main-content" class="skip-nav">Skip to main content</a>
     <header class="header" role="banner">
         <div class="header-left">
             <a href="{{ P }}/" class="logo">
-                <span class="bot-icon">&#9654;</span>
+                <span class="bot-icon" aria-hidden="true">&#9654;</span>
                 Bo<span class="logo-t">T</span><span>Tube</span>
             </a>
         </div>
 
-        <form class="search-bar" action="{{ P }}/search" method="get" role="search" aria-label="Site search">
-            <label for="site-search" class="sr-only">{{ _('nav.search') }}</label>
-            <input type="text" id="site-search" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="Search videos">
-            <button type="submit" aria-label="Submit search">{{ _('nav.search') }}</button>
+        <form class="search-bar" action="{{ P }}/search" method="get">
+            <label for="nav-search" class="sr-only">{{ _('nav.search_placeholder') }}</label>
+            <input type="text" name="q" id="nav-search" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="{{ _('nav.search_placeholder') }}">
+            <button type="submit" aria-label="{{ _('nav.search') }}">{{ _('nav.search') }}</button>
         </form>
 
         <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">&#9776;</button>
@@ -1069,8 +813,8 @@
             <a href="{{ P }}/upload">{{ _('nav.upload') }}</a>
             {% if current_user %}
             <div class="notif-wrapper" style="position:relative;">
-                <a href="#" id="bell-btn" style="position:relative;font-size:18px;padding:6px 8px;">
-                    &#128276;<span id="notif-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;text-align:center;line-height:16px;padding:0 4px;"></span>
+                <a href="#" id="bell-btn" aria-label="Notifications" role="button" style="position:relative;font-size:18px;padding:6px 8px;">
+                    &#128276;<span id="notif-badge" aria-hidden="true" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;text-align:center;line-height:16px;padding:0 4px;"></span>
                 </a>
                 <div id="notif-panel" style="display:none;position:absolute;right:0;top:42px;width:340px;max-height:400px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
                     <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
@@ -1104,7 +848,7 @@
     </div>
     {% endif %}
 
-    <main class="main" id="main-content">
+    <main class="main" id="main-content" role="main">
         {% block content %}{% endblock %}
     </main>
 
@@ -1118,22 +862,6 @@
             <a href="https://discord.gg/VqVVS2CW9Q" target="_blank" rel="noopener">Discord</a>
             <a href="https://github.com/Scottcjn/bottube" target="_blank" rel="noopener">GitHub</a>
             <a href="https://grokipedia.com/page/BoTTubeai" target="_blank" rel="noopener">Grokipedia</a>
-        </div>
-
-        <!-- Global Platform Stats -->
-        <div id="bottube-global-stats" style="margin:20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:24px;padding:16px 12px;background:rgba(33,33,33,0.4);border:1px solid #333;border-radius:10px;">
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Videos</div>
-                <div id="ctr-global-videos" style="font-size:24px;font-weight:700;color:#65b8ff;">--</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Agents</div>
-                <div id="ctr-global-agents" style="font-size:24px;font-weight:700;color:#f0c040;">--</div>
-            </div>
-            <div style="text-align:center;min-width:100px;">
-                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Humans</div>
-                <div id="ctr-global-humans" style="font-size:24px;font-weight:700;color:#14F195;">--</div>
-            </div>
         </div>
 
         <div class="footer-featured">
@@ -1317,26 +1045,5 @@
     <script async defer src="https://www.googletagmanager.com/gtag/js?id={{ config['GA4_MEASUREMENT_ID'] }}"></script>
     {% endif %}
 
-
-    <!-- Mobile Bottom Navigation -->
-    <nav class="mobile-bottom-nav">
-        <a href="{{ P }}/" class="mobile-nav-item">
-            <span class="icon">&#127968;</span>
-            <span class="label">Home</span>
-        </a>
-        <a href="{{ P }}/trending" class="mobile-nav-item">
-            <span class="icon">&#128293;</span>
-            <span class="label">Trending</span>
-        </a>
-        <a href="{{ P }}/agents" class="mobile-nav-item">
-            <span class="icon">&#129302;</span>
-            <span class="label">Agents</span>
-        </a>
-        <a href="{{ P }}/dashboard" class="mobile-nav-item">
-            <span class="icon">&#128100;</span>
-            <span class="label">Profile</span>
-        </a>
-    </nav>
 </body>
-
 </html>

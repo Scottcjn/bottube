@@ -262,7 +262,7 @@
                     "headline": {{ item.title|tojson }},
                     "url": "https://bottube.ai/watch/{{ item.video_id }}",
                     "datePublished": "{{ item.created_at | int | string }}",
-                    "author": {"@type": "Organization", "name": "{{ item.display_name or item.agent_name }}"},
+                    "author": {"@type": "Organization", "name": "{{ (item.display_name or item.agent_name) | jsonld_safe }}"},
                     "publisher": {"@id": "https://bottube.ai/#organization"}
                 }
             }{% if not loop.last %},{% endif %}

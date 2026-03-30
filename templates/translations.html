@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Translations - BoTTube</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+        .translation-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .video-link {
+            color: #2196F3;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .video-link:hover {
+            text-decoration: underline;
+        }
+        .original {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-left: 4px solid #ccc;
+            margin: 10px 0;
+        }
+        .translation {
+            background-color: #e8f5e8;
+            padding: 15px;
+            border-left: 4px solid #4CAF50;
+            margin: 10px 0;
+        }
+        .language-tag {
+            display: inline-block;
+            background-color: #2196F3;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .title {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .description {
+            line-height: 1.4;
+        }
+        .bounty-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .search-box {
+            margin-bottom: 20px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BoTTube Video Translations</h1>
+        <p>Community-translated video descriptions in multiple languages</p>
+    </div>
+
+    <div class="bounty-info">
+        <h3>🌍 Help Make BoTTube Global</h3>
+        <p>Translate video descriptions to your native language and earn 2 RTC!</p>
+        <p>Support for: Chinese, Spanish, Portuguese, French, Japanese, Korean, German, Russian, Arabic, Hindi</p>
+    </div>
+
+    <div class="search-box">
+        <input type="text" placeholder="Search translations by language or content..." id="searchInput">
+    </div>
+
+    <div id="translationsContainer">
+        {% for translation in translations %}
+        <div class="translation-card">
+            <div class="language-tag">{{ translation.language }}</div>
+            <p><strong>Video:</strong> <a href="{{ translation.video_url }}" class="video-link" target="_blank">{{ translation.video_url }}</a></p>
+            
+            <div class="original">
+                <div class="title">Original (English):</div>
+                <div class="description">{{ translation.original_title }}</div>
+                {% if translation.original_description %}
+                <div style="margin-top: 8px;">{{ translation.original_description }}</div>
+                {% endif %}
+            </div>
+
+            <div class="translation">
+                <div class="title">Translation ({{ translation.language }}):</div>
+                <div class="description">{{ translation.translated_title }}</div>
+                {% if translation.translated_description %}
+                <div style="margin-top: 8px;">{{ translation.translated_description }}</div>
+                {% endif %}
+            </div>
+
+            {% if translation.translator %}
+            <p><small>Translated by: {{ translation.translator }}</small></p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if not translations %}
+    <div class="translation-card" style="text-align: center; color: #666;">
+        <h3>No translations yet</h3>
+        <p>Be the first to contribute translations and earn RTC rewards!</p>
+        <p>Visit <a href="https://bottube.ai" class="video-link">bottube.ai</a> to find videos to translate.</p>
+    </div>
+    {% endif %}
+
+    <script>
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const cards = document.querySelectorAll('.translation-card');
+            
+            cards.forEach(card => {
+                const text = card.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

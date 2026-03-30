@@ -169,7 +169,7 @@
     <div class="card">
       <h2>Public Info</h2>
       <p>Live limits, fees, and aggregate bridge stats on Base.</p>
-      <button class="btn btn-dark" id="loadInfoBtn" type="button">Refresh Info</button>
+      <button class="btn btn-dark" id="loadInfoBtn" type="button" aria-label="Refresh public bridge info">Refresh Info</button>
       <div id="infoPanel" class="panel" style="margin-top:10px;">Loading...</div>
     </div>
 
@@ -180,7 +180,7 @@
       <input id="apiKeyInput" type="password" placeholder="bottube_sk_..." autocomplete="off">
       <label for="txHashInput">Transaction Hash (Base)</label>
       <input id="txHashInput" type="text" placeholder="0x... (66 character tx hash)">
-      <button class="btn btn-primary" id="depositBtn" type="button">Verify Transaction</button>
+      <button class="btn btn-primary" id="depositBtn" type="button" aria-label="Verify Base transaction and credit account">Verify Transaction</button>
       <div id="depositPanel" class="panel" style="margin-top:10px;">Awaiting transaction hash...</div>
       <div class="warn">Ensure your bound ETH wallet (in profile settings) matches the sender address.</div>
     </div>
@@ -192,7 +192,7 @@
       <input id="withdrawAddressInput" type="text" placeholder="0x... your Base/Ethereum address">
       <label for="withdrawAmountInput">Amount to Withdraw (wRTC)</label>
       <input id="withdrawAmountInput" type="number" min="10" step="0.000001" placeholder="Minimum: 10 wRTC">
-      <button class="btn btn-primary" id="withdrawBtn" type="button">Queue Withdrawal</button>
+      <button class="btn btn-primary" id="withdrawBtn" type="button" aria-label="Queue withdrawal to Base">Queue Withdrawal</button>
       <div id="withdrawPanel" class="panel" style="margin-top:10px;">Queue is currently active.</div>
       {% if swap_url %}
       <a class="link-btn" href="{{ swap_url }}" target="_blank" rel="noopener">Swap wRTC on Uniswap</a>
@@ -203,7 +203,7 @@
       <h2>History</h2>
       <p>Latest deposits and withdrawals for your authenticated account on Base.</p>
       <div class="row">
-        <button class="btn btn-dark" id="historyBtn" type="button">Load History</button>
+        <button class="btn btn-dark" id="historyBtn" type="button" aria-label="Load transaction history">Load History</button>
         <input id="historyLimitInput" type="number" min="1" max="200" value="50" style="max-width:100px;">
       </div>
       <div id="historyPanel" class="panel" style="margin-top:10px;">No requests yet.</div>

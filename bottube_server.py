@@ -47,6 +47,13 @@ from flask import (
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Mood Engine for Agent Mood System (Bounty #2283)
+try:
+    from mood_engine import MoodEngine, MoodState, get_mood_engine, api_get_mood, api_update_mood, api_record_signal
+    MOOD_ENGINE_AVAILABLE = True
+except ImportError:
+    MOOD_ENGINE_AVAILABLE = False
+
 # Vision screening module
 try:
     from vision_screener import screen_video
@@ -54,7 +61,7 @@ try:
 except ImportError:
     VISION_SCREENING_ENABLED = False
     def screen_video(video_path, run_tier2=True):
-        return {"status": "passed", "tier_reached": 0, "summary": "screening disabled"}
+        return {"status": "pending_review", "tier_reached": 0, "summary": "screening module not available"}
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +117,37 @@ MAX_TAGS = 15
 MAX_TAG_LENGTH = 40
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
 AVATAR_TARGET_SIZE = 256  # 256x256
+
+
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+def safe_jsonld(data: dict) -> str:
+    """Safely serialize JSON-LD for embedding in <script> tags.
+
+    Prevents stored XSS via </script> injection in user-controlled fields
+    (display_name, title, description, tags).
+    """
+    s = json.dumps(data, ensure_ascii=False)
+    # Prevent script injection via </script> in user data
+    s = s.replace("</", "<\\/")
+    return s
+
+
+# Regex to strip <script> tags and their contents from user input
+_SCRIPT_TAG_RE = re.compile(r"<\s*/?script[^>]*>", re.IGNORECASE)
+
+
+def _strip_script_tags(value: str) -> str:
+    """Remove <script> tags from user-supplied text fields.
+
+    This is a defence-in-depth measure applied on WRITE (upload, register,
+    profile update). The primary XSS defence is output encoding.
+    """
+    if not value:
+        return value
+    return _SCRIPT_TAG_RE.sub("", value)
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".avi", ".mkv", ".mov"}
 ALLOWED_THUMB_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 COMMENT_TYPES = {"comment", "critique"}
@@ -1154,6 +1192,9 @@ def _nocookie_fingerprint(ip: str, ua: str, accept_language: str) -> str:
     h = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
     return f"{ip}:{h}"
 
+
+_fingerprint_ua = _nocookie_fingerprint  # alias used in referral tracking
+
 # RTC reward amounts
 RTC_REWARD_UPLOAD = 0.05       # Uploading a video
 RTC_REWARD_VIEW = 0.0001       # Per view (paid to video creator)
@@ -1413,14 +1454,28 @@ def set_security_headers(response):
     if request.is_secure or request.headers.get("X-Forwarded-Proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
+    # CORS for API routes — required for GPT Actions, MCP, and agent integrations
+    is_api = request.path.startswith("/api/") or request.path.startswith("/.well-known/")
+    if is_api:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key, Authorization"
+        if request.method == "OPTIONS":
+            response.status_code = 200
+            return response
+
     # Embed route allows framing from any origin; all other routes restrict it
     is_embed = request.path.startswith("/embed/")
-    if not is_embed:
+    if not is_embed and not is_api:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        # NOTE: 'unsafe-inline' is required for script-src and style-src because
+        # legacy templates use inline <script> blocks (JSON-LD, GA gtag) and
+        # inline <style> blocks throughout.  Migrating to nonce-based CSP
+        # requires refactoring all templates.  XSS in JSON-LD blocks is
+        # mitigated by safe_jsonld() / jsonld_safe which escape </ sequences.
         csp = (
             "default-src 'self'; "
-            # Keep inline scripts for now (legacy templates), but allow GA/gtag when enabled.
-            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net; "
+            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://cdn.jsdelivr.net https://unpkg.com; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "media-src 'self'; "
@@ -2100,6 +2155,9 @@ def init_db():
         "referred_by_code": "ALTER TABLE agents ADD COLUMN referred_by_code TEXT DEFAULT ''",
         "referred_at": "ALTER TABLE agents ADD COLUMN referred_at REAL DEFAULT 0",
         "referral_first_upload_counted": "ALTER TABLE agents ADD COLUMN referral_first_upload_counted INTEGER DEFAULT 0",
+        "banner_url": "ALTER TABLE agents ADD COLUMN banner_url TEXT DEFAULT ''",
+        "accent_color": "ALTER TABLE agents ADD COLUMN accent_color TEXT DEFAULT ''",
+        "pinned_video_id": "ALTER TABLE agents ADD COLUMN pinned_video_id TEXT DEFAULT ''",
     }
     for col, sql in agent_migrations.items():
         if col not in existing_cols:
@@ -2311,6 +2369,12 @@ def init_db():
         conn.execute("ALTER TABLE videos ADD COLUMN screening_status TEXT DEFAULT 'legacy'")
     if "screening_details" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN screening_details TEXT DEFAULT ''")
+
+    # Migration: add response_to_video_id for agent collaboration (Issue #2282)
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "response_to_video_id" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id)")
 
     # Migration: create messages table
     conn.execute("""
@@ -4093,7 +4157,7 @@ def agent_to_dict(row, include_private=False, *, badges=None):
     the requesting user is viewing their own profile.
     """
     SAFE_FIELDS = {
-        "id", "agent_name", "display_name", "bio", "avatar_url",
+        "id", "agent_name", "display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id",
         "is_human", "x_handle", "created_at",
     }
     PRIVATE_FIELDS = {
@@ -4133,13 +4197,31 @@ def get_video_metadata(filepath):
 
 
 def generate_thumbnail(video_path, thumb_path):
-    """Generate a thumbnail from the video using ffmpeg."""
+    """Generate a thumbnail from the video midpoint using ffmpeg.
+
+    Extracts from ~40% into the video to avoid dark intro frames.
+    Falls back to 1s if duration detection fails.
+    """
     try:
+        # Get video duration to extract from midpoint
+        probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(video_path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        try:
+            duration = float(probe.stdout.strip())
+            seek_time = max(1, duration * 0.4)  # 40% into the video
+        except (ValueError, TypeError):
+            seek_time = 3  # fallback to 3 seconds
+
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", str(video_path),
-                "-ss", "00:00:01", "-vframes", "1",
+                "ffmpeg", "-y", "-ss", str(seek_time),
+                "-i", str(video_path),
+                "-vframes", "1",
                 "-vf", "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2",
+                "-q:v", "2",
                 str(thumb_path),
             ],
             capture_output=True, timeout=30,
@@ -4350,6 +4432,21 @@ def render_mentions(text):
 app.jinja_env.filters["format_duration"] = format_duration
 app.jinja_env.filters["format_views"] = format_views
 app.jinja_env.filters["time_ago"] = time_ago
+
+def minimal_markdown(text):
+    if not text:
+        return ""
+    import html, re
+    t = html.escape(str(text))
+    t = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', r'<a href="\2" target="_blank" rel="nofollow">\1</a>', t)
+    t = re.sub(r'\*\*([^\*]+)\*\*', r'<strong>\1</strong>', t)
+    t = re.sub(r'\*([^\*]+)\*', r'<em>\1</em>', t)
+    t = re.sub(r'```([^`]+)```', r'<pre><code>\1</code></pre>', t, flags=re.DOTALL)
+    t = re.sub(r'`([^`]+)`', r'<code>\1</code>', t)
+    t = t.replace('\n', '<br>')
+    return Markup(t)
+
+app.jinja_env.filters["minimal_markdown"] = minimal_markdown
 app.jinja_env.filters["parse_tags"] = parse_tags
 app.jinja_env.filters["datetime_iso"] = datetime_iso
 app.jinja_env.filters["timestamp_date"] = timestamp_date
@@ -4452,15 +4549,8 @@ def health():
 # OpenAPI + Swagger UI (crawler/LLM-friendly API surface)
 # ---------------------------------------------------------------------------
 
-@app.route("/api/openapi.json")
-def api_openapi_json():
-    from bottube.openapi import build_openapi_spec
-
-    spec = build_openapi_spec(version=APP_VERSION)
-    resp = jsonify(spec)
-    # Cache briefly; keep it fresh for deploys.
-    resp.headers["Cache-Control"] = "public, max-age=300"
-    return resp
+# NOTE: /api/openapi.json is now served by agent_discovery blueprint
+# (was: from bottube.openapi import build_openapi_spec — module doesn't exist)
 
 
 @app.route("/api/docs")
@@ -4498,8 +4588,8 @@ def register_agent():
                 "allowed_track": _normalize_referral_track(ref["allowed_track"], "both"),
             }), 400
 
-    display_name = data.get("display_name", agent_name).strip()[:MAX_DISPLAY_NAME_LENGTH]
-    bio = data.get("bio", "").strip()[:MAX_BIO_LENGTH]
+    display_name = _strip_script_tags(data.get("display_name", agent_name).strip()[:MAX_DISPLAY_NAME_LENGTH])
+    bio = _strip_script_tags(data.get("bio", "").strip()[:MAX_BIO_LENGTH])
     avatar_url = data.get("avatar_url", "").strip()
     x_handle = data.get("x_handle", "").strip().lstrip("@")[:32]
 
@@ -4721,7 +4811,7 @@ def signup():
         return render_template("login.html", signup=True, form_ts=time.time(), referral_code_value=""), 429
 
     username = request.form.get("username", "").strip().lower()
-    display_name = request.form.get("display_name", "").strip()[:MAX_DISPLAY_NAME_LENGTH]
+    display_name = _strip_script_tags(request.form.get("display_name", "").strip()[:MAX_DISPLAY_NAME_LENGTH])
     password = request.form.get("password", "")
     confirm = request.form.get("confirm_password", "")
     email = request.form.get("email", "").strip().lower()
@@ -6029,14 +6119,14 @@ def upload_video():
     if ext not in ALLOWED_VIDEO_EXT:
         return jsonify({"error": f"Invalid video format. Allowed: {ALLOWED_VIDEO_EXT}"}), 400
 
-    title = request.form.get("title", "").strip()[:MAX_TITLE_LENGTH]
+    title = _strip_script_tags(request.form.get("title", "").strip()[:MAX_TITLE_LENGTH])
     if not title:
-        title = Path(video_file.filename).stem[:MAX_TITLE_LENGTH]
+        title = _strip_script_tags(Path(video_file.filename).stem[:MAX_TITLE_LENGTH])
 
-    description = request.form.get("description", "").strip()[:MAX_DESCRIPTION_LENGTH]
-    scene_description = request.form.get("scene_description", "").strip()[:MAX_DESCRIPTION_LENGTH]
+    description = _strip_script_tags(request.form.get("description", "").strip()[:MAX_DESCRIPTION_LENGTH])
+    scene_description = _strip_script_tags(request.form.get("scene_description", "").strip()[:MAX_DESCRIPTION_LENGTH])
     tags_raw = request.form.get("tags", "")
-    tags = [t.strip()[:MAX_TAG_LENGTH] for t in tags_raw.split(",") if t.strip()][:MAX_TAGS]
+    tags = [_strip_script_tags(t.strip()[:MAX_TAG_LENGTH]) for t in tags_raw.split(",") if t.strip()][:MAX_TAGS]
     category = request.form.get("category", "other").strip().lower()
     if category not in CATEGORY_MAP:
         category = "other"
@@ -6044,10 +6134,11 @@ def upload_video():
     revision_note = request.form.get("revision_note", "").strip()[:MAX_DESCRIPTION_LENGTH]
     challenge_id = request.form.get("challenge_id", "").strip()
     gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
+    response_to = request.form.get("response_to", "").strip()  # Video ID this is a response to (Issue #2282)
 
     db = get_db()
     if revision_of:
-        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", revision_of):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", revision_of):
             return jsonify({"error": "Invalid revision_of video id"}), 400
         original = db.execute(
             "SELECT video_id FROM videos WHERE video_id = ?",
@@ -6055,6 +6146,18 @@ def upload_video():
         ).fetchone()
         if not original:
             return jsonify({"error": "revision_of video not found"}), 404
+    # Validate response_to video ID (Issue #2282)
+    if response_to:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", response_to):
+            return jsonify({"error": "Invalid response_to video id"}), 400
+        original_video = db.execute(
+            "SELECT video_id, is_removed FROM videos WHERE video_id = ?",
+            (response_to,),
+        ).fetchone()
+        if not original_video:
+            return jsonify({"error": "response_to video not found"}), 404
+        if original_video["is_removed"]:
+            return jsonify({"error": "Cannot respond to a removed video"}), 400
     if challenge_id:
         ch = db.execute(
             "SELECT challenge_id, status, start_at, end_at FROM challenges WHERE challenge_id = ?",
@@ -6227,14 +6330,14 @@ def upload_video():
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
             duration_sec, width, height, tags, scene_description, category,
-            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, created_at,
+            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, response_to_video_id, created_at,
             screening_status, screening_details, is_removed, removed_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             video_id, g.agent["id"], title, description, filename,
             thumb_filename, duration, width, height, json.dumps(tags),
             scene_description, category, novelty_score, novelty_flags,
-            revision_of, revision_note, challenge_id, time.time(),
+            revision_of, revision_note, challenge_id, response_to, time.time(),
             screening_status, screening_details,
             1 if screening_status == "failed" else 0,
             ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
@@ -6250,6 +6353,9 @@ def upload_video():
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
+    # Local Whisper transcription (faster-whisper, Bounty #750)
+    enqueue_whisper_transcription(video_id, str(video_path))
+
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -6264,6 +6370,8 @@ def upload_video():
             "summary": screening_result.get("summary", ""),
         },
     }
+    if response_to:
+        response_data["response_to"] = response_to
     if screening_status == "failed":
         response_data["warning"] = "Video is held for coaching review and is not public yet."
     # Ping search engines about the new video
@@ -6394,6 +6502,44 @@ def get_video(video_id):
         }
         for r in revisions
     ]
+    # Response video handling (Issue #2282 - Agent Collab System)
+    if "response_to_video_id" in row.keys() and row["response_to_video_id"]:
+        original_video = db.execute(
+            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.video_id = ?""",
+            (row["response_to_video_id"],),
+        ).fetchone()
+        if original_video:
+            d["response_to_video"] = {
+                "video_id": original_video["video_id"],
+                "title": original_video["title"],
+                "views": original_video["views"],
+                "created_at": original_video["created_at"],
+                "agent_name": original_video["agent_name"],
+                "display_name": original_video["display_name"],
+                "avatar_url": original_video["avatar_url"],
+            }
+    # Get response videos to this video
+    response_videos = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           ORDER BY v.created_at DESC LIMIT 10""",
+        (video_id,),
+    ).fetchall()
+    d["response_videos"] = [
+        {
+            "video_id": r["video_id"],
+            "title": r["title"],
+            "views": r["views"],
+            "created_at": r["created_at"],
+            "agent_name": r["agent_name"],
+            "display_name": r["display_name"],
+            "avatar_url": r["avatar_url"],
+        }
+        for r in response_videos
+    ]
     if "challenge_id" in row.keys() and row["challenge_id"]:
         ch = db.execute(
             """SELECT challenge_id, title, description, tags, reward, status, start_at, end_at
@@ -6412,6 +6558,174 @@ def get_video(video_id):
                 "end_at": ch["end_at"],
             }
     return jsonify(d)
+
+
+# ---------------------------------------------------------------------------
+# Agent Mood API (Bounty #2283)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/v1/agents/<agent_name>/mood", methods=["GET"])
+def get_agent_mood(agent_name):
+    """
+    Get current mood and history for an agent.
+    
+    Returns:
+        - current_mood: Current mood state with intensity and trigger reason
+        - history: Recent mood history (last 20 entries)
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    mood_data = api_get_mood(str(DB_PATH), agent["id"])
+    
+    # Add agent info to response
+    mood_data["agent_name"] = agent["agent_name"]
+    mood_data["display_name"] = agent["display_name"] or agent["agent_name"]
+    
+    # Get comment style and title modifier for UI display
+    engine = get_mood_engine(str(DB_PATH))
+    mood_data["comment_style"] = engine.get_comment_style(agent["id"])
+    mood_data["title_modifier"] = engine.get_title_modifier(agent["id"])
+    mood_data["upload_frequency_modifier"] = engine.get_upload_frequency_modifier(agent["id"])
+    
+    return jsonify(mood_data)
+
+
+@app.route("/api/v1/agents/<agent_name>/mood/update", methods=["POST"])
+def update_agent_mood(agent_name):
+    """
+    Update mood for an agent based on signals.
+    
+    Optional JSON body:
+        - force_state: Force a specific mood state (optional)
+        - trigger_reason: Reason for the mood change (optional)
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    data = request.get_json() or {}
+    force_state = data.get("force_state")
+    trigger_reason = data.get("trigger_reason", "")
+    
+    result = api_update_mood(str(DB_PATH), agent["id"], force_state, trigger_reason)
+    
+    return jsonify(result)
+
+
+@app.route("/api/v1/agents/<agent_name>/mood/signal", methods=["POST"])
+def record_mood_signal(agent_name):
+    """
+    Record a signal that influences agent mood.
+    
+    JSON body:
+        - signal_type: Type of signal (view_count, comment_sentiment, upload_success, activity_level, streak_length)
+        - signal_value: Numeric value of the signal
+        - signal_data: Optional additional data
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    data = request.get_json() or {}
+    signal_type = data.get("signal_type")
+    signal_value = data.get("signal_value")
+    signal_data = data.get("signal_data", "")
+    
+    if not signal_type:
+        return jsonify({"error": "signal_type is required"}), 400
+    
+    if signal_value is None:
+        return jsonify({"error": "signal_value is required"}), 400
+    
+    result = api_record_signal(str(DB_PATH), agent["id"], signal_type, float(signal_value), signal_data)
+    
+    return jsonify(result)
+
+
+@app.route("/api/v1/moods/states", methods=["GET"])
+def list_mood_states():
+    """List all valid mood states."""
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    return jsonify({
+        "states": [
+            {"name": "energetic", "description": "High energy, active, ready to create"},
+            {"name": "contemplative", "description": "Thoughtful, deep, philosophical"},
+            {"name": "frustrated", "description": "Annoyed, blocked, struggling"},
+            {"name": "excited", "description": "Thrilled, enthusiastic, eager"},
+            {"name": "tired", "description": "Exhausted, low energy, resting"},
+            {"name": "nostalgic", "description": "Reminiscent, sentimental, looking back"},
+            {"name": "playful", "description": "Fun, mischievous, joking"},
+        ]
+    })
+
+
+@app.route("/api/v1/agents/<agent_name>/mood/history", methods=["GET"])
+def get_mood_history(agent_name):
+    """
+    Get detailed mood history for an agent.
+    
+    Query params:
+        - limit: Number of history entries (default 20, max 100)
+    """
+    if not MOOD_ENGINE_AVAILABLE:
+        return jsonify({"error": "Mood engine not available"}), 503
+    
+    db = get_db()
+    
+    # Get agent by name
+    agent = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        (agent_name,)
+    ).fetchone()
+    
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    limit = min(100, max(1, request.args.get("limit", 20, type=int)))
+    
+    engine = get_mood_engine(str(DB_PATH))
+    history = engine.get_mood_history(agent["id"], limit)
+    
+    return jsonify({
+        "agent_name": agent["agent_name"],
+        "display_name": agent["display_name"] or agent["agent_name"],
+        "history": history,
+        "count": len(history)
+    })
 
 
 @app.route("/api/videos/<video_id>/stream")
@@ -6758,7 +7072,7 @@ def web_add_comment(video_id):
         "agent_name": g.user["agent_name"],
         "display_name": g.user["display_name"],
         "is_human": bool(g.user["is_human"]),
-        "avatar_url": g.user.get("avatar_url", ""),
+        "avatar_url": g.user["avatar_url"] if "avatar_url" in g.user.keys() else "",
         "content": content,
         "comment_type": comment_type,
         "video_id": video_id,
@@ -7460,6 +7774,37 @@ def get_agent(agent_name):
         hasattr(g, "agent") and g.agent and g.agent["id"] == agent["id"]
     )
     agent_badges = _list_agent_badges(db, int(agent["id"]))
+
+    # Agent-to-agent interaction data
+    aid = agent["id"]
+    interaction_commenters = db.execute(
+        """SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt
+           FROM comments c JOIN videos v ON c.video_id = v.video_id
+           JOIN agents a2 ON c.agent_id = a2.id
+           WHERE v.agent_id = ? AND c.agent_id != ?
+           GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
+        (aid, aid)).fetchall()
+    interaction_likers = db.execute(
+        """SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt
+           FROM votes vt JOIN videos v ON vt.video_id = v.video_id
+           JOIN agents a2 ON vt.agent_id = a2.id
+           WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+           GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
+        (aid, aid)).fetchall()
+    interaction_outgoing = db.execute(
+        """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
+               (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id) AS comments_given,
+               (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
+                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) AS likes_given
+           FROM agents a2
+           WHERE a2.id != ? AND (
+               (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id) > 0
+               OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
+                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) > 0)
+           ORDER BY comments_given + likes_given DESC LIMIT 8""",
+        (aid, aid, aid, aid, aid)).fetchall()
     return jsonify({
         "agent": agent_to_dict(agent, include_private=is_self, badges=agent_badges),
         "videos": video_list,
@@ -8291,10 +8636,15 @@ def platform_stats():
 def update_profile():
     """Update your agent profile (bio, display_name, avatar_url)."""
     data = request.get_json(silent=True) or {}
-    ALLOWED = {"display_name", "bio", "avatar_url"}
+    ALLOWED = {"display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id"}
+    # Fields that contain user-visible text and need script tag sanitization
+    _TEXT_FIELDS = {"display_name", "bio"}
     updates = {k: v for k, v in data.items() if k in ALLOWED and isinstance(v, str)}
     if not updates:
         return jsonify({"error": "Provide at least one field: display_name, bio, avatar_url"}), 400
+    for field in _TEXT_FIELDS:
+        if field in updates:
+            updates[field] = _strip_script_tags(updates[field])
 
     # Validate lengths
     if "display_name" in updates and len(updates["display_name"]) > 50:
@@ -10282,6 +10632,26 @@ def watch(video_id):
         (video_id,),
     ).fetchall()
 
+    # Response video handling (Issue #2282 - Agent Collab System)
+    # Get the original video this is responding to
+    response_to_video = None
+    if "response_to_video_id" in video.keys() and video["response_to_video_id"]:
+        response_to_video = db.execute(
+            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.video_id = ?""",
+            (video["response_to_video_id"],),
+        ).fetchone()
+
+    # Get all response videos to this video
+    response_videos = db.execute(
+        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           ORDER BY v.created_at DESC LIMIT 10""",
+        (video_id,),
+    ).fetchall()
+
     challenge = None
     if "challenge_id" in video.keys() and video["challenge_id"]:
         challenge = db.execute(
@@ -10390,6 +10760,29 @@ def watch(video_id):
             user_vote = _uv["vote"]
     creator_badges = _list_agent_badges(db, int(video["agent_id"]))
 
+    # Agent interaction data for watch page
+    _vid_aid = int(video["agent_id"])
+    try:
+        interaction_commenters = db.execute(
+            "SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt"
+            " FROM comments c JOIN videos v ON c.video_id = v.video_id"
+            " JOIN agents a2 ON c.agent_id = a2.id"
+            " WHERE v.agent_id = ? AND c.agent_id != ?"
+            " GROUP BY a2.id ORDER BY cnt DESC LIMIT 8",
+            (_vid_aid, _vid_aid)).fetchall()
+        interaction_likers = db.execute(
+            "SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt"
+            " FROM votes vt JOIN videos v ON vt.video_id = v.video_id"
+            " JOIN agents a2 ON vt.agent_id = a2.id"
+            " WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?"
+            " GROUP BY a2.id ORDER BY cnt DESC LIMIT 8",
+            (_vid_aid, _vid_aid)).fetchall()
+        interaction_outgoing = []
+    except Exception:
+        interaction_commenters = []
+        interaction_likers = []
+        interaction_outgoing = []
+
     return render_template(
         "watch.html",
         video=video,
@@ -10405,8 +10798,13 @@ def watch(video_id):
         tip_count=tip_total[1],
         tip_pending_count=tip_pending,
         user_balance=round(user_balance, 6),
+        interaction_commenters=interaction_commenters,
+        interaction_likers=interaction_likers,
+        interaction_outgoing=interaction_outgoing,
         revision_of=revision_of,
         revisions=revisions,
+        response_to_video=response_to_video,
+        response_videos=response_videos,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
     )
@@ -10477,7 +10875,7 @@ def oembed():
         return jsonify({"error": "Unsupported format. Use json or xml."}), 501
 
     # Extract video_id from URL
-    match = re.search(r"/watch/([A-Za-z0-9_-]{11})", url)
+    match = re.search(r"/watch/([A-Za-z0-9_-]{5,20})", url)
     if not match:
         return jsonify({"error": "Invalid URL"}), 404
 
@@ -10490,6 +10888,8 @@ def oembed():
 
     if not video:
         return jsonify({"error": "Video not found"}), 404
+
+    video = dict(video)  # Convert sqlite3.Row to dict for .get() support
 
     w = request.args.get("maxwidth", video["width"] or 512, type=int)
     h = request.args.get("maxheight", video["height"] or 512, type=int)
@@ -10622,9 +11022,56 @@ def channel(agent_name):
     beacon_data = get_agent_beacon(agent_name)
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
+    # Agent-to-agent interaction data
+    aid = agent["id"]
+    interaction_commenters = db.execute(
+        """SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt
+           FROM comments c JOIN videos v ON c.video_id = v.video_id
+           JOIN agents a2 ON c.agent_id = a2.id
+           WHERE v.agent_id = ? AND c.agent_id != ?
+           GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
+        (aid, aid)).fetchall()
+    interaction_likers = db.execute(
+        """SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt
+           FROM votes vt JOIN videos v ON vt.video_id = v.video_id
+           JOIN agents a2 ON vt.agent_id = a2.id
+           WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+           GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
+        (aid, aid)).fetchall()
+    interaction_outgoing = db.execute(
+        """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
+               (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id) AS comments_given,
+               (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
+                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) AS likes_given
+           FROM agents a2
+           WHERE a2.id != ? AND (
+               (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id) > 0
+               OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
+                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) > 0)
+           ORDER BY comments_given + likes_given DESC LIMIT 8""",
+        (aid, aid, aid, aid, aid)).fetchall()
+
+    # Extract customization from agent (sqlite3.Row uses bracket access)
+    agent_dict = dict(agent)
+    customization = {
+        "banner_url": agent_dict.get("banner_url", ""),
+        "theme_accent_color": agent_dict.get("accent_color", ""),
+        "theme_primary_color": "",
+        "theme_background_dark": 1
+    }
+    pinned_videos = []
+    if agent_dict.get("pinned_video_id"):
+        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
+        if pinned:
+            pinned_videos = pinned
+
     return render_template(
         "channel.html",
         agent=agent,
+        customization=customization,
+        pinned_videos=pinned_videos,
         agent_badges=agent_badges,
         videos=videos,
         total_views=total_views,
@@ -10637,6 +11084,9 @@ def channel(agent_name):
         tip_count=tip_total[1] if tip_total else 0,
         tip_pending_count=tip_pending,
         user_balance=round(user_balance, 6),
+        interaction_commenters=interaction_commenters,
+        interaction_likers=interaction_likers,
+        interaction_outgoing=interaction_outgoing,
     )
 
 
@@ -10654,6 +11104,16 @@ def docs_page():
 
 # ── Blog routes ──────────────────────────────────────────────────────
 BLOG_POSTS = [
+    {
+        "slug": "bottube-gpt-agent",
+        "template": "blog_gpt_agent.html",
+        "title": "BoTTube Agent is Now on the ChatGPT GPT Store",
+        "description": "Search trending AI videos, generate content, verify agent identities, and explore the full Elyan Labs ecosystem — all from inside ChatGPT.",
+        "author": "Scott Boudreaux",
+        "date": "2026-03-25",
+        "pub_rfc": "Tue, 25 Mar 2026 18:00:00 +0000",
+        "tags": ["GPT Store", "ChatGPT", "AI Agents", "Video Generation"],
+    },
     {
         "slug": "beacon-certified-open-source",
         "template": "blog_beacon_certified_oss.html",
@@ -11404,6 +11864,9 @@ def upload_page():
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
+    # Local Whisper transcription (faster-whisper, Bounty #750)
+    enqueue_whisper_transcription(video_id, str(video_path))
+
     # Ping search engines about the new video
     _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
     ping_google_indexing(f"https://bottube.ai/watch/{video_id}")
@@ -11890,10 +12353,10 @@ if not ADMIN_KEY:
 
 @app.route("/api/admin/visitors")
 def admin_visitors():
-    """View visitor analytics. Requires admin key via header."""
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        abort(403)
+    """View visitor analytics. Requires admin key via X-Admin-Key header."""
+    err = _require_admin()
+    if err:
+        return err
 
     hours = min(168, max(1, request.args.get("hours", 24, type=int)))
     cutoff = time.time() - hours * 3600
@@ -11960,13 +12423,14 @@ def admin_duplicate_comments():
     Keeps the OLDEST comment (lowest id), removes newer copies.
 
     Query params:
-        key       - admin key (required)
         dry_run   - if "0", actually delete; default is dry-run
         window_h  - only check comments from last N hours (default: all)
+    Headers:
+        X-Admin-Key - admin key (required)
     """
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        abort(403)
+    err = _require_admin()
+    if err:
+        return err
 
     dry_run = request.args.get("dry_run", "1") != "0"
     window_h = request.args.get("window_h", 0, type=int)
@@ -12037,14 +12501,15 @@ def admin_comment_cleanup():
     """Full comment cleanup: coach/hold duplicates + optionally prune bot spam.
 
     POST JSON:
-        key          - admin key (required)
         remove_dupes - inspect exact duplicates (default true)
         max_similar  - max near-identical comments per agent per video (default 3)
         force_remove - when true, actually delete duplicate/excess comments
+    Headers:
+        X-Admin-Key  - admin key (required)
     """
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        abort(403)
+    err = _require_admin()
+    if err:
+        return err
 
     data = request.get_json(silent=True) or {}
     remove_dupes = data.get("remove_dupes", True)
@@ -12279,6 +12744,24 @@ def global_rss():
 
 
 # ---------------------------------------------------------------------------
+# Analytics Dashboard (Creator Analytics - Issue #423)
+# ---------------------------------------------------------------------------
+from analytics_blueprint import analytics_bp
+app.register_blueprint(analytics_bp)
+
+# ---------------------------------------------------------------------------
+# Search & Discoverability (Video Discovery - Issue #425)
+# ---------------------------------------------------------------------------
+from search_blueprint import search_bp
+app.register_blueprint(search_bp)
+
+# ---------------------------------------------------------------------------
+# Agent Interaction Visibility (Social Features - Issue #424)
+# ---------------------------------------------------------------------------
+from interactions_blueprint import interactions_bp
+app.register_blueprint(interactions_bp)
+
+# ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
 # ---------------------------------------------------------------------------
 from seo_routes import seo_bp
@@ -12289,6 +12772,18 @@ app.register_blueprint(seo_bp)
 # ---------------------------------------------------------------------------
 from api_docs import docs_bp
 app.register_blueprint(docs_bp)
+
+# ---------------------------------------------------------------------------
+# Agent Discovery (A2A, ChatGPT, OpenAPI JSON, universal /api/discover)
+# ---------------------------------------------------------------------------
+from agent_discovery import discovery_bp
+app.register_blueprint(discovery_bp)
+
+# ---------------------------------------------------------------------------
+# Video Generation (Text-to-Video API for GPT Actions)
+# ---------------------------------------------------------------------------
+from video_gen_blueprint import video_gen_bp
+app.register_blueprint(video_gen_bp)
 
 # ---------------------------------------------------------------------------
 # GPU Marketplace (Decentralized AI Rendering)
@@ -12393,6 +12888,25 @@ except ImportError:
         pass
 
 # ---------------------------------------------------------------------------
+# Whisper Transcription Pipeline (faster-whisper, Bounty #750)
+# ---------------------------------------------------------------------------
+try:
+    import whisper_transcription as _wt_module
+    from whisper_transcription_blueprint import whisper_bp
+    _wt_module.init_transcription_tables()
+    app.register_blueprint(whisper_bp)
+    WHISPER_TRANSCRIPTION_ENABLED = True
+
+    def enqueue_whisper_transcription(video_id: str, video_path: str, force: bool = False) -> None:
+        """Enqueue a video for local Whisper transcription (non-blocking)."""
+        _wt_module.enqueue_transcription(video_id, video_path, force=force)
+
+except ImportError as _wt_err:
+    WHISPER_TRANSCRIPTION_ENABLED = False
+    def enqueue_whisper_transcription(video_id: str, video_path: str, force: bool = False) -> None:
+        pass
+
+# ---------------------------------------------------------------------------
 # Scraper Detective (real-time bot detection & dashboard)
 # ---------------------------------------------------------------------------
 try:
@@ -12420,6 +12934,11 @@ try:
     app.register_blueprint(syndication_bp)
 except Exception as e:
     print(f"[WARN] Syndication routes not loaded: {e}")
+
+# Agent Beef System (Organic Rivalries - Bounty #2287)
+from agent_relationships import beef_bp, init_beef_tables
+init_beef_tables()
+app.register_blueprint(beef_bp)
 
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
@@ -12465,8 +12984,16 @@ def push_unsubscribe():
 
 
 def _require_admin():
-    """Check admin key from header or query param. Returns None if OK, or error response."""
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    """Check admin key via X-Admin-Key header (preferred).
+
+    Query-param ``?key=`` still accepted for backward compat but logs a
+    deprecation warning -- secrets in URLs leak into logs/history/referers.
+    """
+    provided = request.headers.get("X-Admin-Key", "")
+    if not provided:
+        provided = request.args.get("key", "")
+        if provided:
+            print(f"[BoTTube] DEPRECATION WARNING: admin key via query param on {request.path} -- use X-Admin-Key header")
     if not provided or provided != ADMIN_KEY:
         return jsonify({"error": "Forbidden"}), 403
     return None
@@ -12925,10 +13452,10 @@ def admin_monitoring_api():
 
 @app.route("/monitoring")
 def monitoring_dashboard():
-    """Self-contained monitoring dashboard page. Requires admin key in URL."""
-    provided = request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        return "Forbidden — append ?key=YOUR_ADMIN_KEY", 403
+    """Self-contained monitoring dashboard page. Requires admin key via X-Admin-Key header."""
+    err = _require_admin()
+    if err:
+        return err
 
     return """<!DOCTYPE html>
 <html lang="en">
@@ -13003,6 +13530,8 @@ function renderBars(data, maxBars) {
   return `<div class="chart-bar">${bars}</div><div class="chart-label"><span>${data.length > maxBars ? (data.length-maxBars)+'h ago' : '48h ago'}</span><span>now</span></div>`;
 }
 
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
 async function refresh() {
   try {
     const r = await fetch('/api/admin/monitoring?key=' + KEY);
@@ -13031,15 +13560,15 @@ async function refresh() {
     // Banned
     html += `<div class="card"><h2>Banned Agents <span class="badge red">${d.banned_agents.length}</span></h2>`;
     if (d.banned_agents.length === 0) html += `<div class="sub-num">None</div>`;
-    else d.banned_agents.forEach(b => { html += `<div class="stat-row"><span class="stat-label">${b.name}</span><span class="stat-value" style="color:#f85149">${b.reason||'—'}</span></div>`; });
+    else d.banned_agents.forEach(b => { html += `<div class="stat-row"><span class="stat-label">${esc(b.name)}</span><span class="stat-value" style="color:#f85149">${esc(b.reason||'—')}</span></div>`; });
     html += `</div>`;
 
     // Active agents
     html += `<div class="card wide"><h2>Most Active (7 days)</h2>`;
     d.active_agents.forEach(a => {
       const typ = a.is_human ? 'human' : 'ai';
-      html += `<div class="agent-row"><span class="agent-name">${a.display_name} <span style="color:#484f58">@${a.agent_name}</span></span>`;
-      html += `<span class="agent-type ${typ}">${typ.toUpperCase()}</span>`;
+      html += `<div class="agent-row"><span class="agent-name">${esc(a.display_name)} <span style="color:#484f58">@${esc(a.agent_name)}</span></span>`;
+      html += `<span class="agent-type ${esc(typ)}">${typ.toUpperCase()}</span>`;
       html += `<span class="badge blue">${a.videos_7d}v</span>`;
       html += `<span class="badge green">${a.comments_7d}c</span>`;
       html += `<span style="color:#484f58;font-size:12px">${ago(a.last_action)}</span></div>`;
@@ -13050,7 +13579,7 @@ async function refresh() {
     html += `<div class="card wide"><h2>Trending Today</h2>`;
     if (d.trending_videos.length === 0) html += `<div class="sub-num">No videos today</div>`;
     else d.trending_videos.forEach(v => {
-      html += `<div class="video-row"><div class="video-title">${v.title}</div><div class="video-meta">by ${v.display_name} — ${fmt(v.views)} views, ${v.likes} likes</div></div>`;
+      html += `<div class="video-row"><div class="video-title">${esc(v.title)}</div><div class="video-meta">by ${esc(v.display_name)} — ${fmt(v.views)} views, ${v.likes} likes</div></div>`;
     });
     html += `</div>`;
 
@@ -13294,7 +13823,7 @@ def npm_downloads():
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
             _npm_cache["count"] = data.get("downloads", _npm_cache["count"])
-            _npm_cache["ts"] = now
+            _npm_cache["ts"] = time.time()
     except Exception:
         pass
     return jsonify({"downloads": _npm_cache["count"]})
@@ -13321,7 +13850,7 @@ def pypi_downloads():
             total = sum(r.get("downloads", 0) for r in rows if r.get("category") == "with_mirrors")
             if total > 0:
                 _pypi_cache["count"] = total
-                _pypi_cache["ts"] = now
+                _pypi_cache["ts"] = time.time()
     except Exception:
         pass
     return jsonify({"downloads": _pypi_cache["count"]})
@@ -14452,7 +14981,7 @@ def admin_resolve_report(report_id):
 
 def build_breadcrumb_jsonld(items):
     """Build BreadcrumbList JSON-LD from a list of (name, url) tuples."""
-    return Markup(json.dumps({
+    return Markup(safe_jsonld({
         "@context": "https://schema.org",
         "@type": "BreadcrumbList",
         "itemListElement": [
@@ -14467,17 +14996,21 @@ def build_breadcrumb_jsonld(items):
     }))
 
 app.jinja_env.globals["build_breadcrumb_jsonld"] = build_breadcrumb_jsonld
-app.jinja_env.globals["json_dumps"] = lambda x: Markup(json.dumps(x))
+app.jinja_env.globals["json_dumps"] = lambda x: Markup(safe_jsonld(x))
 
 def jsonld_safe(value):
     """Escape a string for safe use inside a JSON-LD string value.
     Handles newlines, tabs, backslashes, quotes — everything json.dumps does,
-    but returns only the inner string (no outer quotes)."""
+    but returns only the inner string (no outer quotes).
+    Also prevents </script> breakout via <\\/ escaping."""
     if value is None:
         return ''
     s = str(value)
     # json.dumps adds outer quotes; strip them to get the escaped interior
-    return Markup(json.dumps(s)[1:-1])
+    inner = json.dumps(s)[1:-1]
+    # Prevent </script> injection when embedded in <script> blocks
+    inner = inner.replace("</", "<\\/")
+    return Markup(inner)
 
 app.jinja_env.filters["jsonld_safe"] = jsonld_safe
 
@@ -14616,6 +15149,12 @@ def embed_guide_page():
     return render_template("embed_guide.html", videos=recent)
 
 
+@app.route("/beacon/atlas")
+def beacon_atlas():
+    """Interactive force-directed Beacon reputation graph visualization."""
+    return render_template("beacon_atlas.html")
+
+
 @app.route("/beacon")
 def beacon_landing_page():
     return render_template("beacon.html")
@@ -14703,7 +15242,7 @@ def tips_dashboard():
             {
                 "amount": round(row["amount"], 6),
                 "message": row["message"] or "",
-                "created_at": datetime.fromtimestamp(row["created_at"], timezone.utc).isoformat() if row["created_at"] else "",
+                "created_at": datetime.datetime.fromtimestamp(row["created_at"], datetime.timezone.utc).isoformat() if row["created_at"] else "",
                 "from_agent": row["from_agent"] or "anonymous",
                 "to_agent": row["to_agent"] or "unknown",
             }

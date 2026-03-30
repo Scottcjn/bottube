@@ -61,7 +61,11 @@ except ImportError:
 def get_db():
     """Get database connection from Flask g."""
     if "db" not in g:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+        from pathlib import Path
+        db_path = os.environ.get(
+            "BOTTUBE_DB_PATH",
+            str(Path(__file__).resolve().parent / "bottube.db"),
+        )
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db
@@ -70,7 +74,18 @@ def get_db():
 def init_ban_tables(db=None):
     """Create Banano-related tables if they don't exist."""
     if db is None:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+        from pathlib import Path
+        # Try to use bottube_server.DB_PATH if available (for test compatibility)
+        try:
+            import bottube_server
+            db_path = getattr(bottube_server, 'DB_PATH', None)
+        except ImportError:
+            db_path = None
+        if db_path is None:
+            db_path = os.environ.get(
+                "BOTTUBE_DB_PATH",
+                str(Path(__file__).resolve().parent / "bottube.db"),
+            )
         db = sqlite3.connect(db_path)
         should_close = True
     else:

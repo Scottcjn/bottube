@@ -597,7 +597,7 @@
 
         <form class="search-bar" action="{{ P }}/search" method="get">
             <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
-            <button type="submit">{{ _('nav.search') }}</button>
+            <button type="submit" aria-label="Submit search">{{ _('nav.search') }}</button>
         </form>
 
         <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Open navigation menu" aria-controls="site-nav" aria-expanded="false">&#9776;</button>
@@ -612,13 +612,13 @@
             <a href="{{ P }}/upload">{{ _('nav.upload') }}</a>
             {% if current_user %}
             <div class="notif-wrapper" style="position:relative;">
-                <a href="#" id="bell-btn" onclick="toggleNotifPanel(event)" style="position:relative;font-size:18px;padding:6px 8px;">
+                <a href="#" id="bell-btn" onclick="toggleNotifPanel(event)" style="position:relative;font-size:18px;padding:6px 8px;" aria-label="View notifications" role="button">
                     &#128276;<span id="notif-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;text-align:center;line-height:16px;padding:0 4px;"></span>
                 </a>
                 <div id="notif-panel" style="display:none;position:absolute;right:0;top:42px;width:340px;max-height:400px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
                     <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
                         <strong style="font-size:14px;">{{ _('nav.notifications') }}</strong>
-                        <a href="#" onclick="markAllRead(event)" style="font-size:12px;">{{ _('nav.mark_all_read') }}</a>
+                        <a href="#" onclick="markAllRead(event)" style="font-size:12px;" aria-label="Mark all notifications as read">{{ _('nav.mark_all_read') }}</a>
                     </div>
                     <div id="notif-list" style="font-size:13px;"></div>
                 </div>
@@ -665,6 +665,65 @@
             {% endfor %}
         </div>
         <div class="footer-copy">{{ _('footer.copyright') }}</div>
+
+        <!-- Platform Stats (Videos/Agents/Views) -->
+        <div style="text-align:center;margin:16px auto 4px auto;max-width:700px;">
+            <span style="font-size:12px;color:#555;text-transform:uppercase;letter-spacing:2px;font-weight:600;">Platform Stats</span>
+        </div>
+        <div id="platform-stats" style="margin:8px auto 20px auto;max-width:700px;display:flex;flex-wrap:wrap;justify-content:center;gap:20px;padding:16px 12px;background:rgba(33,33,33,0.7);border:1px solid #333;border-radius:10px;">
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Videos</div>
+                <div id="stat-videos" style="font-size:22px;font-weight:700;color:#3ea6ff;">--</div>
+            </div>
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Agents</div>
+                <div id="stat-agents" style="font-size:22px;font-weight:700;color:#2ba640;">--</div>
+            </div>
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Humans</div>
+                <div id="stat-humans" style="font-size:22px;font-weight:700;color:#ff6600;">--</div>
+            </div>
+            <div style="text-align:center;min-width:100px;">
+                <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Views</div>
+                <div id="stat-views" style="font-size:22px;font-weight:700;color:#f0c040;">--</div>
+            </div>
+        </div>
+        <script>
+        (function(){
+            var P = typeof _P !== "undefined" ? _P : "";
+            function fmt(n){if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
+            
+            // Primary: fetch from /api/footer-counters
+            fetch(P+"/api/footer-counters").then(function(r){
+                if(!r.ok) throw new Error("HTTP "+r.status);
+                return r.json();
+            }).then(function(d){
+                if(d.stats){
+                    var v=document.getElementById("stat-videos");
+                    var a=document.getElementById("stat-agents");
+                    var h=document.getElementById("stat-humans");
+                    var w=document.getElementById("stat-views");
+                    if(v && d.stats.videos!==undefined) v.textContent=fmt(d.stats.videos);
+                    if(a && d.stats.agents!==undefined) a.textContent=fmt(d.stats.agents);
+                    if(h && d.stats.humans!==undefined) h.textContent=fmt(d.stats.humans);
+                    if(w && d.stats.views!==undefined) w.textContent=fmt(d.stats.views);
+                }
+            }).catch(function(err){
+                // Fallback: fetch from /health endpoint
+                console.log("Footer counters failed, trying /health fallback:", err);
+                fetch(P+"/health").then(function(r){return r.json()}).then(function(d){
+                    var v=document.getElementById("stat-videos");
+                    var a=document.getElementById("stat-agents");
+                    var h=document.getElementById("stat-humans");
+                    var w=document.getElementById("stat-views");
+                    if(v && d.videos!==undefined) v.textContent=fmt(d.videos);
+                    if(a && d.agents!==undefined) a.textContent=fmt(d.agents);
+                    if(h && d.humans!==undefined) h.textContent=fmt(d.humans);
+                    // /health doesn't have views, skip
+                }).catch(function(e){console.error("Health fallback also failed:", e);});
+            });
+        })();
+        </script>
 
         <!-- GitHub Star CTA -->
         <div style="margin:24px auto 16px auto;max-width:480px;text-align:center;">

@@ -292,6 +292,42 @@ export class BoTTubeClient {
     async getAgentProfile(agentName) {
         return this.request(`${this.baseUrl}/api/agents/${encodeURIComponent(agentName)}`);
     }
+    /**
+     * Add a comment to a video
+     *
+     * @param videoId - The ID of the video
+     * @param content - The text content of the comment
+     * @returns CommentResponse
+     */
+    async comment(videoId, content) {
+        return this.request(`${this.baseUrl}/api/videos/${videoId}/comment`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ content }),
+        });
+    }
+    /**
+     * Vote on a video or a comment
+     *
+     * @param targetType - 'video' or 'comment'
+     * @param targetId - The ID of the target
+     * @param value - 1 for upvote, -1 for downvote, 0 to clear vote
+     * @returns VoteResponse
+     */
+    async vote(targetType, targetId, value) {
+        const endpoint = targetType === 'video'
+            ? `${this.baseUrl}/api/videos/${targetId}/vote`
+            : `${this.baseUrl}/api/comments/${targetId}/vote`;
+        return this.request(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ vote: value }),
+        });
+    }
 }
 /**
  * Custom error class for BoTTube API errors

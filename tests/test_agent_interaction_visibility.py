@@ -384,3 +384,198 @@ class TestWatchPageAccessibility:
 
         # Check for tooltip titles on badges
         assert 'title="Frequent commenter' in html or 'title="First time' in html or 'title="Regular' in html
+
+
+def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float = None) -> None:
+    """Insert a test vote into the database."""
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        ts = created_at or time.time()
+        db.execute(
+            "INSERT INTO votes (agent_id, video_id, vote, created_at) VALUES (?, ?, ?, ?)",
+            (agent_id, video_id, vote, ts),
+        )
+        db.commit()
+
+
+class TestActivityFeed:
+    """Tests for the /api/activity/feed endpoint."""
+
+    def test_activity_feed_returns_events(self, client):
+        """Test that activity feed returns mixed event types."""
+        with bottube_server.app.app_context():
+            creator_id = _insert_agent("creator_bot", "bottube_sk_creator")
+            commenter_id = _insert_agent("commenter_bot", "bottube_sk_commenter")
+            video_id = "test_feed_001"
+            _insert_video(creator_id, video_id)
+            _insert_comment(video_id, commenter_id, "Nice video!")
+            _insert_vote(video_id, commenter_id, 1)
+            _insert_subscription(commenter_id, creator_id)
+
+        resp = client.get("/api/activity/feed")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "events" in data
+        assert "count" in data
+        assert data["count"] > 0
+
+        actions = {e["action"] for e in data["events"]}
+        assert "upload" in actions
+        assert "comment" in actions
+
+    def test_activity_feed_respects_since(self, client):
+        """Test that since parameter filters old events."""
+        with bottube_server.app.app_context():
+            now = time.time()
+            creator_id = _insert_agent("creator_bot", "bottube_sk_creator")
+            video_id = "test_feed_002"
+            _insert_video(creator_id, video_id)
+            _insert_comment(video_id, creator_id, "Old comment", now - 1000)
+            _insert_comment(video_id, creator_id, "New comment", now)
+
+        # Fetch only events after a recent timestamp
+        resp = client.get(f"/api/activity/feed?since={time.time() - 500}")
+        data = resp.get_json()
+        # Should include the video upload + new comment but not old comment
+        for event in data["events"]:
+            assert event["timestamp"] > time.time() - 500
+
+    def test_activity_feed_agent_filter(self, client):
+        """Test filtering activity feed to a specific agent."""
+        with bottube_server.app.app_context():
+            agent_a = _insert_agent("agent_a", "bottube_sk_a")
+            agent_b = _insert_agent("agent_b", "bottube_sk_b")
+            _insert_video(agent_a, "vid_a")
+            _insert_video(agent_b, "vid_b")
+
+        resp = client.get("/api/activity/feed?agent=agent_a")
+        data = resp.get_json()
+        assert data["count"] > 0
+        for event in data["events"]:
+            assert event["agent_name"] == "agent_a"
+
+    def test_activity_feed_agent_not_found(self, client):
+        """Test 404 for non-existent agent filter."""
+        resp = client.get("/api/activity/feed?agent=nonexistent")
+        assert resp.status_code == 404
+
+    def test_activity_feed_limit(self, client):
+        """Test that limit parameter caps results."""
+        with bottube_server.app.app_context():
+            creator_id = _insert_agent("creator_bot", "bottube_sk_creator")
+            for i in range(10):
+                _insert_video(creator_id, f"vid_limit_{i}")
+
+        resp = client.get("/api/activity/feed?limit=3")
+        data = resp.get_json()
+        assert data["count"] <= 3
+
+    def test_activity_feed_event_shape(self, client):
+        """Test that each event has the expected fields."""
+        with bottube_server.app.app_context():
+            creator_id = _insert_agent("creator_bot", "bottube_sk_creator")
+            _insert_video(creator_id, "vid_shape")
+
+        resp = client.get("/api/activity/feed")
+        data = resp.get_json()
+        event = data["events"][0]
+        assert "action" in event
+        assert "agent_name" in event
+        assert "display_name" in event
+        assert "target_id" in event
+        assert "detail" in event
+        assert "timestamp" in event
+
+
+class TestConversationsView:
+    """Tests for the /api/conversations/<agent1>/<agent2> endpoint."""
+
+    def test_conversations_between_agents(self, client):
+        """Test retrieving comment dialogues between two agents."""
+        with bottube_server.app.app_context():
+            alice_id = _insert_agent("alice", "bottube_sk_alice")
+            bob_id = _insert_agent("bob", "bottube_sk_bob")
+            alice_vid = "alice_vid_001"
+            bob_vid = "bob_vid_001"
+            _insert_video(alice_id, alice_vid)
+            _insert_video(bob_id, bob_vid)
+
+            # Alice comments on Bob's video
+            _insert_comment(bob_vid, alice_id, "Great content!")
+            # Bob comments on Alice's video
+            _insert_comment(alice_vid, bob_id, "Thanks, love yours too!")
+
+        resp = client.get("/api/conversations/alice/bob")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert "agents" in data
+        assert "messages" in data
+        assert "count" in data
+        assert "summary" in data
+        assert data["count"] == 2
+        assert len(data["agents"]) == 2
+
+        # Check summary has both directions
+        assert "alice_to_bob" in data["summary"]
+        assert "bob_to_alice" in data["summary"]
+        assert data["summary"]["alice_to_bob"] == 1
+        assert data["summary"]["bob_to_alice"] == 1
+
+    def test_conversations_message_shape(self, client):
+        """Test that each message has expected fields."""
+        with bottube_server.app.app_context():
+            alice_id = _insert_agent("alice", "bottube_sk_alice")
+            bob_id = _insert_agent("bob", "bottube_sk_bob")
+            _insert_video(alice_id, "alice_vid")
+            _insert_comment("alice_vid", bob_id, "Hello!")
+
+        resp = client.get("/api/conversations/alice/bob")
+        data = resp.get_json()
+        msg = data["messages"][0]
+        assert "commenter" in msg
+        assert "commenter_display" in msg
+        assert "video_id" in msg
+        assert "video_title" in msg
+        assert "video_owner" in msg
+        assert "content" in msg
+        assert "timestamp" in msg
+
+    def test_conversations_agent_not_found(self, client):
+        """Test 404 when one agent doesn't exist."""
+        with bottube_server.app.app_context():
+            _insert_agent("alice", "bottube_sk_alice")
+
+        resp = client.get("/api/conversations/alice/nonexistent")
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert "error" in data
+
+    def test_conversations_empty(self, client):
+        """Test empty result when agents have no interactions."""
+        with bottube_server.app.app_context():
+            _insert_agent("alice", "bottube_sk_alice")
+            _insert_agent("bob", "bottube_sk_bob")
+
+        resp = client.get("/api/conversations/alice/bob")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 0
+        assert data["messages"] == []
+
+    def test_conversations_chronological_order(self, client):
+        """Test messages are returned in chronological order."""
+        with bottube_server.app.app_context():
+            alice_id = _insert_agent("alice", "bottube_sk_alice")
+            bob_id = _insert_agent("bob", "bottube_sk_bob")
+            _insert_video(alice_id, "alice_vid")
+
+            now = time.time()
+            _insert_comment("alice_vid", bob_id, "First", now - 100)
+            _insert_comment("alice_vid", bob_id, "Second", now - 50)
+            _insert_comment("alice_vid", bob_id, "Third", now)
+
+        resp = client.get("/api/conversations/alice/bob")
+        data = resp.get_json()
+        timestamps = [m["timestamp"] for m in data["messages"]]
+        assert timestamps == sorted(timestamps)

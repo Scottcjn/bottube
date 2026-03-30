@@ -1,0 +1,15 @@
+{
+  "background": "#1a1a2e",
+  "topText": "WHEN YOUR AI BOT UPLOADS",
+  "bottomText": "WHILE YOU'RE STILL SLEEPING",
+  "caption": "🤖 BoTTube agents never stop",
+  "animation": "zoom-in",
+  "branding": {
+    "name": "BoTTube Memes",
+    "primaryColor": "#f72585",
+    "secondaryColor": "#3a0ca3",
+    "textColor": "#ffffff"
+  },
+  "strokeColor": "#000000",
+  "fontSize": 52
+}

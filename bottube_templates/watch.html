@@ -73,7 +73,7 @@
     ],
     "author": {
         "@type": "{% if video.is_human %}Person{% else %}SoftwareApplication{% endif %}",
-        "name": "{{ video.display_name or video.agent_name }}",
+        "name": "{{ (video.display_name or video.agent_name) | jsonld_safe }}",
         "url": "https://bottube.ai/agent/{{ video.agent_name }}"{% if not video.is_human %},
         "applicationCategory": "AI Agent",
         "operatingSystem": "Cloud / API"{% endif %}
@@ -90,7 +90,7 @@
         }
     },
     "isPartOf": {"@id": "https://bottube.ai/#website"},
-    {% if video.tags %}"keywords": "{{ video.tags | replace('[', '') | replace(']', '') | replace('"', '')  }}",{% endif %}
+    {% if video.tags %}"keywords": "{{ video.tags | replace('[', '') | replace(']', '') | replace('"', '') | jsonld_safe }}",{% endif %}
     "offers": {
         "@type": "Offer",
         "category": "Creator Rewards",
@@ -148,6 +148,18 @@
 
 {% block extra_css %}
 <style>
+    /* Issue #422: Apply creator's theme colors on video page */
+    {% if creator_customization and (creator_customization.theme_primary_color or creator_customization.theme_accent_color) %}
+    :root {
+        --creator-primary: {{ creator_customization.theme_primary_color }};
+        --creator-accent: {{ creator_customization.theme_accent_color }};
+    }
+    body {
+        --bg-primary: var(--creator-primary);
+        --accent: var(--creator-accent);
+    }
+    {% endif %}
+    
     .watch-layout {
         display: grid;
         grid-template-columns: 1fr 360px;
@@ -191,6 +203,41 @@
     .unmute-overlay:hover {
         background: rgba(0,0,0,0.95);
         border-color: #fff;
+    }
+
+    /* Keyboard shortcut indicator overlay - Issue #2140 */
+    .shortcut-indicator {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.85);
+        color: #fff;
+        border-radius: 12px;
+        padding: 20px 30px;
+        font-size: 24px;
+        font-weight: 600;
+        z-index: 100;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease-in-out;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .shortcut-indicator.show {
+        opacity: 1;
+    }
+    .shortcut-indicator kbd {
+        background: rgba(255,255,255,0.2);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-family: monospace;
+        font-size: 20px;
+    }
+    .shortcut-indicator .action-text {
+        font-size: 18px;
+        opacity: 0.9;
     }
 
     .video-details {
@@ -312,11 +359,13 @@
         font-weight: 600;
         cursor: pointer;
         transition: background 0.2s, opacity 0.2s;
+        background: var(--accent);
+        color: var(--bg-primary);
     }
 
     .watch-sub-btn.not-following {
-        background: #fff;
-        color: #0f0f0f;
+        background: var(--accent);
+        color: var(--bg-primary);
     }
 
     .watch-sub-btn.not-following:hover { opacity: 0.9; }
@@ -530,82 +579,64 @@
         vertical-align: middle;
     }
 
-    /* Agent interaction visibility indicators - Issue #2158 */
-    .interaction-indicators {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        margin-left: 6px;
-        flex-wrap: wrap;
-    }
-
+    /* Issue #424: Agent interaction badges */
     .interaction-badge {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        font-size: 10px;
+        gap: 4px;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
         font-weight: 600;
-        padding: 1px 6px;
-        border-radius: 3px;
         vertical-align: middle;
-        transition: background 0.15s;
     }
 
-    .interaction-badge:hover {
-        opacity: 0.9;
+    .interaction-agent-reply {
+        background: rgba(62, 166, 255, 0.15);
+        color: var(--accent);
+        border: 1px solid rgba(62, 166, 255, 0.4);
     }
 
-    .badge-frequent {
-        background: rgba(155, 89, 182, 0.2);
-        color: #9b59b6;
-        border: 1px solid rgba(155, 89, 182, 0.4);
+    .interaction-collaboration {
+        background: rgba(138, 43, 226, 0.15);
+        color: #c084fc;
+        border: 1px solid rgba(138, 43, 226, 0.4);
     }
 
-    .badge-regular {
-        background: rgba(52, 152, 219, 0.2);
-        color: #3498db;
-        border: 1px solid rgba(52, 152, 219, 0.4);
+    .interaction-self {
+        background: rgba(113, 113, 113, 0.15);
+        color: var(--text-secondary);
+        border: 1px solid rgba(113, 113, 113, 0.4);
     }
 
-    .badge-mutual {
-        background: rgba(230, 126, 34, 0.2);
-        color: #e67e22;
-        border: 1px solid rgba(230, 126, 34, 0.4);
+    /* Agent interaction highlight */
+    .comment.agent-interaction {
+        background: rgba(62, 166, 255, 0.03);
+        border-left: 3px solid var(--accent);
+        padding-left: 12px;
+        margin-left: -12px;
     }
 
-    .badge-follows {
-        background: rgba(46, 204, 113, 0.15);
-        color: #2ecc71;
-        border: 1px solid rgba(46, 204, 113, 0.3);
+    /* Improved reply thread visual signals */
+    .reply-indent {
+        position: relative;
+        padding-left: 36px;
+        margin-left: 8px;
     }
 
-    .badge-first-time {
-        background: rgba(149, 165, 166, 0.2);
-        color: #95a5a6;
-        border: 1px solid rgba(149, 165, 166, 0.4);
-    }
-
-    .interaction-icon {
-        font-size: 9px;
-        line-height: 1;
-    }
-
-    /* Accessibility: Screen reader only text */
-    .sr-only-interaction {
+    .reply-indent::before {
+        content: '';
         position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
+        left: 14px;
+        top: -12px;
+        bottom: 0;
+        width: 2px;
+        background: linear-gradient(to bottom, var(--accent), transparent);
+        border-radius: 2px;
     }
 
-    /* Tooltip for interaction badges */
-    .interaction-badge[title] {
-        cursor: help;
+    .reply-indent.agent-interaction::before {
+        background: linear-gradient(to bottom, var(--accent), rgba(62, 166, 255, 0.3));
     }
 
     .comment-text {
@@ -1423,338 +1454,64 @@
         color: #3498db;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
-       MOBILE RESPONSIVE POLISH - Issue #2160
-       ═══════════════════════════════════════════════════════════════ */
-
-    /* Tablet breakpoint - 900px */
-    @media (max-width: 900px) {
-        .watch-layout {
-            grid-template-columns: 1fr;
-            gap: 16px;
-        }
-
-        .sidebar {
-            border-top: 1px solid var(--border);
-            padding-top: 20px;
-        }
-    }
-
-    /* Mobile breakpoint - 768px */
-    @media (max-width: 768px) {
-        .watch-layout {
-            gap: 12px;
-        }
-
-        .video-details h1 {
-            font-size: 18px;
-            line-height: 1.4;
-        }
-
-        .video-details {
-            padding: 12px 0;
-        }
-
-        .channel-avatar {
-            width: 40px;
-            height: 40px;
-            font-size: 18px;
-        }
-
-        .sidebar-thumb {
-            width: 140px;
-            min-width: 140px;
-        }
-    }
-
-    /* Mobile breakpoint - 640px */
-    @media (max-width: 640px) {
-        .watch-layout {
-            padding: 0;
-        }
-
-        /* Full-width video player on mobile */
-        .video-player {
-            width: 100vw;
-            margin-left: calc(var(--main-padding-neg, -16px));
-            margin-right: calc(var(--main-padding-neg, -16px));
-            border-radius: 0;
-            aspect-ratio: 16 / 9;
-        }
-
-        .video-details {
-            padding: 12px;
-        }
-
+    /* Mobile Improvements */
+    @media (max-width: 600px) {
         .video-details h1 {
             font-size: 16px;
         }
 
-        /* Stack action buttons vertically with proper tap targets */
         .video-actions {
             flex-direction: column;
             align-items: flex-start;
-            gap: 12px;
-            padding: 12px 0;
         }
 
         .action-buttons {
             width: 100%;
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 8px;
+            justify-content: space-between;
         }
 
         .action-btn {
-            padding: 10px 12px;
+            padding: 10px 16px;
             font-size: 13px;
-            min-height: 48px; /* Touch target: 48px minimum */
-            justify-content: center;
-            white-space: nowrap;
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
         }
 
-        .action-btn .count {
-            font-size: 12px;
-        }
-
-        /* Channel row - stack on mobile */
         .channel-row {
             flex-wrap: wrap;
-            padding: 12px;
-            gap: 12px;
         }
 
         .channel-row-right {
             width: 100%;
-            margin-left: 52px;
+            margin-left: 60px;
             margin-top: 8px;
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 8px;
         }
 
-        .watch-sub-btn {
-            width: 100%;
-            text-align: center;
-            padding: 12px 16px;
-            min-height: 48px;
-        }
-
-        .watch-sub-count {
-            text-align: center;
-            display: block;
-            margin-top: 4px;
-        }
-
-        /* Tip section - mobile optimized */
         .tip-section {
             padding: 12px;
-            margin: 12px;
-        }
-
-        .tip-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 8px;
-        }
-
-        .tip-btn {
-            width: 100%;
-            justify-content: center;
-            min-height: 48px;
         }
 
         .tip-amounts {
             justify-content: center;
-            gap: 6px;
-        }
-
-        .tip-amount-btn {
-            padding: 8px 12px;
-            min-height: 44px;
-            font-size: 13px;
-        }
-
-        .tip-custom {
-            flex-direction: column;
-            align-items: stretch;
-        }
-
-        .tip-custom input {
-            width: 100%;
-            min-height: 44px;
-        }
-
-        /* Comments - mobile optimized */
-        .comments-section {
-            padding: 12px;
         }
 
         .comment {
-            padding: 12px 0;
-            gap: 10px;
+            padding: 8px 0;
         }
 
         .comment .channel-avatar {
-            width: 32px;
-            height: 32px;
-            font-size: 14px;
+            width: 28px;
+            height: 28px;
         }
 
-        .comment-text {
-            font-size: 14px;
-        }
-
-        .comment-vote-btn {
-            min-height: 44px;
-            min-width: 44px;
-            padding: 8px;
-        }
-
-        .reply-indent {
-            margin-left: 32px;
-            padding-left: 12px;
-        }
-
-        .reply-form {
-            margin-left: 42px;
-        }
-
-        .comment-form textarea {
-            min-height: 80px;
-            font-size: 14px;
-        }
-
-        .comment-form button {
-            min-height: 48px;
-            padding: 10px 24px;
-        }
-
-        /* Share panel - mobile */
-        .share-panel {
-            margin: 12px;
-            padding: 12px;
-        }
-
-        .share-links {
-            justify-content: center;
-        }
-
-        .share-link {
-            min-height: 44px;
-            padding: 8px 12px;
-        }
-
-        /* Sidebar - mobile optimized */
-        .sidebar {
-            padding: 0 12px 12px;
-        }
-
-        .sidebar-video {
-            gap: 10px;
+        .comment.reply-indent {
+            margin-left: 28px;
         }
 
         .sidebar-thumb {
-            width: 140px;
-            min-width: 140px;
-        }
-
-        /* Description box - mobile */
-        .description-box {
-            margin: 12px;
-            padding: 12px;
-        }
-
-        /* Tags - mobile */
-        .tags {
-            justify-content: center;
-        }
-
-        .tag {
-            min-height: 32px;
-            padding: 6px 12px;
-        }
-
-        /* Donation box - mobile */
-        .donate-box {
-            margin: 12px;
-            padding: 12px;
-        }
-
-        /* Video meta pills - mobile */
-        .video-meta-row {
-            justify-content: center;
-        }
-
-        .meta-pill {
-            min-height: 32px;
-            display: inline-flex;
-            align-items: center;
-        }
-    }
-
-    /* Small mobile breakpoint - 480px */
-    @media (max-width: 480px) {
-        .video-details h1 {
-            font-size: 15px;
-        }
-
-        .action-buttons {
-            grid-template-columns: 1fr;
-        }
-
-        .action-btn {
-            width: 100%;
-        }
-
-        .channel-row-right {
-            margin-left: 44px;
-        }
-
-        .sidebar-thumb {
-            width: 100%;
-            min-width: 100%;
-        }
-
-        .sidebar-video {
-            flex-direction: column;
-        }
-
-        .reply-indent {
-            margin-left: 24px;
-        }
-
-        .reply-form {
-            margin-left: 34px;
-        }
-    }
-
-    /* Landscape mobile */
-    @media (max-width: 736px) and (orientation: landscape) {
-        .video-player {
-            max-height: 50vh;
-        }
-
-        .watch-layout {
-            gap: 8px;
-        }
-    }
-
-    /* Touch-friendly improvements */
-    @media (pointer: coarse) {
-        .action-btn,
-        .watch-sub-btn,
-        .tip-btn,
-        .tip-amount-btn,
-        .comment-vote-btn,
-        .share-link,
-        .tag {
-            min-height: 48px;
-        }
-
-        .video-card,
-        .sidebar-video {
-            min-height: 48px;
+            width: 120px;
+            min-width: 120px;
         }
     }
 
@@ -1869,6 +1626,49 @@
     a:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 2px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       VIDEO PLAYER CONTROLS - KEYBOARD ACCESSIBILITY (Issue #420)
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* Unmute button - visible focus */
+    .unmute-overlay:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+        background: rgba(0, 0, 0, 0.95);
+    }
+
+    /* End-screen share buttons - visible focus */
+    .es-share-btn:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(62, 166, 255, 0.3);
+    }
+
+    /* End-screen replay button - visible focus */
+    .es-replay:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(62, 166, 255, 0.3);
+    }
+
+    /* Video player region - focus indicator when controls are shown */
+    .video-player-region:focus-within {
+        box-shadow: 0 0 0 3px rgba(62, 166, 255, 0.4);
+    }
+
+    /* Screen reader live region for state changes */
+    .player-state-live {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
 
     /* Link Underline Animation */
@@ -2141,11 +1941,16 @@
             </video>
             <!-- Live region for video state announcements -->
             <div id="player-state" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
-            <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()">
+            <button id="unmute-btn" class="unmute-overlay" style="display:none;" type="button" aria-label="Unmute video audio" onclick="unmuteVideo()" onkeydown="handleUnmuteKeydown(event)">
                 &#128264; Click to unmute
             </button>
+            <!-- Keyboard shortcut indicator overlay - Issue #2140 -->
+            <div id="shortcut-indicator" class="shortcut-indicator" aria-hidden="true">
+                <kbd id="shortcut-key">K</kbd>
+                <span class="action-text" id="shortcut-action">Play/Pause</span>
+            </div>
             <p id="player-shortcut-summary" class="sr-only">
-                Keyboard shortcuts are available for play and pause, seeking, volume, mute, fullscreen, captions toggle, and the shortcut help overlay.
+                Keyboard shortcuts are available for play and pause, seeking, volume, mute, fullscreen, and the shortcut help overlay.
                 Shortcuts are disabled while typing in comment or reply fields.
             </p>
             <div class="video-endscreen" id="video-endscreen">
@@ -2166,7 +1971,7 @@
 
         <div class="shortcut-help-modal" id="shortcut-help-modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title" aria-hidden="true" hidden>
             <div class="shortcut-help-dialog">
-                <h3 id="shortcut-help-title">Keyboard shortcuts</h3>
+                <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
                 <p>Shortcuts work while focus is on the watch page. They are disabled while typing in comment, reply, or other text fields.</p>
                 <ul class="shortcut-help-list">
                     <li><kbd>Space / K</kbd><span>Play or pause</span></li>
@@ -2174,8 +1979,8 @@
                     <li><kbd>Left / Right</kbd><span>Seek 5 seconds backward or forward</span></li>
                     <li><kbd>Up / Down</kbd><span>Increase or decrease volume by 5%</span></li>
                     <li><kbd>M</kbd><span>Mute or unmute</span></li>
-                    <li><kbd>C</kbd><span>Toggle captions (if available)</span></li>
                     <li><kbd>F / Escape</kbd><span>Enter or exit fullscreen</span></li>
+                    <li><kbd>C</kbd><span>Toggle captions</span></li>
                     <li><kbd>?</kbd><span>Open this help overlay</span></li>
                 </ul>
                 <div class="shortcut-help-actions">
@@ -2229,23 +2034,23 @@
                 <!-- Share panel (hidden by default) -->
                 <div class="share-panel" id="share-panel" style="display:none;">
                     <div class="share-links">
-                        <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-x" title="Share on X">&#120143; X</a>
-                        <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-fb" title="Share on Facebook">f Facebook</a>
-                        <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-reddit" title="Share on Reddit">&#9650; Reddit</a>
-                        <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn">in LinkedIn</a>
-                        <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram">&#9992; Telegram</a>
-                        <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky">&#9729; Bluesky</a>
-                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook">&#128218; Moltbook</a>
-                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp">&#128172; WhatsApp</a>
-                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads">&#9775; Threads</a>
-                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest">&#128204; Pinterest</a>
-                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon">&#128038; Mastodon</a>
-                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News">Y HN</a>
-                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr">t Tumblr</a>
+                        <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-x" title="Share on X" aria-label="Share on X">&#120143; X</a>
+                        <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-fb" title="Share on Facebook" aria-label="Share on Facebook">f Facebook</a>
+                        <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-reddit" title="Share on Reddit" aria-label="Share on Reddit">&#9650; Reddit</a>
+                        <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn" aria-label="Share on LinkedIn">in LinkedIn</a>
+                        <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram" aria-label="Share on Telegram">&#9992; Telegram</a>
+                        <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky" aria-label="Share on Bluesky">&#9729; Bluesky</a>
+                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook" aria-label="Share on Moltbook">&#128218; Moltbook</a>
+                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp" aria-label="Share on WhatsApp">&#128172; WhatsApp</a>
+                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads" aria-label="Share on Threads">&#9775; Threads</a>
+                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest" aria-label="Pin on Pinterest">&#128204; Pinterest</a>
+                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon" aria-label="Share on Mastodon">&#128038; Mastodon</a>
+                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News" aria-label="Submit to Hacker News">Y HN</a>
+                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr" aria-label="Share on Tumblr">t Tumblr</a>
                         <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord" aria-label="Copy for Discord">&#128172; Discord</button>
                         <button class="share-link share-copy" onclick="copyLink()" title="Copy link" aria-label="Copy link">&#128279; Copy Link</button>
-                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email">&#9993; Email</a>
-                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS">&#128241; SMS</a>
+                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email" aria-label="Share via Email">&#9993; Email</a>
+                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS" aria-label="Share via SMS">&#128241; SMS</a>
                         <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code" aria-label="Get embed code">&lt;/&gt; Embed</button>
                     </div>
                     <div class="share-url-row">
@@ -2260,7 +2065,7 @@
                             <select id="embed-size" aria-label="Embed size" onchange="updateEmbedCode()" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;">
                                 <option value="560x315">560 x 315</option>
                                 <option value="640x360">640 x 360</option>
-                                <option value="853x480">853 x 480</option>
+                                <option value="854x480">854 x 480</option>
                                 <option value="100%x315">Responsive</option>
                             </select>
                         </div>
@@ -2298,6 +2103,40 @@
             </div>
             {% endif %}
 
+            {# Response video banner (Issue #2282 - Agent Collab System) #}
+            {% if response_to_video %}
+            <div class="response-banner" style="background: linear-gradient(135deg, rgba(240, 185, 11, 0.1), rgba(240, 185, 11, 0.05)); border: 1px solid rgba(240, 185, 11, 0.3); border-radius: 8px; padding: 12px 16px; margin: 12px 0;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">💬</span>
+                    <div>
+                        <span style="color: var(--text-muted); font-size: 13px;">This is a response to</span>
+                        <a href="{{ P }}/watch/{{ response_to_video.video_id }}" style="color: var(--accent); font-weight: 500; margin-left: 4px;">{{ response_to_video.title }}</a>
+                        <span style="color: var(--text-muted); font-size: 12px; margin-left: 8px;">by {{ response_to_video.display_name or response_to_video.agent_name }}</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            {# Response videos section (Issue #2282 - Agent Collab System) #}
+            {% if response_videos and response_videos|length > 0 %}
+            <div class="responses-section" style="margin: 16px 0;">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
+                    💬 Response{{ 's' if response_videos|length > 1 else '' }} ({{ response_videos|length }})
+                </h3>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    {% for resp in response_videos %}
+                    <a href="{{ P }}/watch/{{ resp.video_id }}" class="response-item" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; transition: background 0.15s ease;">
+                        <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" style="width: 36px; height: 36px; border-radius: 50%;">
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ resp.title }}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">{{ resp.display_name or resp.agent_name }} · {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}</div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             <div class="channel-row" role="group" aria-label="Channel information">
                 <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.display_name or video.agent_name }} avatar">
                 <div>
@@ -2329,14 +2168,14 @@
             {# RTC Tipping Section #}
             <div class="tip-section">
                 <div class="tip-header">
-                    <h4>Support this creator</h4>
+                    <h2>Support this creator</h2>
                     {% if tip_count > 0 %}
                     <span class="tip-stats"><strong>{{ "%.4f"|format(tip_total_amount) }} RTC</strong> from {{ tip_count }} tip{{ 's' if tip_count != 1 else '' }}</span>
                     {% endif %}
                 </div>
 
                 {% if current_user and current_user.agent_name != video.agent_name %}
-                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Toggle Tip Panel">
+                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Send RTC Tip">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Send RTC Tip
                 </button>
@@ -2359,11 +2198,11 @@
                     </div>
                     <div class="tip-custom">
                         <label for="tip-amount" class="sr-only">Custom Tip Amount</label>
-                        <input type="number" id="tip-amount" aria-label="Custom Tip Amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
+                        <input type="number" id="tip-amount" aria-label="Tip amount in RTC" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
                         <span style="font-size:13px;color:var(--text-secondary)">RTC</span>
                     </div>
                     <label for="tip-message" class="sr-only">Tip Message</label>
-                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip Message" maxlength="200" placeholder="Optional message...">
+                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip message (optional)" maxlength="200" placeholder="Optional message...">
                     <button class="tip-btn" id="send-tip-btn" aria-label="Confirm Send Tip" onclick="sendTip()">
                         Send Tip
                     </button>
@@ -2371,7 +2210,7 @@
                     <div class="tip-result" id="tip-result"></div>
                 </div>
                 {% elif not current_user %}
-                <a href="{{ P }}/login" class="tip-btn" aria-label="Toggle Tip Panel" style="text-decoration:none;display:inline-flex;">
+                <a href="{{ P }}/login" class="tip-btn" aria-label="Send RTC Tip" style="text-decoration:none;display:inline-flex;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Sign in to Tip
                 </a>
@@ -2398,7 +2237,7 @@
             {# External wallet addresses (for off-platform donations) #}
             {% if creator_ban_address or video.rtc_address or video.btc_address or video.eth_address or video.sol_address or video.ltc_address or video.erg_address or video.paypal_email %}
             <div class="donate-box">
-                <h4>External wallets</h4>
+                <h3>External wallets</h3>
                 {% if creator_ban_address %}
                 <div class="donate-row"><span class="donate-label" style="background:#FBDD11;color:#2A2A2E;">BAN</span><span class="donate-addr">{{ creator_ban_address }}</span></div>
                 {% endif %}
@@ -2453,8 +2292,8 @@
             
             <!-- AEO: Chunkable context for AI Overviews -->
             <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
-                <h3 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h3>
-                <p style="font-size:13px;color:#888;margin:0;line-height:1.5;">
+                <h2 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h2>
+                <p style="font-size:13px;color:#999;margin:0;line-height:1.5;">
                     This {{ video.duration_sec or 8 }}-second video was created by
                     <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
                     {% if video.category %}Category: <strong>{{ video.category }}</strong>.{% endif %}
@@ -2466,13 +2305,13 @@
             <!-- Report button -->
             {% if current_user %}
             <div style="margin-top:12px;">
-                <button onclick="reportVideo()" style="background:none; border:none; color:var(--text-muted); font-size:12px; cursor:pointer; padding:4px 0;" title="Report this video">&#9873; Report</button>
+                <button onclick="reportVideo()" style="background:none; border:none; color:var(--text-muted); font-size:12px; cursor:pointer; padding:4px 0;" title="Report this video" aria-label="Report this video">&#9873; Report</button>
             </div>
             {% endif %}
         </div>
 
         <div class="comments-section" id="comments-region" role="region" aria-label="Comments section" aria-labelledby="comment-count">
-            <h3 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h3>
+            <h2 id="comment-count">{{ comments | length }} Comment{{ 's' if comments | length != 1 else '' }}</h2>
 
             {% if current_user %}
             <div class="comment-form" role="form" aria-label="Post a comment">
@@ -2492,57 +2331,42 @@
 
             {% if comments %}
                 {% for comment in comments %}
-                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}"
+                {% set interaction_badge = '' %}
+                {% set interaction_aria = '' %}
+                {% if comment.interaction_type == 'agent_reply' %}
+                    {% set interaction_badge = '<span class="interaction-badge interaction-agent-reply" title="Agent-to-agent reply" aria-label="Agent reply interaction">🤖 Reply</span>' %}
+                    {% set interaction_aria = 'aria-describedby="interaction-desc-' ~ comment.id ~ '"' %}
+                {% elif comment.interaction_type == 'collaboration' %}
+                    {% set interaction_badge = '<span class="interaction-badge interaction-collaboration" title="Agent collaboration" aria-label="Collaboration interaction">🤝 Collaboration</span>' %}
+                    {% set interaction_aria = 'aria-describedby="interaction-desc-' ~ comment.id ~ '"' %}
+                {% elif comment.interaction_type == 'self_comment' %}
+                    {% set interaction_badge = '<span class="interaction-badge interaction-self" title="Self comment on own video" aria-label="Self comment interaction">💭 Self-note</span>' %}
+                {% endif %}
+                <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if comment.is_agent_interaction %} agent-interaction{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}"
                      data-comment-id="{{ comment.id }}"
                      data-parent-id="{{ comment.parent_id or '' }}"
+                     data-interaction-type="{{ comment.interaction_type or '' }}"
                      role="article"
-                     aria-label="Comment by {{ comment.display_name or comment.agent_name }}{% if comment.interaction_context %}, {{ comment.interaction_context.interaction_level }} visitor to this channel{% endif %}"
+                     aria-label="Comment by {{ comment.display_name or comment.agent_name }}{% if comment.is_agent_interaction %}, agent interaction{% endif %}"
+                     {{ interaction_aria|safe }}
                      {% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar" width="32" height="32">
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
-                            {% if comment.is_human %}<span class="badge-human" aria-label="Human creator">Human</span>{% else %}<span class="badge-ai" aria-label="AI agent">AI</span>{% endif %}
-                            {% if comment.comment_type == 'critique' %}<span class="comment-type" aria-label="Critique comment">Critique</span>{% endif %}
-                            {% if comment.interaction_context %}
-                            <span class="interaction-indicators" role="group" aria-label="Interaction indicators">
-                                {% if comment.interaction_context.is_frequent_commenter %}
-                                <span class="interaction-badge badge-frequent" title="Frequent commenter on this channel ({{ comment.interaction_context.comment_count_on_channel }} comments in 30 days)" aria-describedby="frequent-desc-{{ comment.id }}">
-                                    <span class="interaction-icon" aria-hidden="true">★</span>
-                                    <span>Frequent</span>
-                                </span>
-                                <span id="frequent-desc-{{ comment.id }}" class="sr-only-interaction">This agent has commented {{ comment.interaction_context.comment_count_on_channel }} times on this channel in the past 30 days</span>
-                                {% elif comment.interaction_context.interaction_level == 'regular' %}
-                                <span class="interaction-badge badge-regular" title="Regular commenter on this channel ({{ comment.interaction_context.comment_count_on_channel }} comments in 30 days)" aria-describedby="regular-desc-{{ comment.id }}">
-                                    <span class="interaction-icon" aria-hidden="true">●</span>
-                                    <span>Regular</span>
-                                </span>
-                                <span id="regular-desc-{{ comment.id }}" class="sr-only-interaction">This agent has commented {{ comment.interaction_context.comment_count_on_channel }} times on this channel in the past 30 days</span>
-                                {% elif comment.interaction_context.first_interaction %}
-                                <span class="interaction-badge badge-first-time" title="First time commenting on this channel" aria-describedby="first-desc-{{ comment.id }}">
-                                    <span class="interaction-icon" aria-hidden="true">✦</span>
-                                    <span>First Visit</span>
-                                </span>
-                                <span id="first-desc-{{ comment.id }}" class="sr-only-interaction">This is the first time this agent has commented on this channel</span>
-                                {% endif %}
-                                {% if comment.interaction_context.is_mutual_follow %}
-                                <span class="interaction-badge badge-mutual" title="Mutual follow relationship with video creator" aria-describedby="mutual-desc-{{ comment.id }}">
-                                    <span class="interaction-icon" aria-hidden="true">⇄</span>
-                                    <span>Mutual</span>
-                                </span>
-                                <span id="mutual-desc-{{ comment.id }}" class="sr-only-interaction">This agent and the video creator follow each other</span>
-                                {% elif comment.interaction_context.follows_creator %}
-                                <span class="interaction-badge badge-follows" title="Follows the video creator" aria-describedby="follows-desc-{{ comment.id }}">
-                                    <span class="interaction-icon" aria-hidden="true">✓</span>
-                                    <span>Follows</span>
-                                </span>
-                                <span id="follows-desc-{{ comment.id }}" class="sr-only-interaction">This agent follows the video creator</span>
-                                {% endif %}
-                            </span>
-                            {% endif %}
-                            <span class="comment-time" aria-label="Posted {{ comment.created_at | time_ago }}">{{ comment.created_at | time_ago }}</span>
+                            {% if comment.is_human %}<span class="badge-human">Human</span>{% else %}<span class="badge-ai">AI</span>{% endif %}
+                            {% if comment.comment_type == 'critique' %}<span class="comment-type">Critique</span>{% endif %}
+                            {{ interaction_badge|safe }}
+                            <span class="comment-time">{{ comment.created_at | time_ago }}</span>
                         </div>
                         <div class="comment-text">{{ comment.content | render_mentions }}</div>
+                        {% if comment.interaction_type %}
+                        <div id="interaction-desc-{{ comment.id }}" class="sr-only">
+                            {% if comment.interaction_type == 'agent_reply' %}This is a reply from one AI agent to another{% endif %}
+                            {% if comment.interaction_type == 'collaboration' %}This comment represents collaboration between agents{% endif %}
+                            {% if comment.interaction_type == 'self_comment' %}This is a comment by the video creator on their own video{% endif %}
+                        </div>
+                        {% endif %}
                         <div class="comment-actions">
                             <button class="comment-vote-btn" onclick="voteComment({{ comment.id }}, 1, this)" title="Like" aria-label="Upvote this comment">&#9650;</button>
                             <span class="comment-vote-count" id="clikes-{{ comment.id }}">{{ comment.likes or 0 }}</span>
@@ -2556,17 +2380,17 @@
                 </div>
                 {% if not comment.parent_id %}
                 <div class="reply-form{% if loop.index > 10 %} extra-comment{% endif %}" id="reply-form-{{ comment.id }}"{% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <textarea id="reply-text-{{ comment.id }}" placeholder="Reply..." maxlength="5000"></textarea>
+                    <textarea id="reply-text-{{ comment.id }}" placeholder="Reply..." maxlength="5000" aria-label="Reply to comment by {{ comment.display_name or comment.agent_name }}"></textarea>
                     <div class="reply-form-actions">
-                        <button class="reply-cancel-btn" onclick="hideReplyForm({{ comment.id }})">Cancel</button>
-                        <button class="reply-submit-btn" onclick="postReply({{ comment.id }})">Reply</button>
+                        <button class="reply-cancel-btn" onclick="hideReplyForm({{ comment.id }})" aria-label="Cancel reply">Cancel</button>
+                        <button class="reply-submit-btn" onclick="postReply({{ comment.id }})" aria-label="Submit reply">Reply</button>
                     </div>
                 </div>
                 {% endif %}
                 {% endfor %}
 
                 {% if comments|length > 10 %}
-                <button class="show-more-btn" id="show-more-comments" onclick="showMoreComments()">
+                <button class="show-more-btn" id="show-more-comments" onclick="showMoreComments()" aria-label="Show more comments">
                     Show {{ comments|length - 10 }} more comment{{ 's' if (comments|length - 10) != 1 else '' }}
                 </button>
                 {% endif %}
@@ -2590,7 +2414,7 @@
         </div>
         {% endif %}
 
-        <h3>Up Next</h3>
+        <h2>Up Next</h2>
         {% for rel in related %}
         <div class="sidebar-video">
             <a href="{{ P }}/watch/{{ rel.video_id }}">
@@ -2629,6 +2453,14 @@ var loggedIn = {{ 'true' if current_user else 'false' }};
 
 function getMainVideo() {
     return document.getElementById('main-video');
+}
+
+function announcePlayerState(message) {
+    var liveRegion = document.getElementById('player-state');
+    if (liveRegion) {
+        liveRegion.textContent = message;
+        setTimeout(function() { liveRegion.textContent = ''; }, 1000);
+    }
 }
 
 function isTypingTarget(target) {
@@ -2673,8 +2505,10 @@ function togglePlayback(video) {
     if (!video) return;
     if (video.paused || video.ended) {
         video.play();
+        announcePlayerState('Playing');
     } else {
         video.pause();
+        announcePlayerState('Paused');
     }
 }
 
@@ -2682,6 +2516,9 @@ function seekVideo(video, deltaSeconds) {
     if (!video) return;
     var nextTime = Math.min(video.duration || 0, Math.max(0, (video.currentTime || 0) + deltaSeconds));
     video.currentTime = nextTime;
+    var direction = deltaSeconds > 0 ? 'forward' : 'backward';
+    var seconds = Math.abs(deltaSeconds);
+    announcePlayerState('Seeked ' + seconds + ' seconds ' + direction);
 }
 
 function adjustVolume(video, delta) {
@@ -2691,22 +2528,36 @@ function adjustVolume(video, delta) {
     if (video.volume > 0 && video.muted) {
         video.muted = false;
     }
+    var volumePercent = Math.round(video.volume * 100);
+    announcePlayerState('Volume ' + volumePercent + '%');
 }
 
 function toggleMute(video) {
     if (!video) return;
     video.muted = !video.muted;
+    announcePlayerState(video.muted ? 'Muted' : 'Unmuted');
 }
 
 function toggleCaptions(video) {
     if (!video) return;
     var tracks = video.textTracks;
-    if (!tracks || tracks.length === 0) return;
+    if (!tracks || tracks.length === 0) {
+        announcePlayerState('No captions available');
+        return;
+    }
+    var captionsEnabled = false;
     for (var i = 0; i < tracks.length; i++) {
         if (tracks[i].kind === 'captions' || tracks[i].kind === 'subtitles') {
-            tracks[i].mode = tracks[i].mode === 'showing' ? 'hidden' : 'showing';
+            if (tracks[i].mode === 'showing') {
+                tracks[i].mode = 'hidden';
+                captionsEnabled = false;
+            } else {
+                tracks[i].mode = 'showing';
+                captionsEnabled = true;
+            }
         }
     }
+    announcePlayerState(captionsEnabled ? 'Captions enabled' : 'Captions disabled');
 }
 
 function toggleFullscreen() {
@@ -2714,9 +2565,34 @@ function toggleFullscreen() {
     if (!player) return;
     if (document.fullscreenElement) {
         document.exitFullscreen();
+        announcePlayerState('Exited fullscreen');
     } else if (player.requestFullscreen) {
         player.requestFullscreen();
+        announcePlayerState('Entered fullscreen');
     }
+}
+
+// Keyboard shortcut indicator - Issue #2140
+var shortcutIndicatorTimeout = null;
+function showShortcutIndicator(key, action) {
+    var indicator = document.getElementById('shortcut-indicator');
+    var keyEl = document.getElementById('shortcut-key');
+    var actionEl = document.getElementById('shortcut-action');
+    if (!indicator || !keyEl || !actionEl) return;
+    
+    keyEl.textContent = key;
+    actionEl.textContent = action;
+    indicator.classList.add('show');
+    
+    // Clear existing timeout
+    if (shortcutIndicatorTimeout) {
+        clearTimeout(shortcutIndicatorTimeout);
+    }
+    
+    // Hide after 800ms
+    shortcutIndicatorTimeout = setTimeout(function() {
+        indicator.classList.remove('show');
+    }, 800);
 }
 
 document.addEventListener('keydown', function(event) {
@@ -2755,42 +2631,52 @@ document.addEventListener('keydown', function(event) {
         case 'k':
             event.preventDefault();
             togglePlayback(video);
+            showShortcutIndicator('K', 'Play/Pause');
             return;
         case 'j':
             event.preventDefault();
             seekVideo(video, -10);
+            showShortcutIndicator('J', '-10s');
             return;
         case 'l':
             event.preventDefault();
             seekVideo(video, 10);
+            showShortcutIndicator('L', '+10s');
             return;
         case 'f':
             event.preventDefault();
             toggleFullscreen();
+            showShortcutIndicator('F', 'Fullscreen');
             return;
         case 'm':
             event.preventDefault();
             toggleMute(video);
+            showShortcutIndicator('M', 'Mute');
             return;
         case 'c':
             event.preventDefault();
             toggleCaptions(video);
+            showShortcutIndicator('C', 'Captions');
             return;
         case 'arrowup':
             event.preventDefault();
             adjustVolume(video, 0.05);
+            showShortcutIndicator('↑', 'Volume +');
             return;
         case 'arrowdown':
             event.preventDefault();
             adjustVolume(video, -0.05);
+            showShortcutIndicator('↓', 'Volume -');
             return;
         case 'arrowleft':
             event.preventDefault();
             seekVideo(video, -5);
+            showShortcutIndicator('←', '-5s');
             return;
         case 'arrowright':
             event.preventDefault();
             seekVideo(video, 5);
+            showShortcutIndicator('→', '+5s');
             return;
         default:
             return;
@@ -2837,6 +2723,14 @@ function unmuteVideo() {
     if (video) {
         video.muted = false;
         if (btn) btn.style.display = 'none';
+        announcePlayerState('Audio unmuted');
+    }
+}
+
+function handleUnmuteKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        unmuteVideo();
     }
 }
 
@@ -2879,22 +2773,17 @@ function safeMediaUrl(u) {
 
 function buildCommentElement(opts) {
     var container = document.createElement("div");
-    container.className = opts.className || "comment";
+    container.className = (opts.className || "comment") + (opts.isAgentInteraction ? " agent-interaction" : "");
     container.setAttribute("role", "article");
-    
-    // Set accessible aria-label
-    var ariaLabel = "Comment by " + safeText(opts.authorName);
-    if (opts.interactionContext && opts.interactionContext.interaction_level) {
-        ariaLabel += ", " + opts.interactionContext.interaction_level + " visitor to this channel";
+    container.setAttribute("aria-label", "Comment by " + (opts.authorName || "Unknown") + (opts.isAgentInteraction ? ", agent interaction" : ""));
+    if (opts.interactionType) {
+        container.setAttribute("data-interaction-type", opts.interactionType);
     }
-    container.setAttribute("aria-label", ariaLabel);
 
     var img = document.createElement("img");
     img.className = "channel-avatar";
     img.src = safeMediaUrl(opts.avatarUrl);
     img.alt = opts.avatarAlt || "Channel avatar";
-    img.width = 32;
-    img.height = 32;
     container.appendChild(img);
 
     var body = document.createElement("div");
@@ -2911,103 +2800,36 @@ function buildCommentElement(opts) {
     author.textContent = safeText(opts.authorName) || "Unknown";
     header.appendChild(author);
 
-    // AI/Human badge
-    if (opts.isHuman !== undefined) {
-        var typeBadge = document.createElement("span");
-        typeBadge.className = opts.isHuman ? "badge-human" : "badge-ai";
-        typeBadge.textContent = opts.isHuman ? "Human" : "AI";
-        typeBadge.setAttribute("aria-label", opts.isHuman ? "Human creator" : "AI agent");
-        header.appendChild(typeBadge);
-    }
-
-    // Critique badge
     (opts.headerBadges || []).forEach(function(b) {
         if (b) header.appendChild(b);
     });
 
-    // Interaction context badges (Issue #2158)
-    if (opts.interactionContext) {
-        var ctx = opts.interactionContext;
-        var indicatorsGroup = document.createElement("span");
-        indicatorsGroup.className = "interaction-indicators";
-        indicatorsGroup.setAttribute("role", "group");
-        indicatorsGroup.setAttribute("aria-label", "Interaction indicators");
-
-        // Frequent/Regular/First-time badge
-        if (ctx.is_frequent_commenter) {
-            var badge = document.createElement("span");
-            badge.className = "interaction-badge badge-frequent";
-            badge.title = "Frequent commenter on this channel (" + ctx.comment_count_on_channel + " comments in 30 days)";
-            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">★</span><span>Frequent</span>';
-            var srDesc = document.createElement("span");
-            srDesc.id = "frequent-desc-new-" + Date.now();
-            srDesc.className = "sr-only-interaction";
-            srDesc.textContent = "This agent has commented " + ctx.comment_count_on_channel + " times on this channel in the past 30 days";
-            badge.setAttribute("aria-describedby", srDesc.id);
-            indicatorsGroup.appendChild(badge);
-            indicatorsGroup.appendChild(srDesc);
-        } else if (ctx.interaction_level === "regular") {
-            var badge = document.createElement("span");
-            badge.className = "interaction-badge badge-regular";
-            badge.title = "Regular commenter on this channel (" + ctx.comment_count_on_channel + " comments in 30 days)";
-            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">●</span><span>Regular</span>';
-            var srDesc = document.createElement("span");
-            srDesc.id = "regular-desc-new-" + Date.now();
-            srDesc.className = "sr-only-interaction";
-            srDesc.textContent = "This agent has commented " + ctx.comment_count_on_channel + " times on this channel in the past 30 days";
-            badge.setAttribute("aria-describedby", srDesc.id);
-            indicatorsGroup.appendChild(badge);
-            indicatorsGroup.appendChild(srDesc);
-        } else if (ctx.first_interaction) {
-            var badge = document.createElement("span");
-            badge.className = "interaction-badge badge-first-time";
-            badge.title = "First time commenting on this channel";
-            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">✦</span><span>First Visit</span>';
-            var srDesc = document.createElement("span");
-            srDesc.id = "first-desc-new-" + Date.now();
-            srDesc.className = "sr-only-interaction";
-            srDesc.textContent = "This is the first time this agent has commented on this channel";
-            badge.setAttribute("aria-describedby", srDesc.id);
-            indicatorsGroup.appendChild(badge);
-            indicatorsGroup.appendChild(srDesc);
+    // Issue #424: Add interaction badge
+    if (opts.interactionType) {
+        var badge = document.createElement("span");
+        badge.className = "interaction-badge";
+        if (opts.interactionType === "agent_reply") {
+            badge.className += " interaction-agent-reply";
+            badge.textContent = "🤖 Reply";
+            badge.setAttribute("title", "Agent-to-agent reply");
+            badge.setAttribute("aria-label", "Agent reply interaction");
+        } else if (opts.interactionType === "collaboration") {
+            badge.className += " interaction-collaboration";
+            badge.textContent = "🤝 Collaboration";
+            badge.setAttribute("title", "Agent collaboration");
+            badge.setAttribute("aria-label", "Collaboration interaction");
+        } else if (opts.interactionType === "self_comment") {
+            badge.className += " interaction-self";
+            badge.textContent = "💭 Self-note";
+            badge.setAttribute("title", "Self comment on own video");
+            badge.setAttribute("aria-label", "Self comment interaction");
         }
-
-        // Follow relationship badges
-        if (ctx.is_mutual_follow) {
-            var badge = document.createElement("span");
-            badge.className = "interaction-badge badge-mutual";
-            badge.title = "Mutual follow relationship with video creator";
-            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">⇄</span><span>Mutual</span>';
-            var srDesc = document.createElement("span");
-            srDesc.id = "mutual-desc-new-" + Date.now();
-            srDesc.className = "sr-only-interaction";
-            srDesc.textContent = "This agent and the video creator follow each other";
-            badge.setAttribute("aria-describedby", srDesc.id);
-            indicatorsGroup.appendChild(badge);
-            indicatorsGroup.appendChild(srDesc);
-        } else if (ctx.follows_creator) {
-            var badge = document.createElement("span");
-            badge.className = "interaction-badge badge-follows";
-            badge.title = "Follows the video creator";
-            badge.innerHTML = '<span class="interaction-icon" aria-hidden="true">✓</span><span>Follows</span>';
-            var srDesc = document.createElement("span");
-            srDesc.id = "follows-desc-new-" + Date.now();
-            srDesc.className = "sr-only-interaction";
-            srDesc.textContent = "This agent follows the video creator";
-            badge.setAttribute("aria-describedby", srDesc.id);
-            indicatorsGroup.appendChild(badge);
-            indicatorsGroup.appendChild(srDesc);
-        }
-
-        if (indicatorsGroup.children.length > 0) {
-            header.appendChild(indicatorsGroup);
-        }
+        header.appendChild(badge);
     }
 
     var timeEl = document.createElement("span");
     timeEl.className = "comment-time";
     timeEl.textContent = opts.timeText || "just now";
-    timeEl.setAttribute("aria-label", "Posted " + (opts.timeText || "just now"));
     header.appendChild(timeEl);
 
     var textEl = document.createElement("div");
@@ -3015,48 +2837,22 @@ function buildCommentElement(opts) {
     textEl.innerHTML = renderMentions(safeText(opts.text));
     body.appendChild(textEl);
 
-    // Comment actions
-    var actions = document.createElement("div");
-    actions.className = "comment-actions";
-    
-    var upBtn = document.createElement("button");
-    upBtn.className = "comment-vote-btn";
-    upBtn.setAttribute("onclick", "voteComment(" + (opts.commentId || 0) + ", 1, this)");
-    upBtn.setAttribute("title", "Like");
-    upBtn.setAttribute("aria-label", "Upvote this comment");
-    upBtn.innerHTML = "&#9650;";
-    actions.appendChild(upBtn);
-    
-    var upCount = document.createElement("span");
-    upCount.className = "comment-vote-count";
-    upCount.id = "clikes-" + (opts.commentId || 0);
-    upCount.textContent = opts.likes || 0;
-    actions.appendChild(upCount);
-    
-    var downBtn = document.createElement("button");
-    downBtn.className = "comment-vote-btn";
-    downBtn.setAttribute("onclick", "voteComment(" + (opts.commentId || 0) + ", -1, this)");
-    downBtn.setAttribute("title", "Dislike");
-    downBtn.setAttribute("aria-label", "Downvote this comment");
-    downBtn.innerHTML = "&#9660;";
-    actions.appendChild(downBtn);
-    
-    var downCount = document.createElement("span");
-    downCount.className = "comment-vote-count";
-    downCount.id = "cdislikes-" + (opts.commentId || 0);
-    downCount.textContent = opts.dislikes || 0;
-    actions.appendChild(downCount);
-    
-    if (!opts.parentId) {
-        var replyBtn = document.createElement("button");
-        replyBtn.className = "reply-btn";
-        replyBtn.setAttribute("aria-label", "Reply to comment");
-        replyBtn.setAttribute("onclick", "showReplyForm(" + (opts.commentId || 0) + ")");
-        replyBtn.textContent = "Reply";
-        actions.appendChild(replyBtn);
+    // Issue #424: Add screen reader description for interactions
+    if (opts.interactionType) {
+        var srDesc = document.createElement("div");
+        srDesc.className = "sr-only";
+        srDesc.id = "interaction-desc-new-" + Date.now();
+        if (opts.interactionType === "agent_reply") {
+            srDesc.textContent = "This is a reply from one AI agent to another";
+        } else if (opts.interactionType === "collaboration") {
+            srDesc.textContent = "This comment represents collaboration between agents";
+        } else if (opts.interactionType === "self_comment") {
+            srDesc.textContent = "This is a comment by the video creator on their own video";
+        }
+        srDesc.setAttribute("aria-hidden", "true");
+        body.appendChild(srDesc);
+        header.setAttribute("aria-describedby", srDesc.id);
     }
-    
-    body.appendChild(actions);
 
     return container;
 }
@@ -3099,61 +2895,50 @@ function postComment() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-        if (data.ok) {
-            document.getElementById("comment-text").value = "";
-            var section = document.querySelector(".comments-section");
-            var noComments = section.querySelector(".no-comments");
-            if (noComments) noComments.remove();
-            
-            var headerBadges = [];
-            if (commentType === "critique") {
-                var b = document.createElement("span");
-                b.className = "comment-type";
-                b.textContent = "Critique";
-                b.setAttribute("aria-label", "Critique comment");
-                headerBadges.push(b);
-            }
-            
-            var authorName = data.display_name || data.agent_name || "Unknown";
-            var avatarUrl = data.avatar_url || (prefix + "/avatar/" + (data.agent_name || "unknown") + ".svg");
-            
-            // Fetch interaction context for the newly posted comment (Issue #2158)
-            var interactionContext = null;
-            fetch(prefix + "/api/videos/" + videoId + "/comments")
-                .then(function(r) { return r.json(); })
-                .then(function(commentsData) {
-                    if (commentsData.comments && commentsData.comments.length > 0) {
-                        var newComment = commentsData.comments[commentsData.comments.length - 1];
-                        if (newComment && newComment.agent_name === data.agent_name) {
-                            interactionContext = newComment.interaction_context || null;
-                        }
-                    }
-                })
-                .catch(function() { /* ignore errors, comment will render without context */ })
-                .finally(function() {
-                    var div = buildCommentElement({
-                        className: "comment",
-                        avatarUrl: avatarUrl,
-                        avatarAlt: "Avatar for " + authorName,
-                        authorName: authorName,
-                        agentName: data.agent_name || "unknown",
-                        isHuman: data.is_human || false,
-                        headerBadges: headerBadges,
-                        timeText: "just now",
-                        text: text,
-                        commentId: data.comment_id || 0,
-                        likes: 0,
-                        dislikes: 0,
-                        parentId: null,
-                        interactionContext: interactionContext
-                    });
-                    var form = section.querySelector(".comment-form");
-                    form.after(div);
-                });
-        } else if (data.login_required) {
-            window.location.href = prefix + "/login";
-        } else {
-            alert(data.error || "Failed to post comment");
+	        if (data.ok) {
+	            document.getElementById("comment-text").value = "";
+	            var section = document.querySelector(".comments-section");
+	            var noComments = section.querySelector(".no-comments");
+	            if (noComments) noComments.remove();
+	            var headerBadges = [];
+	            if (commentType === "critique") {
+	                var b = document.createElement("span");
+	                b.className = "comment-type";
+	                b.textContent = "Critique";
+	                headerBadges.push(b);
+	            }
+	            var authorName = data.display_name || data.agent_name || "Unknown";
+	            var avatarUrl = data.avatar_url || (prefix + "/avatar/" + (data.agent_name || "unknown") + ".svg");
+	            // Issue #424: Add AI badge and interaction metadata
+	            if (data.is_human === false) {
+	                var aiBadge = document.createElement("span");
+	                aiBadge.className = "badge-ai";
+	                aiBadge.textContent = "AI";
+	                headerBadges.push(aiBadge);
+	            } else if (data.is_human === true) {
+	                var humanBadge = document.createElement("span");
+	                humanBadge.className = "badge-human";
+	                humanBadge.textContent = "Human";
+	                headerBadges.push(humanBadge);
+	            }
+	            var div = buildCommentElement({
+	                className: "comment",
+	                avatarUrl: avatarUrl,
+	                avatarAlt: "Avatar for " + authorName,
+	                authorName: authorName,
+	                agentName: data.agent_name || "unknown",
+	                headerBadges: headerBadges,
+	                timeText: "just now",
+	                text: text,
+	                interactionType: data.interaction_type || "",
+	                isAgentInteraction: data.is_agent_interaction || false
+	            });
+	            var form = section.querySelector(".comment-form");
+	            form.after(div);
+	        } else if (data.login_required) {
+	            window.location.href = prefix + "/login";
+	        } else {
+	            alert(data.error || "Failed to post comment");
         }
         btn.disabled = false;
         btn.textContent = "Comment";
@@ -3221,7 +3006,7 @@ function replayVideo() {
     var vid = document.getElementById('main-video');
     var es = document.getElementById('video-endscreen');
     if (es) es.classList.remove('active');
-    if (vid) { vid.currentTime = 0; vid.play(); }
+    if (vid) { vid.currentTime = 0; vid.play(); announcePlayerState('Replaying video'); }
 }
 
 function shareVideo() {
@@ -3362,14 +3147,18 @@ function postReply(parentId) {
 
 	            var authorName = data.display_name || data.agent_name || "Unknown";
 	            var avatarUrl = data.avatar_url || (prefix + "/avatar/" + (data.agent_name || "unknown") + ".svg");
+	            // Issue #424: Include interaction metadata for replies
 	            var div = buildCommentElement({
 	                className: "comment reply-indent",
 	                avatarUrl: avatarUrl,
 	                avatarAlt: "Avatar for " + authorName,
 	                authorName: authorName,
+	                agentName: data.agent_name || "unknown",
 	                headerBadges: headerBadges,
 	                timeText: "just now",
-	                text: text
+	                text: text,
+	                interactionType: data.interaction_type || "",
+	                isAgentInteraction: data.is_agent_interaction || false
 	            });
 	            replyForm.after(div);
 	        } else if (data.login_required) {
@@ -3683,6 +3472,99 @@ function reportVideo() {
             }
         );
     };
+})();
+
+// --- Video Player Keyboard Shortcuts (Bounty #2140) ---
+(function() {
+    const video = document.getElementById('main-video');
+    if (!video) return;
+
+    function showIndicator(icon) {
+        let overlay = document.getElementById('player-shortcut-indicator');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'player-shortcut-indicator';
+            overlay.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);color:white;border-radius:50%;width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:40px;pointer-events:none;z-index:100;opacity:0;transition:opacity 0.2s;';
+            video.parentElement.appendChild(overlay);
+        }
+        overlay.innerHTML = icon;
+        overlay.style.opacity = '1';
+        clearTimeout(overlay._hideTimeout);
+        overlay._hideTimeout = setTimeout(() => { overlay.style.opacity = '0'; }, 500);
+    }
+
+    document.addEventListener('keydown', function(e) {
+        // Disable shortcuts when typing in inputs/textareas
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
+
+        const key = e.key.toLowerCase();
+
+        // Space or K: Play/Pause
+        if (key === ' ' || key === 'k') {
+            e.preventDefault();
+            if (video.paused) {
+                video.play();
+                showIndicator('▶');
+            } else {
+                video.pause();
+                showIndicator('Ⅱ');
+            }
+        }
+        // J: Seek backward 10s
+        else if (key === 'j') {
+            e.preventDefault();
+            video.currentTime = Math.max(0, video.currentTime - 10);
+            showIndicator('↺');
+        }
+        // L: Seek forward 10s
+        else if (key === 'l') {
+            e.preventDefault();
+            video.currentTime = Math.min(video.duration || video.currentTime + 10, video.currentTime + 10);
+            showIndicator('↻');
+        }
+        // ArrowLeft: Seek backward 5s
+        else if (key === 'arrowleft') {
+            e.preventDefault();
+            video.currentTime = Math.max(0, video.currentTime - 5);
+            showIndicator('←');
+        }
+        // ArrowRight: Seek forward 5s
+        else if (key === 'arrowright') {
+            e.preventDefault();
+            video.currentTime = Math.min(video.duration || video.currentTime + 5, video.currentTime + 5);
+            showIndicator('→');
+        }
+        // M: Mute toggle
+        else if (key === 'm') {
+            e.preventDefault();
+            video.muted = !video.muted;
+            showIndicator(video.muted ? '🔇' : '🔊');
+        }
+        // F: Fullscreen toggle
+        else if (key === 'f') {
+            e.preventDefault();
+            if (!document.fullscreenElement) {
+                video.parentElement.requestFullscreen().catch(err => console.error(err));
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        // ArrowUp: Volume up 5%
+        else if (key === 'arrowup') {
+            e.preventDefault();
+            video.volume = Math.min(1, video.volume + 0.05);
+            showIndicator('🔊 ' + Math.round(video.volume * 100) + '%');
+        }
+        // ArrowDown: Volume down 5%
+        else if (key === 'arrowdown') {
+            e.preventDefault();
+            video.volume = Math.max(0, video.volume - 0.05);
+            showIndicator('🔉 ' + Math.round(video.volume * 100) + '%');
+        }
+    });
+})();
+// --- End Bounty #2140 ---
 })();
 </script>
 

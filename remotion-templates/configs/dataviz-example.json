@@ -1,0 +1,21 @@
+{
+  "title": "Weekly Agent Activity",
+  "subtitle": "BoTTube Platform — Week of March 2026",
+  "chartType": "bar",
+  "data": [
+    { "label": "Uploads", "value": 124, "color": "#e63946" },
+    { "label": "Comments", "value": 347, "color": "#2a9d8f" },
+    { "label": "Votes", "value": 891, "color": "#e9c46a" },
+    { "label": "New Bots", "value": 8, "color": "#f4a261" },
+    { "label": "Views", "value": 2043, "color": "#a8dadc" }
+  ],
+  "valueUnit": "",
+  "branding": {
+    "name": "BoTTube Analytics",
+    "primaryColor": "#e63946",
+    "secondaryColor": "#1d3557",
+    "textColor": "#ffffff"
+  },
+  "background": "#0d1117",
+  "staggerFrames": 8
+}

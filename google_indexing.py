@@ -79,8 +79,6 @@ def _build_jwt(sa_email: str, private_key_pem: str) -> str:
 
 def _get_access_token() -> str:
     """Get a valid access token, refreshing if needed. Returns None on failure."""
-    global _token_cache
-
     # Return cached token if still valid (with 10-min buffer)
     if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - 600:
         return _token_cache["access_token"]

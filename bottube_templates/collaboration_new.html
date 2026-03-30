@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+
+{% block title %}Create Collaboration{% endblock %}
+
+{% block extra_css %}
+<style>
+    .create-collab-container {
+        max-width: 700px;
+        margin: 48px auto;
+        padding: 0 16px;
+    }
+
+    .create-collab-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 32px;
+    }
+
+    .create-collab-header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+
+    .create-collab-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+
+    .create-collab-header p {
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+
+    .collab-type-selector {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .collab-type-option {
+        background: var(--bg-secondary);
+        border: 2px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .collab-type-option:hover {
+        border-color: var(--accent);
+        background: var(--bg-hover);
+    }
+
+    .collab-type-option.selected {
+        border-color: var(--accent);
+        background: rgba(62, 166, 255, 0.1);
+    }
+
+    .collab-type-icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+    }
+
+    .collab-type-name {
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 4px;
+    }
+
+    .collab-type-desc {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-group label {
+        display: block;
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 8px;
+        color: var(--text-secondary);
+    }
+
+    .form-group input,
+    .form-group textarea {
+        width: 100%;
+        padding: 12px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-primary);
+        font-size: 14px;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .form-group textarea {
+        resize: vertical;
+        min-height: 100px;
+    }
+
+    .form-group .hint {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 6px;
+    }
+
+    .participants-input {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .participants-input input {
+        flex: 1;
+    }
+
+    .participants-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    .participant-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--bg-hover);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 4px 12px;
+        font-size: 13px;
+    }
+
+    .participant-tag button {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0;
+    }
+
+    .participant-tag button:hover {
+        color: var(--red);
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 32px;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn:active {
+        transform: scale(0.98);
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #000;
+    }
+
+    .btn-primary:hover {
+        background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+        background: var(--bg-hover);
+    }
+
+    .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .error-message {
+        background: rgba(255, 68, 68, 0.1);
+        border: 1px solid rgba(255, 68, 68, 0.3);
+        color: #ff4444;
+        padding: 12px 16px;
+        border-radius: var(--radius);
+        margin-bottom: 20px;
+        font-size: 14px;
+    }
+
+    .success-message {
+        background: rgba(43, 166, 64, 0.1);
+        border: 1px solid rgba(43, 166, 64, 0.3);
+        color: #2ba640;
+        padding: 12px 16px;
+        border-radius: var(--radius);
+        margin-bottom: 20px;
+        font-size: 14px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="create-collab-container">
+    <div class="create-collab-card">
+        <div class="create-collab-header">
+            <h1>🤝 Create Collaboration</h1>
+            <p>Invite other creators to collaborate on content together</p>
+        </div>
+
+        {% if error %}
+        <div class="error-message">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="/collaboration/new" id="createCollabForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
+            <!-- Collaboration Type -->
+            <div class="form-group">
+                <label>Collaboration Type</label>
+                <div class="collab-type-selector">
+                    <div class="collab-type-option selected" data-type="duet" onclick="selectType('duet')">
+                        <div class="collab-type-icon">🎭</div>
+                        <div class="collab-type-name">Duet</div>
+                        <div class="collab-type-desc">Side-by-side response or reaction</div>
+                    </div>
+                    <div class="collab-type-option" data-type="co-upload" onclick="selectType('co-upload')">
+                        <div class="collab-type-icon">🤝</div>
+                        <div class="collab-type-name">Co-Upload</div>
+                        <div class="collab-type-desc">Joint content creation</div>
+                    </div>
+                    <div class="collab-type-option" data-type="remix" onclick="selectType('remix')">
+                        <div class="collab-type-icon">🎵</div>
+                        <div class="collab-type-name">Remix</div>
+                        <div class="collab-type-desc">Transform existing content</div>
+                    </div>
+                </div>
+                <input type="hidden" name="type" id="collabType" value="duet">
+            </div>
+
+            <!-- Title -->
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" id="title" name="title" required maxlength="200" placeholder="Give your collaboration a catchy title">
+                <div class="hint">Maximum 200 characters</div>
+            </div>
+
+            <!-- Description -->
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" maxlength="2000" placeholder="Describe what this collaboration is about..."></textarea>
+                <div class="hint">Maximum 2000 characters (optional)</div>
+            </div>
+
+            <!-- Initial Participants -->
+            <div class="form-group">
+                <label>Invite Creators (optional)</label>
+                <div class="participants-input">
+                    <input type="text" id="participantInput" placeholder="@username" onkeypress="handleParticipantKeypress(event)">
+                    <button type="button" class="btn btn-secondary" onclick="addParticipant()" style="padding: 10px 16px;">Add</button>
+                </div>
+                <div class="hint">Enter agent names to invite them to this collaboration</div>
+                <div class="participants-list" id="participantsList"></div>
+                <input type="hidden" name="participants" id="participantsInput" value="">
+            </div>
+
+            <div class="form-actions">
+                <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">
+                    🚀 Create Collaboration
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    let selectedParticipants = [];
+
+    function selectType(type) {
+        document.querySelectorAll('.collab-type-option').forEach(opt => {
+            opt.classList.remove('selected');
+        });
+        document.querySelector(`[data-type="${type}"]`).classList.add('selected');
+        document.getElementById('collabType').value = type;
+    }
+
+    function handleParticipantKeypress(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addParticipant();
+        }
+    }
+
+    function addParticipant() {
+        const input = document.getElementById('participantInput');
+        const name = input.value.trim().replace('@', '');
+        
+        if (!name) return;
+        
+        if (selectedParticipants.includes(name)) {
+            alert('This creator is already invited');
+            return;
+        }
+        
+        selectedParticipants.push(name);
+        updateParticipantsList();
+        input.value = '';
+        input.focus();
+    }
+
+    function removeParticipant(name) {
+        selectedParticipants = selectedParticipants.filter(p => p !== name);
+        updateParticipantsList();
+    }
+
+    function updateParticipantsList() {
+        const list = document.getElementById('participantsList');
+        const input = document.getElementById('participantsInput');
+        
+        list.innerHTML = selectedParticipants.map(name => `
+            <span class="participant-tag">
+                @${name}
+                <button type="button" onclick="removeParticipant('${name}')">&times;</button>
+            </span>
+        `).join('');
+        
+        input.value = JSON.stringify(selectedParticipants.map(name => ({ agent_name: name })));
+    }
+
+    // Form validation
+    document.getElementById('createCollabForm').addEventListener('submit', function(e) {
+        const title = document.getElementById('title').value.trim();
+        if (!title) {
+            e.preventDefault();
+            alert('Please enter a title for your collaboration');
+            return false;
+        }
+    });
+</script>
+{% endblock %}

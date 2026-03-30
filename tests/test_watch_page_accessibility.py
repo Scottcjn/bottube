@@ -112,3 +112,105 @@ def test_watch_page_renders_keyboard_shortcuts_and_accessibility_regions(client)
     keydown_block_start = html.index("document.addEventListener('keydown'")
     keydown_block = html[keydown_block_start:]
     assert keydown_block.index("isShortcutBypassTarget(event.target)") < keydown_block.index("openShortcutHelp();")
+
+
+def test_watch_page_unmute_button_keyboard_accessible(client):
+    """Test that the unmute button is keyboard accessible with proper ARIA (Issue #420)."""
+    agent_id = _insert_agent("unmutebot", "bottube_sk_unmutebot")
+    _insert_video(agent_id, "watcha11y02")
+
+    resp = client.get("/watch/watcha11y02")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    # Unmute button should have proper ARIA label
+    assert 'id="unmute-btn"' in html
+    assert 'aria-label="Unmute video audio"' in html
+    assert 'type="button"' in html
+    # Should have keyboard event handler
+    assert 'onkeydown="handleUnmuteKeydown(event)"' in html
+    # Should have click handler
+    assert 'onclick="unmuteVideo()"' in html
+    # Should have the JavaScript handler function
+    assert 'function handleUnmuteKeydown(event)' in html
+    assert "event.key === 'Enter' || event.key === ' '" in html
+
+
+def test_watch_page_player_state_live_region(client):
+    """Test that player state changes are announced via ARIA live region (Issue #420)."""
+    agent_id = _insert_agent("statebot", "bottube_sk_statebot")
+    _insert_video(agent_id, "watcha11y03")
+
+    resp = client.get("/watch/watcha11y03")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    # Live region for player state announcements
+    assert 'id="player-state"' in html
+    assert 'role="status"' in html
+    assert 'aria-live="polite"' in html
+    assert 'aria-atomic="true"' in html
+    # announcePlayerState function should exist
+    assert 'function announcePlayerState(message)' in html
+    assert "liveRegion.textContent = message" in html
+
+
+def test_watch_page_keyboard_shortcuts_announce_state(client):
+    """Test that keyboard shortcuts announce state changes for accessibility (Issue #420)."""
+    agent_id = _insert_agent("announcebot", "bottube_sk_announcebot")
+    _insert_video(agent_id, "watcha11y04")
+
+    resp = client.get("/watch/watcha11y04")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    # Toggle playback should announce state
+    assert "announcePlayerState('Playing')" in html
+    assert "announcePlayerState('Paused')" in html
+    # Seek should announce direction
+    assert "announcePlayerState('Seeked" in html
+    # Volume should announce percentage
+    assert "announcePlayerState('Volume" in html
+    # Mute should announce state
+    assert "announcePlayerState('Muted')" in html or "announcePlayerState(video.muted ? 'Muted' : 'Unmuted')" in html
+    # Fullscreen should announce state
+    assert "announcePlayerState('Exited fullscreen')" in html
+    assert "announcePlayerState('Entered fullscreen')" in html
+    # Replay should announce action
+    assert "announcePlayerState('Replaying video')" in html
+
+
+def test_watch_page_visible_focus_styles(client):
+    """Test that visible focus styles are defined for keyboard navigation (Issue #420)."""
+    agent_id = _insert_agent("focusbot", "bottube_sk_focusbot")
+    _insert_video(agent_id, "watcha11y05")
+
+    resp = client.get("/watch/watcha11y05")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    # Focus styles for unmute button
+    assert '.unmute-overlay:focus-visible' in html
+    # Focus styles for end-screen buttons
+    assert '.es-share-btn:focus-visible' in html
+    assert '.es-replay:focus-visible' in html
+    # Focus-within for player region
+    assert '.video-player-region:focus-within' in html
+    # General focus-visible styles
+    assert ':focus-visible' in html
+    assert 'outline' in html
+
+
+def test_watch_page_captions_announce_state(client):
+    """Test that captions toggle announces state change (Issue #420)."""
+    agent_id = _insert_agent("captionbot", "bottube_sk_captionbot")
+    _insert_video(agent_id, "watcha11y06")
+
+    resp = client.get("/watch/watcha11y06")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    # Captions toggle should announce state
+    assert "announcePlayerState('Captions enabled')" in html or "announcePlayerState(captionsEnabled ? 'Captions enabled' : 'Captions disabled')" in html
+    # Should handle no captions case
+    assert "announcePlayerState('No captions available')" in html

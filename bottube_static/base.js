@@ -40,12 +40,31 @@
   function initMobileMenu() {
     var btn = byId("mobile-menu-btn");
     if (!btn) return;
-    btn.addEventListener("click", function () {
+    
+    function toggleMenu() {
       var right = document.querySelector(".header-right");
       if (!right) return;
       var isOpen = right.classList.toggle("open");
       btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+    
+    btn.addEventListener("click", toggleMenu);
+    
+    // Keyboard accessibility: Enter and Space keys
+    btn.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleMenu();
+      }
     });
+  }
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function sanitizeUrl(u) {
+    u = String(u || '').trim();
+    if (u.startsWith('/') || u.startsWith('https://') || u.startsWith('http://')) return u;
+    return '#';
   }
 
   function timeAgo(ts) {
@@ -106,9 +125,10 @@
           }
           list.innerHTML = d.notifications.map(function (n) {
             var bg = n.is_read ? "transparent" : "rgba(62,166,255,0.06)";
-            var link = n.link || "#";
-            var msg = String(n.message || "").replace(/</g, "&lt;");
-            return '<a href="' + link + '" data-notification-id="' + n.id + '" data-notification-read="' + (n.is_read ? "1" : "0") + '" style="display:block;padding:10px 16px;border-bottom:1px solid var(--border);background:' +
+            var link = sanitizeUrl(n.link);
+            var msg = esc(String(n.message || ""));
+            var safeId = esc(String(n.id || ""));
+            return '<a href="' + esc(link) + '" data-notification-id="' + safeId + '" data-notification-read="' + (n.is_read ? "1" : "0") + '" style="display:block;padding:10px 16px;border-bottom:1px solid var(--border);background:' +
               bg + ';color:var(--text-primary);font-size:13px;line-height:1.4;">' +
               "<div>" + msg + "</div>" +
               '<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">' + timeAgo(n.created_at) + "</div></a>";
@@ -126,13 +146,27 @@
         .catch(function () {});
     }
 
-    bell.addEventListener("click", function (e) {
-      e.preventDefault();
+    function toggleNotifPanel() {
       if (panel.style.display === "none" || !panel.style.display) {
         panel.style.display = "block";
+        bell.setAttribute("aria-expanded", "true");
         loadNotifs();
       } else {
         panel.style.display = "none";
+        bell.setAttribute("aria-expanded", "false");
+      }
+    }
+
+    bell.addEventListener("click", function (e) {
+      e.preventDefault();
+      toggleNotifPanel();
+    });
+    
+    // Keyboard accessibility for notification bell
+    bell.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleNotifPanel();
       }
     });
 
@@ -268,4 +302,34 @@
   sendBotProofPing();
   initGa4();
   // registerServiceWorker(); // Disabled - Play Store TWA
+})();
+
+/**
+ * Footer Statistics Loader (Bounty #2138)
+ * Fetches live platform stats from /api/stats and updates footer counters.
+ */
+(function() {
+    function updateCounters() {
+        const videoCtr = document.getElementById('ctr-global-videos');
+        const agentCtr = document.getElementById('ctr-global-agents');
+        const humanCtr = document.getElementById('ctr-global-humans');
+        
+        if (!videoCtr && !agentCtr && !humanCtr) return;
+
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                if (data.videos && videoCtr) videoCtr.innerText = Number(data.videos).toLocaleString();
+                if (data.agents && agentCtr) agentCtr.innerText = Number(data.agents).toLocaleString();
+                if (data.humans && humanCtr) humanCtr.innerText = Number(data.humans).toLocaleString();
+            })
+            .catch(err => console.error('Failed to load platform stats:', err));
+    }
+
+    // Run on load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateCounters);
+    } else {
+        updateCounters();
+    }
 })();
