@@ -3009,6 +3009,83 @@ function replayVideo() {
     if (vid) { vid.currentTime = 0; vid.play(); announcePlayerState('Replaying video'); }
 }
 
+// Keyboard Shortcuts (Bounty #2140)
+(function() {
+    var vid = document.getElementById('main-video');
+    if (!vid) return;
+
+    // Overlay indicator
+    function showOverlay(icon, text) {
+        var overlay = document.createElement('div');
+        overlay.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:#fff;padding:20px 40px;border-radius:8px;font-size:48px;z-index:100;animation:fadeout 1s forwards;';
+        overlay.textContent = icon;
+        vid.parentElement.style.position = 'relative';
+        vid.parentElement.appendChild(overlay);
+        setTimeout(function() { overlay.remove(); }, 1000);
+    }
+
+    document.addEventListener('keydown', function(e) {
+        // Ignore if typing in input/textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+
+        var key = e.key.toLowerCase();
+        var handled = false;
+
+        if (key === ' ' || key === 'k') {
+            // Play/Pause
+            if (vid.paused) { vid.play(); showOverlay('▶', 'Play'); }
+            else { vid.pause(); showOverlay('⏸', 'Pause'); }
+            handled = true;
+        } else if (key === 'j') {
+            // Seek back 10s
+            vid.currentTime = Math.max(0, vid.currentTime - 10);
+            showOverlay('⏪', '-10s');
+            handled = true;
+        } else if (key === 'l') {
+            // Seek forward 10s
+            vid.currentTime = Math.min(vid.duration, vid.currentTime + 10);
+            showOverlay('⏩', '+10s');
+            handled = true;
+        } else if (key === 'm') {
+            // Mute toggle
+            vid.muted = !vid.muted;
+            showOverlay(vid.muted ? '🔇' : '🔊', vid.muted ? 'Muted' : 'Unmuted');
+            handled = true;
+        } else if (key === 'f') {
+            // Fullscreen toggle
+            if (!document.fullscreenElement) vid.parentElement.requestFullscreen().catch(()=>{});
+            else document.exitFullscreen().catch(()=>{});
+            showOverlay('⛶', 'Fullscreen');
+            handled = true;
+        } else if (key === 'arrowleft') {
+            // Seek back 5s
+            vid.currentTime = Math.max(0, vid.currentTime - 5);
+            showOverlay('⏪', '-5s');
+            handled = true;
+        } else if (key === 'arrowright') {
+            // Seek forward 5s
+            vid.currentTime = Math.min(vid.duration, vid.currentTime + 5);
+            showOverlay('⏩', '+5s');
+            handled = true;
+        } else if (key === 'arrowup') {
+            // Volume up
+            vid.volume = Math.min(1, vid.volume + 0.1);
+            showOverlay('🔊', Math.round(vid.volume * 100) + '%');
+            handled = true;
+        } else if (key === 'arrowdown') {
+            // Volume down
+            vid.volume = Math.max(0, vid.volume - 0.1);
+            showOverlay('🔉', Math.round(vid.volume * 100) + '%');
+            handled = true;
+        }
+
+        if (handled) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    });
+})();
+
 function shareVideo() {
     var panel = document.getElementById("share-panel");
     panel.style.display = panel.style.display === "none" ? "block" : "none";
