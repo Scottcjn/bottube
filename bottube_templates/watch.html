@@ -3040,7 +3040,8 @@ function updateEmbedCode() {
     var parts = size.split("x");
     var w = parts[0], h = parts[1];
     var style = w === "100%" ? ' style="width:100%;max-width:853px;"' : '';
-    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" width="' + w + '" height="' + h + '" frameborder="0" allowfullscreen' + style + '></iframe>';
+    var embedUrl = window.location.origin + '/embed/' + videoId;
+    var code = '<iframe src="' + embedUrl + '" width="' + w + '" height="' + h + '" frameborder="0" allowfullscreen' + style + '></iframe>';
     document.getElementById("embed-code").value = code;
 }
 

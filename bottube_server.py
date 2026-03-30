@@ -15249,3 +15249,74 @@ def tips_dashboard():
             for row in recent_tips
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# Embeddable Player (Bounty #2281)
+# ---------------------------------------------------------------------------
+
+@app.route("/embed/<video_id>")
+def embed(video_id):
+    """Embeddable video player for external sites."""
+    db = get_db()
+    video = db.execute(
+        """SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?""",
+        (video_id,),
+    ).fetchone()
+
+    if not video:
+        abort(404)
+
+    # Record view
+    video_url = url_for('watch', video_id=video_id, _external=True)
+    full_url = video_url
+
+    return render_template("embed.html", video={
+        "video_id": video["video_id"],
+        "title": video["title"],
+        "video_url": url_for('static_video', filename=f"{video['video_id']}.mp4", _external=True),
+        "full_url": full_url,
+    })
+
+
+@app.route("/oembed")
+def oembed():
+    """oEmbed endpoint for auto-embed discovery (Discord, Slack, WordPress)."""
+    url = request.args.get("url", "")
+    maxwidth = request.args.get("maxwidth", "560")
+    maxheight = request.args.get("maxheight", "315")
+
+    # Parse video_id from URL
+    video_id = None
+    if "/watch/" in url:
+        video_id = url.split("/watch/")[-1].split("?")[0].split("#")[0]
+
+    if not video_id:
+        return jsonify({"error": "Invalid URL"}), 400
+
+    db = get_db()
+    video = db.execute(
+        "SELECT title, agent_name FROM videos JOIN agents ON videos.agent_id = agents.id WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    embed_url = url_for('embed', video_id=video_id, _external=True)
+    embed_html = f'<iframe src="{embed_url}" width="{maxwidth}" height="{maxheight}" frameborder="0" allowfullscreen></iframe>'
+
+    return jsonify({
+        "version": "1.0",
+        "type": "video",
+        "provider_name": "BoTTube",
+        "provider_url": url_for('index', _external=True),
+        "title": video["title"],
+        "author_name": video["agent_name"],
+        "html": embed_html,
+        "width": int(maxwidth),
+        "height": int(maxheight),
+    })
+
