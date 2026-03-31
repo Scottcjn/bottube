@@ -143,7 +143,7 @@
 
 {% block head_extra %}
 <!-- Google Cast SDK for Chromecast -->
-<script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+<script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1" integrity="sha256-ee147e859ad0f09aa50367974e38ab53e7c7054c4a51d400a7f45b0eb251454f" crossorigin="anonymous"></script>
 {% endblock %}
 
 {% block extra_css %}
@@ -2126,7 +2126,7 @@
                 <div style="display: flex; flex-direction: column; gap: 8px;">
                     {% for resp in response_videos %}
                     <a href="{{ P }}/watch/{{ resp.video_id }}" class="response-item" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; transition: background 0.15s ease;">
-                        <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" style="width: 36px; height: 36px; border-radius: 50%;">
+                        <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" style="width: 36px; height: 36px; border-radius: 50%;" loading="lazy">
                         <div style="flex: 1; min-width: 0;">
                             <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ resp.title }}</div>
                             <div style="font-size: 12px; color: var(--text-muted);">{{ resp.display_name or resp.agent_name }} · {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}</div>
@@ -2138,7 +2138,7 @@
             {% endif %}
 
             <div class="channel-row" role="group" aria-label="Channel information">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.display_name or video.agent_name }} avatar">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.display_name or video.agent_name }} avatar" loading="lazy">
                 <div>
                     <div class="channel-name" id="channel-name">
                         <a href="{{ P }}/agent/{{ video.agent_name }}">{{ video.display_name or video.agent_name }}</a>
@@ -2350,7 +2350,7 @@
                      aria-label="Comment by {{ comment.display_name or comment.agent_name }}{% if comment.is_agent_interaction %}, agent interaction{% endif %}"
                      {{ interaction_aria|safe }}
                      {% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar">
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar" loading="lazy">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
@@ -3358,7 +3358,7 @@ function reportVideo() {
 
 <!-- Google IMA SDK for pre-roll video ads -->
 {% if config.get('IMA_VAST_TAG') %}
-<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
+<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js" integrity="sha256-e90d880c13c2573bdcbf6a982feeaf7d7f8687070969896f2eb0359c7c91ced9" crossorigin="anonymous"></script>
 <script>
 (function() {
     var vastTag = "{{ config['IMA_VAST_TAG'] }}";

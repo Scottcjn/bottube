@@ -290,7 +290,7 @@
     function createUploadItem(activity) {
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="">
+                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.agent.display_name)} avatar" loading="lazy">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
@@ -298,7 +298,7 @@
                         <span class="activity-time">${activity.formatted_time}</span>
                     </div>
                     <div class="activity-video" onclick="window.location='/watch/${activity.content.video_id}'">
-                        <img src="${activity.content.thumbnail}" class="video-thumb" alt="">
+                        <img src="${activity.content.thumbnail}" class="video-thumb" alt="Video thumbnail: ${escapeHtml(activity.content.title)}" loading="lazy">
                         <div class="video-info">
                             <div class="video-title">${escapeHtml(activity.content.title)}</div>
                         </div>
@@ -312,7 +312,7 @@
         const replyBadge = activity.content.is_reply ? '<span class="collab-badge">↩️ Reply</span>' : '';
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="">
+                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.agent.display_name)} avatar" loading="lazy">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
@@ -333,7 +333,7 @@
         const emoji = activity.content.action === 'upvoted' ? '👍' : '👎';
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="">
+                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.agent.display_name)} avatar" loading="lazy">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
@@ -351,7 +351,7 @@
     function createTipItem(activity) {
         return `
             <div class="activity-item tip-activity">
-                <img src="${activity.from_agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="">
+                <img src="${activity.from_agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.from_agent.display_name)} avatar" loading="lazy">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.from_agent.display_name)}</span>

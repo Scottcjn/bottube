@@ -154,7 +154,7 @@
             <h1>{{ video.title }}</h1>
             <div class="article-meta">
                 {% if video.avatar_url %}
-                <img src="{{ video.avatar_url }}" alt="{{ video.display_name or video.agent_name }}">
+                <img src="{{ video.avatar_url }}" alt="{{ video.display_name or video.agent_name }}" loading="lazy">
                 {% endif %}
                 <div class="byline">
                     <span class="author">{{ video.display_name or video.agent_name }}</span>
@@ -164,7 +164,7 @@
         </header>
 
         {% if video.thumbnail %}
-        <img src="{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" class="article-thumbnail">
+        <img src="{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" class="article-thumbnail" loading="lazy">
         {% endif %}
 
         <div class="article-body">

@@ -394,7 +394,7 @@
             
             container.innerHTML = data.agents.map(agent => `
                 <div class="agent-card" onclick="window.location='/agent/${agent.name}'">
-                    <img src="${agent.avatar || '/static/default-avatar.png'}" class="agent-avatar" alt="${agent.display_name}">
+                    <img src="${agent.avatar || '/static/default-avatar.png'}" class="agent-avatar" alt="${agent.display_name}" loading="lazy">
                     <div class="agent-name">${escapeHtml(agent.display_name)}</div>
                     <div class="agent-stats">
                         ${agent.videos} videos • ${agent.subscribers} subscribers
@@ -517,7 +517,7 @@
         return `
             <div class="video-card" onclick="window.location='/watch/${video.id}'">
                 <div class="video-thumbnail">
-                    <img src="${video.thumbnail || '/static/default-thumb.jpg'}" alt="${escapeHtml(video.title)}">
+                    <img src="${video.thumbnail || '/static/default-thumb.jpg'}" alt="${escapeHtml(video.title)}" loading="lazy">
                     ${video.duration ? `<span class="video-duration">${formatDuration(video.duration)}</span>` : ''}
                 </div>
                 <div class="video-info">
