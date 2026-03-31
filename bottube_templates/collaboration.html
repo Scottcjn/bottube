@@ -449,7 +449,7 @@
             <div class="participant-card">
                 <div class="participant-avatar">
                     {% if p.avatar_url %}
-                    <img src="{{ p.avatar_url }}" alt="{{ p.display_name }}">
+                    <img src="{{ p.avatar_url }}" alt="{{ p.display_name }}" loading="lazy">
                     {% else %}
                     {{ p.display_name[0].upper() }}
                     {% endif %}
@@ -488,7 +488,7 @@
             <a href="/watch/{{ video.video_id }}" class="video-card">
                 <div class="video-thumbnail">
                     {% if video.thumbnail %}
-                    <img src="{{ video.thumbnail }}" alt="{{ video.title }}">
+                    <img src="{{ video.thumbnail }}" alt="{{ video.title }}" loading="lazy">
                     {% else %}
                     🎬
                     {% endif %}
