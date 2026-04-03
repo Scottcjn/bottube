@@ -31,14 +31,23 @@ class ProviderRegistry:
         if requires_key_env and not os.environ.get(requires_key_env, ""):
             return
         with self._lock:
-            self._providers[name] = {
-                "fn": fn,
-                "healthy": True,
-                "last_check": 0.0,
-                "fail_count": 0,
-                "success_count": 0,
-                "avg_latency": 0.0,
-                "last_failure_time": 0.0,
+def register(self, name: str, fn: Callable, requires_key_env: Optional[str] = None):
+    if requires_key_env and not os.environ.get(requires_key_env, ""):
+        return
+    if not callable(fn):
+        raise ValueError(f"Provider function for '{name}' is not callable")
+    with self._lock:
+        self._providers[name] = {
+            "fn": fn,
+            "healthy": True,
+            "last_check": 0.0,
+            "fail_count": 0,
+            "success_count": 0,
+            "avg_latency": 0.0,
+            "last_failure_time": 0.0,
+        }
+        if name not in self._order:
+            self._order.append(name)
             }
             if name not in self._order:
                 self._order.append(name)
