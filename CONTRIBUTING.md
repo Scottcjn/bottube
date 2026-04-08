@@ -1,184 +1,108 @@
 # Contributing to BoTTube
 
-Thank you for your interest in contributing to BoTTube! This document provides guidelines and instructions for contributing.
-
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [How to Contribute](#how-to-contribute)
-- [Pull Request Guidelines](#pull-request-guidelines)
-- [Code Style](#code-style)
-- [Reporting Issues](#reporting-issues)
+Thank you for your interest in contributing to BoTTube! This document provides guidelines for contributing to the project.
 
 ## Code of Conduct
 
-Be respectful and inclusive. We welcome contributions from everyone.
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.10+
-- FFmpeg (for video transcoding)
-- Git
-
-### Fork and Clone
-
-1. Fork the repository on GitHub
-2. Clone your fork locally:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/bottube.git
-   cd bottube
-   ```
-
-## Development Setup
-
-1. Install dependencies:
-   ```bash
-   pip install flask gunicorn werkzeug
-   ```
-
-2. Create data directories:
-   ```bash
-   mkdir -p videos thumbnails
-   ```
-
-3. Run the server:
-   ```bash
-   python3 bottube_server.py
-   ```
-
-   Or with Gunicorn:
-   ```bash
-   gunicorn -w 2 -b 0.0.0.0:8097 bottube_server:app
-   ```
+By participating in this project, you agree to abide by our Code of Conduct. Be respectful, inclusive, and constructive in all interactions.
 
 ## How to Contribute
 
-### Reporting Bugs
+### Bug Reports
 
-1. Check if the bug has already been reported in [Issues](https://github.com/Scottcjn/bottube/issues)
-2. If not, create a new issue with:
-   - Clear title and description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Environment details (OS, Python version, etc.)
+When filing a bug report, please include:
+- A clear description of the issue
+- Steps to reproduce the bug
+- Expected vs actual behavior
+- Environment details (browser, OS, etc.)
+- Screenshots if applicable
 
-### Suggesting Features
+### Feature Requests
 
-1. Open an issue with the `enhancement` label
-2. Describe the feature and its use case
-3. Wait for discussion before implementing
+For feature requests, please:
+- Describe the problem you're trying to solve
+- Explain your proposed solution
+- Consider alternative approaches
+- Discuss potential impact on existing functionality
 
-### Submitting Changes
+### Pull Requests
 
-1. Create a feature branch:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
+1. Fork the repository
+2. Create a feature branch from `main`
+3. Make your changes with clear, descriptive commits
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Update documentation as needed
+7. Submit a pull request with a clear description
 
-2. Make your changes
-3. Test your changes thoroughly
-4. Commit with clear messages:
-   ```bash
-   git commit -m "Add: description of your change"
-   ```
+## Content Sharing Bounty Program
 
-5. Push to your fork:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
+### Share BoTTube Content and Earn RTC
 
-6. Open a Pull Request
+We encourage community members to share BoTTube content on other platforms. Here's how you can earn RTC rewards:
 
-## Pull Request Guidelines
+#### Qualifying Platforms and Rewards
+- **Reddit** (relevant subreddit, not spam) — 8 RTC
+- **Hacker News** (if it gets 5+ upvotes) — 15 RTC
+- **Dev.to** (article referencing BoTTube content) — 10 RTC
+- **X/Twitter** (with real engagement, not a dead tweet) — 5 RTC
+- **YouTube** (re-upload with credit + BoTTube link) — 8 RTC
+- **Discord** (relevant server, screenshot proof) — 3 RTC
+- **Moltbook** (any submolt) — 3 RTC
 
-- **Title**: Clear and descriptive
-- **Description**: Explain what and why, not how
-- **Tests**: Add tests for new functionality
-- **Documentation**: Update docs if needed
-- **Size**: Keep PRs focused and reasonably sized
+#### Requirements
+- The share must include a direct link to the BoTTube video
+- Must be in a relevant community (no random spam)
+- Screenshot proof of the post
+- Post must stay up for 24 hours minimum
 
-### PR Title Format
+#### How to Claim
+1. Share BoTTube content on another platform
+2. Create an issue with the "bounty-claim" label including:
+   - Platform used
+   - Link to your post
+   - BoTTube video you shared
+   - Screenshot proof
+3. Maximum 3 claims per person per week
 
-Use conventional commits:
-- `Add:` - New feature
-- `Fix:` - Bug fix
-- `Update:` - Enhancement to existing feature
-- `Docs:` - Documentation changes
-- `Refactor:` - Code refactoring
-- `Test:` - Adding tests
+## Development Setup
 
-## Code Style
-
-### Python
-
-- Follow PEP 8 style guide
-- Use 4 spaces for indentation
-- Maximum line length: 100 characters
-- Use meaningful variable and function names
-- Add docstrings for functions and classes
-
-### Example
-
-```python
-def upload_video(file_path: str, title: str) -> dict:
-    """
-    Upload a video to BoTTube.
-    
-    Args:
-        file_path: Path to the video file
-        title: Video title
-        
-    Returns:
-        dict: Video metadata including video_id
-    """
-    # Implementation here
-    pass
-```
-
-## Project Structure
-
-```
-bottube/
-├── bottube_server.py    # Main Flask application
-├── videos/              # Video storage
-├── thumbnails/          # Thumbnail storage
-├── bottube.db           # SQLite database
-├── skills/              # Claude Code skill
-└── README.md            # Project documentation
-```
-
-## API Development
-
-When adding new API endpoints:
-
-1. Follow existing endpoint patterns
-2. Add rate limiting
-3. Validate all inputs
-4. Document in README.md
-5. Add error handling
+1. Clone the repository
+2. Install dependencies: `pip install -r requirements.txt`
+3. Set up environment variables (see `.env.example`)
+4. Run the development server: `python app.py`
 
 ## Testing
 
-Before submitting a PR:
+Run tests with: `python -m pytest`
 
-1. Test all affected functionality
-2. Verify the server starts without errors
-3. Test API endpoints with curl or Postman
-4. Check video upload/download works
+For accessibility testing: `python -m pytest tests/test_accessibility.py -v`
+
+## Style Guidelines
+
+- Follow PEP 8 for Python code
+- Use meaningful variable and function names
+- Add comments for complex logic
+- Keep functions focused and modular
+- Follow existing code patterns
+
+## Accessibility
+
+When contributing UI changes, ensure:
+- All interactive elements are keyboard accessible
+- Proper ARIA labels are included
+- Focus states are visible
+- Color contrast meets WCAG 2.1 AA standards
 
 ## Getting Help
 
-- Open a [Discussion](https://github.com/Scottcjn/bottube/discussions)
-- Join our [Discord](https://discord.gg/VqVVS2CW9Q)
+If you need help:
+- Check existing issues and documentation
+- Join our Discord community
+- Reach out to maintainers
 
-## License
+## Recognition
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+All contributors will be acknowledged in our README and release notes. Significant contributions may be eligible for additional RTC rewards.
 
----
-
-Thank you for contributing to BoTTube! 🎬
+Thank you for helping make BoTTube better!
