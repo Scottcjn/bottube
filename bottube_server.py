@@ -10818,6 +10818,15 @@ def watch(video_id):
         interaction_likers = []
         interaction_outgoing = []
 
+    # Video Page Customization (Issue #2156)
+    # Read URL query params for player customization
+    video_theme = request.args.get("theme", "dark")
+    video_accent = request.args.get("accent", "")
+    video_autoplay = request.args.get("autoplay", "0")
+    video_controls = request.args.get("controls", "1")
+    video_quality = request.args.get("quality", "auto")
+    video_speed = request.args.get("speed", "1.0")
+
     return render_template(
         "watch.html",
         video=video,
@@ -10842,12 +10851,19 @@ def watch(video_id):
         response_videos=response_videos,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
+        # Video customization params
+        video_theme=video_theme,
+        video_accent=video_accent,
+        video_autoplay=video_autoplay,
+        video_controls=video_controls,
+        video_quality=video_quality,
+        video_speed=video_speed,
     )
 
 
 @app.route("/embed/<video_id>")
 def embed(video_id):
-    """Branded embed player for iframes and Twitter player cards."""
+    """Branded embed player for iframes and Twitter player cards with URL customization support."""
     db = get_db()
     video = db.execute(
         "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
@@ -10856,11 +10872,35 @@ def embed(video_id):
     if not video:
         abort(404)
 
+    # Video Page Customization (Issue #2156)
+    theme = request.args.get("theme", "dark")
+    accent = request.args.get("accent", "3ea6ff")  # Default BoTTube blue
     autoplay = request.args.get("autoplay", "0") == "1"
+    controls = request.args.get("controls", "1") == "1"
+    speed = request.args.get("speed", "1.0")
+    quality = request.args.get("quality", "auto")
+
     autoplay_attr = "autoplay " if autoplay else ""
+    controls_attr = "controls " if controls else ""
 
     title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
+
+    # Determine theme colors
+    if theme == "light":
+        bg_color = "#f5f5f5"
+        text_color = "#212121"
+        overlay_bg = "linear-gradient(transparent,rgba(255,255,255,0.85))"
+        info_color = "#212121"
+        brand_bg = "#3ea6ff"
+        brand_color = "#0f0f0f"
+    else:
+        bg_color = "#000"
+        text_color = "#fff"
+        overlay_bg = "linear-gradient(transparent,rgba(0,0,0,0.85))"
+        info_color = "#fff"
+        brand_bg = accent
+        brand_color = "#0f0f0f"
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -10871,27 +10911,38 @@ def embed(video_id):
 <link rel="canonical" href="https://bottube.ai/watch/{video_id}">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-html,body{{width:100%;height:100%}}
-body{{background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
+html,body{{width:100%;height:100%;background:{bg_color};color:{text_color}}}
+body{{display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
 video{{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block}}
-.overlay{{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;background:linear-gradient(transparent,rgba(0,0,0,0.85));
+.overlay{{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;background:{overlay_bg};
  opacity:0;transition:opacity 0.3s;pointer-events:none;display:flex;align-items:flex-end;justify-content:space-between}}
 body:hover .overlay{{opacity:1}}
-.info{{color:#fff;min-width:0}}
+.info{{color:{info_color};min-width:0}}
 .title{{font:600 14px/1.3 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}}
-.creator{{font:12px -apple-system,sans-serif;color:#aaa;margin-top:2px}}
-.brand{{pointer-events:auto;text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
+.creator{{font:12px -apple-system,sans-serif;color:{'#666' if theme == 'light' else '#aaa'};margin-top:2px}}
+.brand{{pointer-events:auto;text-decoration:none;background:{brand_bg};color:{brand_color};padding:6px 14px;border-radius:4px;
  font:700 12px -apple-system,sans-serif;white-space:nowrap;flex-shrink:0}}
-.brand:hover{{background:#65b8ff}}
+.brand:hover{{opacity:0.9}}
+.speed-badge{{position:absolute;top:12px;right:12px;background:{accent};color:#fff;padding:4px 8px;border-radius:4px;
+ font:600 11px -apple-system,sans-serif;opacity:0.9}}
 </style>
 </head><body>
-<video controls {autoplay_attr}playsinline>
+<video {controls_attr}{autoplay_attr}playsinline data-speed="{speed}" data-quality="{quality}">
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
+{f'<div class="speed-badge">{speed}x</div>' if speed != '1.0' else ''}
 <div class="overlay">
 <div class="info"><div class="title">{title_esc}</div><div class="creator">{creator_esc}</div></div>
-<a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank" rel="noopener">Watch on BoTTube</a>
+<a class="brand" href="https://bottube.ai/watch/{video_id}?theme={theme}&accent={accent}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
+<script>
+// Apply speed customization
+const video = document.querySelector('video');
+const speed = "{speed}";
+if (speed !== '1.0' && video) {{
+    video.playbackRate = parseFloat(speed);
+}}
+</script>
 </body></html>"""
     resp = Response(html, mimetype="text/html")
     # Allow embedding in any iframe
@@ -15416,6 +15467,12 @@ def embed_guide_page():
         "SELECT v.video_id, v.title FROM videos v ORDER BY v.created_at DESC LIMIT 5"
     ).fetchall()
     return render_template("embed_guide.html", videos=recent)
+
+
+@app.route("/video-customization-demo")
+def video_customization_demo():
+    """Demo page showing video player customization options via URL params (Issue #2156)."""
+    return render_template("video_customization_demo.html")
 
 
 @app.route("/beacon/atlas")
