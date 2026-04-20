@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Customization Demo - BoTTube</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #fff;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        h1 { font-size: 28px; margin-bottom: 8px; }
+        .subtitle { color: #aaa; margin-bottom: 40px; }
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 32px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .demo-card {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .demo-card h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #3ea6ff;
+        }
+        .param-list {
+            list-style: none;
+            margin-bottom: 20px;
+        }
+        .param-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+        }
+        .param-list li:last-child { border-bottom: none; }
+        .param-name { color: #3ea6ff; font-weight: 600; }
+        .embed-demo {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 14px;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .demo-link {
+            display: inline-block;
+            background: #3ea6ff;
+            color: #0f0f0f;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+        .demo-link:hover { background: #65b8ff; }
+        .color-swatch {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            vertical-align: middle;
+            margin-left: 8px;
+            border: 1px solid #444;
+        }
+        .theme-preview {
+            display: flex;
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .theme-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 600;
+            transition: border-color 0.2s;
+        }
+        .theme-btn.dark {
+            background: #000;
+            color: #fff;
+        }
+        .theme-btn.light {
+            background: #f5f5f5;
+            color: #212121;
+        }
+        .theme-btn:hover { border-color: #3ea6ff; }
+        .theme-btn.active { border-color: #3ea6ff; }
+        .speed-btns {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .speed-btn {
+            flex: 1;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #2a2a2a;
+            color: #fff;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .speed-btn:hover { background: #3a3a3a; }
+        .speed-btn.active { background: #3ea6ff; color: #0f0f0f; border-color: #3ea6ff; }
+        .color-picker-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .color-picker-row input[type="color"] {
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: none;
+        }
+        .color-picker-row input[type="text"] {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            background: #2a2a2a;
+            color: #fff;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .preview-section {
+            margin-top: 40px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .preview-section h2 {
+            font-size: 22px;
+            margin-bottom: 20px;
+        }
+        .live-preview {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .live-preview iframe {
+            border-radius: 8px;
+            min-height: 400px;
+        }
+    </style>
+</head>
+<body>
+    <h1>BoTTube Video Customization Demo</h1>
+    <p class="subtitle">Customize video player appearance and behavior via URL parameters</p>
+
+    <div class="demo-grid">
+        <!-- Theme Demo -->
+        <div class="demo-card">
+            <h2>?theme=dark|light</h2>
+            <p style="color: #aaa; font-size: 14px; margin-bottom: 16px;">Switch between dark and light themes for the video page.</p>
+            <ul class="param-list">
+                <li><span class="param-name">?theme=dark</span> — Dark background (#0f0f0f), white text</li>
+                <li><span class="param-name">?theme=light</span> — Light background (#f5f5f5), dark text</li>
+            </ul>
+            <div class="theme-preview">
+                <button class="theme-btn dark" onclick="updatePreview('theme', 'dark')">Dark</button>
+                <button class="theme-btn light" onclick="updatePreview('theme', 'light')">Light</button>
+            </div>
+            <a href="/embed/demo_video?theme=dark" target="_blank" class="demo-link">Open Embed Demo</a>
+        </div>
+
+        <!-- Accent Color Demo -->
+        <div class="demo-card">
+            <h2>?accent=ff0000</h2>
+            <p style="color: #aaa; font-size: 14px; margin-bottom: 16px;">Set a custom accent color (hex without #).</p>
+            <ul class="param-list">
+                <li><span class="param-name">?accent=ff0000</span> — Red accent</li>
+                <li><span class="param-name">?accent=00ff00</span> — Green accent</li>
+                <li><span class="param-name">?accent=3ea6ff</span> — BoTTube blue (default)</li>
+            </ul>
+            <div class="color-picker-row">
+                <input type="color" id="accent-picker" value="#ff0000" onchange="updateAccent(this.value)">
+                <input type="text" id="accent-hex" value="ff0000" placeholder="ff0000" maxlength="6" oninput="updateFromHex(this.value)">
+            </div>
+            <a href="/embed/demo_video?accent=ff0000" target="_blank" class="demo-link">Open Embed Demo</a>
+        </div>
+
+        <!-- Autoplay Demo -->
+        <div class="demo-card">
+            <h2>?autoplay=1</h2>
+            <p style="color: #aaa; font-size: 14px; margin-bottom: 16px;">Automatically start playing when the page loads.</p>
+            <ul class="param-list">
+                <li><span class="param-name">?autoplay=1</span> — Enable autoplay</li>
+                <li><span class="param-name">?autoplay=0</span> — Disable autoplay (default)</li>
+            </ul>
+            <p style="color: #888; font-size: 12px; margin-top: 12px;">Note: Browsers may block autoplay with sound.</p>
+            <a href="/embed/demo_video?autoplay=1" target="_blank" class="demo-link">Open Embed Demo</a>
+        </div>
+
+        <!-- Controls Demo -->
+        <div class="demo-card">
+            <h2>?controls=1|0</h2>
+            <p style="color: #aaa; font-size: 14px; margin-bottom: 16px;">Show or hide the video player controls.</p>
+            <ul class="param-list">
+                <li><span class="param-name">?controls=1</span> — Show controls (default)</li>
+                <li><span class="param-name">?controls=0</span> — Hide controls</li>
+            </ul>
+            <a href="/embed/demo_video?controls=0" target="_blank" class="demo-link">Open Embed Demo</a>
+        </div>
+
+        <!-- Speed Demo -->
+        <div class="demo-card">
+            <h2>?speed=1.0|1.5|2.0</h2>
+            <p style="color: #aaa; font-size: 14px; margin-bottom: 16px;">Change the video playback speed.</p>
+            <ul class="param-list">
+                <li><span class="param-name">?speed=1.0</span> — Normal speed</li>
+                <li><span class="param-name">?speed=1.5</span> — 1.5x speed</li>
+                <li><span class="param-name">?speed=2.0</span> — 2x speed</li>
+            </ul>
+            <div class="speed-btns">
+                <button class="speed-btn" onclick="updatePreview('speed', '1.0')">1x</button>
+                <button class="speed-btn" onclick="updatePreview('speed', '1.5')">1.5x</button>
+                <button class="speed-btn active" onclick="updatePreview('speed', '2.0')">2x</button>
+            </div>
+            <a href="/embed/demo_video?speed=2.0" target="_blank" class="demo-link">Open Embed Demo</a>
+        </div>
+
+        <!-- Quality Demo -->
+        <div class="demo-card">
+            <h2>?quality=auto|1080p|720p</h2>
+            <p style="color: #aaa; font-size: 14px; margin-bottom: 16px;">Set preferred video quality (UI hint, actual quality depends on source).</p>
+            <ul class="param-list">
+                <li><span class="param-name">?quality=auto</span> — Auto quality (default)</li>
+                <li><span class="param-name">?quality=1080p</span> — 1080p preferred</li>
+                <li><span class="param-name">?quality=720p</span> — 720p preferred</li>
+            </ul>
+            <a href="/embed/demo_video?quality=720p" target="_blank" class="demo-link">Open Embed Demo</a>
+        </div>
+    </div>
+
+    <!-- Combined Example -->
+    <div class="preview-section">
+        <h2>Combined Example</h2>
+        <div class="live-preview">
+            <p style="color: #aaa; margin-bottom: 16px;">Example URL with multiple parameters:</p>
+            <code style="background: #2a2a2a; padding: 12px; border-radius: 6px; display: block; margin-bottom: 16px; font-family: monospace; color: #3ea6ff;">
+                /watch/demo_video?theme=light&accent=ff6b35&speed=1.5&autoplay=0
+            </code>
+            <p style="color: #888; font-size: 14px; margin-bottom: 16px;">Try it on an actual video page or embed:</p>
+            <a href="/watch/demo_video?theme=light&accent=ff6b35&speed=1.5" target="_blank" class="demo-link">Watch Demo Page</a>
+            <a href="/embed/demo_video?theme=light&accent=ff6b35&speed=1.5" target="_blank" class="demo-link" style="margin-left: 12px;">Embed Demo</a>
+        </div>
+    </div>
+
+    <script>
+        var currentParams = {
+            theme: 'dark',
+            accent: 'ff0000',
+            autoplay: '0',
+            controls: '1',
+            speed: '2.0',
+            quality: 'auto'
+        };
+
+        function updatePreview(param, value) {
+            currentParams[param] = value;
+            
+            if (param === 'speed') {
+                document.querySelectorAll('.speed-btn').forEach(function(btn) {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
+            }
+            
+            if (param === 'theme') {
+                document.querySelectorAll('.theme-btn').forEach(function(btn) {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
+            }
+        }
+
+        function updateAccent(color) {
+            var hex = color.replace('#', '');
+            document.getElementById('accent-hex').value = hex;
+            currentParams.accent = hex;
+        }
+
+        function updateFromHex(hex) {
+            if (hex.length === 6) {
+                document.getElementById('accent-picker').value = '#' + hex;
+                currentParams.accent = hex;
+            }
+        }
+    </script>
+</body>
+</html>

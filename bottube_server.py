@@ -1757,6 +1757,7 @@ CREATE TABLE IF NOT EXISTS videos (
     attribution_id INTEGER DEFAULT NULL,
     syndication_chain TEXT DEFAULT '[]',
     license TEXT DEFAULT 'CC-BY-4.0',
+    collaborator_ids TEXT DEFAULT '[]',
     created_at REAL NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES agents(id)
 );
@@ -1954,6 +1955,19 @@ CREATE TABLE IF NOT EXISTS playlist_items (
 CREATE INDEX IF NOT EXISTS idx_playlists_agent ON playlists(agent_id);
 CREATE INDEX IF NOT EXISTS idx_playlist_items_pl ON playlist_items(playlist_id, position);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_playlist_items_uniq ON playlist_items(playlist_id, video_id);
+
+CREATE TABLE IF NOT EXISTS playlist_collaborators (
+    id INTEGER PRIMARY KEY,
+    playlist_id INTEGER NOT NULL,
+    agent_id INTEGER NOT NULL,
+    role TEXT DEFAULT 'editor',
+    created_at REAL NOT NULL,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_pl ON playlist_collaborators(playlist_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_agent ON playlist_collaborators(agent_id);
 
 CREATE TABLE IF NOT EXISTS webhooks (
     id INTEGER PRIMARY KEY,
@@ -2375,6 +2389,26 @@ def init_db():
     if "response_to_video_id" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id)")
+
+    # Migration: add collaborator_ids for creator collaboration (Bounty #2161)
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "collaborator_ids" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN collaborator_ids TEXT DEFAULT '[]'")
+
+    # Migration: create playlist_collaborators table (Bounty #2161)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS playlist_collaborators (
+            id INTEGER PRIMARY KEY,
+            playlist_id INTEGER NOT NULL,
+            agent_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'editor',
+            created_at REAL NOT NULL,
+            FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_pl ON playlist_collaborators(playlist_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_agent ON playlist_collaborators(agent_id)")
 
     # Migration: create messages table
     conn.execute("""
@@ -4139,6 +4173,7 @@ def video_to_dict(row):
     """Convert a video DB row to a JSON-friendly dict."""
     d = dict(row)
     d["tags"] = json.loads(d.get("tags", "[]"))
+    d["collaborator_ids"] = json.loads(d.get("collaborator_ids", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
     d["thumbnail_url"] = f"/thumbnails/{d['thumbnail']}" if d.get("thumbnail") else ""
@@ -10783,6 +10818,15 @@ def watch(video_id):
         interaction_likers = []
         interaction_outgoing = []
 
+    # Video Page Customization (Issue #2156)
+    # Read URL query params for player customization
+    video_theme = request.args.get("theme", "dark")
+    video_accent = request.args.get("accent", "")
+    video_autoplay = request.args.get("autoplay", "0")
+    video_controls = request.args.get("controls", "1")
+    video_quality = request.args.get("quality", "auto")
+    video_speed = request.args.get("speed", "1.0")
+
     return render_template(
         "watch.html",
         video=video,
@@ -10807,12 +10851,19 @@ def watch(video_id):
         response_videos=response_videos,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
+        # Video customization params
+        video_theme=video_theme,
+        video_accent=video_accent,
+        video_autoplay=video_autoplay,
+        video_controls=video_controls,
+        video_quality=video_quality,
+        video_speed=video_speed,
     )
 
 
 @app.route("/embed/<video_id>")
 def embed(video_id):
-    """Branded embed player for iframes and Twitter player cards."""
+    """Branded embed player for iframes and Twitter player cards with URL customization support."""
     db = get_db()
     video = db.execute(
         "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
@@ -10821,11 +10872,35 @@ def embed(video_id):
     if not video:
         abort(404)
 
+    # Video Page Customization (Issue #2156)
+    theme = request.args.get("theme", "dark")
+    accent = request.args.get("accent", "3ea6ff")  # Default BoTTube blue
     autoplay = request.args.get("autoplay", "0") == "1"
+    controls = request.args.get("controls", "1") == "1"
+    speed = request.args.get("speed", "1.0")
+    quality = request.args.get("quality", "auto")
+
     autoplay_attr = "autoplay " if autoplay else ""
+    controls_attr = "controls " if controls else ""
 
     title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
+
+    # Determine theme colors
+    if theme == "light":
+        bg_color = "#f5f5f5"
+        text_color = "#212121"
+        overlay_bg = "linear-gradient(transparent,rgba(255,255,255,0.85))"
+        info_color = "#212121"
+        brand_bg = "#3ea6ff"
+        brand_color = "#0f0f0f"
+    else:
+        bg_color = "#000"
+        text_color = "#fff"
+        overlay_bg = "linear-gradient(transparent,rgba(0,0,0,0.85))"
+        info_color = "#fff"
+        brand_bg = accent
+        brand_color = "#0f0f0f"
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -10836,27 +10911,38 @@ def embed(video_id):
 <link rel="canonical" href="https://bottube.ai/watch/{video_id}">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-html,body{{width:100%;height:100%}}
-body{{background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
+html,body{{width:100%;height:100%;background:{bg_color};color:{text_color}}}
+body{{display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}}
 video{{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block}}
-.overlay{{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;background:linear-gradient(transparent,rgba(0,0,0,0.85));
+.overlay{{position:absolute;bottom:0;left:0;right:0;padding:12px 16px;background:{overlay_bg};
  opacity:0;transition:opacity 0.3s;pointer-events:none;display:flex;align-items:flex-end;justify-content:space-between}}
 body:hover .overlay{{opacity:1}}
-.info{{color:#fff;min-width:0}}
+.info{{color:{info_color};min-width:0}}
 .title{{font:600 14px/1.3 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}}
-.creator{{font:12px -apple-system,sans-serif;color:#aaa;margin-top:2px}}
-.brand{{pointer-events:auto;text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
+.creator{{font:12px -apple-system,sans-serif;color:{'#666' if theme == 'light' else '#aaa'};margin-top:2px}}
+.brand{{pointer-events:auto;text-decoration:none;background:{brand_bg};color:{brand_color};padding:6px 14px;border-radius:4px;
  font:700 12px -apple-system,sans-serif;white-space:nowrap;flex-shrink:0}}
-.brand:hover{{background:#65b8ff}}
+.brand:hover{{opacity:0.9}}
+.speed-badge{{position:absolute;top:12px;right:12px;background:{accent};color:#fff;padding:4px 8px;border-radius:4px;
+ font:600 11px -apple-system,sans-serif;opacity:0.9}}
 </style>
 </head><body>
-<video controls {autoplay_attr}playsinline>
+<video {controls_attr}{autoplay_attr}playsinline data-speed="{speed}" data-quality="{quality}">
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
+{f'<div class="speed-badge">{speed}x</div>' if speed != '1.0' else ''}
 <div class="overlay">
 <div class="info"><div class="title">{title_esc}</div><div class="creator">{creator_esc}</div></div>
-<a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank" rel="noopener">Watch on BoTTube</a>
+<a class="brand" href="https://bottube.ai/watch/{video_id}?theme={theme}&accent={accent}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
+<script>
+// Apply speed customization
+const video = document.querySelector('video');
+const speed = "{speed}";
+if (speed !== '1.0' && video) {{
+    video.playbackRate = parseFloat(speed);
+}}
+</script>
 </body></html>"""
     resp = Response(html, mimetype="text/html")
     # Allow embedding in any iframe
@@ -14460,6 +14546,240 @@ def api_related_videos(video_id):
 
 
 # ---------------------------------------------------------------------------
+# Creator Collaboration API (Bounty #2161)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/videos/<video_id>/collaborators", methods=["POST"])
+@require_api_key
+def add_video_collaborator(video_id):
+    """Add a collaborator to a video."""
+    db = get_db()
+    video = db.execute(
+        "SELECT id, agent_id, collaborator_ids FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Only video owner can add collaborators
+    if video["agent_id"] != g.agent["id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    collaborator_agent_id = data.get("agent_id")
+    if not collaborator_agent_id:
+        return jsonify({"error": "agent_id is required"}), 400
+    
+    # Validate collaborator exists
+    collaborator = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE id = ?",
+        (collaborator_agent_id,),
+    ).fetchone()
+    if not collaborator:
+        return jsonify({"error": "Collaborator agent not found"}), 404
+    
+    # Parse existing collaborator_ids
+    current_ids = json.loads(video["collaborator_ids"] or "[]")
+    if collaborator_agent_id not in current_ids:
+        current_ids.append(collaborator_agent_id)
+    
+    db.execute(
+        "UPDATE videos SET collaborator_ids = ? WHERE video_id = ?",
+        (json.dumps(current_ids), video_id),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "collaborator_ids": current_ids,
+        "collaborator": {
+            "agent_id": collaborator["id"],
+            "agent_name": collaborator["agent_name"],
+            "display_name": collaborator["display_name"],
+        }
+    })
+
+
+@app.route("/api/videos/<video_id>/collaborators", methods=["GET"])
+def list_video_collaborators(video_id):
+    """List collaborators on a video."""
+    db = get_db()
+    video = db.execute(
+        "SELECT id, agent_id, collaborator_ids FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Parse collaborator IDs
+    collaborator_ids = json.loads(video["collaborator_ids"] or "[]")
+    collaborators = []
+    
+    for cid in collaborator_ids:
+        agent = db.execute(
+            "SELECT id, agent_name, display_name, avatar_url FROM agents WHERE id = ?",
+            (cid,),
+        ).fetchone()
+        if agent:
+            collaborators.append({
+                "agent_id": agent["id"],
+                "agent_name": agent["agent_name"],
+                "display_name": agent["display_name"],
+                "avatar_url": agent["avatar_url"],
+            })
+    
+    return jsonify({
+        "video_id": video_id,
+        "owner_id": video["agent_id"],
+        "collaborators": collaborators,
+    })
+
+
+@app.route("/api/videos/<video_id>/respond", methods=["POST"])
+@require_api_key
+def mark_video_as_response(video_id):
+    """Mark a video as a response to another video."""
+    db = get_db()
+    video = db.execute(
+        "SELECT id, agent_id FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Only video owner can mark as response
+    if video["agent_id"] != g.agent["id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    response_to_video_id = data.get("response_to_video_id", "").strip()
+    
+    # Validate response_to_video_id format if provided
+    if response_to_video_id:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", response_to_video_id):
+            return jsonify({"error": "Invalid response_to_video_id format"}), 400
+        
+        # Check target video exists
+        target = db.execute(
+            "SELECT video_id FROM videos WHERE video_id = ?",
+            (response_to_video_id,),
+        ).fetchone()
+        if not target:
+            return jsonify({"error": "response_to_video_id not found"}), 404
+    
+    db.execute(
+        "UPDATE videos SET response_to_video_id = ? WHERE video_id = ?",
+        (response_to_video_id, video_id),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "response_to_video_id": response_to_video_id,
+    })
+
+
+@app.route("/api/playlists/<playlist_id>/collaborators", methods=["POST"])
+@require_api_key
+def add_playlist_collaborator(playlist_id):
+    """Add a collaborator to a playlist."""
+    db = get_db()
+    playlist = db.execute(
+        "SELECT id, agent_id FROM playlists WHERE playlist_id = ?",
+        (playlist_id,),
+    ).fetchone()
+    if not playlist:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    # Only playlist owner can add collaborators
+    if playlist["agent_id"] != g.agent["id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    collaborator_agent_id = data.get("agent_id")
+    role = data.get("role", "editor")
+    if role not in ("editor", "viewer"):
+        role = "editor"
+    
+    if not collaborator_agent_id:
+        return jsonify({"error": "agent_id is required"}), 400
+    
+    # Validate collaborator exists
+    collaborator = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE id = ?",
+        (collaborator_agent_id,),
+    ).fetchone()
+    if not collaborator:
+        return jsonify({"error": "Collaborator agent not found"}), 404
+    
+    # Check if already a collaborator
+    existing = db.execute(
+        "SELECT id FROM playlist_collaborators WHERE playlist_id = ? AND agent_id = ?",
+        (playlist["id"], collaborator_agent_id),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "Agent is already a collaborator"}), 409
+    
+    now = time.time()
+    db.execute(
+        "INSERT INTO playlist_collaborators (playlist_id, agent_id, role, created_at) VALUES (?, ?, ?, ?)",
+        (playlist["id"], collaborator_agent_id, role, now),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "collaborator": {
+            "agent_id": collaborator["id"],
+            "agent_name": collaborator["agent_name"],
+            "display_name": collaborator["display_name"],
+            "role": role,
+        }
+    }), 201
+
+
+@app.route("/api/playlists/<playlist_id>/collaborators", methods=["GET"])
+def list_playlist_collaborators(playlist_id):
+    """List collaborators on a playlist."""
+    db = get_db()
+    playlist = db.execute(
+        "SELECT id, agent_id, title FROM playlists WHERE playlist_id = ?",
+        (playlist_id,),
+    ).fetchone()
+    if not playlist:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    rows = db.execute(
+        """SELECT pc.role, pc.created_at, a.id as agent_id, a.agent_name, a.display_name, a.avatar_url
+           FROM playlist_collaborators pc
+           JOIN agents a ON pc.agent_id = a.id
+           WHERE pc.playlist_id = ?
+           ORDER BY pc.created_at ASC""",
+        (playlist["id"],),
+    ).fetchall()
+    
+    collaborators = [
+        {
+            "agent_id": row["agent_id"],
+            "agent_name": row["agent_name"],
+            "display_name": row["display_name"],
+            "avatar_url": row["avatar_url"],
+            "role": row["role"],
+            "added_at": row["created_at"],
+        }
+        for row in rows
+    ]
+    
+    return jsonify({
+        "playlist_id": playlist_id,
+        "title": playlist["title"],
+        "owner_id": playlist["agent_id"],
+        "collaborators": collaborators,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Video & Comment Reporting (Phase 7)
 # ---------------------------------------------------------------------------
 
@@ -15147,6 +15467,12 @@ def embed_guide_page():
         "SELECT v.video_id, v.title FROM videos v ORDER BY v.created_at DESC LIMIT 5"
     ).fetchall()
     return render_template("embed_guide.html", videos=recent)
+
+
+@app.route("/video-customization-demo")
+def video_customization_demo():
+    """Demo page showing video player customization options via URL params (Issue #2156)."""
+    return render_template("video_customization_demo.html")
 
 
 @app.route("/beacon/atlas")

@@ -35,10 +35,31 @@ def fix_schema(db_path: str = "/root/bottube/bottube.db") -> None:
             ("revision_note", "TEXT DEFAULT ''"),
             ("challenge_id", "TEXT DEFAULT ''"),
             ("submolt_crosspost", "TEXT DEFAULT ''"),
+            ("collaborator_ids", "TEXT DEFAULT '[]'"),
         ]
 
         for col, typ in additions:
             add_column_if_missing(conn, "videos", col, typ)
+
+        # Migration: create playlist_collaborators table (Bounty #2161)
+        existing_tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "playlist_collaborators" not in existing_tables:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS playlist_collaborators (
+                    id INTEGER PRIMARY KEY,
+                    playlist_id INTEGER NOT NULL,
+                    agent_id INTEGER NOT NULL,
+                    role TEXT DEFAULT 'editor',
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+                    FOREIGN KEY (agent_id) REFERENCES agents(id)
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_pl ON playlist_collaborators(playlist_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_agent ON playlist_collaborators(agent_id)")
+            print("  Created: playlist_collaborators table")
+        else:
+            print("  Already exists: playlist_collaborators table")
 
         conn.commit()
         print("Schema fix done!")
