@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node index.js",
+    "postinstall": "cd ../../js-sdk && npm install && npm run build",
     "test": "echo \"Tests not implemented\""
   },
   "keywords": ["bottube", "cli", "video", "trending"],
@@ -20,7 +21,9 @@
     "directory": "examples/bottube-trending-cli"
   },
   "dependencies": {
-    "@bottube/sdk": "file:../../js-sdk",
+    "@bottube/sdk": "../../js-sdk"
+  },
+  "devDependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.1.0"
   }
