@@ -1757,6 +1757,7 @@ CREATE TABLE IF NOT EXISTS videos (
     attribution_id INTEGER DEFAULT NULL,
     syndication_chain TEXT DEFAULT '[]',
     license TEXT DEFAULT 'CC-BY-4.0',
+    collaborator_ids TEXT DEFAULT '[]',
     created_at REAL NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES agents(id)
 );
@@ -1954,6 +1955,19 @@ CREATE TABLE IF NOT EXISTS playlist_items (
 CREATE INDEX IF NOT EXISTS idx_playlists_agent ON playlists(agent_id);
 CREATE INDEX IF NOT EXISTS idx_playlist_items_pl ON playlist_items(playlist_id, position);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_playlist_items_uniq ON playlist_items(playlist_id, video_id);
+
+CREATE TABLE IF NOT EXISTS playlist_collaborators (
+    id INTEGER PRIMARY KEY,
+    playlist_id INTEGER NOT NULL,
+    agent_id INTEGER NOT NULL,
+    role TEXT DEFAULT 'editor',
+    created_at REAL NOT NULL,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_pl ON playlist_collaborators(playlist_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_agent ON playlist_collaborators(agent_id);
 
 CREATE TABLE IF NOT EXISTS webhooks (
     id INTEGER PRIMARY KEY,
@@ -2375,6 +2389,26 @@ def init_db():
     if "response_to_video_id" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id)")
+
+    # Migration: add collaborator_ids for creator collaboration (Bounty #2161)
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "collaborator_ids" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN collaborator_ids TEXT DEFAULT '[]'")
+
+    # Migration: create playlist_collaborators table (Bounty #2161)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS playlist_collaborators (
+            id INTEGER PRIMARY KEY,
+            playlist_id INTEGER NOT NULL,
+            agent_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'editor',
+            created_at REAL NOT NULL,
+            FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_id) REFERENCES agents(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_pl ON playlist_collaborators(playlist_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_collaborators_agent ON playlist_collaborators(agent_id)")
 
     # Migration: create messages table
     conn.execute("""
@@ -4139,6 +4173,7 @@ def video_to_dict(row):
     """Convert a video DB row to a JSON-friendly dict."""
     d = dict(row)
     d["tags"] = json.loads(d.get("tags", "[]"))
+    d["collaborator_ids"] = json.loads(d.get("collaborator_ids", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
     d["thumbnail_url"] = f"/thumbnails/{d['thumbnail']}" if d.get("thumbnail") else ""
@@ -14456,6 +14491,240 @@ def api_related_videos(video_id):
             }
             for r in scored[:limit]
         ],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Creator Collaboration API (Bounty #2161)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/videos/<video_id>/collaborators", methods=["POST"])
+@require_api_key
+def add_video_collaborator(video_id):
+    """Add a collaborator to a video."""
+    db = get_db()
+    video = db.execute(
+        "SELECT id, agent_id, collaborator_ids FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Only video owner can add collaborators
+    if video["agent_id"] != g.agent["id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    collaborator_agent_id = data.get("agent_id")
+    if not collaborator_agent_id:
+        return jsonify({"error": "agent_id is required"}), 400
+    
+    # Validate collaborator exists
+    collaborator = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE id = ?",
+        (collaborator_agent_id,),
+    ).fetchone()
+    if not collaborator:
+        return jsonify({"error": "Collaborator agent not found"}), 404
+    
+    # Parse existing collaborator_ids
+    current_ids = json.loads(video["collaborator_ids"] or "[]")
+    if collaborator_agent_id not in current_ids:
+        current_ids.append(collaborator_agent_id)
+    
+    db.execute(
+        "UPDATE videos SET collaborator_ids = ? WHERE video_id = ?",
+        (json.dumps(current_ids), video_id),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "collaborator_ids": current_ids,
+        "collaborator": {
+            "agent_id": collaborator["id"],
+            "agent_name": collaborator["agent_name"],
+            "display_name": collaborator["display_name"],
+        }
+    })
+
+
+@app.route("/api/videos/<video_id>/collaborators", methods=["GET"])
+def list_video_collaborators(video_id):
+    """List collaborators on a video."""
+    db = get_db()
+    video = db.execute(
+        "SELECT id, agent_id, collaborator_ids FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Parse collaborator IDs
+    collaborator_ids = json.loads(video["collaborator_ids"] or "[]")
+    collaborators = []
+    
+    for cid in collaborator_ids:
+        agent = db.execute(
+            "SELECT id, agent_name, display_name, avatar_url FROM agents WHERE id = ?",
+            (cid,),
+        ).fetchone()
+        if agent:
+            collaborators.append({
+                "agent_id": agent["id"],
+                "agent_name": agent["agent_name"],
+                "display_name": agent["display_name"],
+                "avatar_url": agent["avatar_url"],
+            })
+    
+    return jsonify({
+        "video_id": video_id,
+        "owner_id": video["agent_id"],
+        "collaborators": collaborators,
+    })
+
+
+@app.route("/api/videos/<video_id>/respond", methods=["POST"])
+@require_api_key
+def mark_video_as_response(video_id):
+    """Mark a video as a response to another video."""
+    db = get_db()
+    video = db.execute(
+        "SELECT id, agent_id FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+    
+    # Only video owner can mark as response
+    if video["agent_id"] != g.agent["id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    response_to_video_id = data.get("response_to_video_id", "").strip()
+    
+    # Validate response_to_video_id format if provided
+    if response_to_video_id:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", response_to_video_id):
+            return jsonify({"error": "Invalid response_to_video_id format"}), 400
+        
+        # Check target video exists
+        target = db.execute(
+            "SELECT video_id FROM videos WHERE video_id = ?",
+            (response_to_video_id,),
+        ).fetchone()
+        if not target:
+            return jsonify({"error": "response_to_video_id not found"}), 404
+    
+    db.execute(
+        "UPDATE videos SET response_to_video_id = ? WHERE video_id = ?",
+        (response_to_video_id, video_id),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "response_to_video_id": response_to_video_id,
+    })
+
+
+@app.route("/api/playlists/<playlist_id>/collaborators", methods=["POST"])
+@require_api_key
+def add_playlist_collaborator(playlist_id):
+    """Add a collaborator to a playlist."""
+    db = get_db()
+    playlist = db.execute(
+        "SELECT id, agent_id FROM playlists WHERE playlist_id = ?",
+        (playlist_id,),
+    ).fetchone()
+    if not playlist:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    # Only playlist owner can add collaborators
+    if playlist["agent_id"] != g.agent["id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json(silent=True) or {}
+    collaborator_agent_id = data.get("agent_id")
+    role = data.get("role", "editor")
+    if role not in ("editor", "viewer"):
+        role = "editor"
+    
+    if not collaborator_agent_id:
+        return jsonify({"error": "agent_id is required"}), 400
+    
+    # Validate collaborator exists
+    collaborator = db.execute(
+        "SELECT id, agent_name, display_name FROM agents WHERE id = ?",
+        (collaborator_agent_id,),
+    ).fetchone()
+    if not collaborator:
+        return jsonify({"error": "Collaborator agent not found"}), 404
+    
+    # Check if already a collaborator
+    existing = db.execute(
+        "SELECT id FROM playlist_collaborators WHERE playlist_id = ? AND agent_id = ?",
+        (playlist["id"], collaborator_agent_id),
+    ).fetchone()
+    if existing:
+        return jsonify({"error": "Agent is already a collaborator"}), 409
+    
+    now = time.time()
+    db.execute(
+        "INSERT INTO playlist_collaborators (playlist_id, agent_id, role, created_at) VALUES (?, ?, ?, ?)",
+        (playlist["id"], collaborator_agent_id, role, now),
+    )
+    db.commit()
+    
+    return jsonify({
+        "ok": True,
+        "collaborator": {
+            "agent_id": collaborator["id"],
+            "agent_name": collaborator["agent_name"],
+            "display_name": collaborator["display_name"],
+            "role": role,
+        }
+    }), 201
+
+
+@app.route("/api/playlists/<playlist_id>/collaborators", methods=["GET"])
+def list_playlist_collaborators(playlist_id):
+    """List collaborators on a playlist."""
+    db = get_db()
+    playlist = db.execute(
+        "SELECT id, agent_id, title FROM playlists WHERE playlist_id = ?",
+        (playlist_id,),
+    ).fetchone()
+    if not playlist:
+        return jsonify({"error": "Playlist not found"}), 404
+    
+    rows = db.execute(
+        """SELECT pc.role, pc.created_at, a.id as agent_id, a.agent_name, a.display_name, a.avatar_url
+           FROM playlist_collaborators pc
+           JOIN agents a ON pc.agent_id = a.id
+           WHERE pc.playlist_id = ?
+           ORDER BY pc.created_at ASC""",
+        (playlist["id"],),
+    ).fetchall()
+    
+    collaborators = [
+        {
+            "agent_id": row["agent_id"],
+            "agent_name": row["agent_name"],
+            "display_name": row["display_name"],
+            "avatar_url": row["avatar_url"],
+            "role": row["role"],
+            "added_at": row["created_at"],
+        }
+        for row in rows
+    ]
+    
+    return jsonify({
+        "playlist_id": playlist_id,
+        "title": playlist["title"],
+        "owner_id": playlist["agent_id"],
+        "collaborators": collaborators,
     })
 
 
