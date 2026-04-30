@@ -2640,7 +2640,20 @@
         </div>
         {% endif %}
 
-        <h2>Up Next</h2>
+        <h2 style="display:flex;align-items:center;gap:8px;">
+            Up Next
+            <span id="upnext-source-badge"
+                  style="font-size:9px;letter-spacing:0.06em;text-transform:uppercase;
+                         background:rgba(62,166,255,0.12);color:var(--accent);
+                         padding:2px 7px;border-radius:999px;border:1px solid rgba(62,166,255,0.4);
+                         font-weight:600;display:none;">embeddings</span>
+        </h2>
+
+        <!-- Embeddings-driven similar videos (preferred) -->
+        <div id="upnext-similar" data-state="loading"></div>
+
+        <!-- Static fallback (rendered server-side, hidden if dynamic loads) -->
+        <div id="upnext-static">
         {% for rel in related %}
         <div class="sidebar-video">
             <a href="{{ P }}/watch/{{ rel.video_id }}">
@@ -2666,6 +2679,99 @@
         {% if not related %}
         <p style="color: var(--text-muted); font-size: 13px;">No other videos yet.</p>
         {% endif %}
+        </div>
+
+        <style>
+            .upnext-why {
+                display: inline-block;
+                font-size: 10px;
+                letter-spacing: 0.02em;
+                background: rgba(74, 210, 122, 0.12);
+                color: #4ad27a;
+                border: 1px solid rgba(74, 210, 122, 0.4);
+                padding: 1px 7px;
+                border-radius: 999px;
+                margin-top: 4px;
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .upnext-score {
+                font-family: ui-monospace, monospace;
+                font-size: 10px;
+                color: var(--text-secondary);
+                margin-left: 6px;
+            }
+        </style>
+
+        <script>
+        (function () {
+            var VIDEO_ID = "{{ video.video_id }}";
+            var dyn = document.getElementById('upnext-similar');
+            var stat = document.getElementById('upnext-static');
+            var badge = document.getElementById('upnext-source-badge');
+            if (!dyn || !stat) return;
+
+            function _esc(s) {
+                return String(s == null ? '' : s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+            function _fmtViews(v) {
+                v = Number(v) || 0;
+                if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M views';
+                if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K views';
+                return v + ' views';
+            }
+            function _fmtDur(sec) {
+                sec = Math.max(0, Math.floor(Number(sec) || 0));
+                if (!sec) return '';
+                var m = Math.floor(sec / 60), s = sec % 60;
+                return m + ':' + (s < 10 ? '0' : '') + s;
+            }
+
+            fetch('/api/videos/' + encodeURIComponent(VIDEO_ID) + '/similar?k=10', { credentials: 'omit' })
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    if (!j || !j.ok || !j.results || !j.results.length) {
+                        // Keep static fallback visible
+                        return;
+                    }
+                    dyn.innerHTML = j.results.map(function (r) {
+                        var thumb = r.thumbnail
+                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="" loading="lazy">'
+                            : '<div class="thumb-placeholder">&#9654;</div>';
+                        var dur = r.duration_sec > 0
+                            ? '<span class="duration-badge">' + _esc(_fmtDur(r.duration_sec)) + '</span>'
+                            : '';
+                        var human = r.is_human
+                            ? '<span class="badge-human-sm">Human</span>'
+                            : '<span class="badge-ai-sm">AI</span>';
+                        var score = r.score
+                            ? '<span class="upnext-score">' + (r.score * 100).toFixed(0) + '%</span>'
+                            : '';
+                        var why = '<div class="upnext-why" title="Cosine similarity ' + _esc((r.score || 0).toFixed(3)) + '">&#10024; Similar topic ' + score + '</div>';
+                        return ''
+                            + '<div class="sidebar-video">'
+                            +   '<a href="/watch/' + _esc(r.video_id) + '">'
+                            +     '<div class="sidebar-thumb">' + thumb + dur + '</div>'
+                            +     '<div class="sidebar-meta">'
+                            +       '<div class="video-title">' + _esc(r.title) + '</div>'
+                            +       '<div class="video-channel">' + _esc(r.display_name || r.agent_name) + ' ' + human + '</div>'
+                            +       '<div class="video-stats">' + _fmtViews(r.views) + '</div>'
+                            +       why
+                            +     '</div>'
+                            +   '</a>'
+                            + '</div>';
+                    }).join('');
+                    dyn.dataset.state = 'ready';
+                    stat.style.display = 'none';
+                    if (badge) badge.style.display = 'inline-block';
+                })
+                .catch(function () { /* leave static visible */ });
+        })();
+        </script>
     </div>
 </div>
 
