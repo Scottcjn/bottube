@@ -6413,6 +6413,34 @@ def upload_video():
     _referral_refresh_invite_state(db, g.agent["id"])
     db.commit()
 
+    # Provenance: hash the canonical (post-transcode) asset, capture any
+    # generation metadata the agent supplied, sign with the platform key,
+    # and persist. Pill flips from gray (unverified) to amber (pending).
+    # Anchor TX is filled in later by the Ergo anchor job (separate cron).
+    try:
+        _provenance_record_for_upload(
+            video_id=video_id,
+            canonical_path=str(video_path),
+            agent=g.agent,
+            form=request.form,
+            width=width,
+            height=height,
+            duration=duration,
+            uploaded_at=time.time(),
+        )
+    except Exception as _prov_e:
+        # Provenance failures must not block upload success.
+        app.logger.warning("provenance record failed for %s: %s", video_id, _prov_e)
+
+    # Adaptive renditions + VMAF: encode 360p variant in the background
+    # and compute VMAF against canonical. Populates video_renditions so
+    # the provenance side-sheet shows real per-encoding quality scores.
+    # Bounded concurrency via _RENDITION_GATE; never blocks the upload.
+    try:
+        _renditions_process_video_async(video_id)
+    except Exception as _rend_e:
+        app.logger.warning("rendition async dispatch failed for %s: %s", video_id, _rend_e)
+
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
@@ -16511,6 +16539,593 @@ def admin_blocklist_add():
     _ts_log_audit("admin", "blocklist_add", "hash", sha,
                   reason=f"{category} via {source}", severity="critical" if category == "csam" else "high")
     return jsonify({"ok": True, "sha256": sha, "category": category, "added_at": time.time()})
+
+
+# --- Provenance write-path -------------------------------------------------
+# Populate video_provenance on every upload so the pill flips from gray
+# (unverified) to amber (pending) immediately. Anchor TX is filled in by
+# a separate Ergo anchor job; once both uploader_sig and anchor_tx_hash
+# are present, _build_provenance_payload() flips it to verified (green).
+
+def _provenance_signing_key():
+    """The platform secret used to sign canonical-asset manifests.
+
+    Falls back to BOTTUBE_SECRET_KEY (Flask session secret) if the
+    dedicated provenance key is unset. Both are HMAC keys, never exposed
+    to clients; only the resulting signature appears in the public JSON.
+    """
+    return (os.environ.get("BOTTUBE_PROVENANCE_KEY", "")
+            or os.environ.get("BOTTUBE_SECRET_KEY", "")
+            or "bottube-provenance-bootstrap")
+
+
+def _provenance_uploader_sig(video_id, canonical_sha256, agent_id, uploaded_at):
+    """HMAC-SHA256 platform signature over the canonical manifest line."""
+    key = _provenance_signing_key().encode("utf-8")
+    msg = f"{video_id}|{canonical_sha256}|{agent_id}|{int(uploaded_at)}".encode("utf-8")
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()
+
+
+def _provenance_optional_from_form(form):
+    """Pull optional generation metadata from the upload form.
+
+    All fields are optional. Agents that supply them get a richer pill;
+    legacy clients that don't get the same pending state with empty
+    generation block.
+    """
+    def _s(k, n=200):
+        return (form.get(k, "") or "").strip()[:n]
+    seed = 0
+    try:
+        seed = int(form.get("seed", "0") or 0)
+    except Exception:
+        seed = 0
+    generated_at = 0.0
+    try:
+        gen_at_raw = form.get("generated_at", "0") or 0
+        generated_at = float(gen_at_raw)
+    except Exception:
+        generated_at = 0.0
+    return {
+        "model": _s("gen_model", 64) or _s("model", 64),
+        "provider": _s("gen_provider", 64) or _s("provider", 64),
+        "workflow_hash": _s("workflow_hash", 128),
+        "prompt_hash": _s("prompt_hash", 128),
+        "seed": seed,
+        "generated_at": generated_at,
+    }
+
+
+def _provenance_record_for_upload(video_id, canonical_path, agent, form,
+                                   width=0, height=0, duration=0.0,
+                                   uploaded_at=None):
+    """Compute SHA-256, sign, and INSERT into video_provenance.
+
+    Idempotent (REPLACE semantics). Never raises — provenance is best-effort
+    and an error here must not block the upload response.
+    """
+    try:
+        _ensure_provenance_schema()
+        if uploaded_at is None:
+            uploaded_at = time.time()
+        sha = _ts_sha256_file(canonical_path)
+        agent_id = agent["id"] if hasattr(agent, "__getitem__") else int(agent or 0)
+        sig = _provenance_uploader_sig(video_id, sha, agent_id, uploaded_at)
+        opt = _provenance_optional_from_form(form or {})
+
+        # Pull beacon_id / pubkey if columns exist on agents.
+        creator_pubkey = ""
+        creator_beacon = ""
+        try:
+            agent_keys = list(agent.keys()) if hasattr(agent, "keys") else []
+            if "rtc_wallet" in agent_keys:
+                creator_pubkey = agent["rtc_wallet"] or ""
+            if not creator_pubkey and "rtc_address" in agent_keys:
+                creator_pubkey = agent["rtc_address"] or ""
+            if "beacon_id" in agent_keys:
+                creator_beacon = agent["beacon_id"] or ""
+        except Exception:
+            pass
+
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.execute(
+                """INSERT OR REPLACE INTO video_provenance
+                       (video_id, canonical_sha256, duration_sec, width, height,
+                        creator_agent_id, creator_pubkey, creator_beacon_id,
+                        model, provider, workflow_hash, prompt_hash, seed,
+                        generated_at, uploader_sig, uploaded_at,
+                        anchor_chain, anchor_tx_hash, anchor_block_height,
+                        anchor_manifest_hash, parents_json, renditions_json,
+                        verified, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (video_id, sha, duration, width, height,
+                 agent_id, creator_pubkey, creator_beacon,
+                 opt["model"], opt["provider"], opt["workflow_hash"],
+                 opt["prompt_hash"], opt["seed"],
+                 opt["generated_at"] or uploaded_at, sig, uploaded_at,
+                 "", "", 0, "", "[]", "[]",
+                 0, time.time(), time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {"ok": True, "sha256": sha, "uploader_sig": sig}
+    except Exception as e:
+        try:
+            app.logger.warning("provenance write failed for %s: %s", video_id, e)
+        except Exception:
+            pass
+        return {"ok": False, "error": str(e)}
+
+
+# --- Adaptive renditions + VMAF -------------------------------------------
+# Generate a 360p variant for the human-watch lane and compute VMAF
+# against the canonical 720x720 source. The result lands in
+# video_renditions and surfaces in the provenance side-sheet on every
+# /watch/<id> page. Encoding is async so uploads are not blocked.
+
+from threading import Semaphore as _eng_Semaphore
+import concurrent.futures as _cf2
+
+RENDITION_DIR = BASE_DIR / "renditions"
+RENDITION_FFMPEG = "/opt/ffmpeg-vmaf/ffmpeg"  # static build with libvmaf
+RENDITION_VMAF_MODEL = "version=vmaf_v0.6.1"  # bundled in the static build
+
+# Cap concurrent rendition jobs across all upload threads to keep the
+# VPS from getting starved on background ffmpeg.
+_RENDITION_GATE = _eng_Semaphore(2)
+_RENDITION_INFLIGHT = set()
+_RENDITION_INFLIGHT_LOCK = _eng_Lock()
+
+
+def _renditions_dir_for(video_id):
+    """Per-video subdir, created on demand."""
+    d = RENDITION_DIR / video_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _renditions_ffmpeg_available():
+    return Path(RENDITION_FFMPEG).is_file() and os.access(RENDITION_FFMPEG, os.X_OK)
+
+
+def _renditions_encode(canonical_path, out_path, target_w, target_h, crf=24, preset="medium"):
+    """Encode a downscale variant. Returns size in bytes (>0) on success, 0 on failure."""
+    out_path = str(out_path)
+    cmd = [
+        RENDITION_FFMPEG, "-loglevel", "error", "-y",
+        "-i", str(canonical_path),
+        "-vf", f"scale={target_w}:{target_h}:flags=bicubic",
+        "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-an",
+        out_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, timeout=120,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        sz = Path(out_path).stat().st_size
+        return sz
+    except subprocess.CalledProcessError as e:
+        try:
+            err = (e.stderr or b"").decode("utf-8", errors="replace")[:300]
+        except Exception:
+            err = ""
+        app.logger.warning("rendition encode failed: %s", err)
+        return 0
+    except subprocess.TimeoutExpired:
+        app.logger.warning("rendition encode timeout")
+        return 0
+
+
+def _renditions_compute_vmaf(distorted_path, ref_path, ref_width, ref_height,
+                             threads=2, timeout=180):
+    """Run libvmaf and return the mean score, or 0.0 on error.
+
+    Distorted is upscaled to reference dimensions before comparison
+    (standard practice — VMAF is computed at the reference resolution).
+    """
+    log_path = Path(distorted_path).with_suffix(".vmaf.json")
+    filter_chain = (
+        f"[0:v]scale={ref_width}:{ref_height}:flags=bicubic[d];"
+        f"[d][1:v]libvmaf=log_path={log_path}:log_fmt=json:n_threads={threads}:"
+        f"model={RENDITION_VMAF_MODEL}"
+    )
+    cmd = [
+        RENDITION_FFMPEG, "-loglevel", "error",
+        "-i", str(distorted_path),
+        "-i", str(ref_path),
+        "-lavfi", filter_chain,
+        "-f", "null", "-",
+    ]
+    try:
+        subprocess.run(cmd, check=True, timeout=timeout,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if not log_path.exists():
+            return 0.0
+        with open(log_path, "r") as f:
+            j = json.load(f)
+        pooled = j.get("pooled_metrics", {}).get("vmaf", {})
+        mean = float(pooled.get("mean", 0.0) or 0.0)
+        return mean
+    except subprocess.CalledProcessError as e:
+        try:
+            err = (e.stderr or b"").decode("utf-8", errors="replace")[:300]
+        except Exception:
+            err = ""
+        app.logger.warning("vmaf compute failed: %s", err)
+        return 0.0
+    except subprocess.TimeoutExpired:
+        app.logger.warning("vmaf compute timeout")
+        return 0.0
+    except Exception as e:
+        app.logger.warning("vmaf parse error: %s", e)
+        return 0.0
+    finally:
+        try:
+            log_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _renditions_upsert(video_id, label, url_path, width, height,
+                       bitrate_kbps, file_sha256, file_size, vmaf,
+                       is_canonical=False):
+    """Idempotent INSERT OR REPLACE into video_renditions."""
+    _ensure_provenance_schema()
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO video_renditions
+                   (video_id, label, url_path, width, height, bitrate_kbps,
+                    codec, file_sha256, file_size, vmaf, is_canonical, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'h264', ?, ?, ?, ?, ?)""",
+            (video_id, label, url_path, width, height, bitrate_kbps,
+             file_sha256, file_size, vmaf,
+             1 if is_canonical else 0, time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _renditions_estimate_bitrate_kbps(file_path, duration_sec):
+    """Approximate bitrate from file size + duration."""
+    try:
+        size = Path(file_path).stat().st_size
+        if duration_sec and duration_sec > 0:
+            return int((size * 8) / 1000 / duration_sec)
+    except Exception:
+        pass
+    return 0
+
+
+def _renditions_process_video(video_id):
+    """Generate the 360p variant + canonical row for a single video.
+
+    Idempotent. If the rendition already exists on disk and in DB, returns fast.
+    Bounded concurrency via _RENDITION_GATE.
+    """
+    if not _renditions_ffmpeg_available():
+        app.logger.warning("renditions: static ffmpeg missing at %s", RENDITION_FFMPEG)
+        return {"ok": False, "error": "ffmpeg-vmaf not installed"}
+
+    # Coalesce concurrent calls for the same video
+    with _RENDITION_INFLIGHT_LOCK:
+        if video_id in _RENDITION_INFLIGHT:
+            return {"ok": False, "error": "in_flight"}
+        _RENDITION_INFLIGHT.add(video_id)
+
+    acquired = False
+    try:
+        if not _RENDITION_GATE.acquire(blocking=True, timeout=600):
+            return {"ok": False, "error": "gate_timeout"}
+        acquired = True
+
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            video = conn.execute(
+                "SELECT video_id, filename, duration_sec, width, height "
+                "FROM videos WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            if not video:
+                return {"ok": False, "error": "not_found"}
+
+            canonical_path = VIDEO_DIR / (video["filename"] or "")
+            if not canonical_path.exists():
+                return {"ok": False, "error": "canonical_missing"}
+
+            ref_w = int(video["width"] or 720)
+            ref_h = int(video["height"] or 720)
+            duration = float(video["duration_sec"] or 0)
+
+            outdir = _renditions_dir_for(video_id)
+
+            # Register the canonical first (no VMAF — it IS the reference)
+            try:
+                canon_sha = _ts_sha256_file(canonical_path)
+            except Exception:
+                canon_sha = ""
+            canon_size = canonical_path.stat().st_size if canonical_path.exists() else 0
+            canon_kbps = _renditions_estimate_bitrate_kbps(canonical_path, duration)
+            _renditions_upsert(
+                video_id=video_id, label="canonical",
+                url_path=f"/api/videos/{video_id}/stream",
+                width=ref_w, height=ref_h, bitrate_kbps=canon_kbps,
+                file_sha256=canon_sha, file_size=canon_size, vmaf=0.0,
+                is_canonical=True,
+            )
+
+            # 360p downscale (square, since canonical is square)
+            target_dim = 360
+            p360_path = outdir / "360p.mp4"
+            need_encode = (
+                not p360_path.exists()
+                or p360_path.stat().st_size < 1024
+            )
+            if need_encode:
+                size = _renditions_encode(
+                    canonical_path, p360_path,
+                    target_w=target_dim, target_h=target_dim,
+                    crf=24, preset="medium",
+                )
+                if not size:
+                    return {"ok": False, "error": "encode_360_failed"}
+
+            # VMAF
+            vmaf_score = _renditions_compute_vmaf(
+                p360_path, canonical_path, ref_w, ref_h, threads=2,
+            )
+
+            try:
+                p360_sha = _ts_sha256_file(p360_path)
+            except Exception:
+                p360_sha = ""
+            p360_size = p360_path.stat().st_size
+            p360_kbps = _renditions_estimate_bitrate_kbps(p360_path, duration)
+
+            _renditions_upsert(
+                video_id=video_id, label="360p",
+                url_path=f"/renditions/{video_id}/360p.mp4",
+                width=target_dim, height=target_dim,
+                bitrate_kbps=p360_kbps,
+                file_sha256=p360_sha, file_size=p360_size,
+                vmaf=round(vmaf_score, 2), is_canonical=False,
+            )
+            return {
+                "ok": True, "video_id": video_id,
+                "vmaf_360p": round(vmaf_score, 2),
+                "size_360p": p360_size,
+                "kbps_360p": p360_kbps,
+            }
+        finally:
+            conn.close()
+    except Exception as e:
+        app.logger.warning("renditions process_video(%s) failed: %s", video_id, e)
+        return {"ok": False, "error": str(e)}
+    finally:
+        if acquired:
+            _RENDITION_GATE.release()
+        with _RENDITION_INFLIGHT_LOCK:
+            _RENDITION_INFLIGHT.discard(video_id)
+
+
+def _renditions_process_video_async(video_id):
+    """Fire-and-forget background dispatch."""
+    try:
+        threading.Thread(
+            target=_renditions_process_video, args=(video_id,),
+            daemon=True, name=f"rendition-{video_id}",
+        ).start()
+    except Exception as e:
+        app.logger.warning("renditions async dispatch failed: %s", e)
+
+
+@app.route("/renditions/<video_id>/<path:filename>")
+def serve_rendition(video_id, filename):
+    """Serve rendition files with strong caching."""
+    if "/" in filename or ".." in filename or "/" in video_id or ".." in video_id:
+        abort(404)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        abort(404)
+    return send_from_directory(
+        RENDITION_DIR / video_id, filename, max_age=86400 * 30, mimetype="video/mp4",
+    )
+
+
+@app.route("/admin/renditions/backfill", methods=["POST"])
+def admin_renditions_backfill():
+    """Backfill renditions for videos missing a 360p rendition.
+
+    Body: {"limit": 30, "since_video_id": null, "concurrency": 2}.
+    Synchronous within the batch (each video ~7s — caller paginates).
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    if not _renditions_ffmpeg_available():
+        return jsonify({"ok": False, "error": "ffmpeg-vmaf not installed"}), 503
+    _ensure_provenance_schema()
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(100, int(data.get("limit", 20))))
+    except Exception:
+        limit = 20
+    try:
+        concurrency = max(1, min(4, int(data.get("concurrency", 2))))
+    except Exception:
+        concurrency = 2
+    since = (data.get("since_video_id") or "").strip()
+
+    db = get_db()
+    if since:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 LEFT JOIN video_renditions r
+                        ON r.video_id = v.video_id AND r.label = '360p'
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND r.video_id IS NULL
+                  AND v.video_id > ?
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (since, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 LEFT JOIN video_renditions r
+                        ON r.video_id = v.video_id AND r.label = '360p'
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND r.video_id IS NULL
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    started = time.time()
+    written, failed = 0, 0
+    last_id = ""
+    samples = []  # collect VMAF for sanity
+    errors = []
+
+    if rows:
+        with _cf2.ThreadPoolExecutor(max_workers=concurrency) as ex:
+            futs = {ex.submit(_renditions_process_video, r["video_id"]): r["video_id"] for r in rows}
+            for fut in _cf2.as_completed(futs):
+                vid = futs[fut]
+                last_id = max(last_id, vid)
+                try:
+                    res = fut.result(timeout=300)
+                    if res and res.get("ok"):
+                        written += 1
+                        samples.append(res.get("vmaf_360p", 0.0))
+                    else:
+                        failed += 1
+                        if len(errors) < 10:
+                            errors.append({"video_id": vid, "error": (res or {}).get("error", "unknown")})
+                except Exception as e:
+                    failed += 1
+                    if len(errors) < 10:
+                        errors.append({"video_id": vid, "error": str(e)})
+
+    elapsed = time.time() - started
+    avg_vmaf = (sum(samples) / len(samples)) if samples else 0.0
+
+    return jsonify({
+        "ok": True,
+        "written": written,
+        "failed": failed,
+        "elapsed_s": round(elapsed, 2),
+        "avg_vmaf": round(avg_vmaf, 2),
+        "last_video_id": last_id,
+        "next_call": (
+            {"since_video_id": last_id, "limit": limit, "concurrency": concurrency}
+            if rows and len(rows) >= limit else None
+        ),
+        "errors": errors,
+    })
+
+
+@app.route("/admin/provenance/backfill", methods=["POST"])
+def admin_provenance_backfill():
+    """Backfill video_provenance for existing videos missing a row.
+
+    Body: {"limit": 200, "since_video_id": null}. Hashes each video file
+    on disk and writes a minimal provenance row signed by the platform.
+    Resumable — caller passes the last video_id processed as
+    since_video_id on the next call.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _ensure_provenance_schema()
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(500, int(data.get("limit", 100))))
+    except Exception:
+        limit = 100
+    since = (data.get("since_video_id") or "").strip()
+
+    db = get_db()
+    if since:
+        rows = db.execute(
+            """SELECT v.video_id, v.agent_id, v.filename, v.duration_sec,
+                      v.width, v.height, v.created_at,
+                      a.rtc_wallet, a.rtc_address
+                 FROM videos v
+                 JOIN agents a ON v.agent_id = a.id
+                 LEFT JOIN video_provenance p ON p.video_id = v.video_id
+                WHERE p.video_id IS NULL
+                  AND v.video_id > ?
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (since, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.video_id, v.agent_id, v.filename, v.duration_sec,
+                      v.width, v.height, v.created_at,
+                      a.rtc_wallet, a.rtc_address
+                 FROM videos v
+                 JOIN agents a ON v.agent_id = a.id
+                 LEFT JOIN video_provenance p ON p.video_id = v.video_id
+                WHERE p.video_id IS NULL
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    written, skipped = 0, 0
+    last_id = ""
+    errors = []
+    for r in rows:
+        last_id = r["video_id"]
+        path = VIDEO_DIR / (r["filename"] or "")
+        if not path.exists():
+            skipped += 1
+            errors.append({"video_id": r["video_id"], "error": "file missing"})
+            continue
+        agent_dict = {
+            "id": r["agent_id"],
+            "rtc_wallet": r["rtc_wallet"] or "",
+            "rtc_address": r["rtc_address"] or "",
+        }
+        # Fake form view (no model/seed available for legacy uploads)
+        result = _provenance_record_for_upload(
+            video_id=r["video_id"],
+            canonical_path=str(path),
+            agent={
+                "id": r["agent_id"],
+                "rtc_wallet": r["rtc_wallet"] or "",
+                "rtc_address": r["rtc_address"] or "",
+            },
+            form={},
+            width=r["width"] or 0,
+            height=r["height"] or 0,
+            duration=r["duration_sec"] or 0.0,
+            uploaded_at=r["created_at"] or time.time(),
+        )
+        if result.get("ok"):
+            written += 1
+        else:
+            skipped += 1
+            errors.append({"video_id": r["video_id"], "error": result.get("error", "unknown")})
+
+    return jsonify({
+        "ok": True,
+        "written": written,
+        "skipped": skipped,
+        "last_video_id": last_id,
+        "next_call": (
+            {"since_video_id": last_id, "limit": limit}
+            if rows and len(rows) >= limit else None
+        ),
+        "errors": errors[:20],
+    })
 
 
 @app.route("/admin/moderation/reports")
