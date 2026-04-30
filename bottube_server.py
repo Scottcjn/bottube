@@ -6441,6 +6441,14 @@ def upload_video():
     except Exception as _rend_e:
         app.logger.warning("rendition async dispatch failed for %s: %s", video_id, _rend_e)
 
+    # Semantic embedding: title+description+tags+scene → Gemini text
+    # embedding (3072-d, L2-norm). Used by /api/videos/<id>/similar and
+    # the upcoming hybrid feed. Async — single API call, ~300ms.
+    try:
+        _ue_record_for_video_async(video_id)
+    except Exception as _emb_e:
+        app.logger.warning("embedding async dispatch failed for %s: %s", video_id, _emb_e)
+
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
@@ -16656,6 +16664,501 @@ def admin_blocklist_add():
     _ts_log_audit("admin", "blocklist_add", "hash", sha,
                   reason=f"{category} via {source}", severity="critical" if category == "csam" else "high")
     return jsonify({"ok": True, "sha256": sha, "category": category, "added_at": time.time()})
+
+
+# --- Semantic embeddings (hybrid feed v1 scaffolding) ---------------------
+# Per-video text embedding via Gemini (gemini-embedding-001, 3072-d, L2-norm).
+# Cached in-memory as a NumPy matrix, refreshed lazily. Brute-force cosine
+# at query time — fine at the current ~1.4k-video scale; swap to Qdrant
+# once content is 10x larger. The /api/feed integration is deferred to
+# Phase 7; this phase ships the embedding store, helpers, and the
+# /api/videos/<id>/similar query surface.
+
+import urllib.request as _ue_urlreq
+import urllib.error as _ue_urlerr
+
+EMBEDDING_MODEL = "gemini-embedding-001"
+EMBEDDING_DIM = 3072
+EMBEDDING_API_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    + EMBEDDING_MODEL
+    + ":embedContent"
+)
+
+# In-memory cache for fast cosine similarity at query time.
+_EMB_CACHE = {"matrix": None, "ids": [], "loaded_at": 0.0}
+_EMB_CACHE_LOCK = _eng_Lock()
+
+# Free-tier Gemini embedContent quota is 100 requests/min/project. We
+# enforce a global ~80 RPM ceiling with a leaky-bucket gap of 0.75s
+# between successful calls, plus a 429-retry with the server-supplied
+# retryDelay. Concurrency stacks behind this gate so multiple workers
+# converge to the same rate.
+_EMB_RATE_LOCK = _eng_Lock()
+_EMB_RATE_NEXT_OK_AT = [0.0]
+_EMB_RATE_MIN_GAP = 0.75
+_EMB_RATE_429_BACKOFF_FLOOR = 5.0
+
+
+def _ue_ensure_schema():
+    """Lazy-create video_embeddings table."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS video_embeddings (
+                video_id     TEXT PRIMARY KEY,
+                model        TEXT NOT NULL,
+                dim          INTEGER NOT NULL,
+                bytes        BLOB NOT NULL,           -- numpy float32 .tobytes()
+                text_sha     TEXT DEFAULT '',         -- hash of source text; refresh if title/desc changes
+                created_at   REAL NOT NULL,
+                updated_at   REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_video_embeddings_updated
+                ON video_embeddings(updated_at DESC);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _ue_text_for_video(video_row):
+    """Build the source text that gets embedded for a video.
+
+    Combines title + description + tags + scene_description + category
+    into a single short prompt. Title is weighted by repetition.
+    """
+    def _norm(s, n=400):
+        return (s or "").strip()[:n]
+
+    title = _norm(video_row.get("title", "") if isinstance(video_row, dict) else video_row["title"], 200)
+    desc = _norm(video_row.get("description", "") if isinstance(video_row, dict) else (video_row["description"] if "description" in video_row.keys() else ""))
+    scene = _norm(video_row.get("scene_description", "") if isinstance(video_row, dict) else (video_row["scene_description"] if "scene_description" in video_row.keys() else ""))
+    cat = _norm(video_row.get("category", "") if isinstance(video_row, dict) else (video_row["category"] if "category" in video_row.keys() else ""), 32)
+    tags_raw = video_row.get("tags", "[]") if isinstance(video_row, dict) else (video_row["tags"] if "tags" in video_row.keys() else "[]")
+    try:
+        tags = json.loads(tags_raw) if isinstance(tags_raw, str) else (tags_raw or [])
+    except Exception:
+        tags = []
+    tag_str = ", ".join(t for t in tags if isinstance(t, str))[:200]
+
+    # Title gets twice the weight via repetition; description and scene
+    # provide semantic ground.
+    parts = []
+    if title:
+        parts.append(f"Title: {title}")
+        parts.append(title)
+    if cat and cat != "other":
+        parts.append(f"Category: {cat}")
+    if desc:
+        parts.append(f"Description: {desc}")
+    if scene:
+        parts.append(f"Scene: {scene}")
+    if tag_str:
+        parts.append(f"Tags: {tag_str}")
+    return "\n".join(parts).strip() or (title or "(no metadata)")
+
+
+def _ue_rate_wait():
+    """Leaky-bucket throttle that keeps the project under the free-tier 100/min."""
+    while True:
+        with _EMB_RATE_LOCK:
+            now = time.time()
+            wait = _EMB_RATE_NEXT_OK_AT[0] - now
+            if wait <= 0:
+                _EMB_RATE_NEXT_OK_AT[0] = now + _EMB_RATE_MIN_GAP
+                return
+        time.sleep(min(2.0, max(0.05, wait)))
+
+
+def _ue_rate_back_off(seconds):
+    """Push the next-OK timestamp out after a 429."""
+    with _EMB_RATE_LOCK:
+        target = time.time() + max(_EMB_RATE_429_BACKOFF_FLOOR, float(seconds))
+        if target > _EMB_RATE_NEXT_OK_AT[0]:
+            _EMB_RATE_NEXT_OK_AT[0] = target
+
+
+def _ue_parse_retry_delay(http_error):
+    """Pull the retryDelay seconds out of a Gemini 429 response body."""
+    try:
+        body = http_error.read()
+        if isinstance(body, bytes):
+            body = body.decode("utf-8", errors="replace")
+        data = json.loads(body)
+        for d in (data.get("error", {}) or {}).get("details", []) or []:
+            if "RetryInfo" in (d.get("@type") or ""):
+                rd = d.get("retryDelay") or ""
+                m = re.match(r"^(\d+(?:\.\d+)?)s$", rd)
+                if m:
+                    return float(m.group(1))
+    except Exception:
+        pass
+    return _EMB_RATE_429_BACKOFF_FLOOR
+
+
+def _ue_embed_text(text, attempts=4):
+    """Call Gemini embedContent. Returns numpy float32 array or None on error.
+
+    Throttled to stay under 100 RPM (free-tier embed quota). On 429,
+    sleeps for the server-supplied retryDelay and retries.
+    """
+    if not text:
+        return None
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        return None
+    body = json.dumps({
+        "content": {"parts": [{"text": text[:8000]}]},
+    }).encode("utf-8")
+    try:
+        import numpy as _np
+    except ImportError:
+        return None
+
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        _ue_rate_wait()
+        req = _ue_urlreq.Request(
+            EMBEDDING_API_URL + "?key=" + key,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with _ue_urlreq.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            vals = data.get("embedding", {}).get("values") or []
+            if not vals:
+                return None
+            arr = _np.asarray(vals, dtype=_np.float32)
+            n = float(_np.linalg.norm(arr))
+            if n > 0:
+                arr = arr / n
+            return arr
+        except _ue_urlerr.HTTPError as e:
+            if e.code == 429:
+                delay = _ue_parse_retry_delay(e)
+                _ue_rate_back_off(delay)
+                last_err = e
+                continue
+            try:
+                app.logger.warning("gemini embed http %s", e)
+            except Exception:
+                pass
+            return None
+        except (_ue_urlerr.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            time.sleep(min(8.0, 1.0 * attempt))
+            continue
+        except Exception as e:
+            try:
+                app.logger.warning("gemini embed error: %s", e)
+            except Exception:
+                pass
+            return None
+    try:
+        app.logger.warning("gemini embed gave up after %d attempts: %s", attempts, last_err)
+    except Exception:
+        pass
+    return None
+
+
+def _ue_text_sha(text):
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:24]
+
+
+def _ue_record_for_video(video_id, video_row=None):
+    """Compute and persist an embedding for a video. Idempotent on text_sha."""
+    _ue_ensure_schema()
+    try:
+        import numpy as _np
+    except ImportError:
+        return {"ok": False, "error": "numpy missing"}
+
+    if video_row is None:
+        db = get_db()
+        video_row = db.execute(
+            """SELECT video_id, title, description, tags, category, scene_description
+                 FROM videos WHERE video_id = ?""",
+            (video_id,),
+        ).fetchone()
+        if not video_row:
+            return {"ok": False, "error": "not_found"}
+
+    text = _ue_text_for_video(video_row)
+    text_sha = _ue_text_sha(text)
+
+    # Check existing row — skip if text unchanged
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        existing = conn.execute(
+            "SELECT text_sha FROM video_embeddings WHERE video_id = ?",
+            (video_id,),
+        ).fetchone()
+        if existing and existing[0] == text_sha:
+            return {"ok": True, "skipped": True, "reason": "unchanged"}
+    finally:
+        conn.close()
+
+    arr = _ue_embed_text(text)
+    if arr is None:
+        return {"ok": False, "error": "embed_failed"}
+    arr = arr.astype("float32", copy=False)
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO video_embeddings
+                   (video_id, model, dim, bytes, text_sha, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM video_embeddings WHERE video_id=?), ?), ?)""",
+            (video_id, EMBEDDING_MODEL, int(arr.shape[0]), arr.tobytes(),
+             text_sha, video_id, time.time(), time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Invalidate the in-memory cache; lazy reload on next query.
+    with _EMB_CACHE_LOCK:
+        _EMB_CACHE["matrix"] = None
+        _EMB_CACHE["ids"] = []
+        _EMB_CACHE["loaded_at"] = 0.0
+    return {"ok": True, "dim": int(arr.shape[0]), "text_sha": text_sha}
+
+
+def _ue_record_for_video_async(video_id):
+    try:
+        threading.Thread(
+            target=_ue_record_for_video, args=(video_id,),
+            daemon=True, name=f"embed-{video_id}",
+        ).start()
+    except Exception as e:
+        try:
+            app.logger.warning("embed async dispatch failed: %s", e)
+        except Exception:
+            pass
+
+
+def _ue_cache_warm():
+    """Materialize the embedding matrix from disk into memory."""
+    try:
+        import numpy as _np
+    except ImportError:
+        return False
+    _ue_ensure_schema()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """SELECT e.video_id, e.dim, e.bytes
+                 FROM video_embeddings e
+                 JOIN videos v ON v.video_id = e.video_id
+                WHERE COALESCE(v.is_removed, 0) = 0
+                ORDER BY e.video_id"""
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        with _EMB_CACHE_LOCK:
+            _EMB_CACHE.update({"matrix": None, "ids": [], "loaded_at": time.time()})
+        return False
+    n = len(rows)
+    dim = int(rows[0]["dim"])
+    M = _np.zeros((n, dim), dtype=_np.float32)
+    ids = []
+    for i, r in enumerate(rows):
+        if int(r["dim"]) != dim:
+            continue
+        try:
+            M[i] = _np.frombuffer(r["bytes"], dtype=_np.float32)
+        except Exception:
+            continue
+        ids.append(r["video_id"])
+    with _EMB_CACHE_LOCK:
+        _EMB_CACHE.update({"matrix": M, "ids": ids, "loaded_at": time.time()})
+    return True
+
+
+def _ue_top_k_for_video(video_id, k=10, exclude_self=True):
+    """Cosine top-K similar videos to `video_id`. Returns list of (video_id, score)."""
+    try:
+        import numpy as _np
+    except ImportError:
+        return []
+    with _EMB_CACHE_LOCK:
+        M = _EMB_CACHE.get("matrix")
+        ids = _EMB_CACHE.get("ids", [])
+        loaded = _EMB_CACHE.get("loaded_at", 0)
+    if M is None or not ids or (time.time() - loaded > 600):
+        _ue_cache_warm()
+        with _EMB_CACHE_LOCK:
+            M = _EMB_CACHE.get("matrix")
+            ids = _EMB_CACHE.get("ids", [])
+    if M is None or not ids:
+        return []
+
+    if video_id not in ids:
+        # Lazily compute on demand
+        result = _ue_record_for_video(video_id)
+        if not result.get("ok"):
+            return []
+        _ue_cache_warm()
+        with _EMB_CACHE_LOCK:
+            M = _EMB_CACHE.get("matrix")
+            ids = _EMB_CACHE.get("ids", [])
+        if video_id not in ids:
+            return []
+
+    idx = ids.index(video_id)
+    q = M[idx]
+    # Vectors are L2-normalized → cosine = dot product
+    sims = M @ q
+    # exclude self
+    if exclude_self:
+        sims[idx] = -1.0
+    k = max(1, min(k, len(ids)))
+    top_idx = _np.argpartition(-sims, k - 1)[:k]
+    top_idx = top_idx[_np.argsort(-sims[top_idx])]
+    return [(ids[int(i)], float(sims[int(i)])) for i in top_idx]
+
+
+@app.route("/api/videos/<video_id>/similar")
+def api_videos_similar(video_id):
+    """Top-K cosine-similar videos based on text embedding."""
+    try:
+        k = max(1, min(50, int(request.args.get("k", 10))))
+    except Exception:
+        k = 10
+    pairs = _ue_top_k_for_video(video_id, k=k, exclude_self=True)
+    if not pairs:
+        return jsonify({"ok": False, "error": "no_embeddings_yet", "video_id": video_id}), 404
+
+    db = get_db()
+    placeholders = ",".join("?" for _ in pairs)
+    rows = db.execute(
+        f"""SELECT v.video_id, v.title, v.thumbnail, v.duration_sec, v.views,
+                   v.created_at, a.agent_name, a.display_name, a.is_human
+              FROM videos v JOIN agents a ON v.agent_id = a.id
+             WHERE v.video_id IN ({placeholders})""",
+        [vid for vid, _ in pairs],
+    ).fetchall()
+    by_id = {r["video_id"]: r for r in rows}
+    out = []
+    for vid, score in pairs:
+        r = by_id.get(vid)
+        if not r:
+            continue
+        out.append({
+            "video_id": r["video_id"],
+            "title": r["title"],
+            "thumbnail": r["thumbnail"],
+            "duration_sec": r["duration_sec"],
+            "views": r["views"],
+            "created_at": r["created_at"],
+            "agent_name": r["agent_name"],
+            "display_name": r["display_name"],
+            "is_human": bool(r["is_human"]),
+            "score": round(score, 4),
+        })
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "model": EMBEDDING_MODEL,
+        "count": len(out),
+        "results": out,
+    })
+
+
+@app.route("/admin/embeddings/backfill", methods=["POST"])
+def admin_embeddings_backfill():
+    """Backfill embeddings for videos missing one. Resumable, batched."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _ue_ensure_schema()
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(200, int(data.get("limit", 50))))
+    except Exception:
+        limit = 50
+    since = (data.get("since_video_id") or "").strip()
+    try:
+        concurrency = max(1, min(8, int(data.get("concurrency", 2))))
+    except Exception:
+        concurrency = 2
+
+    db = get_db()
+    if since:
+        rows = db.execute(
+            """SELECT v.video_id, v.title, v.description, v.tags, v.category, v.scene_description
+                 FROM videos v
+                 LEFT JOIN video_embeddings e ON e.video_id = v.video_id
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND e.video_id IS NULL
+                  AND v.video_id > ?
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (since, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.video_id, v.title, v.description, v.tags, v.category, v.scene_description
+                 FROM videos v
+                 LEFT JOIN video_embeddings e ON e.video_id = v.video_id
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND e.video_id IS NULL
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    started = time.time()
+    written, failed = 0, 0
+    last_id = ""
+    errors = []
+    if rows:
+        # Build dicts so the worker doesn't need a DB connection.
+        items = [{
+            "video_id": r["video_id"],
+            "title": r["title"], "description": r["description"],
+            "tags": r["tags"], "category": r["category"],
+            "scene_description": r["scene_description"],
+        } for r in rows]
+
+        with _cf2.ThreadPoolExecutor(max_workers=concurrency) as ex:
+            futs = {ex.submit(_ue_record_for_video, item["video_id"], item): item["video_id"] for item in items}
+            for fut in _cf2.as_completed(futs):
+                vid = futs[fut]
+                last_id = max(last_id, vid)
+                try:
+                    res = fut.result(timeout=60)
+                    if res and res.get("ok"):
+                        written += 1
+                    else:
+                        failed += 1
+                        if len(errors) < 10:
+                            errors.append({"video_id": vid, "error": (res or {}).get("error", "unknown")})
+                except Exception as e:
+                    failed += 1
+                    if len(errors) < 10:
+                        errors.append({"video_id": vid, "error": str(e)})
+
+    elapsed = time.time() - started
+    return jsonify({
+        "ok": True,
+        "model": EMBEDDING_MODEL,
+        "written": written,
+        "failed": failed,
+        "elapsed_s": round(elapsed, 2),
+        "last_video_id": last_id,
+        "next_call": (
+            {"since_video_id": last_id, "limit": limit, "concurrency": concurrency}
+            if rows and len(rows) >= limit else None
+        ),
+        "errors": errors,
+    })
 
 
 # --- NCMEC submission queue + quarantine -----------------------------------
