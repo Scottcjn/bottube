@@ -8436,6 +8436,39 @@ def _feed_bucket_for_visitor(visitor_id, override=""):
     return _FEED_BUCKETS[h % 3]
 
 
+def _feed_cowatch_scores(db, anchor_video_ids):
+    """Co-view counts per video keyed by IP address.
+
+    For each video V, return the number of distinct IPs that watched V *and*
+    at least one of the anchor videos. Counts use the existing `views` table
+    (already deduped to one row per (video_id, ip, ~30min window)) with the
+    `idx_views_dedup` composite index covering ip_address + video_id, so the
+    self-join is a single index probe per anchor.
+    """
+    if not anchor_video_ids:
+        return {}
+    placeholders = ",".join("?" for _ in anchor_video_ids)
+    try:
+        rows = db.execute(
+            f"""SELECT v2.video_id AS vid,
+                       COUNT(DISTINCT v1.ip_address) AS cnt
+                  FROM views v1
+                  JOIN views v2
+                    ON v1.ip_address = v2.ip_address
+                   AND v1.video_id != v2.video_id
+                 WHERE v1.video_id IN ({placeholders})
+                   AND v1.ip_address IS NOT NULL
+                   AND v1.ip_address != ''
+                 GROUP BY v2.video_id
+                 ORDER BY cnt DESC
+                 LIMIT 400""",
+            anchor_video_ids,
+        ).fetchall()
+        return {r["vid"]: int(r["cnt"]) for r in rows}
+    except Exception:
+        return {}
+
+
 def _feed_anchor_video_ids(db, viewer_agent_id=None, viewer_ip=""):
     """Pick anchor videos for hybrid scoring.
 
@@ -8537,6 +8570,7 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
     n = len(ids)
     freshness = _np.zeros(n, dtype=_np.float32)
     popularity = _np.zeros(n, dtype=_np.float32)
+    cowatch = _np.zeros(n, dtype=_np.float32)
     excluded_mask = _np.zeros(n, dtype=bool)
 
     now = time.time()
@@ -8545,6 +8579,10 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         excl.add(vid)
     if category:
         category = category.strip().lower()
+
+    # Co-watch: compute once per request from anchors.
+    cowatch_map = _feed_cowatch_scores(db, anchors)
+    cowatch_max = max(cowatch_map.values()) if cowatch_map else 0
 
     for i, vid in enumerate(ids):
         m = meta.get(vid)
@@ -8561,13 +8599,57 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         freshness[i] = float(_np.exp(-age_days / 14.0))
         v_views = float(m["views"] or 0) + 3.0 * float(m["likes"] or 0)
         popularity[i] = min(1.0, _np.log1p(v_views) / 10.0)
+        if cowatch_max:
+            cowatch[i] = float(cowatch_map.get(vid, 0)) / float(cowatch_max)
 
-    score = 0.55 * content_sim + 0.25 * freshness + 0.20 * popularity
+    # Final blend per Codex's spec, condensed for v1 (no transcript term):
+    #   0.45 content + 0.20 freshness + 0.15 co-watch + 0.10 popularity + 0.10 diversity.
+    # Diversity is applied below as an MMR-style re-ranking penalty so the
+    # scalar score above stays auditable; the diversity weight (0.10) is
+    # implicit in the re-rank, not added to the linear blend.
+    score = (
+        0.45 * content_sim
+        + 0.20 * freshness
+        + 0.15 * cowatch
+        + 0.10 * popularity
+    )
     score[excluded_mask] = -10.0
 
-    k = max(1, min(per_page * 2, n))
-    top_idx = _np.argpartition(-score, k - 1)[:k]
-    top_idx = top_idx[_np.argsort(-score[top_idx])]
+    # Take a wider initial slice so MMR diversity has candidates to choose from.
+    k_pool = max(per_page * 3, per_page + 10)
+    k_pool = max(1, min(k_pool, n))
+    pool_idx = _np.argpartition(-score, k_pool - 1)[:k_pool]
+    pool_idx = pool_idx[_np.argsort(-score[pool_idx])]
+
+    # MMR re-ranking: at each step pick the candidate maximizing
+    # 0.90 * relevance - 0.10 * max_similarity_to_already_selected.
+    selected = []
+    selected_idx_set = set()
+    pool_list = list(pool_idx)
+    while pool_list and len(selected) < per_page:
+        best_i = None
+        best_v = -1e9
+        for cand_i in pool_list:
+            if int(cand_i) in selected_idx_set:
+                continue
+            base = float(score[int(cand_i)])
+            penalty = 0.0
+            if selected:
+                # Cosine to most-similar already-selected → diversity penalty.
+                sel_M = M[[s for s in selected]]  # noqa: shape (len(selected), D)
+                sims_to_sel = sel_M @ M[int(cand_i)]
+                penalty = float(sims_to_sel.max())
+            mmr = 0.90 * base - 0.10 * penalty
+            if mmr > best_v:
+                best_v = mmr
+                best_i = int(cand_i)
+        if best_i is None:
+            break
+        selected.append(best_i)
+        selected_idx_set.add(best_i)
+        pool_list = [c for c in pool_list if int(c) != best_i]
+
+    top_idx = _np.array(selected, dtype=int) if selected else pool_idx[:per_page]
 
     results = []
     seen_anchor_titles = {}
@@ -8584,19 +8666,19 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         if score[i] <= -1.0:
             continue
         vid = ids[i]
-        # "Why" label: pick the dominant signal.
+        # "Why" label: pick the dominant signal by weighted contribution.
         c = float(content_sim[i])
         f = float(freshness[i])
         p = float(popularity[i])
-        why = ""
-        # Highest weighted contributor wins.
+        cw = float(cowatch[i])
         contribs = [
-            ("content", 0.55 * c, "content"),
-            ("freshness", 0.25 * f, "freshness"),
-            ("popularity", 0.20 * p, "popularity"),
+            (0.45 * c, "content"),
+            (0.20 * f, "freshness"),
+            (0.15 * cw, "cowatch"),
+            (0.10 * p, "popularity"),
         ]
-        contribs.sort(key=lambda t: -t[1])
-        top_signal = contribs[0][2]
+        contribs.sort(key=lambda t: -t[0])
+        top_signal = contribs[0][1]
         if top_signal == "content":
             ai = int(best_anchor_for_each[i])
             anchor_vid = anchors[ai] if ai < len(anchors) else ""
@@ -8605,6 +8687,8 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
                 why = f"Like \"{anchor_title[:60]}\""
             else:
                 why = "Topical match"
+        elif top_signal == "cowatch":
+            why = "Watched by viewers like you"
         elif top_signal == "freshness":
             why = "Just posted"
         else:
@@ -8612,6 +8696,7 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         results.append((vid, float(score[i]), why,
                          {"content_sim": round(c, 3),
                           "freshness": round(f, 3),
+                          "cowatch": round(cw, 3),
                           "popularity": round(p, 3)}))
         if len(results) >= per_page:
             break
@@ -16977,7 +17062,7 @@ def admin_blocklist_add():
 import urllib.request as _ue_urlreq
 import urllib.error as _ue_urlerr
 
-EMBEDDING_MODEL = "gemini-embedding-001"
+EMBEDDING_MODEL = "gemini-embedding-2"
 EMBEDDING_DIM = 3072
 EMBEDDING_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -17191,14 +17276,18 @@ def _ue_record_for_video(video_id, video_row=None):
     text = _ue_text_for_video(video_row)
     text_sha = _ue_text_sha(text)
 
-    # Check existing row — skip if text unchanged
+    # Check existing row — skip only if text *and* model match the current
+    # config. Any mismatch (newer model, source-text edit) triggers a fresh
+    # embed so the row is replaced.
     conn = sqlite3.connect(str(DB_PATH))
     try:
         existing = conn.execute(
-            "SELECT text_sha FROM video_embeddings WHERE video_id = ?",
+            "SELECT text_sha, model FROM video_embeddings WHERE video_id = ?",
             (video_id,),
         ).fetchone()
-        if existing and existing[0] == text_sha:
+        if (existing
+                and existing[0] == text_sha
+                and existing[1] == EMBEDDING_MODEL):
             return {"ok": True, "skipped": True, "reason": "unchanged"}
     finally:
         conn.close()
@@ -17257,7 +17346,9 @@ def _ue_cache_warm():
                  FROM video_embeddings e
                  JOIN videos v ON v.video_id = e.video_id
                 WHERE COALESCE(v.is_removed, 0) = 0
-                ORDER BY e.video_id"""
+                  AND e.model = ?
+                ORDER BY e.video_id""",
+            (EMBEDDING_MODEL,),
         ).fetchall()
     finally:
         conn.close()
@@ -17394,24 +17485,26 @@ def admin_embeddings_backfill():
         rows = db.execute(
             """SELECT v.video_id, v.title, v.description, v.tags, v.category, v.scene_description
                  FROM videos v
-                 LEFT JOIN video_embeddings e ON e.video_id = v.video_id
+                 LEFT JOIN video_embeddings e
+                        ON e.video_id = v.video_id AND e.model = ?
                 WHERE COALESCE(v.is_removed, 0) = 0
                   AND e.video_id IS NULL
                   AND v.video_id > ?
                 ORDER BY v.video_id ASC
                 LIMIT ?""",
-            (since, limit),
+            (EMBEDDING_MODEL, since, limit),
         ).fetchall()
     else:
         rows = db.execute(
             """SELECT v.video_id, v.title, v.description, v.tags, v.category, v.scene_description
                  FROM videos v
-                 LEFT JOIN video_embeddings e ON e.video_id = v.video_id
+                 LEFT JOIN video_embeddings e
+                        ON e.video_id = v.video_id AND e.model = ?
                 WHERE COALESCE(v.is_removed, 0) = 0
                   AND e.video_id IS NULL
                 ORDER BY v.video_id ASC
                 LIMIT ?""",
-            (limit,),
+            (EMBEDDING_MODEL, limit),
         ).fetchall()
 
     started = time.time()
