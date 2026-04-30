@@ -8417,24 +8417,250 @@ def trending():
     return jsonify({"videos": videos})
 
 
+# --- Phase 7: bucketed feed (latest / heuristic / hybrid-v1) -------------
+
+_FEED_BUCKETS = ("latest", "heuristic", "hybrid-v1")
+
+
+def _feed_bucket_for_visitor(visitor_id, override=""):
+    """Deterministic bucket assignment by visitor_id hash mod 3.
+
+    Anonymous visitors (no cookie yet) fall to 'latest' so first-visit
+    behavior is predictable. Override is honored for manual testing.
+    """
+    if override and override in _FEED_BUCKETS:
+        return override
+    if not visitor_id:
+        return "latest"
+    h = int(hashlib.sha256(visitor_id.encode("utf-8")).hexdigest()[:8], 16)
+    return _FEED_BUCKETS[h % 3]
+
+
+def _feed_anchor_video_ids(db, viewer_agent_id=None, viewer_ip=""):
+    """Pick anchor videos for hybrid scoring.
+
+    Logged-in viewers anchor on their last 5 watch events; anonymous viewers
+    anchor on the top 3 trending videos in the last 24h. Returns a list of
+    video_ids that exist in the embedding cache.
+    """
+    anchors = []
+    if viewer_ip:
+        try:
+            rows = db.execute(
+                """SELECT DISTINCT video_id FROM views
+                    WHERE ip_address = ?
+                    ORDER BY created_at DESC LIMIT 5""",
+                (viewer_ip,),
+            ).fetchall()
+            anchors = [r["video_id"] for r in rows]
+        except Exception:
+            anchors = []
+    if not anchors:
+        try:
+            rows = db.execute(
+                """SELECT video_id FROM videos
+                    WHERE COALESCE(is_removed,0)=0 AND created_at > ?
+                    ORDER BY (views * 1.0 + likes * 3.0) DESC, created_at DESC
+                    LIMIT 5""",
+                (time.time() - 86400,),
+            ).fetchall()
+            anchors = [r["video_id"] for r in rows]
+        except Exception:
+            anchors = []
+    return anchors
+
+
+def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
+                    category=None, exclude_video_ids=None):
+    """Embedding-based hybrid feed.
+
+    Scoring per Codex's framing, simplified for v1 (no transcript or co-watch):
+        score = 0.55 * content_sim
+              + 0.25 * freshness        (exp(-age_days / 14))
+              + 0.20 * popularity_norm  (log(1+views) / 10, clipped to [0,1])
+
+    Returns a list of (video_id, score, why_label) sorted by score.
+    Returns None if the embedding cache isn't ready.
+    """
+    try:
+        import numpy as _np
+    except ImportError:
+        return None
+
+    with _EMB_CACHE_LOCK:
+        M = _EMB_CACHE.get("matrix")
+        ids = _EMB_CACHE.get("ids", [])
+        loaded = _EMB_CACHE.get("loaded_at", 0)
+    if M is None or not ids or (time.time() - loaded > 600):
+        _ue_cache_warm()
+        with _EMB_CACHE_LOCK:
+            M = _EMB_CACHE.get("matrix")
+            ids = _EMB_CACHE.get("ids", [])
+    if M is None or not ids or len(ids) < 5:
+        return None
+
+    anchors = _feed_anchor_video_ids(db, viewer_agent_id, viewer_ip)
+    anchor_idx = [ids.index(v) for v in anchors if v in ids]
+    if not anchor_idx:
+        return None
+
+    # Compose mean anchor and a per-anchor index for "why" attribution.
+    A = M[anchor_idx]
+    Q = A.mean(axis=0)
+    qn = float(_np.linalg.norm(Q))
+    if qn <= 0:
+        return None
+    Q = Q / qn
+
+    # Cosine similarity to mean anchor
+    content_sim = M @ Q  # already L2-normalized → dot == cosine
+
+    # Per-candidate "best matching anchor" for the why-label
+    if A.shape[0] > 1:
+        per_anchor = M @ A.T   # shape (N, len(anchors))
+        best_anchor_for_each = per_anchor.argmax(axis=1)
+    else:
+        best_anchor_for_each = _np.zeros(M.shape[0], dtype=int)
+
+    # Pull metadata needed for freshness + popularity in one query.
+    placeholders = ",".join("?" for _ in ids)
+    rows = db.execute(
+        f"""SELECT v.video_id, v.created_at, v.views, v.likes, v.category
+              FROM videos v JOIN agents a ON v.agent_id = a.id
+             WHERE v.video_id IN ({placeholders})
+               AND COALESCE(v.is_removed, 0) = 0
+               AND COALESCE(a.is_banned, 0) = 0""",
+        ids,
+    ).fetchall()
+    meta = {r["video_id"]: dict(r) for r in rows}
+
+    n = len(ids)
+    freshness = _np.zeros(n, dtype=_np.float32)
+    popularity = _np.zeros(n, dtype=_np.float32)
+    excluded_mask = _np.zeros(n, dtype=bool)
+
+    now = time.time()
+    excl = set(exclude_video_ids or [])
+    for vid in anchors:
+        excl.add(vid)
+    if category:
+        category = category.strip().lower()
+
+    for i, vid in enumerate(ids):
+        m = meta.get(vid)
+        if not m:
+            excluded_mask[i] = True
+            continue
+        if vid in excl:
+            excluded_mask[i] = True
+            continue
+        if category and (m.get("category") or "").lower() != category:
+            excluded_mask[i] = True
+            continue
+        age_days = max(0.0, (now - float(m["created_at"] or now)) / 86400.0)
+        freshness[i] = float(_np.exp(-age_days / 14.0))
+        v_views = float(m["views"] or 0) + 3.0 * float(m["likes"] or 0)
+        popularity[i] = min(1.0, _np.log1p(v_views) / 10.0)
+
+    score = 0.55 * content_sim + 0.25 * freshness + 0.20 * popularity
+    score[excluded_mask] = -10.0
+
+    k = max(1, min(per_page * 2, n))
+    top_idx = _np.argpartition(-score, k - 1)[:k]
+    top_idx = top_idx[_np.argsort(-score[top_idx])]
+
+    results = []
+    seen_anchor_titles = {}
+    if anchors:
+        anchor_titles_rows = db.execute(
+            f"""SELECT video_id, title FROM videos
+                 WHERE video_id IN ({",".join("?" for _ in anchors)})""",
+            anchors,
+        ).fetchall()
+        seen_anchor_titles = {r["video_id"]: r["title"] for r in anchor_titles_rows}
+
+    for i in top_idx:
+        i = int(i)
+        if score[i] <= -1.0:
+            continue
+        vid = ids[i]
+        # "Why" label: pick the dominant signal.
+        c = float(content_sim[i])
+        f = float(freshness[i])
+        p = float(popularity[i])
+        why = ""
+        # Highest weighted contributor wins.
+        contribs = [
+            ("content", 0.55 * c, "content"),
+            ("freshness", 0.25 * f, "freshness"),
+            ("popularity", 0.20 * p, "popularity"),
+        ]
+        contribs.sort(key=lambda t: -t[1])
+        top_signal = contribs[0][2]
+        if top_signal == "content":
+            ai = int(best_anchor_for_each[i])
+            anchor_vid = anchors[ai] if ai < len(anchors) else ""
+            anchor_title = seen_anchor_titles.get(anchor_vid, "")
+            if anchor_title:
+                why = f"Like \"{anchor_title[:60]}\""
+            else:
+                why = "Topical match"
+        elif top_signal == "freshness":
+            why = "Just posted"
+        else:
+            why = "Trending now"
+        results.append((vid, float(score[i]), why,
+                         {"content_sim": round(c, 3),
+                          "freshness": round(f, 3),
+                          "popularity": round(p, 3)}))
+        if len(results) >= per_page:
+            break
+    return results
+
+
+def _feed_log_impressions(bucket, video_ids):
+    """Append impressions to variant_impressions keyed by bucket.
+
+    Uses the existing thumbnail A/B table so the engineering page picks them
+    up automatically; the variant_key is the bucket name.
+    """
+    try:
+        if not video_ids:
+            return
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.executemany(
+            """INSERT INTO variant_impressions
+                   (video_id, variant_key, event_type, created_at)
+               VALUES (?, ?, 'feed_impression', ?)""",
+            [(vid, "feed:" + bucket, time.time()) for vid in video_ids],
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 @app.route("/api/feed")
 def feed():
     """Get feed of recent videos with optional recommendation mode.
-    
+
     Query parameters:
         - page: Page number (default 1)
         - per_page: Items per page (default 20, max 50)
         - mode: "latest" (deterministic, default) or "recommended" (ML scoring)
         - category: Filter by category (optional)
-    
+        - bucket: "auto" (default — visitor-hash assigns), "latest",
+                  "heuristic", or "hybrid-v1" (forces a specific bucket).
+
     Returns:
-        JSON with videos list, page info, and mode used.
+        JSON with videos list, page info, mode used, and the active bucket.
     """
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
     mode = request.args.get("mode", "latest")
     category = request.args.get("category")
-    
+    bucket_override = (request.args.get("bucket") or "").strip().lower()
+
     # Get optional API key for personalized recommendations
     api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
     agent_id = None
@@ -8445,7 +8671,64 @@ def feed():
         ).fetchone()
         if agent:
             agent_id = agent["id"]
-    
+
+    # Bucket assignment via deterministic visitor_id hash.
+    visitor_id = getattr(g, "visitor_id", "") or request.cookies.get("_bt_vid", "")
+    bucket = _feed_bucket_for_visitor(visitor_id, override=bucket_override)
+
+    # Hybrid bucket: embedding-based ranking. First page only — subsequent
+    # pages fall back to chronological, since hybrid is an entry-point feed
+    # rather than an infinite scroll target.
+    if bucket == "hybrid-v1" and page == 1:
+        db = get_db()
+        viewer_ip = _get_client_ip()
+        ranked = _feed_hybrid_v1(
+            db, viewer_agent_id=agent_id, viewer_ip=viewer_ip,
+            per_page=per_page, category=category,
+        )
+        if ranked:
+            placeholders = ",".join("?" for _ in ranked)
+            rows = db.execute(
+                f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+                      FROM videos v JOIN agents a ON v.agent_id = a.id
+                     WHERE v.video_id IN ({placeholders})""",
+                [vid for vid, _, _, _ in ranked],
+            ).fetchall()
+            row_by_id = {r["video_id"]: r for r in rows}
+            videos = []
+            for vid, score, why, components in ranked:
+                row = row_by_id.get(vid)
+                if not row:
+                    continue
+                d = video_to_dict(row)
+                d["agent_name"] = row["agent_name"]
+                d["display_name"] = row["display_name"]
+                d["avatar_url"] = row["avatar_url"]
+                d["_why"] = why
+                d["_score"] = round(score, 4)
+                d["_components"] = components
+                videos.append(d)
+            try:
+                _feed_log_impressions("hybrid-v1", [v["video_id"] for v in videos])
+            except Exception:
+                pass
+            return jsonify({
+                "videos": videos,
+                "page": page,
+                "mode": "hybrid-v1",
+                "bucket": "hybrid-v1",
+                "explanation": (
+                    "Embedding-based ranking — content similarity to your "
+                    "recent watches (or trending if anonymous), weighted with "
+                    "freshness and popularity."
+                ),
+            })
+        # Fall through to heuristic/latest if cache not warm yet
+
+    # Heuristic bucket maps to the existing recommendation engine path.
+    if bucket == "heuristic" and mode != "recommended":
+        mode = "recommended"
+
     # Use recommendation engine for recommended mode
     if mode == "recommended":
         from recommendation_engine import get_feed_recommendations
@@ -8466,11 +8749,17 @@ def feed():
             d["display_name"] = v.get("display_name", "")
             d["avatar_url"] = v.get("avatar_url", "")
             d["recommend_score"] = v.get("recommend_score", 0)
+            d["_why"] = "Picked by heuristic ranker"
             result_videos.append(d)
+        try:
+            _feed_log_impressions("heuristic", [d["video_id"] for d in result_videos if d.get("video_id")])
+        except Exception:
+            pass
         return jsonify({
             "videos": result_videos,
             "page": page,
-            "mode": actual_mode
+            "mode": actual_mode,
+            "bucket": "heuristic",
         })
     
     # Default: latest mode (deterministic fallback)
@@ -8505,6 +8794,7 @@ def feed():
         d["agent_name"] = row["agent_name"]
         d["display_name"] = row["display_name"]
         d["avatar_url"] = row["avatar_url"]
+        d["_why"] = "Newest upload"
         videos.append(d)
 
     # CTR: Record impressions for videos shown in feed
@@ -8515,7 +8805,17 @@ def feed():
     except Exception:
         pass  # CTR tracking is best-effort
 
-    return jsonify({"videos": videos, "page": page, "mode": "latest"})
+    try:
+        _feed_log_impressions("latest", [v["video_id"] for v in videos if v.get("video_id")])
+    except Exception:
+        pass
+
+    return jsonify({
+        "videos": videos,
+        "page": page,
+        "mode": "latest",
+        "bucket": bucket,
+    })
 
 
 @app.route("/api/challenges")
