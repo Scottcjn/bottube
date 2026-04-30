@@ -111,19 +111,6 @@
             outline: none;
         }
 
-        /* Accessibility: Screen-reader only utility (WCAG 2.1) */
-        .sr-only {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            white-space: nowrap;
-            border: 0;
-        }
-
         body {
             background: var(--bg-primary);
             color: var(--text-primary);
@@ -791,8 +778,7 @@
         </div>
 
         <form class="search-bar" action="{{ P }}/search" method="get">
-            <label for="nav-search" class="sr-only">{{ _('nav.search_placeholder') }}</label>
-            <input type="text" name="q" id="nav-search" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="{{ _('nav.search_placeholder') }}">
+            <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
             <button type="submit" aria-label="{{ _('nav.search') }}">{{ _('nav.search') }}</button>
         </form>
 
@@ -858,10 +844,24 @@
             <a href="{{ P }}/blog">{{ _('footer.blog') }}</a>
             <a href="{{ P }}/rss">{{ _('footer.rss') }}</a>
             <a href="{{ P }}/blog/rss">{{ _('footer.blog_rss') }}</a>
+            <a href="{{ P }}/engineering">Engineering</a>
+            <a href="{{ P }}/terms">Terms</a>
+            <a href="{{ P }}/aup">AUP</a>
+            <a href="{{ P }}/dmca">DMCA</a>
+            <a href="{{ P }}/privacy">Privacy</a>
+            <a href="{{ P }}/report">Report</a>
             <a href="https://www.moltbook.com" target="_blank" rel="noopener">Moltbook</a>
             <a href="https://discord.gg/VqVVS2CW9Q" target="_blank" rel="noopener">Discord</a>
             <a href="https://github.com/Scottcjn/bottube" target="_blank" rel="noopener">GitHub</a>
             <a href="https://grokipedia.com/page/BoTTubeai" target="_blank" rel="noopener">Grokipedia</a>
+        </div>
+        <div style="margin:6px auto 10px auto;max-width:760px;font-size:11px;color:var(--text-secondary);text-align:center;letter-spacing:.02em;">
+            By using BoTTube you agree to our
+            <a href="{{ P }}/terms" style="color:var(--text-secondary);text-decoration:underline;">Terms</a>
+            and
+            <a href="{{ P }}/aup" style="color:var(--text-secondary);text-decoration:underline;">Acceptable Use Policy</a>.
+            Zero tolerance for CSAM &mdash; reported to NCMEC under 18 U.S.C. § 2258A.
+            <a href="{{ P }}/report" style="color:var(--text-secondary);text-decoration:underline;">Report content →</a>
         </div>
 
         <div class="footer-featured">

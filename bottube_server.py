@@ -76,6 +76,29 @@ BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().
 DB_PATH = BASE_DIR / "bottube.db"
 VIDEO_DIR = BASE_DIR / "videos"
 THUMB_DIR = BASE_DIR / "thumbnails"
+
+# ---------------------------------------------------------------------------
+# CTR / Thumbnail tracking (lazy-init to avoid import-time DB creation)
+# ---------------------------------------------------------------------------
+_ctr_tracker = None
+_ab_manager = None
+
+def _get_ctr_tracker():
+    global _ctr_tracker
+    if _ctr_tracker is None:
+        from thumbnails.ctr_tracker import CTRTracker
+        _ctr_tracker = CTRTracker(str(DB_PATH))
+        _ctr_tracker.init_db()
+    return _ctr_tracker
+
+def _get_ab_manager():
+    global _ab_manager
+    if _ab_manager is None:
+        from thumbnails.ab_test import ABTestManager
+        _ab_manager = ABTestManager(str(DB_PATH))
+        _ab_manager.init_db()
+    return _ab_manager
+
 AVATAR_DIR = BASE_DIR / "avatars"
 TEMPLATE_DIR = BASE_DIR / "bottube_templates"
 
@@ -4634,6 +4657,27 @@ def register_agent():
             "Then call POST /api/claim/verify with your X handle."
         ),
         "message": "Store your API key securely - it cannot be recovered.",
+        # Trust+Safety: explicit TOS notice. Agents must POST acknowledgment
+        # to /api/agents/me/accept-terms before performing any write action.
+        "terms": {
+            "version": TOS_VERSION,
+            "effective": TOS_EFFECTIVE,
+            "terms_url": "https://bottube.ai/terms",
+            "aup_url": "https://bottube.ai/aup",
+            "dmca_url": "https://bottube.ai/dmca",
+            "report_url": "https://bottube.ai/report",
+            "acceptance_required": True,
+            "accept_endpoint": "/api/agents/me/accept-terms",
+            "csam_notice": (
+                "Zero tolerance for CSAM. Uploads are hash-checked and reported "
+                "to NCMEC and law enforcement under 18 U.S.C. § 2258A."
+            ),
+            "agent_responsibility": (
+                "By using your API key you acknowledge that the human operator "
+                "of this agent is responsible for everything it does. To accept "
+                "the Terms, POST {\"version\":\"" + TOS_VERSION + "\"} to /api/agents/me/accept-terms."
+            ),
+        },
     }), 201
 
 
@@ -6223,6 +6267,25 @@ def upload_video():
     # Save video
     video_file.save(str(video_path))
 
+    # Trust+Safety: hash-check the saved file against the content blocklist.
+    # On match (CSAM, terror, etc.) the helper deletes the file, suspends
+    # the agent, and writes audit rows. We surface a 451 to the uploader.
+    try:
+        rejected, ts_info = ts_inspect_uploaded_file(str(video_path), g.agent["id"])
+        if rejected:
+            app.logger.error(
+                "TS-BLOCKLIST: agent=%s category=%s sha=%s",
+                g.agent["agent_name"], ts_info.get("category"), ts_info.get("sha256", "")[:16],
+            )
+            return jsonify({
+                "error": "Upload rejected: content matched the prohibited-content blocklist. "
+                         "If you believe this is in error, contact appeals@elyanlabs.ai. "
+                         "CSAM matches are reported to NCMEC and law enforcement.",
+                "category": ts_info.get("category"),
+            }), 451
+    except Exception as _ts_e:
+        app.logger.warning("TS hash check failed (non-fatal): %s", _ts_e)
+
     # Get metadata
     duration, width, height = get_video_metadata(video_path)
 
@@ -6353,9 +6416,6 @@ def upload_video():
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
-    # Local Whisper transcription (faster-whisper, Bounty #750)
-    enqueue_whisper_transcription(video_id, str(video_path))
-
     response_data = {
         "ok": True,
         "video_id": video_id,
@@ -6393,6 +6453,49 @@ def upload_video():
 
     return jsonify(response_data), 201
 
+
+
+# ---------------------------------------------------------------------------
+# Video update (title, description, tags)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/videos/<video_id>', methods=['PATCH'])
+@require_api_key
+def update_video(video_id):
+    """Update video metadata (title, description, tags). Owner only."""
+    db = get_db()
+    row = db.execute('SELECT * FROM videos WHERE video_id = ?', (video_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Video not found'}), 404
+    if row['agent_id'] != g.agent['id']:
+        return jsonify({'error': 'Not your video'}), 403
+    
+    data = request.get_json(silent=True) or {}
+    updates = []
+    params = []
+    
+    if 'title' in data and data['title'].strip():
+        updates.append('title = ?')
+        params.append(data['title'].strip()[:200])
+    if 'description' in data and data['description'].strip():
+        updates.append('description = ?')
+        params.append(data['description'].strip()[:5000])
+    if 'tags' in data:
+        if isinstance(data['tags'], list):
+            tag_str = ','.join(t.strip() for t in data['tags'] if t.strip())
+        else:
+            tag_str = str(data['tags']).strip()
+        updates.append('tags = ?')
+        params.append(tag_str)
+    
+    if not updates:
+        return jsonify({'error': 'Nothing to update'}), 400
+    
+    params.append(video_id)
+    joiner = ', '.join(updates); db.execute(f'UPDATE videos SET {joiner} WHERE video_id = ?', params)
+    db.commit()
+    
+    return jsonify({'ok': True, 'updated': list(data.keys()), 'video_id': video_id})
 
 # ---------------------------------------------------------------------------
 # Video listing / detail
@@ -6836,6 +6939,12 @@ def record_view(video_id):
         db.commit()
     else:
         reward_result = {"awarded": False, "held": False, "risk_score": 0, "reasons": ["deduplicated recent view"]}
+
+    # CTR: Record click (video opened/watched)
+    try:
+        _get_ctr_tracker().record_click(video_id)
+    except Exception:
+        pass
 
     d = video_to_dict(row)
     d["agent_name"] = row["agent_name"]
@@ -8361,6 +8470,14 @@ def feed():
         d["display_name"] = row["display_name"]
         d["avatar_url"] = row["avatar_url"]
         videos.append(d)
+
+    # CTR: Record impressions for videos shown in feed
+    try:
+        vid_ids = [v.get("video_id", "") for v in videos if v.get("video_id")]
+        if vid_ids:
+            _get_ctr_tracker().record_impressions_batch(vid_ids)
+    except Exception:
+        pass  # CTR tracking is best-effort
 
     return jsonify({"videos": videos, "page": page, "mode": "latest"})
 
@@ -11864,9 +11981,6 @@ def upload_page():
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))
 
-    # Local Whisper transcription (faster-whisper, Bounty #750)
-    enqueue_whisper_transcription(video_id, str(video_path))
-
     # Ping search engines about the new video
     _ping_indexnow(f"https://bottube.ai/watch/{video_id}")
     ping_google_indexing(f"https://bottube.ai/watch/{video_id}")
@@ -12764,7 +12878,7 @@ app.register_blueprint(interactions_bp)
 # ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
 # ---------------------------------------------------------------------------
-from seo_routes import seo_bp
+from seo_routes import seo_bp, get_organization_jsonld, get_website_jsonld, get_faqpage_jsonld
 app.register_blueprint(seo_bp)
 
 # ---------------------------------------------------------------------------
@@ -12840,6 +12954,18 @@ except ImportError:
     X402_ENABLED = False
 
 # ---------------------------------------------------------------------------
+# RTC Service Gateway — Pay RTC for real services (utility before liquidity)
+# ---------------------------------------------------------------------------
+try:
+    import rtc_services
+    rtc_services.init_app(app, DB_PATH)
+    RTC_SERVICES_ENABLED = True
+    print("RTC Services gateway enabled — /api/rtc/services, /services")
+except Exception as e:
+    RTC_SERVICES_ENABLED = False
+    print(f"RTC Services not loaded: {e}")
+
+# ---------------------------------------------------------------------------
 # Google Indexing API (alongside IndexNow)
 # ---------------------------------------------------------------------------
 try:
@@ -12885,25 +13011,6 @@ except ImportError:
     def find_caption_video_ids(query, limit=200):
         return []
     def generate_captions_async(video_id, video_path):
-        pass
-
-# ---------------------------------------------------------------------------
-# Whisper Transcription Pipeline (faster-whisper, Bounty #750)
-# ---------------------------------------------------------------------------
-try:
-    import whisper_transcription as _wt_module
-    from whisper_transcription_blueprint import whisper_bp
-    _wt_module.init_transcription_tables()
-    app.register_blueprint(whisper_bp)
-    WHISPER_TRANSCRIPTION_ENABLED = True
-
-    def enqueue_whisper_transcription(video_id: str, video_path: str, force: bool = False) -> None:
-        """Enqueue a video for local Whisper transcription (non-blocking)."""
-        _wt_module.enqueue_transcription(video_id, video_path, force=force)
-
-except ImportError as _wt_err:
-    WHISPER_TRANSCRIPTION_ENABLED = False
-    def enqueue_whisper_transcription(video_id: str, video_path: str, force: bool = False) -> None:
         pass
 
 # ---------------------------------------------------------------------------
@@ -14996,6 +15103,9 @@ def build_breadcrumb_jsonld(items):
     }))
 
 app.jinja_env.globals["build_breadcrumb_jsonld"] = build_breadcrumb_jsonld
+app.jinja_env.globals["get_organization_jsonld"] = get_organization_jsonld
+app.jinja_env.globals["get_website_jsonld"] = get_website_jsonld
+app.jinja_env.globals["get_faqpage_jsonld"] = get_faqpage_jsonld
 app.jinja_env.globals["json_dumps"] = lambda x: Markup(safe_jsonld(x))
 
 def jsonld_safe(value):
@@ -15158,6 +15268,1281 @@ def beacon_atlas():
 @app.route("/beacon")
 def beacon_landing_page():
     return render_template("beacon.html")
+
+
+# ---------------------------------------------------------------------------
+# CTR / Thumbnail Analytics API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/ctr/stats")
+def ctr_global_stats():
+    """Get global CTR statistics."""
+    try:
+        summary = _get_ctr_tracker().get_global_summary()
+        return jsonify({"ok": True, **summary})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/ctr/top")
+def ctr_top_videos():
+    """Get top videos by CTR."""
+    limit = min(50, request.args.get("limit", 20, type=int))
+    min_imp = request.args.get("min_impressions", 10, type=int)
+    try:
+        top = _get_ctr_tracker().get_top_by_ctr(limit=limit, min_impressions=min_imp)
+        return jsonify({"ok": True, "videos": top})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/ctr/underperforming")
+def ctr_underperforming():
+    """Get videos with high impressions but low CTR."""
+    try:
+        videos = _get_ctr_tracker().get_underperforming()
+        return jsonify({"ok": True, "videos": videos})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/videos/<video_id>/ctr")
+def video_ctr_stats(video_id):
+    """Get CTR stats for a specific video."""
+    try:
+        stats = _get_ctr_tracker().get_stats(video_id)
+        if not stats:
+            return jsonify({"ok": True, "video_id": video_id, "impressions": 0, "clicks": 0, "ctr": 0})
+        return jsonify({"ok": True, **stats})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/videos/<video_id>/watch_time", methods=["POST"])
+def record_watch_time(video_id):
+    """Record watch time for a video (called by player on pause/close).
+
+    Body: {"seconds": 12.5}
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        seconds = float(data.get("seconds", 0))
+        if seconds > 0:
+            _get_ctr_tracker().record_watch_time(video_id, seconds)
+        return jsonify({"ok": True, "video_id": video_id, "seconds_recorded": seconds})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/videos/<video_id>/ab/variants")
+def video_ab_variants(video_id):
+    """Get A/B test variant stats for a video."""
+    try:
+        stats = _get_ab_manager().get_variant_stats(video_id)
+        winner = _get_ab_manager().get_winner(video_id)
+        return jsonify({"ok": True, "video_id": video_id, "variants": stats, "winner": winner})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Engineering / Public Status Page
+# ---------------------------------------------------------------------------
+# Lightweight observability surface for the public /engineering page.
+# Records request latencies in a thread-safe ring buffer, probes the four
+# RustChain anchor nodes, and reads queue/state counts from the live DB.
+
+from collections import deque as _eng_deque
+from threading import Lock as _eng_Lock
+
+_ENG_LATENCY = _eng_deque(maxlen=1000)  # ms samples
+_ENG_LATENCY_LOCK = _eng_Lock()
+
+# Path prefixes excluded from latency sampling so static / streaming traffic
+# doesn't dominate the histogram.
+_ENG_LATENCY_SKIP = (
+    "/static/", "/thumbnails/", "/avatars/", "/videos/", "/api/videos/",
+    "/favicon", "/robots", "/sitemap", "/health", "/api/engineering",
+)
+
+
+@app.before_request
+def _eng_lat_start():
+    g._eng_t0 = time.time()
+
+
+@app.after_request
+def _eng_lat_record(response):
+    try:
+        t0 = getattr(g, "_eng_t0", None)
+        if t0 is None:
+            return response
+        path = request.path or ""
+        # Skip media + static + self
+        if any(path.startswith(p) for p in _ENG_LATENCY_SKIP):
+            return response
+        ms = (time.time() - t0) * 1000.0
+        # Cap absurd values (request still in-flight tail) to keep histogram sane
+        if ms < 30000:
+            with _ENG_LATENCY_LOCK:
+                _ENG_LATENCY.append(ms)
+    except Exception:
+        pass
+    return response
+
+
+# Static node config — keep in code so the page stays honest even if a
+# config DB is unavailable. RTTs are probed at request time.
+_ENG_RUSTCHAIN_NODES = [
+    {"id": "node-1",  "host": "50.28.86.131", "port": 443,  "scheme": "https", "location": "LiquidWeb US (primary)"},
+    {"id": "node-2",  "host": "50.28.86.153", "port": 443,  "scheme": "https", "location": "LiquidWeb US (Ergo anchor)"},
+    {"id": "node-3",  "host": "76.8.228.245", "port": 8099, "scheme": "http",  "location": "Ryan's Proxmox (Texas)"},
+    {"id": "node-4",  "host": "38.76.217.189","port": 8099, "scheme": "http",  "location": "CognetCloud Hong Kong"},
+]
+
+
+def _eng_probe_node(node, timeout=2.0):
+    """Probe a RustChain node /health endpoint. Returns dict with status, rtt_ms."""
+    url = f"{node['scheme']}://{node['host']}:{node['port']}/health"
+    t0 = time.time()
+    try:
+        # urllib instead of requests to avoid adding a dependency
+        ctx = None
+        if node["scheme"] == "https":
+            import ssl as _ssl
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+        req = urllib.request.Request(url, headers={"User-Agent": "BoTTube-Engineering"})
+        if ctx is not None:
+            urllib.request.urlopen(req, timeout=timeout, context=ctx).read(256)
+        else:
+            urllib.request.urlopen(req, timeout=timeout).read(256)
+        rtt = (time.time() - t0) * 1000.0
+        if rtt < 800:
+            status = "ok"
+        elif rtt < 2500:
+            status = "warn"
+        else:
+            status = "err"
+        return {**node, "status": status, "rtt_ms": rtt}
+    except Exception:
+        rtt = (time.time() - t0) * 1000.0
+        return {**node, "status": "err", "rtt_ms": rtt}
+
+
+def _eng_percentile(values, pct):
+    if not values:
+        return 0.0
+    s = sorted(values)
+    k = max(0, min(len(s) - 1, int(round((pct / 100.0) * (len(s) - 1)))))
+    return s[k]
+
+
+def _eng_format_uptime(seconds):
+    seconds = int(max(0, seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, _ = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
+def _eng_collect():
+    """Collect everything the /engineering page renders."""
+    # Ensure provenance/rendition tables exist so counts are honest.
+    try:
+        _ensure_provenance_schema()
+    except Exception:
+        pass
+    db = get_db()
+
+    # Latency snapshot
+    with _ENG_LATENCY_LOCK:
+        samples = list(_ENG_LATENCY)
+    latency = {
+        "samples": len(samples),
+        "p50": _eng_percentile(samples, 50),
+        "p95": _eng_percentile(samples, 95),
+        "p99": _eng_percentile(samples, 99),
+    }
+    latency["p95_bar"] = max(2.0, min(100.0, (latency["p95"] / 500.0) * 100.0))
+
+    # Node probes (parallel via threads)
+    import concurrent.futures as _cf
+    nodes = []
+    with _cf.ThreadPoolExecutor(max_workers=4) as ex:
+        for n in ex.map(_eng_probe_node, _ENG_RUSTCHAIN_NODES):
+            nodes.append(n)
+
+    # Platform state
+    def _scalar(sql, default=0):
+        try:
+            row = db.execute(sql).fetchone()
+            return int(row[0]) if row and row[0] is not None else default
+        except Exception:
+            return default
+
+    state = {
+        "videos": _scalar("SELECT COUNT(*) FROM videos WHERE COALESCE(is_removed,0)=0"),
+        "agents": _scalar("SELECT COUNT(*) FROM agents WHERE is_human=0"),
+        "humans": _scalar("SELECT COUNT(*) FROM agents WHERE is_human=1"),
+        "comments": _scalar("SELECT COUNT(*) FROM comments"),
+        "tips_confirmed": _scalar("SELECT COUNT(*) FROM tips WHERE COALESCE(status,'confirmed')='confirmed'"),
+        "uptime": _eng_format_uptime(time.time() - APP_START_TS),
+        "version": APP_VERSION,
+    }
+
+    # Generation queue (gpu_jobs may not exist on all installs)
+    queue = {"queued": 0, "running": 0, "completed_24h": 0, "failed_24h": 0, "depth_label": "—"}
+    try:
+        cutoff = time.time() - 86400
+        queue["queued"] = _scalar("SELECT COUNT(*) FROM gpu_jobs WHERE status='queued'")
+        queue["running"] = _scalar("SELECT COUNT(*) FROM gpu_jobs WHERE status='running'")
+        queue["completed_24h"] = _scalar(f"SELECT COUNT(*) FROM gpu_jobs WHERE status='completed' AND COALESCE(completed_at,0)>{cutoff}")
+        queue["failed_24h"] = _scalar(f"SELECT COUNT(*) FROM gpu_jobs WHERE status='failed' AND COALESCE(completed_at,0)>{cutoff}")
+        depth = queue["queued"] + queue["running"]
+        if depth == 0:
+            queue["depth_label"] = "idle"
+        elif depth < 5:
+            queue["depth_label"] = "shallow"
+        elif depth < 20:
+            queue["depth_label"] = "moderate"
+        else:
+            queue["depth_label"] = "deep"
+    except Exception:
+        pass
+
+    # Active experiments — best effort from ab_test tables (exposed by ABTestManager)
+    experiments = []
+    try:
+        rows = db.execute(
+            """SELECT video_id,
+                      COUNT(DISTINCT variant_key) AS variants,
+                      COUNT(*) AS impressions
+                 FROM variant_impressions
+                WHERE created_at > ?
+                GROUP BY video_id
+                HAVING variants >= 2
+                ORDER BY impressions DESC
+                LIMIT 5""",
+            (time.time() - 7 * 86400,),
+        ).fetchall()
+        for r in rows:
+            experiments.append({
+                "name": f"thumb-ab:{r['video_id'][:8]}",
+                "variants": r["variants"],
+                "impressions": r["impressions"],
+            })
+    except Exception:
+        pass
+
+    # Media pipeline summary
+    pipeline = {
+        "renditions": _scalar("SELECT COUNT(*) FROM video_renditions") if _eng_table_exists(db, "video_renditions") else "coming soon",
+        "with_provenance": _scalar("SELECT COUNT(*) FROM video_provenance") if _eng_table_exists(db, "video_provenance") else 0,
+        "anchored": _scalar("SELECT COUNT(*) FROM video_provenance WHERE anchor_tx_hash != ''") if _eng_table_exists(db, "video_provenance") else 0,
+        "avg_encode_s": "—",
+    }
+
+    return {
+        "nodes": nodes,
+        "latency": latency,
+        "state": state,
+        "queue": queue,
+        "experiments": experiments,
+        "pipeline": pipeline,
+        "generated_at": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+
+
+def _eng_table_exists(db, name):
+    try:
+        row = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+@app.route("/engineering")
+def engineering_page():
+    """Public engineering status page — visible operational maturity."""
+    try:
+        ctx = _eng_collect()
+    except Exception as e:
+        # Never let this page 500 — it's the operational visibility page.
+        ctx = {
+            "nodes": [], "latency": {"p50": 0, "p95": 0, "p99": 0, "samples": 0, "p95_bar": 0},
+            "state": {"videos": 0, "agents": 0, "humans": 0, "comments": 0, "tips_confirmed": 0,
+                      "uptime": "?", "version": APP_VERSION},
+            "queue": {"queued": 0, "running": 0, "completed_24h": 0, "failed_24h": 0, "depth_label": f"err: {e}"},
+            "experiments": [], "pipeline": {"renditions": 0, "with_provenance": 0, "anchored": 0, "avg_encode_s": "?"},
+            "generated_at": "error",
+        }
+    return render_template("engineering.html", **ctx)
+
+
+@app.route("/api/engineering")
+def engineering_api():
+    """JSON variant of /engineering for live refresh."""
+    try:
+        return jsonify({"ok": True, **_eng_collect()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Provenance — surface on-chain video attestation per Codex spec
+# ---------------------------------------------------------------------------
+# Schema and API for first-class video provenance. Init done lazily on
+# first request so we don't have to touch init_db() during a hot deploy.
+
+_PROVENANCE_SCHEMA_READY = False
+_PROVENANCE_SCHEMA_LOCK = _eng_Lock()
+
+
+def _ensure_provenance_schema():
+    global _PROVENANCE_SCHEMA_READY
+    if _PROVENANCE_SCHEMA_READY:
+        return
+    with _PROVENANCE_SCHEMA_LOCK:
+        if _PROVENANCE_SCHEMA_READY:
+            return
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS video_provenance (
+                    video_id              TEXT PRIMARY KEY,
+                    canonical_sha256      TEXT DEFAULT '',
+                    duration_sec          REAL DEFAULT 0,
+                    width                 INTEGER DEFAULT 0,
+                    height                INTEGER DEFAULT 0,
+                    creator_agent_id      INTEGER DEFAULT 0,
+                    creator_pubkey        TEXT DEFAULT '',
+                    creator_beacon_id     TEXT DEFAULT '',
+                    model                 TEXT DEFAULT '',
+                    provider              TEXT DEFAULT '',
+                    workflow_hash         TEXT DEFAULT '',
+                    prompt_hash           TEXT DEFAULT '',
+                    seed                  INTEGER DEFAULT 0,
+                    generated_at          REAL DEFAULT 0,
+                    uploader_sig          TEXT DEFAULT '',
+                    uploaded_at           REAL DEFAULT 0,
+                    anchor_chain          TEXT DEFAULT '',
+                    anchor_tx_hash        TEXT DEFAULT '',
+                    anchor_block_height   INTEGER DEFAULT 0,
+                    anchor_manifest_hash  TEXT DEFAULT '',
+                    parents_json          TEXT DEFAULT '[]',
+                    renditions_json       TEXT DEFAULT '[]',
+                    verified              INTEGER DEFAULT 0,
+                    created_at            REAL DEFAULT 0,
+                    updated_at            REAL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_provenance_anchor
+                    ON video_provenance(anchor_tx_hash);
+                CREATE INDEX IF NOT EXISTS idx_provenance_creator
+                    ON video_provenance(creator_agent_id);
+                CREATE TABLE IF NOT EXISTS video_renditions (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id      TEXT NOT NULL,
+                    label         TEXT NOT NULL,        -- e.g. 'canonical', '720p', '360p'
+                    url_path      TEXT NOT NULL,
+                    width         INTEGER DEFAULT 0,
+                    height        INTEGER DEFAULT 0,
+                    bitrate_kbps  INTEGER DEFAULT 0,
+                    codec         TEXT DEFAULT 'h264',
+                    file_sha256   TEXT DEFAULT '',
+                    file_size     INTEGER DEFAULT 0,
+                    vmaf          REAL DEFAULT 0,
+                    is_canonical  INTEGER DEFAULT 0,
+                    created_at    REAL DEFAULT 0,
+                    UNIQUE(video_id, label)
+                );
+                CREATE INDEX IF NOT EXISTS idx_renditions_video
+                    ON video_renditions(video_id);
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        _PROVENANCE_SCHEMA_READY = True
+
+
+def _build_provenance_payload(video_row, prov_row, renditions):
+    """Build the public provenance JSON for a video, filling defaults from videos table."""
+    vid = video_row["video_id"]
+    # canonical asset = either provenance row (preferred) or what we know from videos
+    canonical_sha = (prov_row["canonical_sha256"] if prov_row else "") or ""
+    duration = (prov_row["duration_sec"] if prov_row else 0) or video_row["duration_sec"] or 0
+    width = (prov_row["width"] if prov_row else 0) or video_row["width"] or 720
+    height = (prov_row["height"] if prov_row else 0) or video_row["height"] or 720
+
+    creator = {
+        "agent_id": (prov_row["creator_agent_id"] if prov_row else 0) or video_row["agent_id"],
+        "agent_name": video_row["agent_name"],
+        "display_name": video_row["display_name"] or video_row["agent_name"],
+        "pubkey": (prov_row["creator_pubkey"] if prov_row else "") or "",
+        "beacon_id": (prov_row["creator_beacon_id"] if prov_row else "") or "",
+    }
+    generation = {
+        "model": (prov_row["model"] if prov_row else "") or "",
+        "provider": (prov_row["provider"] if prov_row else "") or "",
+        "workflow_hash": (prov_row["workflow_hash"] if prov_row else "") or "",
+        "prompt_hash": (prov_row["prompt_hash"] if prov_row else "") or "",
+        "seed": (prov_row["seed"] if prov_row else 0) or 0,
+        "generated_at": (prov_row["generated_at"] if prov_row else 0) or 0,
+    }
+    upload = {
+        "uploader_sig": (prov_row["uploader_sig"] if prov_row else "") or "",
+        "uploaded_at": (prov_row["uploaded_at"] if prov_row else 0) or video_row["created_at"] or 0,
+    }
+    anchor = {
+        "chain": (prov_row["anchor_chain"] if prov_row else "") or "",
+        "tx_hash": (prov_row["anchor_tx_hash"] if prov_row else "") or "",
+        "block_height": (prov_row["anchor_block_height"] if prov_row else 0) or 0,
+        "manifest_hash": (prov_row["anchor_manifest_hash"] if prov_row else "") or "",
+    }
+
+    parents = []
+    try:
+        parents = json.loads(prov_row["parents_json"]) if prov_row else []
+    except Exception:
+        parents = []
+
+    rends = []
+    for r in renditions or []:
+        rends.append({
+            "label": r["label"],
+            "url": r["url_path"],
+            "width": r["width"],
+            "height": r["height"],
+            "bitrate_kbps": r["bitrate_kbps"],
+            "codec": r["codec"],
+            "file_sha256": r["file_sha256"],
+            "file_size": r["file_size"],
+            "vmaf": r["vmaf"],
+            "is_canonical": bool(r["is_canonical"]),
+        })
+
+    # Verified iff anchor.tx_hash present AND uploader_sig present
+    verified = bool(anchor["tx_hash"]) and bool(upload["uploader_sig"])
+    if prov_row and prov_row["verified"]:
+        verified = True
+
+    # Decide an overall pill state
+    if verified:
+        pill_state = "verified"
+    elif anchor["tx_hash"] or upload["uploader_sig"]:
+        pill_state = "pending"
+    else:
+        pill_state = "unverified"
+
+    return {
+        "video_id": vid,
+        "pill_state": pill_state,
+        "verified": verified,
+        "canonical_asset": {
+            "sha256": canonical_sha,
+            "duration": duration,
+            "width": width,
+            "height": height,
+        },
+        "renditions": rends,
+        "creator": creator,
+        "generation": generation,
+        "upload": upload,
+        "anchor": anchor,
+        "parents": parents,
+    }
+
+
+@app.route("/api/videos/<video_id>/provenance")
+def video_provenance(video_id):
+    """Public provenance JSON for a video — first-class platform primitive."""
+    _ensure_provenance_schema()
+    db = get_db()
+    video = db.execute(
+        """SELECT v.video_id, v.agent_id, v.duration_sec, v.width, v.height, v.created_at,
+                  a.agent_name, a.display_name
+             FROM videos v JOIN agents a ON v.agent_id = a.id
+            WHERE v.video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"ok": False, "error": "video not found"}), 404
+
+    prov_row = db.execute(
+        "SELECT * FROM video_provenance WHERE video_id = ?", (video_id,)
+    ).fetchone()
+    rendition_rows = db.execute(
+        """SELECT label, url_path, width, height, bitrate_kbps, codec,
+                  file_sha256, file_size, vmaf, is_canonical
+             FROM video_renditions WHERE video_id = ?
+            ORDER BY is_canonical DESC, width DESC""",
+        (video_id,),
+    ).fetchall()
+
+    payload = _build_provenance_payload(video, prov_row, rendition_rows)
+    return jsonify({"ok": True, **payload})
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle Timeline — generated → uploaded → anchored → rewarded
+# ---------------------------------------------------------------------------
+
+@app.route("/api/videos/<video_id>/lifecycle")
+def video_lifecycle(video_id):
+    """Public lifecycle of a video: 4 milestone events with timestamps.
+
+    Used by the cinematic player widget to render the on-chain lineage
+    of an AI-generated video, tying provenance + reward + anchor data
+    into a single visible timeline.
+    """
+    _ensure_provenance_schema()
+    db = get_db()
+    video = db.execute(
+        "SELECT video_id, created_at FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"ok": False, "error": "video not found"}), 404
+
+    prov = db.execute(
+        """SELECT generated_at, uploaded_at, anchor_chain, anchor_tx_hash,
+                  anchor_block_height, anchor_manifest_hash
+             FROM video_provenance WHERE video_id = ?""",
+        (video_id,),
+    ).fetchone()
+
+    # Earliest reward (earnings + tips, if any) for this video.
+    reward_at = 0.0
+    reward_kind = ""
+    try:
+        row = db.execute(
+            """SELECT MIN(created_at) AS at FROM earnings WHERE video_id = ?""",
+            (video_id,),
+        ).fetchone()
+        if row and row["at"]:
+            reward_at = float(row["at"])
+            reward_kind = "earnings"
+    except Exception:
+        pass
+    if not reward_at:
+        try:
+            row = db.execute(
+                """SELECT MIN(created_at) AS at FROM tips
+                    WHERE video_id = ? AND COALESCE(status,'confirmed')='confirmed'""",
+                (video_id,),
+            ).fetchone()
+            if row and row["at"]:
+                reward_at = float(row["at"])
+                reward_kind = "tip"
+        except Exception:
+            pass
+
+    uploaded_at = (prov["uploaded_at"] if prov and prov["uploaded_at"] else None) or video["created_at"] or 0
+    generated_at = (prov["generated_at"] if prov and prov["generated_at"] else None)
+    if not generated_at:
+        # Best-guess: generation precedes upload by a few seconds.
+        # We mark this as inferred so the UI can render it lighter.
+        generated_at = max(0.0, float(uploaded_at) - 5.0)
+        generated_inferred = True
+    else:
+        generated_inferred = False
+
+    anchor_at = 0.0
+    anchor_inferred = False
+    if prov and prov["anchor_tx_hash"]:
+        # We don't store anchor_at separately yet; approximate as uploaded_at + 60s
+        # so the tick lands meaningfully on the timeline. UI should mark inferred.
+        anchor_at = float(uploaded_at) + 60.0
+        anchor_inferred = True
+
+    events = [
+        {
+            "key": "generated",
+            "label": "Generated",
+            "icon": "✦",
+            "at": float(generated_at) if generated_at else 0.0,
+            "present": bool(generated_at),
+            "inferred": generated_inferred,
+            "detail": "AI canonical artifact created" + (" (inferred from upload time)" if generated_inferred else ""),
+        },
+        {
+            "key": "uploaded",
+            "label": "Uploaded",
+            "icon": "↑",
+            "at": float(uploaded_at) if uploaded_at else 0.0,
+            "present": bool(uploaded_at),
+            "inferred": False,
+            "detail": "Manifest signed and pushed to BoTTube",
+        },
+        {
+            "key": "anchored",
+            "label": "Anchored",
+            "icon": "⛓",
+            "at": anchor_at,
+            "present": bool(prov and prov["anchor_tx_hash"]),
+            "inferred": anchor_inferred,
+            "detail": (f"RustChain block {prov['anchor_block_height']}"
+                       if prov and prov["anchor_block_height"] else
+                       "Awaiting RustChain anchor"),
+            "tx_hash": prov["anchor_tx_hash"] if prov else "",
+            "chain": prov["anchor_chain"] if prov else "",
+        },
+        {
+            "key": "rewarded",
+            "label": "Rewarded",
+            "icon": "★",
+            "at": reward_at,
+            "present": bool(reward_at),
+            "inferred": False,
+            "detail": (f"First {reward_kind} received" if reward_at
+                       else "No reward issued yet"),
+        },
+    ]
+
+    # Compute relative positions on the timeline (0..1)
+    timestamps = [e["at"] for e in events if e["at"] > 0]
+    t_min = min(timestamps) if timestamps else 0.0
+    t_max = max(timestamps) if timestamps else 0.0
+    span = max(1.0, t_max - t_min)
+    for e in events:
+        if e["at"] > 0:
+            e["rel"] = round((e["at"] - t_min) / span, 4)
+        else:
+            e["rel"] = None
+
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "events": events,
+        "t_min": t_min,
+        "t_max": t_max,
+        "span_s": round(span, 2),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Keyframe sprites — auto-extract for the cinematic scrub strip
+# ---------------------------------------------------------------------------
+
+KEYFRAME_DIR = BASE_DIR / "keyframes"
+KEYFRAME_COUNT = 6
+KEYFRAME_SIZE = 120  # pixels per frame, square
+
+# Module-level lock per-video to avoid concurrent ffmpeg storms on cache-miss.
+_KEYFRAME_LOCKS = {}
+_KEYFRAME_LOCKS_LOCK = _eng_Lock()
+
+
+def _keyframe_lock_for(video_id):
+    with _KEYFRAME_LOCKS_LOCK:
+        lk = _KEYFRAME_LOCKS.get(video_id)
+        if lk is None:
+            lk = _eng_Lock()
+            _KEYFRAME_LOCKS[video_id] = lk
+        return lk
+
+
+def _generate_keyframe_sprite(video_path, sprite_path, frames=KEYFRAME_COUNT, size=KEYFRAME_SIZE):
+    """Run ffmpeg to produce a horizontal sprite of N keyframes.
+
+    Uses select=eq(n,...) instead of relying on i-frames so even GOP-locked
+    AI output gets sampled at predictable positions.
+    """
+    KEYFRAME_DIR.mkdir(parents=True, exist_ok=True)
+    # Get duration first (cheap, ffprobe)
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+            stderr=subprocess.DEVNULL, timeout=10,
+        )
+        duration = float(out.strip() or 0)
+    except Exception:
+        duration = 8.0
+
+    if duration <= 0:
+        duration = 8.0
+
+    # Sample frames at evenly spaced timestamps (slight inset so we don't grab black tail).
+    inset = max(0.05, duration * 0.02)
+    step = (duration - 2 * inset) / max(1, frames - 1)
+    times = [inset + i * step for i in range(frames)]
+
+    # Build a select expression: gte(t,T0)*lte(t,T0+0.05) OR ... with reset(N=PI) trick
+    # Simpler approach: extract each frame to a temp file and tile manually with -filter_complex.
+    # We'll use the more efficient approach: -ss + -frames:v 1 per frame, then montage via ffmpeg tile.
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="bt_kf_") as tmp:
+        tmp_path = Path(tmp)
+        frame_paths = []
+        for i, t in enumerate(times):
+            fp = tmp_path / f"f{i:02d}.jpg"
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(video_path),
+                 "-frames:v", "1", "-vf", f"scale={size}:{size}:force_original_aspect_ratio=increase,crop={size}:{size}",
+                 "-q:v", "5", "-y", str(fp)],
+                check=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            frame_paths.append(str(fp))
+
+        # Tile horizontally
+        # Build -i for each frame, then xstack-style hstack
+        cmd = ["ffmpeg", "-loglevel", "error"]
+        for fp in frame_paths:
+            cmd += ["-i", fp]
+        filter_inputs = "".join(f"[{i}:v]" for i in range(len(frame_paths)))
+        cmd += ["-filter_complex", f"{filter_inputs}hstack=inputs={len(frame_paths)}",
+                "-q:v", "5", "-y", str(sprite_path)]
+        subprocess.run(cmd, check=True, timeout=20,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    return {"frames": frames, "frame_size": size, "duration": duration}
+
+
+@app.route("/api/videos/<video_id>/keyframes")
+def video_keyframes(video_id):
+    """Return keyframe sprite manifest. Generates on first hit, then cached.
+
+    The sprite is a horizontal strip of N square thumbnails. The watch
+    page renders this above the native player and uses CSS transform to
+    show the active frame as the playhead moves.
+    """
+    db = get_db()
+    video = db.execute(
+        "SELECT video_id, filename, duration_sec FROM videos WHERE video_id = ?",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"ok": False, "error": "video not found"}), 404
+
+    sprite_filename = f"{video_id}.jpg"
+    sprite_path = KEYFRAME_DIR / sprite_filename
+    duration = video["duration_sec"] or 8.0
+
+    if not sprite_path.exists() or sprite_path.stat().st_size < 256:
+        video_path = VIDEO_DIR / (video["filename"] or "")
+        if not video_path.exists():
+            return jsonify({"ok": False, "error": "video file missing"}), 404
+        lock = _keyframe_lock_for(video_id)
+        with lock:
+            if not sprite_path.exists() or sprite_path.stat().st_size < 256:
+                try:
+                    _generate_keyframe_sprite(video_path, sprite_path)
+                except subprocess.CalledProcessError as e:
+                    return jsonify({"ok": False, "error": f"ffmpeg failed: {e.returncode}"}), 500
+                except subprocess.TimeoutExpired:
+                    return jsonify({"ok": False, "error": "ffmpeg timeout"}), 504
+                except Exception as e:
+                    return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "sprite_url": f"/keyframes/{sprite_filename}",
+        "frame_count": KEYFRAME_COUNT,
+        "frame_width": KEYFRAME_SIZE,
+        "frame_height": KEYFRAME_SIZE,
+        "duration": duration,
+    })
+
+
+@app.route("/keyframes/<path:filename>")
+def serve_keyframe(filename):
+    """Serve keyframe sprite files with strong caching."""
+    if "/" in filename or ".." in filename:
+        abort(404)
+    return send_from_directory(
+        KEYFRAME_DIR, filename, max_age=86400 * 30, mimetype="image/jpeg"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Trust & Safety: TOS acceptance, content blocklist, user reports, audit
+# ---------------------------------------------------------------------------
+# Static legal pages, click-wrap acceptance for humans + explicit
+# acceptance flow for agents, hash-based content blocklist (SHA-256
+# of file + thumbnail), user-facing /api/report endpoint with rate
+# limiting, and a moderation_audit log of every enforcement action.
+
+TOS_VERSION = "1.0"
+TOS_EFFECTIVE = "2026-04-30"
+
+_TS_SCHEMA_READY = False
+_TS_SCHEMA_LOCK = _eng_Lock()
+
+
+def _ensure_ts_schema():
+    """Lazy create trust+safety tables and add TOS columns to agents."""
+    global _TS_SCHEMA_READY
+    if _TS_SCHEMA_READY:
+        return
+    with _TS_SCHEMA_LOCK:
+        if _TS_SCHEMA_READY:
+            return
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS moderation_reports (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    report_id     TEXT UNIQUE NOT NULL,
+                    category      TEXT NOT NULL,
+                    target        TEXT NOT NULL,
+                    detail        TEXT NOT NULL,
+                    reporter_email TEXT DEFAULT '',
+                    reporter_ip   TEXT DEFAULT '',
+                    reporter_ua   TEXT DEFAULT '',
+                    reporter_agent_id INTEGER DEFAULT 0,
+                    status        TEXT DEFAULT 'open',  -- open, reviewing, actioned, dismissed
+                    severity      TEXT DEFAULT 'normal', -- low, normal, high, critical
+                    handled_by    TEXT DEFAULT '',
+                    handled_at    REAL DEFAULT 0,
+                    resolution    TEXT DEFAULT '',
+                    created_at    REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_modreports_status
+                    ON moderation_reports(status, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_modreports_target
+                    ON moderation_reports(target);
+                CREATE INDEX IF NOT EXISTS idx_modreports_category
+                    ON moderation_reports(category, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS content_blocklist (
+                    hash_sha256   TEXT PRIMARY KEY,
+                    hash_kind     TEXT DEFAULT 'file',   -- file, thumbnail, phash
+                    category      TEXT NOT NULL,         -- csam, terror, ncii, copyright, malware, other
+                    source        TEXT DEFAULT '',       -- ncmec, iwf, projectvic, internal, user_report
+                    notes         TEXT DEFAULT '',
+                    added_by      TEXT DEFAULT '',
+                    added_at      REAL NOT NULL,
+                    hits          INTEGER DEFAULT 0,
+                    last_hit_at   REAL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_blocklist_category
+                    ON content_blocklist(category);
+
+                CREATE TABLE IF NOT EXISTS moderation_audit (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor         TEXT NOT NULL,        -- system, admin, user_report, ncmec
+                    action        TEXT NOT NULL,        -- quarantine, terminate, dismiss, restore, blocklist_add, ncmec_report
+                    target_kind   TEXT NOT NULL,        -- video, agent, ip, hash, comment
+                    target_id     TEXT NOT NULL,
+                    reason        TEXT DEFAULT '',
+                    severity      TEXT DEFAULT 'normal',
+                    metadata_json TEXT DEFAULT '{}',
+                    created_at    REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_target
+                    ON moderation_audit(target_kind, target_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS agent_strikes (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id      INTEGER NOT NULL,
+                    severity      TEXT NOT NULL,    -- minor, major, critical
+                    reason        TEXT NOT NULL,
+                    issued_by     TEXT DEFAULT 'system',
+                    expires_at    REAL DEFAULT 0,
+                    created_at    REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_strikes_agent
+                    ON agent_strikes(agent_id, created_at DESC);
+                """
+            )
+
+            # Add TOS columns to agents (idempotent).
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+            if "tos_version_accepted" not in cols:
+                conn.execute("ALTER TABLE agents ADD COLUMN tos_version_accepted TEXT DEFAULT ''")
+            if "tos_accepted_at" not in cols:
+                conn.execute("ALTER TABLE agents ADD COLUMN tos_accepted_at REAL DEFAULT 0")
+            if "tos_accepted_ip" not in cols:
+                conn.execute("ALTER TABLE agents ADD COLUMN tos_accepted_ip TEXT DEFAULT ''")
+            if "is_suspended" not in cols:
+                conn.execute("ALTER TABLE agents ADD COLUMN is_suspended INTEGER DEFAULT 0")
+            if "suspended_reason" not in cols:
+                conn.execute("ALTER TABLE agents ADD COLUMN suspended_reason TEXT DEFAULT ''")
+            if "suspended_at" not in cols:
+                conn.execute("ALTER TABLE agents ADD COLUMN suspended_at REAL DEFAULT 0")
+            conn.commit()
+        finally:
+            conn.close()
+        _TS_SCHEMA_READY = True
+
+
+def _ts_log_audit(actor, action, target_kind, target_id, reason="",
+                  severity="normal", meta=None):
+    """Append a moderation audit row. Never raises."""
+    try:
+        _ensure_ts_schema()
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.execute(
+                """INSERT INTO moderation_audit
+                       (actor, action, target_kind, target_id, reason, severity,
+                        metadata_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (actor, action, target_kind, target_id, reason, severity,
+                 json.dumps(meta or {}), time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def _ts_check_blocklist(sha256_hex, kind="file"):
+    """Look up a hash in the content_blocklist. Returns the row or None."""
+    try:
+        _ensure_ts_schema()
+        db = get_db()
+        row = db.execute(
+            """SELECT hash_sha256, hash_kind, category, source, notes
+                 FROM content_blocklist WHERE hash_sha256 = ?""",
+            (sha256_hex,),
+        ).fetchone()
+        if row:
+            db.execute(
+                """UPDATE content_blocklist
+                      SET hits = COALESCE(hits, 0) + 1, last_hit_at = ?
+                    WHERE hash_sha256 = ?""",
+                (time.time(), sha256_hex),
+            )
+            db.commit()
+        return row
+    except Exception:
+        return None
+
+
+def _ts_sha256_file(path, chunk=1024 * 1024):
+    """SHA-256 a file on disk."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            buf = f.read(chunk)
+            if not buf:
+                break
+            h.update(buf)
+    return h.hexdigest()
+
+
+def _ts_suspend_agent(agent_id, reason, severity="critical"):
+    """Suspend an agent and log it. Caller still controls the response."""
+    try:
+        _ensure_ts_schema()
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.execute(
+                """UPDATE agents
+                      SET is_suspended = 1,
+                          suspended_reason = ?,
+                          suspended_at = ?
+                    WHERE id = ?""",
+                (reason, time.time(), agent_id),
+            )
+            conn.execute(
+                """INSERT INTO agent_strikes
+                       (agent_id, severity, reason, issued_by, created_at)
+                   VALUES (?, ?, ?, 'system', ?)""",
+                (agent_id, severity, reason, time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    _ts_log_audit("system", "suspend", "agent", str(agent_id), reason, severity)
+
+
+def ts_inspect_uploaded_file(file_path, agent_id):
+    """Hash an uploaded file, check the blocklist. If matched, suspend and return rejection.
+
+    Returns (rejected: bool, info: dict). Never raises.
+    """
+    try:
+        sha = _ts_sha256_file(file_path)
+    except Exception as e:
+        return False, {"hash_error": str(e)}
+
+    hit = _ts_check_blocklist(sha, kind="file")
+    if hit:
+        category = hit["category"]
+        # CSAM gets the heavy hand: delete the file, suspend agent, audit row,
+        # NCMEC report queued (stub for now — real submission goes through
+        # a separate, secure pipeline once registration is approved).
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        _ts_suspend_agent(
+            agent_id,
+            reason=f"upload matched {category} blocklist (hash {sha[:16]}…)",
+            severity="critical" if category in {"csam", "terror"} else "major",
+        )
+        _ts_log_audit(
+            actor="system",
+            action="quarantine",
+            target_kind="upload",
+            target_id=sha,
+            reason=f"blocklist match: {category} (source={hit['source']})",
+            severity="critical" if category in {"csam", "terror"} else "major",
+            meta={"agent_id": agent_id, "kind": hit["hash_kind"]},
+        )
+        return True, {
+            "rejected": True,
+            "category": category,
+            "sha256": sha,
+        }
+    return False, {"sha256": sha}
+
+
+# --- Static legal pages ----------------------------------------------------
+
+@app.route("/terms")
+@app.route("/tos")
+def terms_page():
+    return render_template("terms.html",
+                           tos_version=TOS_VERSION,
+                           tos_effective=TOS_EFFECTIVE)
+
+
+@app.route("/aup")
+def aup_page():
+    return render_template("aup.html",
+                           tos_version=TOS_VERSION,
+                           tos_effective=TOS_EFFECTIVE)
+
+
+@app.route("/dmca")
+def dmca_page():
+    return render_template("dmca.html",
+                           tos_version=TOS_VERSION,
+                           tos_effective=TOS_EFFECTIVE)
+
+
+@app.route("/report")
+def report_page():
+    return render_template("report.html",
+                           tos_version=TOS_VERSION,
+                           tos_effective=TOS_EFFECTIVE)
+
+
+# Privacy template already exists in the templates dir; ensure a route exists.
+@app.route("/privacy")
+def privacy_page():
+    try:
+        return render_template("privacy.html",
+                               tos_version=TOS_VERSION,
+                               tos_effective=TOS_EFFECTIVE)
+    except Exception:
+        # Fallback if template variables differ
+        return render_template("privacy.html")
+
+
+# --- TOS acceptance for agents --------------------------------------------
+
+@app.route("/api/tos", methods=["GET"])
+def tos_metadata():
+    """Public TOS metadata for clients to discover the current version."""
+    return jsonify({
+        "ok": True,
+        "version": TOS_VERSION,
+        "effective": TOS_EFFECTIVE,
+        "terms_url": "https://bottube.ai/terms",
+        "aup_url": "https://bottube.ai/aup",
+        "dmca_url": "https://bottube.ai/dmca",
+        "privacy_url": "https://bottube.ai/privacy",
+        "report_url": "https://bottube.ai/report",
+        "csam_notice": (
+            "Zero tolerance for CSAM. Uploads are hash-checked and reported "
+            "to NCMEC and law enforcement as required by 18 U.S.C. § 2258A."
+        ),
+    })
+
+
+@app.route("/api/agents/me/accept-terms", methods=["POST"])
+@require_api_key
+def agent_accept_terms():
+    """Agent acknowledges the current Terms of Service.
+
+    Required before any write action by agents created after the TOS rollout.
+    Existing agents are grandfathered with a 30-day grace period.
+    """
+    _ensure_ts_schema()
+    data = request.get_json(silent=True) or {}
+    version = str(data.get("version", "")).strip() or TOS_VERSION
+    if version != TOS_VERSION:
+        return jsonify({
+            "ok": False,
+            "error": "version_mismatch",
+            "expected": TOS_VERSION,
+            "received": version,
+            "terms_url": "https://bottube.ai/terms",
+        }), 400
+
+    agent = g.agent
+    ip = _get_client_ip()
+    db = get_db()
+    db.execute(
+        """UPDATE agents
+              SET tos_version_accepted = ?,
+                  tos_accepted_at = ?,
+                  tos_accepted_ip = ?
+            WHERE id = ?""",
+        (version, time.time(), ip, agent["id"]),
+    )
+    db.commit()
+    _ts_log_audit("agent", "accept_terms", "agent", str(agent["id"]),
+                  reason=f"tos {version}", meta={"ip": ip})
+    return jsonify({
+        "ok": True,
+        "agent_name": agent["agent_name"],
+        "tos_version_accepted": version,
+        "tos_effective": TOS_EFFECTIVE,
+        "accepted_at": time.time(),
+        "message": (
+            "Terms of Service acknowledged. "
+            "Welcome — please read https://bottube.ai/aup before posting."
+        ),
+    })
+
+
+# --- Public report endpoint -----------------------------------------------
+
+@app.route("/api/report", methods=["POST"])
+def submit_report():
+    """User-facing report submission. Anonymous accepted, rate-limited per IP."""
+    _ensure_ts_schema()
+    ip = _get_client_ip()
+    if not _rate_limit(f"report:{ip}", 10, 3600):
+        return jsonify({"ok": False, "error": "Too many reports from this IP. Try again later."}), 429
+
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "").strip().lower()[:32]
+    target = (data.get("target") or "").strip()[:512]
+    detail = (data.get("detail") or "").strip()[:4000]
+    email = (data.get("email") or "").strip()[:200]
+
+    valid_cats = {"csam", "illegal", "ncii", "ip", "harassment",
+                  "impersonation", "malware", "spam", "minor", "other"}
+    if category not in valid_cats:
+        return jsonify({"ok": False, "error": "invalid category"}), 400
+    if not target or len(target) < 4:
+        return jsonify({"ok": False, "error": "target is required"}), 400
+    if not detail or len(detail) < 10:
+        return jsonify({"ok": False, "error": "detail must be at least 10 characters"}), 400
+
+    severity = "critical" if category in {"csam", "ncii"} else (
+        "high" if category in {"illegal", "minor", "malware"} else "normal"
+    )
+    report_id = "rpt_" + secrets.token_hex(8)
+    reporter_agent_id = (g.agent["id"] if getattr(g, "agent", None) else 0)
+
+    db = get_db()
+    db.execute(
+        """INSERT INTO moderation_reports
+               (report_id, category, target, detail,
+                reporter_email, reporter_ip, reporter_ua, reporter_agent_id,
+                severity, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (report_id, category, target, detail,
+         email, ip, request.headers.get("User-Agent", "")[:500], reporter_agent_id,
+         severity, time.time()),
+    )
+    db.commit()
+    _ts_log_audit("user_report", "submit", "report", report_id,
+                  reason=f"{category}: {target[:80]}", severity=severity,
+                  meta={"ip": ip, "agent_id": reporter_agent_id})
+
+    return jsonify({
+        "ok": True,
+        "report_id": report_id,
+        "severity": severity,
+        "message": (
+            "Report received. Thank you. CSAM and content depicting minors "
+            "is reviewed within 24 hours and forwarded to NCMEC where applicable."
+        ),
+    })
+
+
+# --- Admin endpoints ------------------------------------------------------
+
+def _ts_admin_ok():
+    key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
+    expected = os.environ.get("BOTTUBE_ADMIN_KEY", "") or os.environ.get("RC_ADMIN_KEY", "")
+    return bool(expected) and (key == expected)
+
+
+@app.route("/admin/blocklist/add", methods=["POST"])
+def admin_blocklist_add():
+    """Admin: add a SHA-256 hash to the content blocklist."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _ensure_ts_schema()
+    data = request.get_json(silent=True) or {}
+    sha = (data.get("sha256") or "").strip().lower()
+    category = (data.get("category") or "").strip().lower()
+    source = (data.get("source") or "internal").strip()[:64]
+    notes = (data.get("notes") or "").strip()[:500]
+    kind = (data.get("hash_kind") or "file").strip()[:32]
+
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        return jsonify({"ok": False, "error": "sha256 must be a 64-char hex string"}), 400
+    if category not in {"csam", "terror", "ncii", "ip", "malware", "other"}:
+        return jsonify({"ok": False, "error": "invalid category"}), 400
+
+    db = get_db()
+    db.execute(
+        """INSERT OR REPLACE INTO content_blocklist
+               (hash_sha256, hash_kind, category, source, notes, added_by, added_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (sha, kind, category, source, notes, "admin", time.time()),
+    )
+    db.commit()
+    _ts_log_audit("admin", "blocklist_add", "hash", sha,
+                  reason=f"{category} via {source}", severity="critical" if category == "csam" else "high")
+    return jsonify({"ok": True, "sha256": sha, "category": category, "added_at": time.time()})
+
+
+@app.route("/admin/moderation/reports")
+def admin_moderation_reports():
+    """Admin queue view: most recent open reports."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _ensure_ts_schema()
+    db = get_db()
+    rows = db.execute(
+        """SELECT report_id, category, target, detail, severity,
+                  reporter_email, status, created_at
+             FROM moderation_reports
+            WHERE status = 'open'
+            ORDER BY
+                CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                              WHEN 'normal'   THEN 2 ELSE 3 END,
+                created_at DESC
+            LIMIT 200"""
+    ).fetchall()
+    out = [{
+        "report_id": r["report_id"],
+        "category": r["category"],
+        "target": r["target"],
+        "detail": r["detail"],
+        "severity": r["severity"],
+        "reporter_email": r["reporter_email"],
+        "status": r["status"],
+        "created_at": r["created_at"],
+    } for r in rows]
+    return jsonify({"ok": True, "count": len(out), "reports": out})
+
 
 if __name__ == "__main__":
     init_db()

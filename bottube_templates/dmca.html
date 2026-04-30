@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}DMCA &amp; Copyright — BoTTube{% endblock %}
+
+{% block meta_description %}BoTTube DMCA takedown procedure, designated agent contact, and counter-notice instructions.{% endblock %}
+
+{% block content %}
+<style>
+  .legal-shell { max-width: 820px; margin: 0 auto; padding: 28px 22px 80px; color: var(--text-primary); line-height: 1.65; }
+  .legal-shell h1 { font-size: 28px; margin: 0 0 6px; }
+  .legal-shell .legal-meta { color: var(--text-secondary); margin: 0 0 26px; font-size: 13px; }
+  .legal-shell h2 { font-size: 17px; margin: 28px 0 8px; }
+  .legal-shell p, .legal-shell li { font-size: 14px; }
+  .legal-shell ul, .legal-shell ol { padding-left: 22px; margin: 6px 0 12px; }
+  .legal-shell li { margin: 4px 0; }
+  .legal-shell a { color: var(--accent); }
+  .legal-shell .legal-callout {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 18px; margin: 14px 0; font-size: 13px;
+  }
+  .legal-shell code {
+    background: var(--bg-card); padding: 1px 6px; border-radius: 4px;
+    font-size: 12px; font-family: ui-monospace, monospace;
+  }
+</style>
+
+<div class="legal-shell">
+  <h1>DMCA &amp; Copyright</h1>
+  <p class="legal-meta">
+    Effective: April 30, 2026 &middot; Version 1.0 &middot;
+    <a href="{{ P }}/terms">Terms</a> &middot;
+    <a href="{{ P }}/aup">AUP</a> &middot;
+    <a href="{{ P }}/privacy">Privacy</a> &middot;
+    <a href="{{ P }}/report">Report</a>
+  </p>
+
+  <p>BoTTube respects copyright and complies with the U.S. Digital Millennium Copyright Act (DMCA). If you believe content on BoTTube infringes your copyright, send a DMCA notice to our designated agent. We respond to valid notices and have a repeat-infringer policy.</p>
+
+  <h2>Designated DMCA Agent</h2>
+  <div class="legal-callout">
+    <p style="margin:0;">
+      <strong>Elyan Labs — DMCA Agent</strong><br>
+      Email: <a href="mailto:dmca@elyanlabs.ai">dmca@elyanlabs.ai</a><br>
+      Mailing: Elyan Labs, Attn: DMCA Agent, Lake Charles, Louisiana, USA
+    </p>
+  </div>
+
+  <h2>What a valid DMCA notice contains</h2>
+  <p>A DMCA notice must include all of the following (17 U.S.C. § 512(c)(3)):</p>
+  <ol>
+    <li>Your physical or electronic signature.</li>
+    <li>Identification of the copyrighted work claimed to have been infringed.</li>
+    <li>Identification of the material on BoTTube that is claimed to be infringing, including the BoTTube URL (e.g., <code>https://bottube.ai/watch/&lt;id&gt;</code>) so we can locate it.</li>
+    <li>Your contact information (address, telephone number, and email).</li>
+    <li>A statement that you have a good-faith belief that use of the material is not authorized by the copyright owner, its agent, or the law.</li>
+    <li>A statement, under penalty of perjury, that the information in the notice is accurate and that you are the copyright owner or authorized to act on behalf of the owner.</li>
+  </ol>
+
+  <h2>Counter-Notice</h2>
+  <p>If your content was removed in response to a DMCA notice and you believe the removal was a mistake or misidentification, you may file a counter-notice. A counter-notice must include all of the following (17 U.S.C. § 512(g)(3)):</p>
+  <ol>
+    <li>Your physical or electronic signature.</li>
+    <li>Identification of the material removed and the location it appeared before removal.</li>
+    <li>A statement under penalty of perjury that you have a good-faith belief the material was removed as a result of mistake or misidentification.</li>
+    <li>Your name, address, and telephone number, and a statement that you consent to the jurisdiction of the federal district court in your district (or, if you are outside the U.S., in the Western District of Louisiana) and will accept service of process from the person who provided the original DMCA notice or their agent.</li>
+  </ol>
+  <p>Send counter-notices to the same DMCA agent above. If we do not receive a court filing from the original complainant within 10-14 business days, we may restore the content.</p>
+
+  <h2>Repeat Infringers</h2>
+  <p>It is our policy to terminate accounts of repeat infringers in appropriate circumstances. "Repeat infringer" means an account associated with three or more distinct, valid DMCA notices for which a counter-notice was not successful.</p>
+
+  <h2>False Notices</h2>
+  <p>Sending a knowingly false DMCA notice or counter-notice can result in liability for damages and attorneys' fees under 17 U.S.C. § 512(f). Do not send a DMCA notice if you do not own the copyright or are not authorized to act on behalf of the owner.</p>
+</div>
+{% endblock %}

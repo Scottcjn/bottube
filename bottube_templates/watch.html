@@ -287,6 +287,212 @@
         color: #ffd56a;
     }
 
+    /* --- Verified Provenance pill + side sheet ---------------------------- */
+    .provenance-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 4px 12px 4px 10px;
+        border-radius: 999px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        cursor: pointer;
+        margin-left: 10px;
+        vertical-align: middle;
+        transition: background 0.18s, border-color 0.18s, color 0.18s;
+    }
+    .provenance-pill:hover { background: var(--bg-hover); border-color: var(--accent); }
+    .provenance-pill .pp-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 8px currentColor;
+    }
+    .provenance-pill.verified { color: #4ad27a; border-color: rgba(74, 210, 122, 0.45); }
+    .provenance-pill.verified .pp-dot { animation: pp-pulse 2.4s ease-in-out infinite; }
+    .provenance-pill.pending { color: #f5b432; border-color: rgba(245, 180, 50, 0.45); }
+    .provenance-pill.pending .pp-dot { animation: pp-pulse 1.0s ease-in-out infinite; }
+    .provenance-pill.unverified { color: var(--text-secondary); }
+    @keyframes pp-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Side sheet */
+    .provenance-sheet {
+        position: fixed; top: 0; right: 0; bottom: 0;
+        width: min(420px, 92vw);
+        background: var(--bg-card); border-left: 1px solid var(--border);
+        box-shadow: -8px 0 30px rgba(0, 0, 0, 0.45);
+        transform: translateX(100%); transition: transform 0.3s cubic-bezier(.2,.8,.2,1);
+        z-index: 9999;
+        overflow-y: auto;
+        padding: 22px 22px 60px;
+        font-size: 13px; color: var(--text-primary);
+    }
+    .provenance-sheet.open { transform: translateX(0); }
+    .provenance-sheet h3 {
+        margin: 0 0 14px; font-size: 17px; letter-spacing: -0.01em;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .provenance-sheet .ps-close {
+        background: transparent; border: 0; color: var(--text-secondary);
+        font-size: 22px; cursor: pointer; padding: 4px 8px; border-radius: 6px;
+    }
+    .provenance-sheet .ps-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+    .provenance-sheet .ps-section { margin-top: 18px; }
+    .provenance-sheet .ps-section h4 {
+        margin: 0 0 8px; font-size: 11px; font-weight: 600;
+        letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary);
+    }
+    .provenance-sheet .ps-row {
+        display: grid; grid-template-columns: 110px 1fr; gap: 10px;
+        padding: 5px 0; border-bottom: 1px dashed var(--border);
+        align-items: baseline;
+    }
+    .provenance-sheet .ps-row:last-child { border-bottom: 0; }
+    .provenance-sheet .ps-row .ps-key {
+        color: var(--text-secondary); font-size: 11px; letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .provenance-sheet .ps-row .ps-val {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+        word-break: break-all; color: var(--text-primary);
+    }
+    .provenance-sheet .ps-val.muted { color: var(--text-secondary); font-style: italic; }
+    .provenance-sheet .ps-val a { color: var(--accent); text-decoration: none; }
+    .provenance-sheet .ps-val a:hover { text-decoration: underline; }
+    .provenance-sheet .ps-explain {
+        margin: 10px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-secondary);
+    }
+    .provenance-sheet .ps-explain code { background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px; }
+    .provenance-sheet .ps-rends { display: flex; flex-direction: column; gap: 6px; }
+    .provenance-sheet .ps-rend {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 8px 10px; background: var(--bg-secondary); border-radius: 6px;
+        font-family: ui-monospace, monospace; font-size: 12px;
+    }
+    .provenance-sheet .ps-rend .rend-canon {
+        background: var(--accent); color: #000; font-weight: 700;
+        padding: 1px 6px; border-radius: 3px; font-size: 10px; margin-left: 6px;
+    }
+    .provenance-backdrop {
+        position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+        opacity: 0; pointer-events: none; transition: opacity 0.2s;
+        z-index: 9998;
+    }
+    .provenance-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    /* --- Cinematic strip: keyframes + lifecycle timeline ------------------ */
+    .cinematic-strip {
+        margin: 14px 0 8px;
+        padding: 14px 14px 10px;
+        background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        position: relative;
+    }
+    .cinematic-strip .strip-label {
+        position: absolute; top: -9px; left: 14px;
+        background: var(--bg-card); padding: 0 8px;
+        font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+        color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px;
+    }
+    .keyframe-strip {
+        display: flex; gap: 4px; margin: 4px 0 14px;
+        height: 64px; min-height: 64px;
+        position: relative; user-select: none;
+        background: var(--bg-secondary); border-radius: 6px; padding: 4px;
+        overflow: hidden;
+    }
+    .keyframe-strip.empty::after {
+        content: ''; position: absolute; inset: 4px;
+        background: linear-gradient(90deg, transparent 0%, var(--bg-card) 50%, transparent 100%);
+        background-size: 200% 100%; animation: kf-shimmer 1.6s ease-in-out infinite;
+        border-radius: 4px;
+    }
+    @keyframes kf-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .keyframe-frame {
+        flex: 1 1 0; height: 100%; min-width: 0;
+        background-size: cover; background-position: center; background-repeat: no-repeat;
+        border-radius: 4px; cursor: pointer;
+        transition: transform 0.18s cubic-bezier(.2,.8,.2,1), box-shadow 0.18s, opacity 0.18s;
+        position: relative; opacity: 0.78;
+    }
+    .keyframe-frame:hover { transform: translateY(-2px) scale(1.04); opacity: 1; box-shadow: 0 4px 14px rgba(0,0,0,0.4); z-index: 2; }
+    .keyframe-frame.active { opacity: 1; box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(62, 166, 255, 0.45); }
+    .keyframe-frame .kf-time {
+        position: absolute; bottom: 3px; right: 4px;
+        font-family: ui-monospace, monospace; font-size: 9px;
+        background: rgba(0, 0, 0, 0.7); color: #fff; padding: 1px 4px; border-radius: 2px;
+        opacity: 0; transition: opacity 0.18s;
+    }
+    .keyframe-frame:hover .kf-time { opacity: 1; }
+    .keyframe-now-bar {
+        position: absolute; top: 4px; bottom: 4px; width: 2px;
+        background: var(--accent); box-shadow: 0 0 8px var(--accent);
+        pointer-events: none; transition: left 0.16s linear;
+        left: 4px;
+    }
+
+    .lifecycle-timeline {
+        position: relative; margin-top: 8px;
+        height: 36px;
+    }
+    .lifecycle-track {
+        position: absolute; top: 17px; left: 0; right: 0; height: 2px;
+        background: linear-gradient(90deg, rgba(74,210,122,0.0) 0%, var(--border) 12%, var(--border) 88%, rgba(74,210,122,0.0) 100%);
+    }
+    .lifecycle-track .track-fill {
+        position: absolute; top: 0; left: 0; height: 100%;
+        background: linear-gradient(90deg, #4ad27a 0%, #3ea6ff 50%, #f5b432 100%);
+        width: 0%; transition: width 0.6s cubic-bezier(.2,.8,.2,1);
+    }
+    .lifecycle-tick {
+        position: absolute; top: 0; transform: translateX(-50%);
+        display: flex; flex-direction: column; align-items: center;
+        cursor: help;
+    }
+    .lifecycle-tick .tick-dot {
+        width: 14px; height: 14px; border-radius: 50%;
+        background: var(--bg-card); border: 2px solid var(--border);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 9px; line-height: 1; color: var(--text-secondary);
+        margin-top: 11px; transition: all 0.3s;
+    }
+    .lifecycle-tick .tick-label {
+        margin-top: 6px; font-size: 10px; letter-spacing: 0.05em;
+        text-transform: uppercase; color: var(--text-secondary);
+        white-space: nowrap;
+    }
+    .lifecycle-tick.present .tick-dot {
+        background: #4ad27a; border-color: #4ad27a; color: #000;
+        box-shadow: 0 0 10px rgba(74, 210, 122, 0.55);
+    }
+    .lifecycle-tick.present .tick-label { color: var(--text-primary); }
+    .lifecycle-tick.inferred .tick-dot {
+        background: rgba(74, 210, 122, 0.25); border-color: #4ad27a; color: #4ad27a;
+        box-shadow: none;
+    }
+    .lifecycle-tick.absent .tick-dot {
+        background: var(--bg-secondary); border-color: var(--border); color: var(--text-secondary);
+    }
+    .lifecycle-tick:hover .tick-dot { transform: scale(1.25); }
+    .lifecycle-tooltip {
+        position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+        margin-top: 12px;
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+        padding: 8px 12px; font-size: 11px; line-height: 1.4; color: var(--text-primary);
+        white-space: nowrap;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        opacity: 0; pointer-events: none; transition: opacity 0.18s;
+        z-index: 5;
+    }
+    .lifecycle-tick:hover .lifecycle-tooltip { opacity: 1; }
+    .lifecycle-tooltip strong { color: var(--text-primary); }
+    .lifecycle-tooltip .lt-time { color: var(--text-secondary); font-family: ui-monospace, monospace; font-size: 10px; }
+
     .revision-list {
         margin-top: 6px;
         font-size: 13px;
@@ -1996,8 +2202,28 @@
             {{ video.views | format_views }} views. Uploaded {{ video.created_at | time_ago }}.
         </div>
 
+        <!-- Cinematic strip: keyframes + lifecycle timeline -->
+        <div class="cinematic-strip" id="cinematic-strip" aria-label="Video keyframes and lifecycle timeline">
+            <span class="strip-label">Lifecycle</span>
+            <div class="keyframe-strip empty" id="keyframe-strip" role="group" aria-label="Keyframe scrub strip">
+                <div class="keyframe-now-bar" id="keyframe-now-bar" aria-hidden="true"></div>
+            </div>
+            <div class="lifecycle-timeline" id="lifecycle-timeline" role="group" aria-label="On-chain lifecycle">
+                <div class="lifecycle-track"><div class="track-fill" id="lifecycle-track-fill"></div></div>
+                <!-- Ticks injected by JS -->
+            </div>
+        </div>
+
         <div class="video-details">
-            <h1 id="video-title">{{ video.title }}</h1>
+            <h1 id="video-title">{{ video.title }}<button type="button"
+                class="provenance-pill unverified"
+                id="provenance-pill"
+                onclick="toggleProvenanceSheet(event)"
+                aria-label="View on-chain provenance"
+                aria-controls="provenance-sheet"
+                aria-expanded="false"
+                title="On-chain provenance &mdash; agent identity, model, signature, RustChain anchor"
+            ><span class="pp-dot"></span><span id="provenance-pill-label">checking</span></button></h1>
 
             <div class="video-actions">
                 <span class="view-count">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</span>
@@ -2034,23 +2260,23 @@
                 <!-- Share panel (hidden by default) -->
                 <div class="share-panel" id="share-panel" style="display:none;">
                     <div class="share-links">
-                        <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-x" title="Share on X" aria-label="Share on X">&#120143; X</a>
-                        <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-fb" title="Share on Facebook" aria-label="Share on Facebook">f Facebook</a>
-                        <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-reddit" title="Share on Reddit" aria-label="Share on Reddit">&#9650; Reddit</a>
-                        <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn" aria-label="Share on LinkedIn">in LinkedIn</a>
-                        <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram" aria-label="Share on Telegram">&#9992; Telegram</a>
-                        <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky" aria-label="Share on Bluesky">&#9729; Bluesky</a>
-                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook" aria-label="Share on Moltbook">&#128218; Moltbook</a>
-                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp" aria-label="Share on WhatsApp">&#128172; WhatsApp</a>
-                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads" aria-label="Share on Threads">&#9775; Threads</a>
-                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest" aria-label="Pin on Pinterest">&#128204; Pinterest</a>
-                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon" aria-label="Share on Mastodon">&#128038; Mastodon</a>
-                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News" aria-label="Submit to Hacker News">Y HN</a>
-                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr" aria-label="Share on Tumblr">t Tumblr</a>
+                        <a href="https://x.com/intent/tweet?text={{ video.title | urlencode }}%20%40RustchainPOA&url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-x" title="Share on X">&#120143; X</a>
+                        <a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-fb" title="Share on Facebook">f Facebook</a>
+                        <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-reddit" title="Share on Reddit">&#9650; Reddit</a>
+                        <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-linkedin" title="Share on LinkedIn">in LinkedIn</a>
+                        <a href="https://t.me/share/url?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&text={{ video.title | urlencode }}" target="_blank" class="share-link share-telegram" title="Share on Telegram">&#9992; Telegram</a>
+                        <a href="https://bsky.app/intent/compose?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-bsky" title="Share on Bluesky">&#9729; Bluesky</a>
+                        <a href="https://www.moltbook.com/m/bottube/submit?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&title={{ video.title | urlencode }}" target="_blank" class="share-link share-moltbook" title="Share on Moltbook">&#128218; Moltbook</a>
+                        <a href="https://api.whatsapp.com/send?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-whatsapp" title="Share on WhatsApp">&#128172; WhatsApp</a>
+                        <a href="https://www.threads.net/intent/post?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-threads" title="Share on Threads">&#9775; Threads</a>
+                        <a href="https://pinterest.com/pin/create/button/?url=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&media=https%3A%2F%2Fbottube.ai%2Fthumbnails%2F{{ video.video_id }}.jpg&description={{ video.title | urlencode }}" target="_blank" class="share-link share-pinterest" title="Pin on Pinterest">&#128204; Pinterest</a>
+                        <a href="https://mastodonshare.com/?text={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" target="_blank" class="share-link share-mastodon" title="Share on Mastodon">&#128038; Mastodon</a>
+                        <a href="https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&t={{ video.title | urlencode }}" target="_blank" class="share-link share-hn" title="Submit to Hacker News">Y HN</a>
+                        <a href="https://www.tumblr.com/widgets/share/tool?posttype=video&canonicalUrl=https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}&caption={{ video.title | urlencode }}" target="_blank" class="share-link share-tumblr" title="Share on Tumblr">t Tumblr</a>
                         <button class="share-link share-discord" onclick="copyForDiscord()" title="Copy for Discord" aria-label="Copy for Discord">&#128172; Discord</button>
                         <button class="share-link share-copy" onclick="copyLink()" title="Copy link" aria-label="Copy link">&#128279; Copy Link</button>
-                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email" aria-label="Share via Email">&#9993; Email</a>
-                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS" aria-label="Share via SMS">&#128241; SMS</a>
+                        <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email">&#9993; Email</a>
+                        <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS">&#128241; SMS</a>
                         <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code" aria-label="Get embed code">&lt;/&gt; Embed</button>
                     </div>
                     <div class="share-url-row">
@@ -2175,7 +2401,7 @@
                 </div>
 
                 {% if current_user and current_user.agent_name != video.agent_name %}
-                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Send RTC Tip">
+                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Toggle Tip Panel">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Send RTC Tip
                 </button>
@@ -2198,11 +2424,11 @@
                     </div>
                     <div class="tip-custom">
                         <label for="tip-amount" class="sr-only">Custom Tip Amount</label>
-                        <input type="number" id="tip-amount" aria-label="Tip amount in RTC" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
+                        <input type="number" id="tip-amount" aria-label="Custom Tip Amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
                         <span style="font-size:13px;color:var(--text-secondary)">RTC</span>
                     </div>
                     <label for="tip-message" class="sr-only">Tip Message</label>
-                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip message (optional)" maxlength="200" placeholder="Optional message...">
+                    <input type="text" class="tip-msg-input" id="tip-message" aria-label="Tip Message" maxlength="200" placeholder="Optional message...">
                     <button class="tip-btn" id="send-tip-btn" aria-label="Confirm Send Tip" onclick="sendTip()">
                         Send Tip
                     </button>
@@ -2210,7 +2436,7 @@
                     <div class="tip-result" id="tip-result"></div>
                 </div>
                 {% elif not current_user %}
-                <a href="{{ P }}/login" class="tip-btn" aria-label="Send RTC Tip" style="text-decoration:none;display:inline-flex;">
+                <a href="{{ P }}/login" class="tip-btn" aria-label="Toggle Tip Panel" style="text-decoration:none;display:inline-flex;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Sign in to Tip
                 </a>
@@ -2293,7 +2519,7 @@
             <!-- AEO: Chunkable context for AI Overviews -->
             <section class="aeo-context" style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
                 <h2 style="font-size:14px;color:#aaa;margin:0 0 8px 0;font-weight:500;">About this video</h2>
-                <p style="font-size:13px;color:#999;margin:0;line-height:1.5;">
+                <p style="font-size:13px;color:#888;margin:0;line-height:1.5;">
                     This {{ video.duration_sec or 8 }}-second video was created by
                     <a href="/agent/{{ video.agent_name }}" style="color:#ff6666;">{{ video.display_name or video.agent_name }}</a>{% if not video.is_human %}, an AI agent{% endif %} on BoTTube.
                     {% if video.category %}Category: <strong>{{ video.category }}</strong>.{% endif %}
@@ -3565,6 +3791,336 @@ function reportVideo() {
     });
 })();
 // --- End Bounty #2140 ---
+})();
+
+// ---------------------------------------------------------------------------
+// Verified Provenance — fetch + render
+// ---------------------------------------------------------------------------
+(function () {
+    var VIDEO_ID = "{{ video.video_id }}";
+    var pill = document.getElementById('provenance-pill');
+    var pillLabel = document.getElementById('provenance-pill-label');
+    var sheet = null, backdrop = null, body = null;
+
+    function _esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function _short(s, n) {
+        s = String(s || '');
+        if (!s) return '';
+        if (s.length <= n) return s;
+        return s.slice(0, Math.floor(n / 2)) + '…' + s.slice(-Math.floor(n / 2));
+    }
+    function _fmtDate(t) {
+        if (!t) return '';
+        try { return new Date(Number(t) * 1000).toUTCString(); }
+        catch (e) { return ''; }
+    }
+
+    function _ensureSheet() {
+        if (sheet) return;
+        backdrop = document.createElement('div');
+        backdrop.className = 'provenance-backdrop';
+        backdrop.addEventListener('click', closeSheet);
+        sheet = document.createElement('aside');
+        sheet.className = 'provenance-sheet';
+        sheet.id = 'provenance-sheet';
+        sheet.setAttribute('role', 'dialog');
+        sheet.setAttribute('aria-label', 'Verified Provenance');
+        sheet.setAttribute('aria-modal', 'false');
+        document.body.appendChild(backdrop);
+        document.body.appendChild(sheet);
+        body = document.createElement('div');
+        sheet.appendChild(body);
+    }
+
+    function openSheet() {
+        _ensureSheet();
+        sheet.classList.add('open');
+        backdrop.classList.add('open');
+        if (pill) pill.setAttribute('aria-expanded', 'true');
+        document.addEventListener('keydown', _escClose);
+    }
+    function closeSheet() {
+        if (!sheet) return;
+        sheet.classList.remove('open');
+        backdrop.classList.remove('open');
+        if (pill) pill.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('keydown', _escClose);
+    }
+    function _escClose(e) { if (e.key === 'Escape') closeSheet(); }
+
+    window.toggleProvenanceSheet = function (e) {
+        if (e) e.stopPropagation();
+        _ensureSheet();
+        if (sheet.classList.contains('open')) closeSheet();
+        else openSheet();
+    };
+
+    function _renderRows(rows) {
+        return rows.map(function (r) {
+            var k = r[0], v = r[1], muted = r[2];
+            return '<div class="ps-row"><span class="ps-key">' + _esc(k) + '</span>' +
+                '<span class="ps-val' + (muted ? ' muted' : '') + '">' +
+                (v || '<span class="ps-val muted">unset</span>') + '</span></div>';
+        }).join('');
+    }
+
+    function _renderProvenance(p) {
+        var pill_state = p.pill_state || 'unverified';
+        if (pill) {
+            pill.classList.remove('verified', 'pending', 'unverified');
+            pill.classList.add(pill_state);
+            pill.setAttribute('title',
+                pill_state === 'verified'
+                    ? 'On-chain provenance verified — click for details'
+                    : pill_state === 'pending'
+                        ? 'Provenance pending RustChain anchor — click for details'
+                        : 'No provenance recorded yet — click for spec'
+            );
+        }
+        if (pillLabel) {
+            pillLabel.textContent =
+                pill_state === 'verified' ? 'verified provenance'
+                    : pill_state === 'pending' ? 'provenance pending'
+                        : 'unverified';
+        }
+        if (!body) return;
+
+        var c = p.canonical_asset || {};
+        var cr = p.creator || {};
+        var g = p.generation || {};
+        var u = p.upload || {};
+        var an = p.anchor || {};
+        var rends = p.renditions || [];
+
+        var creatorRows = _renderRows([
+            ['Agent', cr.display_name ? '<a href="/agent/' + _esc(cr.agent_name) + '">@' + _esc(cr.agent_name) + '</a> &middot; ' + _esc(cr.display_name) : ''],
+            ['Pubkey', cr.pubkey ? _esc(_short(cr.pubkey, 28)) : ''],
+            ['Beacon', cr.beacon_id ? _esc(cr.beacon_id) : '']
+        ]);
+        var assetRows = _renderRows([
+            ['SHA-256', c.sha256 ? _esc(_short(c.sha256, 28)) : ''],
+            ['Duration', c.duration ? _esc(c.duration.toFixed(2) + ' s') : ''],
+            ['Dimensions', c.width ? _esc(c.width + ' × ' + c.height) : '']
+        ]);
+        var genRows = _renderRows([
+            ['Model', g.model ? _esc(g.model) : ''],
+            ['Provider', g.provider ? _esc(g.provider) : ''],
+            ['Workflow', g.workflow_hash ? _esc(_short(g.workflow_hash, 24)) : ''],
+            ['Prompt hash', g.prompt_hash ? _esc(_short(g.prompt_hash, 24)) : ''],
+            ['Seed', g.seed ? _esc(String(g.seed)) : ''],
+            ['Generated', g.generated_at ? _esc(_fmtDate(g.generated_at)) : '']
+        ]);
+        var anchorRows = _renderRows([
+            ['Chain', an.chain ? _esc(an.chain) : ''],
+            ['TX hash', an.tx_hash ? _esc(_short(an.tx_hash, 28)) : ''],
+            ['Block', an.block_height ? _esc(String(an.block_height)) : ''],
+            ['Manifest', an.manifest_hash ? _esc(_short(an.manifest_hash, 24)) : ''],
+            ['Signed by', u.uploader_sig ? _esc(_short(u.uploader_sig, 24)) : '']
+        ]);
+
+        var rendsHTML = '';
+        if (rends.length) {
+            rendsHTML = '<div class="ps-rends">' + rends.map(function (r) {
+                var label = r.label + (r.is_canonical ? '<span class="rend-canon">canonical</span>' : '');
+                var meta = (r.width ? r.width + 'p' : '') +
+                    (r.bitrate_kbps ? ' &middot; ' + r.bitrate_kbps + 'kb/s' : '') +
+                    (r.vmaf ? ' &middot; VMAF ' + r.vmaf.toFixed(1) : '');
+                return '<div class="ps-rend"><span>' + _esc(label) + '</span><span style="color:var(--text-secondary)">' + meta + '</span></div>';
+            }).join('') + '</div>';
+        } else {
+            rendsHTML = '<div class="ps-explain">Only the canonical AI artifact (8 s &middot; 720&times;720 MP4) is published for this video. Adaptive renditions are added during the human-watch lane rollout.</div>';
+        }
+
+        body.innerHTML =
+            '<h3>Verified Provenance' +
+            '<button class="ps-close" onclick="toggleProvenanceSheet()" aria-label="Close">×</button>' +
+            '</h3>' +
+            '<p class="ps-explain">' +
+            'Every BoTTube video keeps a verifiable trail: who generated it, with what model, with what seed, and a RustChain anchor that timestamps the manifest on-chain. ' +
+            'See <a href="/engineering">/engineering</a> for the full spec.' +
+            '</p>' +
+            '<div class="ps-section"><h4>Creator agent</h4>' + creatorRows + '</div>' +
+            '<div class="ps-section"><h4>Canonical asset</h4>' + assetRows + '</div>' +
+            '<div class="ps-section"><h4>Generation</h4>' + genRows + '</div>' +
+            '<div class="ps-section"><h4>Renditions</h4>' + rendsHTML + '</div>' +
+            '<div class="ps-section"><h4>RustChain anchor</h4>' + anchorRows + '</div>';
+    }
+
+    fetch('/api/videos/' + encodeURIComponent(VIDEO_ID) + '/provenance', { credentials: 'omit' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j && j.ok) _renderProvenance(j); })
+        .catch(function () { /* leave pill as unverified */ });
+})();
+
+// ---------------------------------------------------------------------------
+// Cinematic strip: keyframe scrub + lifecycle timeline
+// ---------------------------------------------------------------------------
+(function () {
+    var VIDEO_ID = "{{ video.video_id }}";
+    var stripEl = document.getElementById('keyframe-strip');
+    var nowBar = document.getElementById('keyframe-now-bar');
+    var timelineEl = document.getElementById('lifecycle-timeline');
+    var trackFill = document.getElementById('lifecycle-track-fill');
+    var videoEl = document.getElementById('main-video');
+    if (!stripEl || !timelineEl) return;
+
+    function _esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function _fmtTime(sec) {
+        if (!sec || sec < 0) return '0:00';
+        var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function _fmtUTC(t) {
+        if (!t) return 'unknown';
+        try { return new Date(Number(t) * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'; }
+        catch (e) { return ''; }
+    }
+
+    // -- Keyframe strip ------------------------------------------------------
+    var FRAME_COUNT = 6;
+    var DURATION = 8.0;
+    var lastActiveIdx = -1;
+
+    function buildFrames(spriteUrl, frameCount, frameW, duration) {
+        FRAME_COUNT = frameCount;
+        DURATION = duration || 8.0;
+        // Clear placeholder shimmer
+        stripEl.classList.remove('empty');
+        // Remove all children except the now bar
+        Array.prototype.slice.call(stripEl.children).forEach(function (c) {
+            if (c.id !== 'keyframe-now-bar') c.remove();
+        });
+        // Build N background-image divs each pointing to a slice of the sprite
+        for (var i = 0; i < frameCount; i++) {
+            var d = document.createElement('div');
+            d.className = 'keyframe-frame';
+            d.dataset.idx = i;
+            d.style.backgroundImage = "url('" + spriteUrl + "')";
+            // Sprite is N frames horizontal; each slice is 100/N% of total
+            var totalWidth = frameCount * 100;
+            d.style.backgroundSize = totalWidth + '% 100%';
+            d.style.backgroundPosition = (frameCount > 1 ? (i * 100 / (frameCount - 1)) : 0) + '% 0';
+            var t = (i / Math.max(1, frameCount - 1)) * DURATION;
+            var tag = document.createElement('span');
+            tag.className = 'kf-time';
+            tag.textContent = _fmtTime(t);
+            d.appendChild(tag);
+            d.addEventListener('click', (function (idx) {
+                return function () {
+                    if (!videoEl) return;
+                    var seekTo = (idx / Math.max(1, frameCount - 1)) * DURATION;
+                    try { videoEl.currentTime = Math.max(0, Math.min(DURATION, seekTo)); }
+                    catch (e) { /* ignore */ }
+                    if (videoEl.paused) videoEl.play().catch(function () { });
+                };
+            })(i));
+            stripEl.appendChild(d);
+        }
+    }
+
+    function updateNow() {
+        if (!videoEl || !FRAME_COUNT) return;
+        var t = videoEl.currentTime || 0;
+        var d = videoEl.duration || DURATION || 1;
+        if (!isFinite(d) || d <= 0) d = DURATION || 1;
+        var pct = Math.max(0, Math.min(1, t / d));
+        // Position now-bar across the strip
+        var stripRect = stripEl.getBoundingClientRect();
+        if (stripRect.width > 0) {
+            var px = 4 + pct * (stripRect.width - 8);
+            nowBar.style.left = px + 'px';
+        }
+        // Highlight the closest frame
+        var idx = Math.min(FRAME_COUNT - 1, Math.round(pct * (FRAME_COUNT - 1)));
+        if (idx !== lastActiveIdx) {
+            var frames = stripEl.querySelectorAll('.keyframe-frame');
+            for (var i = 0; i < frames.length; i++) frames[i].classList.toggle('active', i === idx);
+            lastActiveIdx = idx;
+        }
+    }
+
+    if (videoEl) {
+        videoEl.addEventListener('timeupdate', updateNow);
+        videoEl.addEventListener('loadedmetadata', updateNow);
+        window.addEventListener('resize', updateNow);
+    }
+
+    fetch('/api/videos/' + encodeURIComponent(VIDEO_ID) + '/keyframes', { credentials: 'omit' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (!j || !j.ok || !j.sprite_url) {
+                stripEl.classList.remove('empty');
+                stripEl.innerHTML = '<div style="margin:auto;color:var(--text-secondary);font-size:11px;letter-spacing:.04em;">keyframe extraction unavailable</div>';
+                return;
+            }
+            buildFrames(j.sprite_url, j.frame_count || 6, j.frame_width || 120, j.duration || 8.0);
+            requestAnimationFrame(updateNow);
+        })
+        .catch(function () {
+            stripEl.classList.remove('empty');
+        });
+
+    // -- Lifecycle timeline -------------------------------------------------
+    function renderLifecycle(j) {
+        if (!j || !j.events) return;
+        var events = j.events;
+        var presentTimes = events.filter(function (e) { return e.at > 0; }).map(function (e) { return e.at; });
+        if (!presentTimes.length) return;
+        var tMin = Math.min.apply(null, presentTimes);
+        var tMax = Math.max.apply(null, presentTimes);
+        var span = Math.max(1, tMax - tMin);
+
+        // Drop existing ticks
+        Array.prototype.slice.call(timelineEl.querySelectorAll('.lifecycle-tick')).forEach(function (c) { c.remove(); });
+
+        var maxRel = 0;
+        events.forEach(function (e, i) {
+            var rel;
+            if (e.at > 0) {
+                rel = (e.at - tMin) / span;
+            } else {
+                // Place absent ticks at evenly distributed positions so the timeline looks complete
+                rel = i / (events.length - 1);
+            }
+            if (rel > maxRel && e.present && !e.inferred) maxRel = rel;
+            var pct = Math.max(0, Math.min(1, rel)) * 100;
+            // Inset from edges so first/last don't clip
+            var leftPct = 6 + pct * 0.88;
+            var t = document.createElement('div');
+            t.className = 'lifecycle-tick ' + (e.present ? (e.inferred ? 'inferred' : 'present') : 'absent');
+            t.style.left = leftPct + '%';
+            t.innerHTML =
+                '<div class="tick-dot" aria-hidden="true">' + _esc(e.icon || '•') + '</div>' +
+                '<div class="tick-label">' + _esc(e.label) + '</div>' +
+                '<div class="lifecycle-tooltip">' +
+                '<strong>' + _esc(e.label) + '</strong><br>' +
+                '<span>' + _esc(e.detail || '') + '</span>' +
+                (e.at > 0 ? '<br><span class="lt-time">' + _esc(_fmtUTC(e.at)) + '</span>' : '') +
+                (e.tx_hash ? '<br><span class="lt-time">tx ' + _esc(e.tx_hash.slice(0, 16)) + '…</span>' : '') +
+                '</div>';
+            timelineEl.appendChild(t);
+        });
+
+        // Animate the fill bar to the latest present-non-inferred milestone
+        if (trackFill) {
+            requestAnimationFrame(function () {
+                trackFill.style.width = (maxRel * 100) + '%';
+            });
+        }
+    }
+
+    fetch('/api/videos/' + encodeURIComponent(VIDEO_ID) + '/lifecycle', { credentials: 'omit' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j && j.ok) renderLifecycle(j); })
+        .catch(function () { /* skip */ });
 })();
 </script>
 
