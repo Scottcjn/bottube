@@ -16292,7 +16292,9 @@ def _ts_suspend_agent(agent_id, reason, severity="critical"):
 
 
 def ts_inspect_uploaded_file(file_path, agent_id):
-    """Hash an uploaded file, check the blocklist. If matched, suspend and return rejection.
+    """Hash an uploaded file, check the blocklist. If matched, *quarantine*
+    (preserve under § 2258A), suspend the uploader, audit, and — for CSAM
+    — enqueue an NCMEC report for operator review.
 
     Returns (rejected: bool, info: dict). Never raises.
     """
@@ -16304,17 +16306,52 @@ def ts_inspect_uploaded_file(file_path, agent_id):
     hit = _ts_check_blocklist(sha, kind="file")
     if hit:
         category = hit["category"]
-        # CSAM gets the heavy hand: delete the file, suspend agent, audit row,
-        # NCMEC report queued (stub for now — real submission goes through
-        # a separate, secure pipeline once registration is approved).
+        critical = category in {"csam", "terror"}
         try:
-            Path(file_path).unlink(missing_ok=True)
+            file_size = Path(file_path).stat().st_size
+        except Exception:
+            file_size = 0
+
+        # Snapshot upload provenance before we move the file. CSAM and
+        # other federal-reportable categories are *quarantined*, never
+        # deleted; § 2258A(h)(2)(A) requires 90-day preservation. For
+        # categories without a federal reporting duty we still preserve
+        # the file under quarantine so an operator can review.
+        ip = _get_client_ip()
+        ua = request.headers.get("User-Agent", "")[:500] if request else ""
+        agent_name = ""
+        agent_email = ""
+        try:
+            db = get_db()
+            row = db.execute(
+                "SELECT agent_name, COALESCE(email,'') AS email FROM agents WHERE id = ?",
+                (agent_id,),
+            ).fetchone()
+            if row:
+                agent_name = row["agent_name"] or ""
+                try:
+                    agent_email = row["email"] or ""
+                except Exception:
+                    agent_email = ""
         except Exception:
             pass
+
+        qpath = _ts_quarantine_file(
+            file_path, sha, category=category,
+            meta={
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "ip": ip,
+                "user_agent": ua,
+                "blocklist_source": hit["source"],
+                "blocklist_kind": hit["hash_kind"],
+            },
+        )
+
         _ts_suspend_agent(
             agent_id,
             reason=f"upload matched {category} blocklist (hash {sha[:16]}…)",
-            severity="critical" if category in {"csam", "terror"} else "major",
+            severity="critical" if critical else "major",
         )
         _ts_log_audit(
             actor="system",
@@ -16322,13 +16359,39 @@ def ts_inspect_uploaded_file(file_path, agent_id):
             target_kind="upload",
             target_id=sha,
             reason=f"blocklist match: {category} (source={hit['source']})",
-            severity="critical" if category in {"csam", "terror"} else "major",
-            meta={"agent_id": agent_id, "kind": hit["hash_kind"]},
+            severity="critical" if critical else "major",
+            meta={"agent_id": agent_id, "kind": hit["hash_kind"],
+                  "quarantine_path": qpath, "ip": ip},
         )
+
+        # CSAM and minor/NCII categories trigger an NCMEC report queue row.
+        # The operator drafts it from /admin/ncmec/queue and submits via
+        # report.cybertip.org until full ESP-API enrollment is active.
+        queue_id = ""
+        if category in {"csam", "ncii", "minor"}:
+            queue_id = _ncmec_enqueue(
+                source_type="blocklist_hit",
+                category=category,
+                target_kind="upload_attempt",
+                source_id=sha,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                email=agent_email,
+                ip=ip,
+                user_agent=ua,
+                sha256=sha,
+                file_size=file_size,
+                quarantine_path=qpath,
+                discovery_method=f"sha256 match against {category}/{hit['source']} blocklist",
+                notes="Auto-enqueued at upload time by ts_inspect_uploaded_file.",
+            )
+
         return True, {
             "rejected": True,
             "category": category,
             "sha256": sha,
+            "quarantine_path": qpath,
+            "ncmec_queue_id": queue_id,
         }
     return False, {"sha256": sha}
 
@@ -16491,7 +16554,58 @@ def submit_report():
                   reason=f"{category}: {target[:80]}", severity=severity,
                   meta={"ip": ip, "agent_id": reporter_agent_id})
 
-    return jsonify({
+    # CSAM, NCII, and minor-account reports auto-enqueue an NCMEC review.
+    # The status starts at "pending" so an operator must inspect, confirm
+    # apparent violation, draft from /admin/ncmec/draft, and submit. We do
+    # *not* auto-quarantine the target on a user report alone — that's a
+    # human-review decision to avoid weaponized takedowns.
+    ncmec_queue_id = ""
+    if category in {"csam", "ncii", "minor"}:
+        # Best-effort target lookup: extract a video id from the URL or
+        # fall back to the raw target string.
+        target_video_id = ""
+        m = re.search(r"/(?:watch|embed|v)/([A-Za-z0-9_-]{5,32})", target)
+        if m:
+            target_video_id = m.group(1)
+        elif re.fullmatch(r"[A-Za-z0-9_-]{5,32}", target):
+            target_video_id = target
+
+        involved_agent_id = 0
+        involved_agent_name = ""
+        if target_video_id:
+            try:
+                vrow = db.execute(
+                    """SELECT v.agent_id, a.agent_name
+                         FROM videos v JOIN agents a ON v.agent_id = a.id
+                        WHERE v.video_id = ?""",
+                    (target_video_id,),
+                ).fetchone()
+                if vrow:
+                    involved_agent_id = int(vrow["agent_id"] or 0)
+                    involved_agent_name = vrow["agent_name"] or ""
+            except Exception:
+                pass
+
+        ncmec_queue_id = _ncmec_enqueue(
+            source_type="user_report",
+            category=category,
+            target_kind="video" if target_video_id else "url",
+            target_video_id=target_video_id,
+            source_id=report_id,
+            agent_id=involved_agent_id,
+            agent_name=involved_agent_name,
+            ip="",  # the reporter's IP is not the involved party
+            user_agent="",
+            sha256="",
+            file_size=0,
+            quarantine_path="",
+            discovery_method=f"user report {report_id}",
+            notes=("Pending operator review. Confirm apparent violation, "
+                   "quarantine the file, then draft via /admin/ncmec/draft. "
+                   "Reporter detail: " + (detail[:300])),
+        )
+
+    out = {
         "ok": True,
         "report_id": report_id,
         "severity": severity,
@@ -16499,7 +16613,10 @@ def submit_report():
             "Report received. Thank you. CSAM and content depicting minors "
             "is reviewed within 24 hours and forwarded to NCMEC where applicable."
         ),
-    })
+    }
+    if ncmec_queue_id:
+        out["ncmec_queue_id"] = ncmec_queue_id
+    return jsonify(out)
 
 
 # --- Admin endpoints ------------------------------------------------------
@@ -16539,6 +16656,361 @@ def admin_blocklist_add():
     _ts_log_audit("admin", "blocklist_add", "hash", sha,
                   reason=f"{category} via {source}", severity="critical" if category == "csam" else "high")
     return jsonify({"ok": True, "sha256": sha, "category": category, "added_at": time.time()})
+
+
+# --- NCMEC submission queue + quarantine -----------------------------------
+# 18 U.S.C. § 2258A obligates a "provider" to report apparent child sexual
+# abuse material to NCMEC's CyberTipline as soon as reasonably possible
+# after obtaining actual knowledge, and to preserve the content for 90 days
+# (§ 2258A(h)(2)(A)). This module:
+#   * Creates a quarantine directory and a metadata sidecar per incident.
+#   * Replaces the previous "unlink on match" behaviour with a move to
+#     quarantine, restricted file mode (0600), and an audit row.
+#   * Enqueues an NCMEC report row that the operator drafts and submits
+#     manually via report.cybertip.org until full ESP API enrollment is
+#     active.
+#
+# This is preparedness, not a CyberTipline integration: the actual
+# CyberTipline submission still happens through the human operator
+# pasting the generated packet into the NCMEC web form, with the NCMEC
+# report ID written back via /admin/ncmec/mark-submitted.
+
+QUARANTINE_DIR = BASE_DIR / "quarantine"
+
+
+def _ts_quarantine_dir():
+    """Create the quarantine dir on first use with restrictive perms."""
+    QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(QUARANTINE_DIR, 0o700)
+    except Exception:
+        pass
+    return QUARANTINE_DIR
+
+
+def _ts_ensure_ncmec_schema():
+    """Lazy-create ncmec_reports table. Idempotent."""
+    _ensure_ts_schema()  # piggyback on the broader trust+safety schema
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS ncmec_reports (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                queue_id            TEXT UNIQUE NOT NULL,
+                source_type         TEXT NOT NULL,        -- blocklist_hit, user_report, manual
+                source_id           TEXT DEFAULT '',      -- hash_sha256 OR moderation report_id
+                category            TEXT DEFAULT 'csam',  -- csam, ncii, minor (others may exist later)
+                target_kind         TEXT DEFAULT '',      -- video, upload_attempt, comment
+                target_video_id     TEXT DEFAULT '',
+                involved_agent_id   INTEGER DEFAULT 0,
+                involved_agent_name TEXT DEFAULT '',
+                involved_email      TEXT DEFAULT '',
+                involved_ip         TEXT DEFAULT '',
+                involved_user_agent TEXT DEFAULT '',
+                canonical_sha256    TEXT DEFAULT '',
+                file_size           INTEGER DEFAULT 0,
+                quarantine_path     TEXT DEFAULT '',      -- absolute path on disk
+                discovered_at       REAL NOT NULL,
+                discovery_method    TEXT DEFAULT '',
+                status              TEXT DEFAULT 'pending', -- pending, drafted, submitted, acknowledged, closed
+                ncmec_report_id     TEXT DEFAULT '',      -- assigned by NCMEC after submission
+                submitted_at        REAL DEFAULT 0,
+                submitted_by        TEXT DEFAULT '',
+                notes               TEXT DEFAULT '',
+                created_at          REAL NOT NULL,
+                updated_at          REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ncmec_status
+                ON ncmec_reports(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_ncmec_target
+                ON ncmec_reports(target_video_id);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _ts_quarantine_file(src_path, sha, category="csam", meta=None):
+    """Move a flagged upload to the quarantine dir with restrictive perms.
+
+    Writes a JSON sidecar with discovery metadata. The original file is
+    *not* deleted — § 2258A(h) requires 90-day preservation. The caller is
+    responsible for separately invoking the NCMEC enqueue helper.
+
+    Returns the quarantine file path on success, "" on failure.
+    """
+    try:
+        qd = _ts_quarantine_dir()
+        ts = int(time.time())
+        # Predictable but unique filename: {category}_{sha8}_{epoch}.bin
+        qname = f"{category}_{sha[:12] if sha else 'unknown'}_{ts}.bin"
+        qpath = qd / qname
+        # Atomic-ish move; cross-fs fallback to copy+unlink.
+        try:
+            os.replace(str(src_path), str(qpath))
+        except OSError:
+            import shutil as _sh
+            _sh.copy2(str(src_path), str(qpath))
+            try:
+                Path(src_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        try:
+            os.chmod(qpath, 0o600)
+        except Exception:
+            pass
+        # Sidecar metadata
+        side = qpath.with_suffix(".json")
+        side.write_text(json.dumps({
+            "category": category,
+            "sha256": sha,
+            "src_path": str(src_path),
+            "quarantined_at": ts,
+            "preserve_until": ts + 86400 * 90,
+            "meta": meta or {},
+        }, indent=2))
+        try:
+            os.chmod(side, 0o600)
+        except Exception:
+            pass
+        return str(qpath)
+    except Exception as e:
+        try:
+            app.logger.error("quarantine failed: %s", e)
+        except Exception:
+            pass
+        return ""
+
+
+def _ncmec_enqueue(source_type, category="csam", target_kind="upload_attempt",
+                   target_video_id="", source_id="",
+                   agent_id=0, agent_name="", email="",
+                   ip="", user_agent="",
+                   sha256="", file_size=0, quarantine_path="",
+                   discovery_method="", notes=""):
+    """Insert a new NCMEC report queue row. Returns queue_id (or '')."""
+    try:
+        _ts_ensure_ncmec_schema()
+        queue_id = "ncmec_" + secrets.token_hex(8)
+        now = time.time()
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.execute(
+                """INSERT INTO ncmec_reports
+                       (queue_id, source_type, source_id, category, target_kind,
+                        target_video_id, involved_agent_id, involved_agent_name,
+                        involved_email, involved_ip, involved_user_agent,
+                        canonical_sha256, file_size, quarantine_path,
+                        discovered_at, discovery_method, status, notes,
+                        created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                (queue_id, source_type, source_id, category, target_kind,
+                 target_video_id, agent_id, agent_name,
+                 email, ip, user_agent,
+                 sha256, file_size, quarantine_path,
+                 now, discovery_method, notes,
+                 now, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        _ts_log_audit("system", "ncmec_enqueue", "ncmec_report", queue_id,
+                      reason=f"{source_type}/{category}", severity="critical",
+                      meta={"target_video_id": target_video_id,
+                            "agent_id": agent_id, "sha256": sha256})
+        return queue_id
+    except Exception as e:
+        try:
+            app.logger.error("ncmec enqueue failed: %s", e)
+        except Exception:
+            pass
+        return ""
+
+
+def _ncmec_packet_text(row):
+    """Render a CyberTipline-style submission packet from a queue row.
+
+    The operator pastes this into report.cybertip.org until full ESP-API
+    enrollment is active. Field labels mirror the NCMEC web form sections.
+    """
+    def _fmt(t):
+        if not t:
+            return "(unknown)"
+        try:
+            return datetime.datetime.utcfromtimestamp(float(t)).strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            return str(t)
+
+    sections = []
+    sections.append("NCMEC CyberTipline Submission Packet (DRAFT)")
+    sections.append("=" * 72)
+    sections.append(f"Queue ID:           {row['queue_id']}")
+    sections.append(f"Status:             {row['status']}")
+    sections.append(f"Discovered (UTC):   {_fmt(row['discovered_at'])}")
+    sections.append(f"Source type:        {row['source_type']}")
+    sections.append(f"Discovery method:   {row['discovery_method'] or '(unspecified)'}")
+    sections.append(f"Category:           {row['category']}")
+    sections.append("")
+
+    sections.append("REPORTING ELECTRONIC SERVICE PROVIDER")
+    sections.append("-" * 72)
+    sections.append("Name:               Elyan Labs (BoTTube)")
+    sections.append("Address:            Lake Charles, Louisiana, USA")
+    sections.append("Designated contact: abuse@elyanlabs.ai")
+    sections.append("Service URL:        https://bottube.ai")
+    sections.append("Statutory basis:    18 U.S.C. § 2258A — mandatory CyberTipline reporting.")
+    sections.append("Preservation:       File preserved on quarantine storage; will be retained")
+    sections.append("                    at least 90 days from discovery per § 2258A(h)(2)(A).")
+    sections.append("")
+
+    sections.append("INVOLVED PERSON / ACCOUNT")
+    sections.append("-" * 72)
+    sections.append(f"Agent name:         {row['involved_agent_name'] or '(unknown)'}")
+    sections.append(f"Internal agent id:  {row['involved_agent_id'] or '(unknown)'}")
+    sections.append(f"Account email:      {row['involved_email'] or '(unknown)'}")
+    sections.append(f"Originating IP:     {row['involved_ip'] or '(unknown)'}")
+    sections.append(f"User-Agent:         {row['involved_user_agent'] or '(unknown)'}")
+    sections.append("")
+
+    sections.append("INVOLVED CONTENT")
+    sections.append("-" * 72)
+    sections.append(f"Target kind:        {row['target_kind'] or '(unknown)'}")
+    sections.append(f"Target video id:    {row['target_video_id'] or '(none)'}")
+    sections.append(f"Public URL:         "
+                    + (f"https://bottube.ai/watch/{row['target_video_id']}"
+                       if row['target_video_id'] else "(blocked at upload — not published)"))
+    sections.append(f"Canonical SHA-256:  {row['canonical_sha256'] or '(unknown)'}")
+    sections.append(f"File size (bytes):  {row['file_size']}")
+    sections.append(f"Quarantine path:    {row['quarantine_path'] or '(not preserved — investigate)'}")
+    sections.append("")
+
+    sections.append("PROVIDER NOTES")
+    sections.append("-" * 72)
+    sections.append(row["notes"] or "(none)")
+    sections.append("")
+    sections.append("=" * 72)
+    sections.append("ACTION REQUIRED:")
+    sections.append("  1. Open https://report.cybertip.org and select 'Electronic Service Provider'.")
+    sections.append("  2. Paste the fields above into the corresponding form sections.")
+    sections.append("  3. Upload the quarantined file from the path above (do NOT redact hash or alter the file).")
+    sections.append("  4. After submission, NCMEC returns a Report ID. Record it via:")
+    sections.append("       POST /admin/ncmec/mark-submitted")
+    sections.append("       body: {\"queue_id\": \"" + row["queue_id"] + "\", \"ncmec_report_id\": \"<id>\"}")
+    sections.append("  5. Do not modify or delete the quarantined content for 90 days from the")
+    sections.append("     discovered date above (§ 2258A(h)(2)(A)). Cooperate with any law-enforcement")
+    sections.append("     preservation request.")
+    return "\n".join(sections) + "\n"
+
+
+@app.route("/admin/ncmec/queue")
+def admin_ncmec_queue():
+    """Pending NCMEC reports, ordered by oldest-first within severity."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _ts_ensure_ncmec_schema()
+    db = get_db()
+    rows = db.execute(
+        """SELECT queue_id, source_type, category, target_video_id,
+                  involved_agent_name, canonical_sha256,
+                  status, ncmec_report_id, discovered_at, created_at
+             FROM ncmec_reports
+            WHERE status IN ('pending', 'drafted')
+            ORDER BY discovered_at ASC
+            LIMIT 200"""
+    ).fetchall()
+    return jsonify({
+        "ok": True,
+        "count": len(rows),
+        "queue": [
+            {
+                "queue_id": r["queue_id"],
+                "source_type": r["source_type"],
+                "category": r["category"],
+                "target_video_id": r["target_video_id"],
+                "involved_agent_name": r["involved_agent_name"],
+                "canonical_sha256": r["canonical_sha256"],
+                "status": r["status"],
+                "ncmec_report_id": r["ncmec_report_id"],
+                "discovered_at": r["discovered_at"],
+                "age_hours": round((time.time() - r["discovered_at"]) / 3600, 2),
+            } for r in rows
+        ],
+    })
+
+
+@app.route("/admin/ncmec/draft/<queue_id>")
+def admin_ncmec_draft(queue_id):
+    """Render a CyberTipline submission packet for an operator to paste."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    if not re.fullmatch(r"ncmec_[a-f0-9]{8,32}", queue_id):
+        return jsonify({"ok": False, "error": "invalid queue_id"}), 400
+    _ts_ensure_ncmec_schema()
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM ncmec_reports WHERE queue_id = ?",
+        (queue_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    # Bump status to drafted on first read so the queue order is honest.
+    if row["status"] == "pending":
+        db.execute(
+            "UPDATE ncmec_reports SET status = 'drafted', updated_at = ? WHERE queue_id = ?",
+            (time.time(), queue_id),
+        )
+        db.commit()
+        _ts_log_audit("admin", "ncmec_draft", "ncmec_report", queue_id,
+                      reason="operator viewed draft", severity="high")
+
+    packet = _ncmec_packet_text(row)
+    return Response(packet, mimetype="text/plain", headers={
+        "Content-Disposition": f'attachment; filename="{queue_id}.txt"',
+        "Cache-Control": "no-store",
+    })
+
+
+@app.route("/admin/ncmec/mark-submitted", methods=["POST"])
+def admin_ncmec_mark_submitted():
+    """Operator records that a packet was filed with NCMEC; stores their report ID."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _ts_ensure_ncmec_schema()
+    data = request.get_json(silent=True) or {}
+    queue_id = (data.get("queue_id") or "").strip()
+    ncmec_id = (data.get("ncmec_report_id") or "").strip()[:128]
+    submitter = (data.get("submitter") or "operator").strip()[:64]
+
+    if not re.fullmatch(r"ncmec_[a-f0-9]{8,32}", queue_id):
+        return jsonify({"ok": False, "error": "invalid queue_id"}), 400
+    if not ncmec_id:
+        return jsonify({"ok": False, "error": "ncmec_report_id required"}), 400
+
+    db = get_db()
+    row = db.execute(
+        "SELECT queue_id, status FROM ncmec_reports WHERE queue_id = ?", (queue_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    db.execute(
+        """UPDATE ncmec_reports
+              SET status = 'submitted',
+                  ncmec_report_id = ?,
+                  submitted_at = ?,
+                  submitted_by = ?,
+                  updated_at = ?
+            WHERE queue_id = ?""",
+        (ncmec_id, time.time(), submitter, time.time(), queue_id),
+    )
+    db.commit()
+    _ts_log_audit("admin", "ncmec_submit", "ncmec_report", queue_id,
+                  reason=f"NCMEC id {ncmec_id}", severity="critical",
+                  meta={"submitter": submitter})
+    return jsonify({"ok": True, "queue_id": queue_id, "ncmec_report_id": ncmec_id})
 
 
 # --- Provenance write-path -------------------------------------------------
