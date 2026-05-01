@@ -18977,6 +18977,269 @@ def admin_renditions_backfill():
     })
 
 
+# --- Phase 10.5: anchor batch lifecycle ----------------------------------
+# A pull-batch worker pattern, per Codex's Phase 10 review:
+#   * Bottube exposes GET /api/admin/provenance/pending — atomically
+#     claims a batch of unanchored manifests, returns them.
+#   * Worker cron (on node-2 / RustChain Ergo host) pulls hourly,
+#     computes a Merkle root of (video_id || canonical_sha256) leaves,
+#     anchors the root in a single Ergo box, POSTs the resulting
+#     tx_hash + block_height back to /api/admin/provenance/anchor-result.
+#   * Pills flip green only after a confirmed block height arrives.
+# Idempotent on batch_id so a retry of the callback can't double-write.
+
+def _provenance_ensure_anchor_columns():
+    """Idempotently add anchor_status and anchor_batch_id columns."""
+    _ensure_provenance_schema()
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "anchor_status" not in cols:
+            conn.execute(
+                "ALTER TABLE video_provenance ADD COLUMN anchor_status TEXT DEFAULT 'pending'"
+            )
+        if "anchor_batch_id" not in cols:
+            conn.execute(
+                "ALTER TABLE video_provenance ADD COLUMN anchor_batch_id TEXT DEFAULT ''"
+            )
+        if "anchored_at" not in cols:
+            conn.execute(
+                "ALTER TABLE video_provenance ADD COLUMN anchored_at REAL DEFAULT 0"
+            )
+        if "anchor_error" not in cols:
+            conn.execute(
+                "ALTER TABLE video_provenance ADD COLUMN anchor_error TEXT DEFAULT ''"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/provenance/pending", methods=["GET", "POST"])
+def admin_provenance_pending():
+    """Claim a batch of unanchored manifests for the worker to anchor.
+
+    Atomically (in one transaction):
+      * Mints a batch_id.
+      * Selects up to `limit` rows with uploader_sig != '' AND anchor_tx_hash = ''
+        AND anchor_status IN ('pending', 'failed').
+      * Updates anchor_status='claimed', anchor_batch_id=<new id>.
+      * Returns the claimed rows + batch_id.
+
+    The worker is expected to either succeed (POST anchor-result) or
+    timeout, in which case the next claim treats stale 'claimed' rows
+    older than `claim_ttl` as eligible again.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _provenance_ensure_anchor_columns()
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(500, int(data.get("limit", 100))))
+    except Exception:
+        limit = 100
+    try:
+        claim_ttl_s = max(60, int(data.get("claim_ttl_s", 3600)))
+    except Exception:
+        claim_ttl_s = 3600
+
+    batch_id = "batch_" + secrets.token_hex(8)
+    now = time.time()
+    stale_cutoff = now - claim_ttl_s
+
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                      creator_agent_id, creator_pubkey, model, generated_at
+                 FROM video_provenance
+                WHERE uploader_sig != ''
+                  AND COALESCE(anchor_tx_hash, '') = ''
+                  AND (
+                        COALESCE(anchor_status, 'pending') IN ('pending', 'failed')
+                     OR (COALESCE(anchor_status, 'pending') = 'claimed'
+                         AND COALESCE(updated_at, 0) < ?)
+                      )
+                ORDER BY uploaded_at ASC
+                LIMIT ?""",
+            (stale_cutoff, limit),
+        ).fetchall()
+        if not rows:
+            conn.execute("COMMIT")
+            return jsonify({
+                "ok": True,
+                "batch_id": "",
+                "manifests": [],
+                "count": 0,
+                "message": "no manifests pending anchor",
+            })
+        ids = [r["video_id"] for r in rows]
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(
+            f"""UPDATE video_provenance
+                  SET anchor_status = 'claimed',
+                      anchor_batch_id = ?,
+                      updated_at = ?
+                WHERE video_id IN ({placeholders})""",
+            [batch_id, now] + ids,
+        )
+        conn.execute("COMMIT")
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        conn.close()
+
+    manifests = []
+    for r in rows:
+        manifests.append({
+            "video_id": r["video_id"],
+            "canonical_sha256": r["canonical_sha256"],
+            "uploader_sig": r["uploader_sig"],
+            "uploaded_at": r["uploaded_at"],
+            "creator_agent_id": r["creator_agent_id"],
+            "creator_pubkey": r["creator_pubkey"] or "",
+            "model": r["model"] or "",
+            "generated_at": r["generated_at"] or 0,
+        })
+    return jsonify({
+        "ok": True,
+        "batch_id": batch_id,
+        "claimed_at": now,
+        "claim_ttl_s": claim_ttl_s,
+        "count": len(manifests),
+        "manifests": manifests,
+    })
+
+
+@app.route("/api/admin/provenance/anchor-result", methods=["POST"])
+def admin_provenance_anchor_result():
+    """Finalize a claimed batch with the on-chain anchor result.
+
+    Idempotent on batch_id: if the batch is already anchored, this is a
+    no-op success. If a callback arrives for a batch_id that doesn't
+    match the rows' current state, we log and refuse so a stale worker
+    can't overwrite a later successful anchor.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _provenance_ensure_anchor_columns()
+    data = request.get_json(silent=True) or {}
+    batch_id = (data.get("batch_id") or "").strip()
+    chain = (data.get("chain") or "ergo").strip()[:32]
+    tx_hash = (data.get("tx_hash") or "").strip()[:128]
+    try:
+        block_height = int(data.get("block_height", 0))
+    except Exception:
+        block_height = 0
+    manifest_hash = (data.get("merkle_root") or data.get("manifest_hash") or "").strip()[:128]
+    error_msg = (data.get("error") or "").strip()[:500]
+    video_ids = data.get("video_ids") or []
+
+    if not batch_id or not re.fullmatch(r"batch_[a-f0-9]{8,32}", batch_id):
+        return jsonify({"ok": False, "error": "invalid batch_id"}), 400
+
+    now = time.time()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            """SELECT video_id, anchor_status, anchor_tx_hash
+                 FROM video_provenance
+                WHERE anchor_batch_id = ?""",
+            (batch_id,),
+        ).fetchall()
+        if not existing:
+            conn.execute("ROLLBACK")
+            return jsonify({"ok": False, "error": "batch_id has no claimed rows"}), 404
+
+        # Idempotency: if batch already anchored, return ok.
+        already = [r for r in existing if r["anchor_tx_hash"]]
+        if already and not error_msg:
+            conn.execute("ROLLBACK")
+            return jsonify({
+                "ok": True,
+                "idempotent": True,
+                "batch_id": batch_id,
+                "rows_already_anchored": len(already),
+            })
+
+        if error_msg:
+            # Worker reported failure — release the claim, keep status='failed'
+            conn.execute(
+                """UPDATE video_provenance
+                      SET anchor_status = 'failed',
+                          anchor_error = ?,
+                          updated_at = ?
+                    WHERE anchor_batch_id = ?""",
+                (error_msg, now, batch_id),
+            )
+            conn.execute("COMMIT")
+            return jsonify({
+                "ok": True,
+                "batch_id": batch_id,
+                "status": "failed",
+                "rows": len(existing),
+            })
+
+        if not tx_hash or not manifest_hash:
+            conn.execute("ROLLBACK")
+            return jsonify({
+                "ok": False,
+                "error": "tx_hash and merkle_root required for success result",
+            }), 400
+
+        # Apply the anchor result to all rows in this batch.
+        conn.execute(
+            """UPDATE video_provenance
+                  SET anchor_chain = ?,
+                      anchor_tx_hash = ?,
+                      anchor_block_height = ?,
+                      anchor_manifest_hash = ?,
+                      anchor_status = 'anchored',
+                      anchored_at = ?,
+                      anchor_error = '',
+                      updated_at = ?
+                WHERE anchor_batch_id = ?""",
+            (chain, tx_hash, block_height, manifest_hash, now, now, batch_id),
+        )
+        conn.execute("COMMIT")
+        rows_anchored = len(existing)
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        conn.close()
+
+    _ts_log_audit(
+        actor="anchor_worker",
+        action="anchor_batch",
+        target_kind="batch",
+        target_id=batch_id,
+        reason=f"{rows_anchored} manifests anchored on {chain} block {block_height}",
+        severity="normal",
+        meta={"tx_hash": tx_hash, "merkle_root": manifest_hash},
+    )
+
+    return jsonify({
+        "ok": True,
+        "batch_id": batch_id,
+        "rows_anchored": rows_anchored,
+        "tx_hash": tx_hash,
+        "block_height": block_height,
+        "chain": chain,
+    })
+
+
 @app.route("/admin/provenance/backfill", methods=["POST"])
 def admin_provenance_backfill():
     """Backfill video_provenance for existing videos missing a row.
