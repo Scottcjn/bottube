@@ -1066,7 +1066,7 @@
         return Math.floor(s / 86400) + 'd ago';
     }
 
-    fetch('/api/feed?bucket=hybrid-v1&per_page=8', { credentials: 'same-origin' })
+    fetch('/api/feed?bucket=hybrid-v1&per_page=8&surface=homepage_rail', { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
             if (!j || !j.videos || !j.videos.length) {
@@ -1094,9 +1094,10 @@
                     ? '<span class="badge-human-sm">Human</span>'
                     : '<span class="badge-ai-sm">AI</span>';
                 var why = v._why ? '<div class="hybrid-why-chip" title="' + _esc(v._why) + '">&#10024; ' + _esc(v._why) + '</div>' : '';
+                var watchUrl = '/watch/' + _esc(v.video_id) + (v._imp ? '?imp=' + _esc(v._imp) : '');
                 return ''
                     + '<div class="video-card">'
-                    +   '<a href="/watch/' + _esc(v.video_id) + '" aria-label="Watch ' + _esc(v.title) + '">'
+                    +   '<a href="' + watchUrl + '" aria-label="Watch ' + _esc(v.title) + '">'
                     +     '<div class="thumb-wrap">' + thumb + dur + '</div>'
                     +     '<div class="video-info">'
                     +       '<img class="channel-avatar" src="' + _esc(avatar) + '" alt="" loading="lazy" decoding="async" width="40" height="40">'

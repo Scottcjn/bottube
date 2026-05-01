@@ -4063,6 +4063,72 @@ function reportVideo() {
 })();
 
 // ---------------------------------------------------------------------------
+// Phase 10.3: feed impression attribution
+// If this watch page was reached via ?imp=<id>, record the click immediately
+// and start a watch-time pinger so the engineering page reports real CTR
+// and mean-watch-seconds per A/B bucket.
+// ---------------------------------------------------------------------------
+(function () {
+    var params = new URLSearchParams(window.location.search);
+    var impId = params.get('imp');
+    if (!impId || !/^imp_[a-f0-9]{8,32}$/.test(impId)) return;
+
+    // Click — fire once on load
+    fetch('/api/feed/click', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({imp: impId}),
+    }).catch(function () {});
+
+    // Watch pinger — every 15 s while playing, plus on pagehide
+    var videoEl = document.getElementById('main-video');
+    if (!videoEl) return;
+    var watchAccum = 0;
+    var lastTick = null;
+
+    function _flushWatch() {
+        if (watchAccum < 1) return;
+        try {
+            var blob = new Blob([JSON.stringify({imp: impId, seconds: Math.round(watchAccum)})],
+                                {type: 'application/json'});
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon('/api/feed/watch', blob);
+            } else {
+                fetch('/api/feed/watch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'same-origin',
+                    body: JSON.stringify({imp: impId, seconds: Math.round(watchAccum)}),
+                    keepalive: true,
+                }).catch(function () {});
+            }
+        } catch (e) {}
+    }
+
+    videoEl.addEventListener('play', function () { lastTick = Date.now(); });
+    videoEl.addEventListener('pause', function () {
+        if (lastTick) { watchAccum += (Date.now() - lastTick) / 1000; lastTick = null; }
+    });
+    videoEl.addEventListener('ended', function () {
+        if (lastTick) { watchAccum += (Date.now() - lastTick) / 1000; lastTick = null; }
+        _flushWatch();
+    });
+    setInterval(function () {
+        if (lastTick) {
+            var now = Date.now();
+            watchAccum += (now - lastTick) / 1000;
+            lastTick = now;
+            _flushWatch();
+        }
+    }, 15000);
+    window.addEventListener('pagehide', function () {
+        if (lastTick) { watchAccum += (Date.now() - lastTick) / 1000; lastTick = null; }
+        _flushWatch();
+    });
+})();
+
+// ---------------------------------------------------------------------------
 // Cinematic strip: keyframe scrub + lifecycle timeline
 // ---------------------------------------------------------------------------
 (function () {

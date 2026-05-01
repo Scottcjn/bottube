@@ -68,14 +68,26 @@
     </div>
 
     <div class="eng-card">
-      <h2>API Latency (last 1k requests)</h2>
+      <h2>User API Latency (last 1k requests)</h2>
       <div class="row"><span class="label">p50</span><span class="value">{{ '%.0f'|format(latency.p50) }} ms</span></div>
       <div class="row"><span class="label">p95</span><span class="value">{{ '%.0f'|format(latency.p95) }} ms</span></div>
       <div class="row"><span class="label">p99</span><span class="value">{{ '%.0f'|format(latency.p99) }} ms</span></div>
       <div class="row"><span class="label">samples</span><span class="value">{{ latency.samples }}</span></div>
       <div style="margin-top:10px;">
         <div class="latency-bar"><div class="fill" style="width: {{ latency.p95_bar }}%"></div></div>
-        <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">p95 against 500 ms ceiling</div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">p95 against 500 ms ceiling &middot; excludes <code style="background:var(--bg-secondary);padding:1px 4px;border-radius:3px;font-size:10px;">/admin/*</code> + media</div>
+      </div>
+    </div>
+
+    <div class="eng-card">
+      <h2>Admin Backfill Latency (last 200)</h2>
+      <div class="row"><span class="label">p50</span><span class="value">{{ '%.0f'|format(latency_admin.p50 / 1000) }} s</span></div>
+      <div class="row"><span class="label">p95</span><span class="value">{{ '%.0f'|format(latency_admin.p95 / 1000) }} s</span></div>
+      <div class="row"><span class="label">p99</span><span class="value">{{ '%.0f'|format(latency_admin.p99 / 1000) }} s</span></div>
+      <div class="row"><span class="label">samples</span><span class="value">{{ latency_admin.samples }}</span></div>
+      <div style="margin-top:10px;">
+        <div class="latency-bar"><div class="fill" style="width: {{ latency_admin.p95_bar }}%"></div></div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">p95 against 60 s ceiling &middot; ffmpeg encode + VMAF + Gemini embedding batches run here intentionally</div>
       </div>
     </div>
 
@@ -97,6 +109,30 @@
       <div class="row"><span class="label">completed (24h)</span><span class="value">{{ queue.completed_24h }}</span></div>
       <div class="row"><span class="label">failed (24h)</span><span class="value">{{ queue.failed_24h }}</span></div>
       <div class="row"><span class="label">queue depth percentile</span><span class="value">{{ queue.depth_label }}</span></div>
+    </div>
+
+    <div class="eng-card">
+      <h2>Bucket Outcomes (last 7 days)</h2>
+      {% if outcomes %}
+        {% for bucket, o in outcomes.items() %}
+        <div class="row">
+          <span class="label">{{ bucket }}</span>
+          <span class="value" style="font-variant-numeric: tabular-nums;">
+            CTR <strong>{{ '%.2f'|format(o.ctr * 100) }}%</strong>
+            &middot; {{ o.clicks }}/{{ o.impressions }}
+            {% if o.mean_watch_s %}
+              &middot; <span title="mean watch seconds among clicked impressions">w&#772; {{ '%.1f'|format(o.mean_watch_s) }}s</span>
+            {% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="row"><span class="label">no impressions yet</span><span class="value">—</span></div>
+      {% endif %}
+      <div class="row" style="margin-top:8px;">
+        <span class="label" style="font-size:11px;">attribution</span>
+        <span class="value" style="font-size:11px;">click via <code>?imp=&lt;id&gt;</code> hop &middot; watch via <code>POST /api/feed/watch</code></span>
+      </div>
     </div>
 
     <div class="eng-card">

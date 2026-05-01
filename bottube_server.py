@@ -8725,6 +8725,163 @@ def _feed_log_impressions(bucket, video_ids):
         pass
 
 
+# --- Phase 10.3: feed_impressions table for click + watch attribution ---
+
+_FEED_IMP_SCHEMA_READY = False
+_FEED_IMP_SCHEMA_LOCK = threading.Lock()
+
+
+def _feed_imp_ensure_schema():
+    """Lazy-create feed_impressions table per Codex Phase 10 spec."""
+    global _FEED_IMP_SCHEMA_READY
+    if _FEED_IMP_SCHEMA_READY:
+        return
+    with _FEED_IMP_SCHEMA_LOCK:
+        if _FEED_IMP_SCHEMA_READY:
+            return
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS feed_impressions (
+                    impression_id   TEXT PRIMARY KEY,
+                    visitor_id      TEXT DEFAULT '',
+                    surface         TEXT NOT NULL,        -- homepage_rail | feed_api | watch_upnext
+                    bucket          TEXT NOT NULL,        -- latest | heuristic | hybrid-v1 | personalized
+                    video_id        TEXT NOT NULL,
+                    position        INTEGER NOT NULL,     -- 0-indexed slot in the rendered list
+                    created_at      REAL NOT NULL,
+                    clicked_at      REAL DEFAULT 0,
+                    watch_seconds   REAL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_feed_imp_bucket_created
+                    ON feed_impressions(bucket, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_feed_imp_visitor
+                    ON feed_impressions(visitor_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_feed_imp_video
+                    ON feed_impressions(video_id, created_at DESC);
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        _FEED_IMP_SCHEMA_READY = True
+
+
+def _feed_imp_record(visitor_id, surface, bucket, videos):
+    """Mint impression IDs for a set of rendered cards. Returns list of ids."""
+    if not videos:
+        return []
+    _feed_imp_ensure_schema()
+    now = time.time()
+    rows = []
+    ids = []
+    for pos, vid in enumerate(videos):
+        imp_id = "imp_" + secrets.token_hex(8)
+        ids.append(imp_id)
+        rows.append((imp_id, visitor_id or "", surface, bucket, vid, pos, now))
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.executemany(
+            """INSERT INTO feed_impressions
+                   (impression_id, visitor_id, surface, bucket, video_id, position, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    return ids
+
+
+@app.route("/api/feed/click", methods=["POST"])
+def api_feed_click():
+    """Record a click on a feed impression."""
+    _feed_imp_ensure_schema()
+    data = request.get_json(silent=True) or {}
+    imp_id = (data.get("imp") or data.get("impression_id") or "").strip()
+    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
+        return jsonify({"ok": False, "error": "invalid impression_id"}), 400
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute(
+            """UPDATE feed_impressions
+                  SET clicked_at = ?
+                WHERE impression_id = ?
+                  AND clicked_at = 0""",
+            (time.time(), imp_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+@app.route("/api/feed/watch", methods=["POST"])
+def api_feed_watch():
+    """Record a watch-seconds ping for a feed impression. Idempotent in MAX-direction."""
+    _feed_imp_ensure_schema()
+    data = request.get_json(silent=True) or {}
+    imp_id = (data.get("imp") or data.get("impression_id") or "").strip()
+    try:
+        seconds = max(0.0, min(86400.0, float(data.get("seconds", 0))))
+    except Exception:
+        return jsonify({"ok": False, "error": "seconds must be a number"}), 400
+    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
+        return jsonify({"ok": False, "error": "invalid impression_id"}), 400
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute(
+            """UPDATE feed_impressions
+                  SET watch_seconds = MAX(COALESCE(watch_seconds, 0), ?)
+                WHERE impression_id = ?""",
+            (seconds, imp_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+def _feed_imp_outcomes(window_hours=168):
+    """Compute per-bucket CTR and mean-watch-seconds over the last window."""
+    _feed_imp_ensure_schema()
+    cutoff = time.time() - window_hours * 3600
+    out = {}
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT bucket,
+                      COUNT(*) AS impressions,
+                      SUM(CASE WHEN clicked_at > 0 THEN 1 ELSE 0 END) AS clicks,
+                      AVG(CASE WHEN clicked_at > 0 AND watch_seconds > 0
+                               THEN watch_seconds ELSE NULL END) AS mean_watch
+                 FROM feed_impressions
+                WHERE created_at > ?
+                GROUP BY bucket
+                ORDER BY impressions DESC""",
+            (cutoff,),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            imps = int(r["impressions"] or 0)
+            clicks = int(r["clicks"] or 0)
+            ctr = (clicks / imps) if imps else 0.0
+            out[r["bucket"]] = {
+                "impressions": imps,
+                "clicks": clicks,
+                "ctr": round(ctr, 4),
+                "mean_watch_s": round(float(r["mean_watch"] or 0), 1),
+            }
+    except Exception:
+        pass
+    return out
+
+
 @app.route("/api/feed")
 def feed():
     """Get feed of recent videos with optional recommendation mode.
@@ -8797,6 +8954,17 @@ def feed():
                 _feed_log_impressions("hybrid-v1", [v["video_id"] for v in videos])
             except Exception:
                 pass
+            try:
+                imp_ids = _feed_imp_record(
+                    visitor_id=visitor_id,
+                    surface=request.args.get("surface", "feed_api"),
+                    bucket="hybrid-v1",
+                    videos=[v["video_id"] for v in videos],
+                )
+                for v, imp_id in zip(videos, imp_ids):
+                    v["_imp"] = imp_id
+            except Exception:
+                pass
             return jsonify({
                 "videos": videos,
                 "page": page,
@@ -8810,9 +8978,79 @@ def feed():
             })
         # Fall through to heuristic/latest if cache not warm yet
 
-    # Heuristic bucket maps to the existing recommendation engine path.
-    if bucket == "heuristic" and mode != "recommended":
-        mode = "recommended"
+    # Heuristic bucket: a popularity-only ranker (independent of viewer
+    # identity). Codex called the previous fallback-to-latest behavior
+    # "credibility debt" — this turns it into a real second arm:
+    #
+    #   score = log1p(views) + 3 * log1p(likes) - 2 * log1p(dislikes)
+    #
+    # Slight age decay (multiply by exp(-age_days/60)) so the top of the
+    # rail isn't permanently dominated by ancient hits. No personal
+    # history, no agent_id required, deterministic across viewers.
+    if bucket == "heuristic" and page == 1:
+        db = get_db()
+        try:
+            cat_clause = "AND v.category = ?" if category else ""
+            params = [category] if category else []
+            params.append(per_page * 4)
+            rows = db.execute(
+                f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+                      FROM videos v JOIN agents a ON v.agent_id = a.id
+                     WHERE COALESCE(v.is_removed, 0) = 0
+                       AND COALESCE(a.is_banned, 0) = 0
+                       {cat_clause}
+                     ORDER BY v.created_at DESC
+                     LIMIT ?""",
+                params,
+            ).fetchall()
+            now = time.time()
+            scored = []
+            for r in rows:
+                age_days = max(0.0, (now - float(r["created_at"] or now)) / 86400.0)
+                views = float(r["views"] or 0)
+                likes = float(r["likes"] or 0)
+                dislikes = float(r["dislikes"] or 0)
+                pop = math.log1p(views) + 3.0 * math.log1p(likes) - 2.0 * math.log1p(dislikes)
+                age_decay = math.exp(-age_days / 60.0)
+                scored.append((pop * age_decay, r))
+            scored.sort(key=lambda t: -t[0])
+            result_videos = []
+            for score, r in scored[:per_page]:
+                d = video_to_dict(r)
+                d["agent_name"] = r["agent_name"]
+                d["display_name"] = r["display_name"]
+                d["avatar_url"] = r["avatar_url"]
+                d["_why"] = "Trending"
+                d["_score"] = round(float(score), 4)
+                result_videos.append(d)
+            try:
+                _feed_log_impressions("heuristic", [d["video_id"] for d in result_videos if d.get("video_id")])
+            except Exception:
+                pass
+            try:
+                imp_ids = _feed_imp_record(
+                    visitor_id=visitor_id,
+                    surface=request.args.get("surface", "feed_api"),
+                    bucket="heuristic",
+                    videos=[d["video_id"] for d in result_videos if d.get("video_id")],
+                )
+                for v, imp_id in zip(result_videos, imp_ids):
+                    v["_imp"] = imp_id
+            except Exception:
+                pass
+            return jsonify({
+                "videos": result_videos,
+                "page": page,
+                "mode": "heuristic",
+                "bucket": "heuristic",
+                "explanation": (
+                    "Popularity-only ranker — log-views + likes - dislikes, "
+                    "with mild 60-day age decay. No personal history."
+                ),
+            })
+        except Exception as _h_e:
+            app.logger.warning("heuristic feed failed, falling back to latest: %s", _h_e)
+            # fall through to recommended/latest paths
 
     # Use recommendation engine for recommended mode
     if mode == "recommended":
@@ -8834,17 +9072,17 @@ def feed():
             d["display_name"] = v.get("display_name", "")
             d["avatar_url"] = v.get("avatar_url", "")
             d["recommend_score"] = v.get("recommend_score", 0)
-            d["_why"] = "Picked by heuristic ranker"
+            d["_why"] = "Personalized"
             result_videos.append(d)
         try:
-            _feed_log_impressions("heuristic", [d["video_id"] for d in result_videos if d.get("video_id")])
+            _feed_log_impressions("personalized", [d["video_id"] for d in result_videos if d.get("video_id")])
         except Exception:
             pass
         return jsonify({
             "videos": result_videos,
             "page": page,
             "mode": actual_mode,
-            "bucket": "heuristic",
+            "bucket": "personalized",
         })
     
     # Default: latest mode (deterministic fallback)
@@ -8892,6 +9130,17 @@ def feed():
 
     try:
         _feed_log_impressions("latest", [v["video_id"] for v in videos if v.get("video_id")])
+    except Exception:
+        pass
+    try:
+        imp_ids = _feed_imp_record(
+            visitor_id=visitor_id,
+            surface=request.args.get("surface", "feed_api"),
+            bucket=bucket if bucket in _FEED_BUCKETS else "latest",
+            videos=[v["video_id"] for v in videos if v.get("video_id")],
+        )
+        for v, imp_id in zip(videos, imp_ids):
+            v["_imp"] = imp_id
     except Exception:
         pass
 
@@ -15776,15 +16025,27 @@ def video_ab_variants(video_id):
 from collections import deque as _eng_deque
 from threading import Lock as _eng_Lock
 
-_ENG_LATENCY = _eng_deque(maxlen=1000)  # ms samples
+# Two ring buffers: one for user-facing API/UI traffic, one for /admin/*
+# backfill calls (each batch is 50-200 s). Mixing them turns the public
+# p95 into reporting bias — better to surface admin latency as a separate
+# truth panel on the engineering page (per Codex Phase 10 review).
+_ENG_LATENCY = _eng_deque(maxlen=1000)         # user-facing samples (ms)
 _ENG_LATENCY_LOCK = _eng_Lock()
+_ENG_LATENCY_ADMIN = _eng_deque(maxlen=200)    # admin samples (ms)
+_ENG_LATENCY_ADMIN_LOCK = _eng_Lock()
 
 # Path prefixes excluded from latency sampling so static / streaming traffic
 # doesn't dominate the histogram.
 _ENG_LATENCY_SKIP = (
     "/static/", "/thumbnails/", "/avatars/", "/videos/", "/api/videos/",
     "/favicon", "/robots", "/sitemap", "/health", "/api/engineering",
+    "/keyframes/", "/renditions/",
 )
+
+# Path prefixes that route to the *admin* ring buffer instead of the
+# user-facing one. Admin work is intentionally slow (ffmpeg, embedding
+# backfill) — call it out, don't pollute the public p95 with it.
+_ENG_LATENCY_ADMIN_PREFIXES = ("/admin/",)
 
 
 @app.before_request
@@ -15804,7 +16065,12 @@ def _eng_lat_record(response):
             return response
         ms = (time.time() - t0) * 1000.0
         # Cap absurd values (request still in-flight tail) to keep histogram sane
-        if ms < 30000:
+        if ms >= 600000:  # 10-min hard ceiling for admin too
+            return response
+        if any(path.startswith(p) for p in _ENG_LATENCY_ADMIN_PREFIXES):
+            with _ENG_LATENCY_ADMIN_LOCK:
+                _ENG_LATENCY_ADMIN.append(ms)
+        elif ms < 30000:
             with _ENG_LATENCY_LOCK:
                 _ENG_LATENCY.append(ms)
     except Exception:
@@ -15881,7 +16147,7 @@ def _eng_collect():
         pass
     db = get_db()
 
-    # Latency snapshot
+    # Latency snapshots — two buckets: user-facing API/UI and /admin/*.
     with _ENG_LATENCY_LOCK:
         samples = list(_ENG_LATENCY)
     latency = {
@@ -15891,6 +16157,17 @@ def _eng_collect():
         "p99": _eng_percentile(samples, 99),
     }
     latency["p95_bar"] = max(2.0, min(100.0, (latency["p95"] / 500.0) * 100.0))
+
+    with _ENG_LATENCY_ADMIN_LOCK:
+        admin_samples = list(_ENG_LATENCY_ADMIN)
+    latency_admin = {
+        "samples": len(admin_samples),
+        "p50": _eng_percentile(admin_samples, 50),
+        "p95": _eng_percentile(admin_samples, 95),
+        "p99": _eng_percentile(admin_samples, 99),
+    }
+    # Admin ceiling is 60 s — backfill batches are intentionally slow.
+    latency_admin["p95_bar"] = max(2.0, min(100.0, (latency_admin["p95"] / 60000.0) * 100.0))
 
     # Node probes (parallel via threads)
     import concurrent.futures as _cf
@@ -15969,12 +16246,20 @@ def _eng_collect():
         "avg_encode_s": "—",
     }
 
+    # Phase 10.3: bucket outcomes (CTR + mean watch seconds) over last 7 days
+    try:
+        outcomes = _feed_imp_outcomes(window_hours=168)
+    except Exception:
+        outcomes = {}
+
     return {
         "nodes": nodes,
         "latency": latency,
+        "latency_admin": latency_admin,
         "state": state,
         "queue": queue,
         "experiments": experiments,
+        "outcomes": outcomes,
         "pipeline": pipeline,
         "generated_at": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -15999,10 +16284,11 @@ def engineering_page():
         # Never let this page 500 — it's the operational visibility page.
         ctx = {
             "nodes": [], "latency": {"p50": 0, "p95": 0, "p99": 0, "samples": 0, "p95_bar": 0},
+            "latency_admin": {"p50": 0, "p95": 0, "p99": 0, "samples": 0, "p95_bar": 0},
             "state": {"videos": 0, "agents": 0, "humans": 0, "comments": 0, "tips_confirmed": 0,
                       "uptime": "?", "version": APP_VERSION},
             "queue": {"queued": 0, "running": 0, "completed_24h": 0, "failed_24h": 0, "depth_label": f"err: {e}"},
-            "experiments": [], "pipeline": {"renditions": 0, "with_provenance": 0, "anchored": 0, "avg_encode_s": "?"},
+            "experiments": [], "outcomes": {}, "pipeline": {"renditions": 0, "with_provenance": 0, "anchored": 0, "avg_encode_s": "?"},
             "generated_at": "error",
         }
     return render_template("engineering.html", **ctx)
@@ -16474,6 +16760,298 @@ def video_keyframes(video_id):
         "frame_height": KEYFRAME_SIZE,
         "duration": duration,
     })
+
+
+# ---------------------------------------------------------------------------
+# Phase 10.4: MCP-compatible tool surface (read-only)
+# ---------------------------------------------------------------------------
+# Per Codex: "If you only ship the descriptor and not the bridge, do not
+# market that as MCP-compatible." Below: the descriptor at
+# /.well-known/mcp.json plus a JSON-RPC-shaped /mcp bridge that wraps the
+# existing REST endpoints. Five tools: feed.get, video.get, video.similar,
+# video.provenance, video.keyframes. No write tools, no auth — read-only
+# is honest about what's actually safe to expose to a discovering agent.
+
+MCP_VERSION = "1.0"
+MCP_TOOLS = [
+    {
+        "name": "feed.get",
+        "description": (
+            "Return ranked videos from a BoTTube feed bucket. "
+            "Use bucket=hybrid-v1 for embedding-based recommendations, "
+            "bucket=heuristic for popularity-only, bucket=latest for chronological. "
+            "Each result includes _why (recommendation explanation), _score, "
+            "and _components (signal breakdown for hybrid-v1)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bucket": {
+                    "type": "string",
+                    "enum": ["latest", "heuristic", "hybrid-v1", "auto"],
+                    "default": "auto",
+                },
+                "per_page": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                "page": {"type": "integer", "minimum": 1, "default": 1},
+                "category": {"type": "string"},
+            },
+        },
+        "rest_path": "/api/feed",
+        "rest_method": "GET",
+    },
+    {
+        "name": "video.get",
+        "description": (
+            "Look up a single video by id. Returns title, description, tags, "
+            "creator agent, view count, and other metadata."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["video_id"],
+            "properties": {
+                "video_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{5,32}$"},
+            },
+        },
+        "rest_path": "/api/videos/{video_id}",
+        "rest_method": "GET",
+    },
+    {
+        "name": "video.similar",
+        "description": (
+            "Top-K cosine-similar videos to a given video, computed against the "
+            "in-memory text-embedding cache (Gemini gemini-embedding-2, 3072-d). "
+            "Vectors are L2-normalized so the score is direct cosine in [-1, 1]."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["video_id"],
+            "properties": {
+                "video_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{5,32}$"},
+                "k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            },
+        },
+        "rest_path": "/api/videos/{video_id}/similar",
+        "rest_method": "GET",
+    },
+    {
+        "name": "video.provenance",
+        "description": (
+            "Cryptographic provenance for a video: canonical asset SHA-256, "
+            "creator agent identity, generation model + prompt hash + seed, "
+            "uploader signature (HMAC-SHA256), RustChain anchor TX (when "
+            "anchored). Three states: verified | pending | unverified."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["video_id"],
+            "properties": {
+                "video_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{5,32}$"},
+            },
+        },
+        "rest_path": "/api/videos/{video_id}/provenance",
+        "rest_method": "GET",
+    },
+    {
+        "name": "video.keyframes",
+        "description": (
+            "6-frame keyframe sprite for a video, auto-extracted via ffmpeg. "
+            "Returns the sprite URL, frame_count, frame_width, frame_height, "
+            "and duration. Useful for client-side scrub bars or scene preview."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["video_id"],
+            "properties": {
+                "video_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{5,32}$"},
+            },
+        },
+        "rest_path": "/api/videos/{video_id}/keyframes",
+        "rest_method": "GET",
+    },
+]
+
+
+def _mcp_descriptor():
+    """Public MCP descriptor — what the server is and what tools it offers."""
+    return {
+        "schema_version": MCP_VERSION,
+        "name": "bottube",
+        "title": "BoTTube — AI-native video platform",
+        "description": (
+            "Read-only MCP surface over BoTTube. Agents can browse the "
+            "ranked feed, fetch video metadata + provenance, and look up "
+            "semantically similar videos. Write tools (upload, comment, vote) "
+            "are gated by the existing /api/register + /api/agents/me/accept-terms "
+            "human-side flow and are intentionally not exposed here."
+        ),
+        "homepage": "https://bottube.ai",
+        "documentation": "https://bottube.ai/docs",
+        "engineering": "https://bottube.ai/engineering",
+        "endpoints": {
+            "rpc": "https://bottube.ai/mcp",
+            "rest_base": "https://bottube.ai/api",
+        },
+        "auth": {"type": "none", "note": "Read-only tools require no key."},
+        "tools": [
+            {k: v for k, v in tool.items() if k != "rest_path" and k != "rest_method"}
+            for tool in MCP_TOOLS
+        ],
+        "license": "MIT",
+    }
+
+
+@app.route("/.well-known/mcp.json")
+def well_known_mcp():
+    """MCP discovery descriptor."""
+    resp = jsonify(_mcp_descriptor())
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/mcp", methods=["GET", "POST", "OPTIONS"])
+def mcp_bridge():
+    """JSON-RPC-shaped MCP bridge.
+
+    Accepts:
+      * GET           -> returns the descriptor (same payload as /.well-known/mcp.json).
+      * POST {tool, args}  -> invokes the named tool, wraps the existing
+                              REST handler, returns its JSON response unwrapped
+                              with a {ok, tool, result} envelope.
+
+    No auth, read-only. Agents that want write access go through the
+    explicit /api/register + /api/agents/me/accept-terms flow.
+    """
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return resp
+
+    if request.method == "GET":
+        return jsonify(_mcp_descriptor())
+
+    data = request.get_json(silent=True) or {}
+    tool_name = (data.get("tool") or data.get("method") or "").strip()
+    args = data.get("args") or data.get("params") or {}
+    if not isinstance(args, dict):
+        return jsonify({"ok": False, "error": "args must be an object"}), 400
+
+    tool = next((t for t in MCP_TOOLS if t["name"] == tool_name), None)
+    if not tool:
+        return jsonify({
+            "ok": False,
+            "error": f"unknown tool: {tool_name}",
+            "available_tools": [t["name"] for t in MCP_TOOLS],
+        }), 404
+
+    # Use Flask's test_client so the full request lifecycle runs (before_request,
+    # visitor cookie, after_request) rather than test_request_context which
+    # leaves anchor IP empty and silently falls through to chronological.
+    try:
+        if tool_name == "feed.get":
+            qs = {k: str(args[k]) for k in ("bucket", "per_page", "page", "category")
+                  if k in args and args[k] not in (None, "")}
+            qs.setdefault("surface", "mcp")
+            with app.test_client() as client:
+                # Forge a stable visitor id per MCP-anchor video so anchor lookup
+                # has something to bite on. If args includes "anchor_video_id",
+                # use it as the visitor seed for deterministic recommendations.
+                anchor_seed = args.get("anchor_video_id", "") or "mcp_default"
+                visitor = "mcp_" + hashlib.sha256(anchor_seed.encode()).hexdigest()[:24]
+                client.set_cookie("_bt_vid", visitor)
+                r = client.get("/api/feed", query_string=qs)
+                payload = r.get_json()
+        elif tool_name == "video.get":
+            video_id = (args.get("video_id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+                return jsonify({"ok": False, "error": "invalid video_id"}), 400
+            db = get_db()
+            row = db.execute(
+                """SELECT v.video_id, v.title, v.description, v.tags, v.category,
+                          v.duration_sec, v.width, v.height, v.views, v.likes,
+                          v.dislikes, v.created_at, a.agent_name, a.display_name,
+                          a.avatar_url, a.is_human
+                     FROM videos v JOIN agents a ON v.agent_id = a.id
+                    WHERE v.video_id = ? AND COALESCE(v.is_removed, 0) = 0""",
+                (video_id,),
+            ).fetchone()
+            if not row:
+                return jsonify({"ok": False, "error": "video not found"}), 404
+            payload = {
+                "ok": True,
+                "video_id": row["video_id"],
+                "title": row["title"],
+                "description": row["description"],
+                "tags": (lambda t: json.loads(t) if t else [])(row["tags"]),
+                "category": row["category"],
+                "duration_sec": row["duration_sec"],
+                "width": row["width"],
+                "height": row["height"],
+                "views": row["views"],
+                "likes": row["likes"],
+                "dislikes": row["dislikes"],
+                "created_at": row["created_at"],
+                "agent_name": row["agent_name"],
+                "display_name": row["display_name"],
+                "avatar_url": row["avatar_url"],
+                "is_human": bool(row["is_human"]),
+                "watch_url": f"https://bottube.ai/watch/{row['video_id']}",
+                "stream_url": f"https://bottube.ai/api/videos/{row['video_id']}/stream",
+            }
+        elif tool_name == "video.similar":
+            video_id = (args.get("video_id") or "").strip()
+            try:
+                k = max(1, min(50, int(args.get("k", 10))))
+            except Exception:
+                k = 10
+            if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+                return jsonify({"ok": False, "error": "invalid video_id"}), 400
+            with app.test_request_context(
+                f"/api/videos/{video_id}/similar?k={k}",
+                headers={"X-MCP-Bridge": "1"},
+            ):
+                resp = api_videos_similar(video_id)
+                if isinstance(resp, tuple):
+                    resp = resp[0]
+                payload = resp.get_json() if hasattr(resp, "get_json") else resp
+        elif tool_name == "video.provenance":
+            video_id = (args.get("video_id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+                return jsonify({"ok": False, "error": "invalid video_id"}), 400
+            with app.test_request_context(
+                f"/api/videos/{video_id}/provenance",
+                headers={"X-MCP-Bridge": "1"},
+            ):
+                resp = video_provenance(video_id)
+                if isinstance(resp, tuple):
+                    resp = resp[0]
+                payload = resp.get_json() if hasattr(resp, "get_json") else resp
+        elif tool_name == "video.keyframes":
+            video_id = (args.get("video_id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+                return jsonify({"ok": False, "error": "invalid video_id"}), 400
+            with app.test_request_context(
+                f"/api/videos/{video_id}/keyframes",
+                headers={"X-MCP-Bridge": "1"},
+            ):
+                resp = video_keyframes(video_id)
+                if isinstance(resp, tuple):
+                    resp = resp[0]
+                payload = resp.get_json() if hasattr(resp, "get_json") else resp
+        else:
+            return jsonify({"ok": False, "error": f"unrouted tool: {tool_name}"}), 500
+
+        out = jsonify({"ok": True, "tool": tool_name, "result": payload})
+        out.headers["Access-Control-Allow-Origin"] = "*"
+        return out
+    except Exception as e:
+        try:
+            app.logger.warning("mcp bridge error %s: %s", tool_name, e)
+        except Exception:
+            pass
+        return jsonify({"ok": False, "tool": tool_name, "error": str(e)}), 500
 
 
 @app.route("/keyframes/<path:filename>")
