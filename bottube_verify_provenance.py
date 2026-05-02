@@ -148,14 +148,33 @@ def main():
     if not args.quiet:
         print(f"      own_leaf={own_leaf.hex()}")
 
-    # If the operator gave us an admin key, fetch the batch membership so we
-    # can recompute the full Merkle root. Otherwise, the verifier degrades
-    # to "this video's leaf is consistent with own provenance" but cannot
-    # check the on-chain commitment.
+    # Two paths to a full PASS:
+    #   1. Admin key → full batch membership → reconstruct entire Merkle tree.
+    #   2. Public Merkle proof → walk a path of sibling hashes leaf→root.
+    # Either gets us byte-for-byte against the on-chain R4. Public proof
+    # is the default; admin path is the fallback if proof endpoint is
+    # unavailable.
     full_check = bool(args.admin_key)
     on_chain_root_hex = ""
     locally_computed_root_hex = ""
     batch_members = []
+    public_proof = None
+
+    if not full_check:
+        try:
+            proof_data = _http_json(f"{bot}/api/videos/{vid}/anchor-proof")
+            if proof_data.get("ok"):
+                public_proof = proof_data
+                if not args.quiet:
+                    print(f"      using public Merkle proof "
+                          f"(path length {len(proof_data['path'])}, "
+                          f"batch size {proof_data['batch_size']})")
+            else:
+                if not args.quiet:
+                    print(f"      public proof unavailable: {proof_data.get('error')}")
+        except Exception as e:
+            if not args.quiet:
+                print(f"      public proof fetch error: {e}")
 
     if full_check:
         if not args.quiet:
@@ -211,6 +230,32 @@ def main():
         if not args.quiet:
             print(f"      single-leaf batch — own_leaf matches root directly.")
         verdict = "PASS"
+    elif public_proof:
+        # Walk the public Merkle proof: leaf + sibling hashes → root.
+        node = own_leaf
+        for hop in public_proof.get("path", []):
+            sibling = bytes.fromhex(hop["sibling"])
+            if hop["side"] == "R":
+                node = hashlib.sha256(node + sibling).digest()
+            else:
+                node = hashlib.sha256(sibling + node).digest()
+        locally_computed_root_hex = node.hex()
+        if locally_computed_root_hex != manifest_hash:
+            sys.exit(
+                f"FAIL: walking the public Merkle path produced "
+                f"{locally_computed_root_hex} but bottube's manifest_hash is "
+                f"{manifest_hash}. Either the path or the leaf is wrong."
+            )
+        if locally_computed_root_hex != on_chain_root_hex:
+            sys.exit(
+                f"FAIL: walked root ({locally_computed_root_hex}) does NOT "
+                f"match on-chain R4 ({on_chain_root_hex})."
+            )
+        if not args.quiet:
+            print(f"      Walked Merkle path: {locally_computed_root_hex}")
+            print(f"      ✓ matches on-chain R4 byte-for-byte")
+            print(f"      ✓ inclusion proof valid (no admin access needed)")
+        verdict = "PASS"
     elif full_check and batch_members:
         # Full Merkle reconstruction: build leaves for every batch member,
         # compute the binary tree, compare to on-chain root.
@@ -261,8 +306,13 @@ def main():
             if own_leaf.hex() == manifest_hash:
                 print("  Single-leaf batch — own_leaf matches root directly.")
                 print("  End-to-end verified.")
+            elif public_proof:
+                print(f"  Inclusion proof ({len(public_proof['path'])} hops, batch size {public_proof['batch_size']}):")
+                print("    1. bottube's manifest_hash matches the on-chain R4 register")
+                print("    2. walked Merkle path from local leaf reaches the same root")
+                print("  End-to-end cryptographically verified — no admin access required.")
             else:
-                print(f"  Multi-leaf batch ({len(batch_members)} members):")
+                print(f"  Multi-leaf batch ({len(batch_members)} members, full reconstruction):")
                 print("    1. bottube's manifest_hash matches the on-chain R4 register")
                 print("    2. locally-reconstructed Merkle root matches both")
                 print("    3. this video's leaf is included in the batch")

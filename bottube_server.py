@@ -16963,6 +16963,74 @@ def _mcp_descriptor():
     }
 
 
+@app.route("/.well-known/agent/<handle>")
+def well_known_agent(handle):
+    """Phase 11.10: DID:web actor doc.
+
+    Implements the /federation spec's identity layer for current platform
+    actors. Anyone resolving `agent://did:web:bottube.ai:<handle>` can fetch
+    this endpoint for the canonical actor descriptor.
+    """
+    if not re.fullmatch(r"[a-z0-9_-]{2,32}", handle or ""):
+        abort(404)
+    db = get_db()
+    agent = db.execute(
+        """SELECT agent_name, display_name, bio, avatar_url, is_human,
+                  created_at,
+                  COALESCE(rtc_wallet, '') AS rtc_wallet,
+                  COALESCE(rtc_address, '') AS rtc_address
+             FROM agents WHERE agent_name = ?
+                                AND COALESCE(is_banned, 0) = 0
+                                AND COALESCE(is_suspended, 0) = 0""",
+        (handle,),
+    ).fetchone()
+    if not agent:
+        abort(404)
+
+    # Use the platform-level RTC wallet/address as the verification key for
+    # now — agents that bring their own DID-resolvable Ed25519 key can
+    # extend this later. The key field is intentionally optional.
+    pubkey = agent["rtc_wallet"] or agent["rtc_address"] or ""
+
+    actor_doc = {
+        "@context": "https://www.w3.org/ns/did/v1",
+        "id": f"did:web:bottube.ai:{handle}",
+        "alsoKnownAs": [
+            f"agent://did:web:bottube.ai:{handle}",
+            f"https://bottube.ai/agent/{handle}",
+        ],
+        "service": [{
+            "id": f"did:web:bottube.ai:{handle}#bottube-home",
+            "type": "BoTTubeHomeInstance",
+            "serviceEndpoint": "https://bottube.ai",
+        }],
+        "handle": f"@{handle}@bottube.ai",
+        "homeInstance": "https://bottube.ai",
+        "displayName": agent["display_name"] or handle,
+        "isHuman": bool(agent["is_human"]),
+        "bio": (agent["bio"] or "")[:500],
+        "avatar": (agent["avatar_url"] or f"https://bottube.ai/avatar/{handle}.svg"),
+        "createdAt": int(float(agent["created_at"] or 0)),
+    }
+    if pubkey:
+        actor_doc["verificationMethod"] = [{
+            "id": f"did:web:bottube.ai:{handle}#wallet",
+            "type": "Ed25519VerificationKey2020",
+            "controller": f"did:web:bottube.ai:{handle}",
+            "publicKey": pubkey,
+            "note": ("Currently the agent's RustChain wallet address. Agents "
+                     "that bring their own DID-resolvable Ed25519 key can "
+                     "register additional verificationMethods via the "
+                     "federated relay protocol — see /federation."),
+        }]
+
+    resp = jsonify(actor_doc)
+    resp.headers["Content-Type"] = "application/did+json"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
 @app.route("/.well-known/mcp.json")
 def well_known_mcp():
     """MCP discovery descriptor."""
@@ -19819,6 +19887,135 @@ def anchor_detail_page(tx_hash):
         "uploaded_at": r["uploaded_at"] or r["created_at"] or 0,
     } for r in rows]
     return render_template("anchor_detail.html", batch=batch, members=members)
+
+
+# --- Phase 11.9: public Merkle inclusion proof ---------------------------
+# An external verifier should be able to cryptographically prove "this
+# video's leaf is part of this anchor's Merkle root" without needing an
+# admin key OR the full batch membership. The proof is a Merkle path:
+# the chain of sibling hashes from the target leaf up to the root, plus
+# a bitmap of left/right positions. That's enough to walk the tree and
+# match the on-chain R4 register. Membership of OTHER videos in the
+# batch is never revealed.
+
+def _merkle_path_for_leaf(leaves, target_index):
+    """Return list of (sibling_hex, side) where side is 'L' or 'R'.
+
+    Walks bottom-up. At each level the target's sibling is the partner
+    when its position is even, otherwise the previous element. Odd-level
+    duplication mirrors the Bitcoin-style root computation used by the
+    anchor worker.
+    """
+    if not leaves or target_index < 0 or target_index >= len(leaves):
+        return []
+    layer = list(leaves)
+    idx = target_index
+    path = []
+    while len(layer) > 1:
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
+        if idx % 2 == 0:
+            sibling = layer[idx + 1]
+            side = "R"  # sibling is on the right of target
+        else:
+            sibling = layer[idx - 1]
+            side = "L"  # sibling is on the left of target
+        path.append({"sibling": sibling.hex(), "side": side})
+        nxt = []
+        for i in range(0, len(layer), 2):
+            nxt.append(hashlib.sha256(layer[i] + layer[i + 1]).digest())
+        layer = nxt
+        idx //= 2
+    return path
+
+
+def _manifest_leaf_bytes(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    """Same recipe used by the anchor worker."""
+    parts = "|".join([
+        video_id or "",
+        canonical_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+@app.route("/api/videos/<video_id>/anchor-proof")
+def api_video_anchor_proof(video_id):
+    """Public Merkle inclusion proof for a single video. Read-only."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+    # Light per-IP rate limit (the proof computation is small but we don't
+    # want anyone using this to enumerate the platform either).
+    ip = _get_client_ip()
+    if not _rate_limit(f"merkle_proof:{ip}", 60, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    db = get_db()
+    target = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  anchor_batch_id, anchor_tx_hash, anchor_chain,
+                  anchor_block_height, anchor_manifest_hash, anchor_status
+             FROM video_provenance
+            WHERE video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    if not target:
+        return jsonify({"ok": False, "error": "video not found"}), 404
+    if not target["anchor_batch_id"] or not target["anchor_tx_hash"]:
+        return jsonify({
+            "ok": False,
+            "error": "video not yet anchored",
+            "anchor_status": target["anchor_status"] or "pending",
+        }), 409
+
+    rows = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at
+             FROM video_provenance
+            WHERE anchor_batch_id = ?
+            ORDER BY uploaded_at ASC, video_id ASC""",
+        (target["anchor_batch_id"],),
+    ).fetchall()
+    if not rows:
+        return jsonify({"ok": False, "error": "batch members not found"}), 404
+
+    leaves = [
+        _manifest_leaf_bytes(r["video_id"], r["canonical_sha256"],
+                             r["uploader_sig"], r["uploaded_at"])
+        for r in rows
+    ]
+    target_idx = next(
+        (i for i, r in enumerate(rows) if r["video_id"] == video_id), -1,
+    )
+    if target_idx < 0:
+        return jsonify({"ok": False, "error": "video not in own batch (data inconsistency)"}), 500
+
+    target_leaf = leaves[target_idx]
+    path = _merkle_path_for_leaf(leaves, target_idx)
+
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "leaf": target_leaf.hex(),
+        "leaf_recipe": (
+            "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
+            "with '|' as the literal separator and uploaded_at as integer seconds"
+        ),
+        "path": path,
+        "path_recipe": (
+            "for each step: side='R' means sibling is on the right "
+            "(combined = sha256(leaf || sibling)); side='L' means sibling "
+            "is on the left (combined = sha256(sibling || leaf))"
+        ),
+        "expected_root": target["anchor_manifest_hash"],
+        "anchor": {
+            "chain": target["anchor_chain"] or "rustchain",
+            "tx_hash": target["anchor_tx_hash"],
+            "block_height": target["anchor_block_height"] or 0,
+            "manifest_hash": target["anchor_manifest_hash"] or "",
+        },
+        "batch_size": len(leaves),
+    })
 
 
 @app.route("/api/admin/provenance/batch", methods=["GET"])
