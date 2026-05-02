@@ -1,0 +1,37 @@
+# bottube-ergo-tunnel.service
+#
+# Persistent SSH tunnel from .153:127.0.0.1:19053 to .131:9053 (the live
+# Ergo private-chain API serving the RustChain wallet that holds chain
+# coins for anchoring).
+#
+# Why this exists: LiquidWeb's perimeter blocks port 9053 between VPSes,
+# so the bottube anchor worker on .153 cannot reach the Ergo node on
+# .131 directly. The SSH tunnel sidesteps the firewall without opening
+# any new public ports.
+#
+# Pre-requisites:
+#   * /root/.ssh/id_ed25519 on .153 with public key authorized in
+#     /root/.ssh/authorized_keys on .131.
+#   * /etc/systemd/system/bottube-anchor.service uses
+#     ERGO_NODE=http://localhost:19053 (set in /root/bottube/.env.anchor).
+#
+# Failure mode: if the tunnel drops, ssh exits and systemd restarts it
+# in 15 s. ServerAliveInterval=30 catches dead-network situations
+# without a TCP RST.
+
+[Unit]
+Description=SSH tunnel from .153:19053 to .131:9053 (Ergo private chain API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ssh -N -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -L 19053:localhost:9053 root@50.28.86.131
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

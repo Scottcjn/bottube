@@ -1,0 +1,59 @@
+# bottube-anchor.service
+#
+# Pulls a batch of unanchored video manifests from the BoTTube admin API,
+# computes a Merkle root, anchors it on RustChain (Ergo), and posts the
+# resulting tx_hash + block_height back so each video's
+# Verified Provenance pill flips green.
+#
+# THREE MODES (set via the --mode flag in ExecStart below):
+#
+#   --mode stub
+#     Computes the Merkle root and posts back a deterministic stub tx_hash
+#     derived from the root. Real round-trip exercised, but no real chain
+#     write. Useful for validating the pipeline before the Ergo node is
+#     back up. Pills flip "verified" with chain="stub" — viewers can see
+#     this in the side sheet and know it's not a real anchor.
+#
+#   --mode real     (recommended once Ergo is running)
+#     Delegates to /root/rustchain/ergo_miner_anchor.py to write the
+#     Merkle root into an Ergo box's R4 register, then posts back the
+#     real tx_hash. Requires:
+#       - systemctl start ergo-node
+#       - Ergo node fully synced (`/info` returns reasonable height)
+#       - ERGO_API_KEY env var set (defaults to the value in
+#         /root/rustchain/ergo_miner_anchor.py if not overridden)
+#
+#   --mode dry
+#     Claims a batch then immediately reports error=dry-run so the claim
+#     is released. Read-only, useful for testing the claim/release path
+#     without touching the chain.
+#
+# Companion timer is bottube-anchor.timer (hourly).
+#
+# To enable production anchoring (real-mode):
+#   1. systemctl start ergo-node
+#      Wait until `curl -s -H "api_key: $ERGO_API_KEY" \
+#                          http://localhost:9053/info | jq .fullHeight`
+#      returns a fresh number.
+#   2. Edit ExecStart below: change `--mode stub` to `--mode real`.
+#   3. systemctl daemon-reload
+#   4. systemctl enable --now bottube-anchor.timer
+
+[Unit]
+Description=BoTTube provenance anchor worker (Phase 10.5)
+After=network-online.target bottube.service bottube-ergo-tunnel.service
+Wants=network-online.target
+Requires=bottube.service bottube-ergo-tunnel.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/bottube
+EnvironmentFile=-/root/bottube/.env.anchor
+Environment="BOTTUBE_BASE=http://127.0.0.1:8097"
+ExecStart=/usr/bin/python3 /root/bottube/anchor_worker.py --mode real --limit 200
+StandardOutput=append:/var/log/bottube_anchor.log
+StandardError=append:/var/log/bottube_anchor.log
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

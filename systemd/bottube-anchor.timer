@@ -1,0 +1,18 @@
+# bottube-anchor.timer
+# Hourly trigger for bottube-anchor.service.
+# Disabled by default — enable with:
+#   systemctl enable --now bottube-anchor.timer
+# once you're ready to start anchoring (see service file for prerequisites).
+
+[Unit]
+Description=Hourly trigger for BoTTube provenance anchor
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=300
+Persistent=true
+Unit=bottube-anchor.service
+
+[Install]
+WantedBy=timers.target
