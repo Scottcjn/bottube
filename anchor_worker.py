@@ -144,15 +144,26 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
             pass
 
     # 2) Pick a UTXO with enough balance (>= 2x anchor value).
+    # Important: the wallet's unspent-boxes list may include boxes that have
+    # been spent in mempool TXs but not yet mined — picking the first one
+    # deterministically causes "Double spending attempt" loops. Randomize
+    # the selection so consecutive batches don't collide on the same box.
+    import random as _random
     boxes = _ergo_get(ergo_base, "/wallet/boxes/unspent?minConfirmations=1", ergo_key)
-    input_box = None
+    candidates = []
     for b in (boxes or []):
         box = b.get("box", {}) if isinstance(b, dict) else {}
         if int(box.get("value", 0) or 0) >= 2 * anchor_value:
-            input_box = box
-            break
-    if not input_box:
+            candidates.append(box)
+    if not candidates:
         raise RuntimeError("no UTXO with sufficient balance (>= 0.002 ERG)")
+    # Sort by creationHeight DESC so newer boxes are tried first (more
+    # likely to actually be unspent), then random-shuffle within ties.
+    candidates.sort(key=lambda b: -int(b.get("creationHeight", 0)))
+    # Take a random one of the top 32 most-recent boxes — keeps us out of
+    # mempool conflicts without going off the deep end of the list.
+    pool = candidates[:32] if len(candidates) > 32 else candidates
+    input_box = _random.choice(pool)
 
     # 3) Get the raw bytes for the input box + current chain height.
     box_bytes = _ergo_get(
