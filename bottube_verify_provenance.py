@@ -106,6 +106,23 @@ def fetch_anchor_r4(ergo_base, ergo_key, tx_hash, timeout=15):
     return bytes.fromhex(hex_root)
 
 
+def fetch_anchor_r4_via_proxy(bottube_base, tx_hash, timeout=15):
+    """Fallback: use bottube's public chain proxy when no local Ergo node.
+
+    /api/anchors/<tx>/chain pre-decodes R4 to its 32-byte hex form; we
+    just unhex it. Lets the verifier work from any machine with
+    internet, no Ergo node required.
+    """
+    url = f"{bottube_base.rstrip('/')}/api/anchors/{tx_hash}/chain"
+    data = _http_json(url, timeout=timeout)
+    if not data.get("ok"):
+        raise RuntimeError(f"proxy returned ok=false: {data.get('error')}")
+    root_hex = data.get("r4_merkle_root", "")
+    if len(root_hex) != 64 or not re.fullmatch(r"[0-9a-f]+", root_hex):
+        raise RuntimeError(f"proxy R4 not 32-byte hex: {root_hex!r}")
+    return bytes.fromhex(root_hex)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Verify a BoTTube video's on-chain provenance")
     ap.add_argument("video_id", help="The video_id to verify")
@@ -200,10 +217,25 @@ def main():
     if not args.quiet:
         print(f"[3/4] Fetching on-chain R4 for tx {tx_hash[:16]}...")
 
+    on_chain = None
+    chain_source = None
     try:
         on_chain = fetch_anchor_r4(args.ergo_base, args.ergo_api_key, tx_hash)
-    except Exception as e:
-        sys.exit(f"FAIL: could not fetch R4 from {args.ergo_base}: {e}")
+        chain_source = "direct ergo node (" + args.ergo_base + ")"
+    except Exception as e_direct:
+        if not args.quiet:
+            print(f"      direct chain query failed ({e_direct})")
+            print(f"      falling back to bottube chain proxy at {bot}/api/anchors/<tx>/chain")
+        try:
+            on_chain = fetch_anchor_r4_via_proxy(bot, tx_hash)
+            chain_source = "bottube proxy"
+        except Exception as e_proxy:
+            sys.exit(
+                f"FAIL: could not fetch R4 from either {args.ergo_base} ({e_direct}) "
+                f"or {bot} proxy ({e_proxy})"
+            )
+    if not args.quiet:
+        print(f"      via {chain_source}")
 
     on_chain_root_hex = on_chain.hex()
     if not args.quiet:

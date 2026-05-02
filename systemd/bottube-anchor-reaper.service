@@ -1,0 +1,27 @@
+# bottube-anchor-reaper.service
+#
+# Periodic job that re-checks pending TX confirmations on the chain and
+# updates anchor_block_height on video_provenance rows. Companion to the
+# main bottube-anchor.timer (which creates new anchors); this one closes
+# the loop on confirmations after the chain has time to mine.
+#
+# Endpoint: POST /api/admin/provenance/reap-confirmations on bottube.
+# Companion timer: bottube-anchor-reaper.timer (every 30 min).
+
+[Unit]
+Description=BoTTube anchor confirmation reaper (Phase 11.13)
+After=network-online.target bottube.service bottube-ergo-tunnel.service
+Wants=network-online.target
+Requires=bottube.service bottube-ergo-tunnel.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/bottube
+EnvironmentFile=-/root/bottube/.env.anchor
+ExecStart=/usr/bin/curl -sk -X POST -H "X-Admin-Key: ${BOTTUBE_ADMIN_KEY}" -H "Content-Type: application/json" -d '{"limit": 100}' http://127.0.0.1:8097/api/admin/provenance/reap-confirmations
+StandardOutput=append:/var/log/bottube_anchor_reaper.log
+StandardError=append:/var/log/bottube_anchor_reaper.log
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -19865,6 +19865,96 @@ def admin_provenance_pending():
     })
 
 
+# --- Phase 11.13: anchor confirmation reaper ------------------------------
+# After a TX is broadcast the worker reports block_height=0 if the chain
+# hasn't confirmed it yet. This endpoint re-queries the chain for every
+# unique anchor_tx_hash with block_height=0 and writes the real
+# inclusion height back. Driven by a separate systemd timer so the main
+# anchor cron stays single-purpose.
+
+@app.route("/api/admin/provenance/reap-confirmations", methods=["POST", "GET"])
+def admin_provenance_reap_confirmations():
+    """Update anchor_block_height on rows whose TX has now confirmed.
+
+    Strategy: SELECT DISTINCT anchor_tx_hash WHERE block_height=0. For
+    each one, query /wallet/transactionById on the configured Ergo node.
+    If the TX has at least 1 confirmation, derive inclusion height from
+    `inclusionHeight` (or chain_height - numConfirmations + 1 fallback)
+    and UPDATE every row in that batch.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _provenance_ensure_anchor_columns()
+
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_key = os.environ.get("ERGO_API_KEY", "")
+    if not ergo_key:
+        return jsonify({"ok": False, "error": "ERGO_API_KEY not set"}), 503
+
+    try:
+        limit = max(1, min(200, int((request.args.get("limit") or
+                                     (request.get_json(silent=True) or {}).get("limit", 50)))))
+    except Exception:
+        limit = 50
+
+    db = get_db()
+    pending = db.execute(
+        """SELECT anchor_tx_hash, MIN(anchored_at) AS first_anchored_at
+             FROM video_provenance
+            WHERE COALESCE(anchor_tx_hash,'') != ''
+              AND COALESCE(anchor_block_height,0) = 0
+              AND anchor_chain != 'stub'
+            GROUP BY anchor_tx_hash
+            ORDER BY first_anchored_at ASC
+            LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    pending_txs = [r["anchor_tx_hash"] for r in pending]
+
+    updated_rows = 0
+    confirmed_txs = 0
+    failures = []
+    for tx_hash in pending_txs:
+        try:
+            req = urllib.request.Request(
+                f"{ergo_base}/wallet/transactionById?id={tx_hash}",
+                headers={"api_key": ergo_key},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            failures.append({"tx": tx_hash, "error": f"HTTP {e.code}"})
+            continue
+        except Exception as e:
+            failures.append({"tx": tx_hash, "error": str(e)[:120]})
+            continue
+
+        num_confs = int((data or {}).get("numConfirmations", 0) or 0)
+        incl_height = int((data or {}).get("inclusionHeight", 0) or 0)
+        if num_confs < 1 or not incl_height:
+            failures.append({"tx": tx_hash, "error": f"unconfirmed ({num_confs} confs)"})
+            continue
+
+        n = db.execute(
+            """UPDATE video_provenance
+                  SET anchor_block_height = ?, updated_at = ?
+                WHERE anchor_tx_hash = ?
+                  AND COALESCE(anchor_block_height, 0) = 0""",
+            (incl_height, time.time(), tx_hash),
+        ).rowcount or 0
+        db.commit()
+        updated_rows += int(n)
+        confirmed_txs += 1
+
+    return jsonify({
+        "ok": True,
+        "scanned": len(pending_txs),
+        "confirmed_txs": confirmed_txs,
+        "rows_updated": updated_rows,
+        "failures": failures[:10],
+    })
+
+
 @app.route("/api/admin/provenance/anchor-result", methods=["POST"])
 def admin_provenance_anchor_result():
     """Finalize a claimed batch with the on-chain anchor result.
