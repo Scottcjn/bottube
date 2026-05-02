@@ -19673,6 +19673,101 @@ def admin_provenance_anchor_result():
     })
 
 
+# ---------------------------------------------------------------------------
+# Phase 11.5: public /anchors page — chain anchor history
+# ---------------------------------------------------------------------------
+# Read-only public surface that lists every Merkle anchor TX bottube has
+# committed to RustChain, with a per-batch detail page that lists members
+# and instructs how to run the verifier. This is what makes "Verified
+# Provenance" visible at the platform level, not just the per-video pill.
+
+def _anchors_summary(limit=200):
+    """Return a list of anchor batches grouped by tx_hash, newest first."""
+    db = get_db()
+    rows = db.execute(
+        """SELECT anchor_tx_hash AS tx_hash,
+                  MIN(anchor_chain) AS chain,
+                  MIN(anchor_block_height) AS block_height,
+                  MIN(anchor_manifest_hash) AS manifest_hash,
+                  MIN(anchor_batch_id) AS batch_id,
+                  MIN(anchored_at) AS anchored_at,
+                  COUNT(*) AS member_count
+             FROM video_provenance
+            WHERE COALESCE(anchor_tx_hash,'') != ''
+            GROUP BY anchor_tx_hash
+            ORDER BY anchored_at DESC
+            LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [{
+        "tx_hash": r["tx_hash"],
+        "chain": r["chain"] or "rustchain",
+        "block_height": r["block_height"] or 0,
+        "manifest_hash": r["manifest_hash"] or "",
+        "batch_id": r["batch_id"] or "",
+        "anchored_at": r["anchored_at"] or 0,
+        "member_count": r["member_count"] or 0,
+    } for r in rows]
+
+
+@app.route("/anchors")
+def anchors_page():
+    """Public chain anchor history."""
+    batches = _anchors_summary(limit=200)
+    total_anchored = sum(b["member_count"] for b in batches)
+    return render_template(
+        "anchors.html",
+        batches=batches,
+        total_anchored=total_anchored,
+        total_batches=len(batches),
+    )
+
+
+@app.route("/anchors/<tx_hash>")
+def anchor_detail_page(tx_hash):
+    """Per-batch detail: tx_hash, manifest_hash, all member videos, verifier hint."""
+    if not re.fullmatch(r"[0-9a-fA-F]{32,128}", tx_hash):
+        abort(404)
+    db = get_db()
+    rows = db.execute(
+        """SELECT v.video_id, v.title, v.thumbnail, v.duration_sec, v.created_at,
+                  a.agent_name, a.display_name,
+                  p.canonical_sha256, p.uploader_sig, p.uploaded_at,
+                  p.anchor_chain, p.anchor_tx_hash, p.anchor_block_height,
+                  p.anchor_manifest_hash, p.anchor_batch_id, p.anchored_at
+             FROM video_provenance p
+             JOIN videos v ON v.video_id = p.video_id
+             JOIN agents a ON a.id = v.agent_id
+            WHERE p.anchor_tx_hash = ?
+              AND COALESCE(v.is_removed, 0) = 0
+            ORDER BY p.uploaded_at ASC""",
+        (tx_hash,),
+    ).fetchall()
+    if not rows:
+        abort(404)
+    head = rows[0]
+    batch = {
+        "tx_hash": head["anchor_tx_hash"],
+        "chain": head["anchor_chain"] or "rustchain",
+        "block_height": head["anchor_block_height"] or 0,
+        "manifest_hash": head["anchor_manifest_hash"] or "",
+        "batch_id": head["anchor_batch_id"] or "",
+        "anchored_at": head["anchored_at"] or 0,
+        "member_count": len(rows),
+    }
+    members = [{
+        "video_id": r["video_id"],
+        "title": r["title"],
+        "thumbnail": r["thumbnail"],
+        "duration_sec": r["duration_sec"],
+        "agent_name": r["agent_name"],
+        "display_name": r["display_name"] or r["agent_name"],
+        "canonical_sha256": r["canonical_sha256"] or "",
+        "uploaded_at": r["uploaded_at"] or r["created_at"] or 0,
+    } for r in rows]
+    return render_template("anchor_detail.html", batch=batch, members=members)
+
+
 @app.route("/api/admin/provenance/batch", methods=["GET"])
 def admin_provenance_batch():
     """Return the membership of a single anchor batch.

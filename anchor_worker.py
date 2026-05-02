@@ -179,6 +179,28 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
 
     # 4) Build the unsigned TX: anchor box (with R4=merkle_root, R5=count)
     #    + change box back to the same wallet (same ergoTree).
+    #
+    # Ergo SInt is ZigZag-VarInt, not fixed-width big-endian. Earlier
+    # commits stored R5 with `format(n, "08x")` which serialized as a
+    # 4-byte VarInt that the Ergo deserializer interpreted as 0 (the
+    # leading "0" zero-byte stops the VarInt scan). Fixed below.
+    def _zigzag_varint_hex(n):
+        # ZigZag encode signed int: (n << 1) ^ (n >> 63) (assume 64-bit
+        # but truncate the result to fit Int = 32-bit; member_count is
+        # always positive and small).
+        z = (n << 1) ^ (n >> 31) if n < 0 else (n << 1)
+        # Encode as VarInt (little-endian 7-bit groups).
+        out = []
+        while True:
+            b = z & 0x7F
+            z >>= 7
+            if z:
+                out.append(b | 0x80)
+            else:
+                out.append(b)
+                break
+        return "".join(format(b, "02x") for b in out)
+
     unsigned_tx = {
         "inputs": [{"boxId": input_box["boxId"], "extension": {}}],
         "dataInputs": [],
@@ -191,8 +213,8 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
                 "additionalRegisters": {
                     # SColl[Byte] of 32 bytes: 0e + 20 (length 32) + hex
                     "R4": "0e20" + merkle_root_hex,
-                    # SInt: 04 + 4-byte big-endian unsigned int
-                    "R5": "04" + format(member_count & 0xFFFFFFFF, "08x"),
+                    # SInt: type tag 04 + ZigZag VarInt
+                    "R5": "04" + _zigzag_varint_hex(int(member_count)),
                 },
             },
             {

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Anchor History — BoTTube{% endblock %}
+
+{% block meta_description %}Public on-chain anchor history for every video on BoTTube. Each anchor is a Merkle root committed to RustChain — verifiable end-to-end with the open-source bottube_verify_provenance.py CLI.{% endblock %}
+
+{% block content %}
+<style>
+  .anchor-shell { max-width: 1100px; margin: 0 auto; padding: 28px 22px 80px; color: var(--text-primary); }
+  .anchor-shell h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .anchor-sub { color: var(--text-secondary); margin: 0 0 28px; font-size: 14px; line-height: 1.55; }
+  .anchor-sub code { background: var(--bg-card); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  .anchor-stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px; margin: 0 0 24px;
+  }
+  .anchor-stat {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 20px;
+  }
+  .anchor-stat .label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+  .anchor-stat .value { font-size: 26px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .anchor-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .anchor-table thead th {
+    text-align: left; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--text-secondary); padding: 10px 14px; border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+  .anchor-table tbody td {
+    padding: 12px 14px; font-size: 13px; border-bottom: 1px dashed var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  .anchor-table tbody tr:last-child td { border-bottom: 0; }
+  .anchor-table tbody tr:hover td { background: var(--bg-hover); }
+  .anchor-table .tx-link {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--accent); text-decoration: none;
+  }
+  .anchor-table .tx-link:hover { text-decoration: underline; }
+  .anchor-table .root-mono { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-secondary); }
+  .anchor-table .age { font-size: 12px; color: var(--text-secondary); }
+  .anchor-table .count {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    background: rgba(74, 210, 122, 0.15); color: #4ad27a; font-weight: 600; font-size: 12px;
+    border: 1px solid rgba(74, 210, 122, 0.4);
+  }
+  .anchor-explainer {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 20px; margin: 0 0 24px; font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+  }
+  .anchor-explainer code { background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px; font-size: 12px; color: var(--text-primary); }
+  .anchor-explainer strong { color: var(--text-primary); }
+  .anchor-empty {
+    text-align: center; padding: 40px 20px; color: var(--text-secondary);
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  }
+</style>
+
+<div class="anchor-shell">
+  <h1>On-Chain Anchor History</h1>
+  <p class="anchor-sub">
+    Every video on BoTTube has its provenance manifest committed to RustChain via a Merkle root anchor TX.
+    This page is the public history of every batch we've anchored.
+    Verify any individual video end-to-end with
+    <a href="https://github.com/Scottcjn/bottube/blob/main/bottube_verify_provenance.py">bottube_verify_provenance.py</a>.
+  </p>
+
+  <div class="anchor-stats">
+    <div class="anchor-stat">
+      <div class="label">Total Anchored</div>
+      <div class="value">{{ '{:,}'.format(total_anchored) }}</div>
+    </div>
+    <div class="anchor-stat">
+      <div class="label">Anchor Batches</div>
+      <div class="value">{{ '{:,}'.format(total_batches) }}</div>
+    </div>
+    <div class="anchor-stat">
+      <div class="label">Chain</div>
+      <div class="value" style="font-size:18px;color:var(--accent);">RustChain</div>
+    </div>
+    <div class="anchor-stat">
+      <div class="label">Anchor Cadence</div>
+      <div class="value" style="font-size:18px;">Hourly</div>
+    </div>
+  </div>
+
+  <div class="anchor-explainer">
+    <strong>What's in each anchor?</strong> A 32-byte Merkle root committed to register
+    <code>R4</code> of an Ergo box on RustChain. Leaves are
+    <code>sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)</code>.
+    The tree is Bitcoin-style binary &mdash; pair adjacent leaves and hash, duplicate the last node
+    when a level has odd cardinality, iterate to a single root. Each batch can be reconstructed
+    leaf-by-leaf by anyone with the public manifest data and the chain's R4 register.
+  </div>
+
+  {% if batches %}
+  <table class="anchor-table">
+    <thead>
+      <tr>
+        <th>Anchor TX</th>
+        <th>Merkle Root</th>
+        <th>Block</th>
+        <th>Members</th>
+        <th>Anchored</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in batches %}
+      <tr>
+        <td>
+          <a class="tx-link" href="{{ P }}/anchors/{{ b.tx_hash }}">{{ b.tx_hash[:16] }}&hellip;{{ b.tx_hash[-8:] }}</a>
+        </td>
+        <td><span class="root-mono">{{ b.manifest_hash[:24] }}&hellip;</span></td>
+        <td>{% if b.block_height %}{{ b.block_height }}{% else %}<span class="age">pending</span>{% endif %}</td>
+        <td><span class="count">{{ b.member_count }}</span></td>
+        <td><span class="age">{{ b.anchored_at | time_ago }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="anchor-empty">
+    <p>No anchor batches yet. The hourly cron picks up new uploads automatically.</p>
+  </div>
+  {% endif %}
+
+  <p style="margin-top:30px;font-size:12px;color:var(--text-secondary);">
+    Engineering visibility: <a href="{{ P }}/engineering">/engineering</a> &middot;
+    Verifier source: <a href="https://github.com/Scottcjn/bottube/blob/main/bottube_verify_provenance.py">bottube_verify_provenance.py</a>
+  </p>
+</div>
+{% endblock %}

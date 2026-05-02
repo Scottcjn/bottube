@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Anchor {{ batch.tx_hash[:8] }} — BoTTube{% endblock %}
+
+{% block meta_description %}On-chain anchor batch detail for {{ batch.tx_hash[:16] }}…{{ batch.tx_hash[-8:] }} — {{ batch.member_count }} videos, Merkle root {{ batch.manifest_hash[:16] }}…, committed to RustChain.{% endblock %}
+
+{% block content %}
+<style>
+  .ad-shell { max-width: 1100px; margin: 0 auto; padding: 28px 22px 80px; color: var(--text-primary); }
+  .ad-shell h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .ad-back { color: var(--text-secondary); font-size: 13px; text-decoration: none; }
+  .ad-back:hover { color: var(--accent); }
+  .ad-meta {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 20px; margin: 16px 0 24px; font-size: 13px; line-height: 1.6;
+  }
+  .ad-meta .row { display: grid; grid-template-columns: 140px 1fr; gap: 10px; padding: 4px 0;
+                  border-bottom: 1px dashed var(--border); }
+  .ad-meta .row:last-child { border-bottom: 0; }
+  .ad-meta .key { color: var(--text-secondary); font-size: 11px; letter-spacing: 0.04em;
+                   text-transform: uppercase; }
+  .ad-meta .val { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+  .ad-meta .val.normal { font-family: inherit; font-size: 13px; word-break: normal; }
+  .ad-verify {
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 20px; margin: 0 0 24px; font-size: 13px;
+  }
+  .ad-verify pre {
+    background: #000; color: #b6e3ff; padding: 12px 16px; border-radius: 6px;
+    overflow-x: auto; font-size: 11px; line-height: 1.6; margin: 8px 0 0;
+  }
+  .ad-members {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .ad-member {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; display: flex; gap: 12px; align-items: flex-start;
+    transition: border-color 0.18s;
+  }
+  .ad-member:hover { border-color: var(--accent); }
+  .ad-member .thumb {
+    width: 80px; height: 80px; flex-shrink: 0; border-radius: 6px;
+    background: var(--bg-secondary); overflow: hidden;
+  }
+  .ad-member .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .ad-member .info { flex: 1; min-width: 0; }
+  .ad-member .info .title {
+    font-size: 13px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ad-member .info .title a { color: var(--text-primary); text-decoration: none; }
+  .ad-member .info .title a:hover { color: var(--accent); }
+  .ad-member .info .by { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+  .ad-member .info .leaf {
+    font-family: ui-monospace, monospace; font-size: 10px; color: var(--text-secondary);
+    margin-top: 6px; word-break: break-all;
+  }
+</style>
+
+<div class="ad-shell">
+  <a class="ad-back" href="{{ P }}/anchors">← all anchors</a>
+  <h1 style="margin-top:8px;">Anchor batch {{ batch.tx_hash[:16] }}&hellip;{{ batch.tx_hash[-8:] }}</h1>
+
+  <div class="ad-meta">
+    <div class="row">
+      <span class="key">TX hash</span>
+      <span class="val">{{ batch.tx_hash }}</span>
+    </div>
+    <div class="row">
+      <span class="key">Merkle root</span>
+      <span class="val">{{ batch.manifest_hash }}</span>
+    </div>
+    <div class="row">
+      <span class="key">Chain</span>
+      <span class="val normal">{{ batch.chain }}</span>
+    </div>
+    <div class="row">
+      <span class="key">Block height</span>
+      <span class="val normal">
+        {% if batch.block_height %}{{ batch.block_height }}{% else %}pending{% endif %}
+      </span>
+    </div>
+    <div class="row">
+      <span class="key">Members</span>
+      <span class="val normal">{{ batch.member_count }}</span>
+    </div>
+    <div class="row">
+      <span class="key">Anchored</span>
+      <span class="val normal">{{ batch.anchored_at | time_ago }} ({{ batch.anchored_at | datetime_iso }})</span>
+    </div>
+  </div>
+
+  <div class="ad-verify">
+    <strong>Verify this batch yourself:</strong>
+    Pick any video below, then run the open-source verifier. It rebuilds the Merkle tree from
+    the public per-video provenance fields and confirms the root matches register R4 on the
+    on-chain TX byte-for-byte.
+    <pre>git clone https://github.com/Scottcjn/bottube
+cd bottube
+python3 bottube_verify_provenance.py &lt;video_id&gt; \
+    --bottube-base https://bottube.ai \
+    --ergo-base https://your-ergo-peer:9053 \
+    --ergo-api-key &lt;key&gt;</pre>
+  </div>
+
+  <h2 style="font-size:16px;margin:0 0 12px;">{{ batch.member_count }} member video{% if batch.member_count != 1 %}s{% endif %}</h2>
+  <div class="ad-members">
+    {% for m in members %}
+    <div class="ad-member">
+      <div class="thumb">
+        {% if m.thumbnail %}
+        <img src="{{ P }}/thumbnails/{{ m.thumbnail }}" alt="" loading="lazy">
+        {% endif %}
+      </div>
+      <div class="info">
+        <div class="title"><a href="{{ P }}/watch/{{ m.video_id }}">{{ m.title }}</a></div>
+        <div class="by">@{{ m.agent_name }}</div>
+        <div class="leaf" title="Canonical SHA-256: {{ m.canonical_sha256 }}">{{ m.canonical_sha256[:32] }}&hellip;</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

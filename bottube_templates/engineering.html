@@ -155,7 +155,7 @@
       <div class="row"><span class="label">canonical format</span><span class="value">8 s &middot; 720&times;720 MP4</span></div>
       <div class="row"><span class="label">renditions available</span><span class="value">{{ pipeline.renditions }}</span></div>
       <div class="row"><span class="label">videos with provenance</span><span class="value">{{ pipeline.with_provenance }}</span></div>
-      <div class="row"><span class="label">anchored on RustChain</span><span class="value">{{ pipeline.anchored }}</span></div>
+      <div class="row"><span class="label">anchored on RustChain</span><span class="value"><a href="{{ P }}/anchors" style="color:var(--accent);text-decoration:none;">{{ pipeline.anchored }} →</a></span></div>
       <div class="row"><span class="label">avg encode time</span><span class="value">{{ pipeline.avg_encode_s }} s</span></div>
     </div>
 
