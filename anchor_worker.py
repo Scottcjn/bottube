@@ -33,6 +33,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -104,66 +105,129 @@ def manifest_leaf(m):
     return hashlib.sha256(parts.encode("utf-8")).digest()
 
 
-def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key):
-    """Anchor merkle_root_hex in an Ergo box's R4 register.
+def _ergo_get(base, path, key, timeout=20):
+    s, body = _http("GET", base + path, headers={"api_key": key}, timeout=timeout)
+    if s != 200:
+        raise RuntimeError(f"GET {path} -> {s}: {str(body)[:200]}")
+    return body
 
-    Returns (tx_hash, block_height). Raises on failure.
 
-    NOTE: This is structured to match the existing
-    /opt/rustchain pattern in ergo_miner_anchor.py — it sends a raw TX
-    with the merkle root in R4 plus the member count in R5. Network
-    timing means block_height will often be 0 immediately; the caller
-    can re-poll later for confirmation.
+def _ergo_post(base, path, key, payload, timeout=30):
+    s, body = _http("POST", base + path, headers={"api_key": key}, body=payload, timeout=timeout)
+    if s != 200:
+        raise RuntimeError(f"POST {path} -> {s}: {str(body)[:200]}")
+    return body
+
+
+def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
+                wallet_password=None, anchor_value=1_000_000, max_tx_wait=180):
+    """Anchor merkle_root_hex in an Ergo box's R4 register on the private chain.
+
+    Reuses the proven pattern from /root/rustchain/ergo_miner_anchor.py
+    (UTXO selection, R4 = 0e20<32-byte hex>, sign + broadcast, TX
+    confirmation poll). Differs only in the source of the commitment —
+    here it's the BoTTube Merkle root, not the miner-attestation digest.
+
+    Returns (tx_id, block_height). block_height=0 if not yet mined when
+    we finish polling; caller re-checks later.
     """
-    # Build a minimal box with the merkle root in R4 and member_count in R5.
-    # The actual ergo wallet TX builder requires a bit of dancing; for the
-    # initial release we go through /wallet/transaction/generate which
-    # accepts a high-level request including registers.
-    request_body = {
-        "requests": [{
-            "address": "9dummyAddressReplaceWithRealMinerAddress",  # caller may override
-            "value": 1000000,  # 0.001 ERG minimum box value
-            "registers": {
-                "R4": "0e20" + merkle_root_hex,                 # SColl[Byte] of 32 bytes
-                "R5": "04" + format(member_count & 0xFFFFFFFF, "08x"),  # SInt
+    if not re.fullmatch(r"[0-9a-f]{64}", merkle_root_hex):
+        raise RuntimeError("merkle_root_hex must be 64 hex chars (32 bytes)")
+
+    # 1) Unlock wallet (idempotent — re-unlocking a locked wallet is OK).
+    if wallet_password:
+        try:
+            _ergo_post(ergo_base, "/wallet/unlock", ergo_key,
+                       {"pass": wallet_password}, timeout=15)
+        except Exception:
+            # Already unlocked is fine; surface only on later step.
+            pass
+
+    # 2) Pick a UTXO with enough balance (>= 2x anchor value).
+    boxes = _ergo_get(ergo_base, "/wallet/boxes/unspent?minConfirmations=1", ergo_key)
+    input_box = None
+    for b in (boxes or []):
+        box = b.get("box", {}) if isinstance(b, dict) else {}
+        if int(box.get("value", 0) or 0) >= 2 * anchor_value:
+            input_box = box
+            break
+    if not input_box:
+        raise RuntimeError("no UTXO with sufficient balance (>= 0.002 ERG)")
+
+    # 3) Get the raw bytes for the input box + current chain height.
+    box_bytes = _ergo_get(
+        ergo_base, "/utxo/byIdBinary/" + input_box["boxId"], ergo_key,
+    ).get("bytes")
+    if not box_bytes:
+        raise RuntimeError("could not fetch box raw bytes")
+    info = _ergo_get(ergo_base, "/info", ergo_key)
+    height = int(info.get("fullHeight") or 0)
+
+    input_val = int(input_box["value"])
+    change_val = input_val - anchor_value  # zero-fee chain config
+
+    # 4) Build the unsigned TX: anchor box (with R4=merkle_root, R5=count)
+    #    + change box back to the same wallet (same ergoTree).
+    unsigned_tx = {
+        "inputs": [{"boxId": input_box["boxId"], "extension": {}}],
+        "dataInputs": [],
+        "outputs": [
+            {
+                "value": anchor_value,
+                "ergoTree": input_box["ergoTree"],
+                "creationHeight": height,
+                "assets": [],
+                "additionalRegisters": {
+                    # SColl[Byte] of 32 bytes: 0e + 20 (length 32) + hex
+                    "R4": "0e20" + merkle_root_hex,
+                    # SInt: 04 + 4-byte big-endian unsigned int
+                    "R5": "04" + format(member_count & 0xFFFFFFFF, "08x"),
+                },
             },
-        }],
-        "fee": 0,  # zero-fee chain config
-        "inputsRaw": [],
-        "dataInputsRaw": [],
+            {
+                "value": change_val,
+                "ergoTree": input_box["ergoTree"],
+                "creationHeight": height,
+                "assets": [],
+                "additionalRegisters": {},
+            },
+        ],
     }
-    headers = {"api_key": ergo_key, "Content-Type": "application/json"}
 
-    # NOTE: the full sign + broadcast dance lives in
-    # /root/rustchain/ergo_miner_anchor.py on the production host.
-    # For v1 of this worker we delegate to that script via subprocess
-    # if it exists, falling back to the inline path here.
-    if os.path.isfile("/root/rustchain/ergo_miner_anchor.py"):
-        import subprocess
-        result = subprocess.run(
-            ["python3", "/root/rustchain/ergo_miner_anchor.py",
-             "--commitment-hex", merkle_root_hex,
-             "--member-count", str(member_count)],
-            capture_output=True, text=True, timeout=300,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"ergo_miner_anchor failed: {result.stderr[:300]}")
-        # Parse a line like: TX_ID=<hex>
-        tx_hash = ""
-        block_height = 0
-        for line in (result.stdout or "").splitlines():
-            if line.startswith("TX_ID="):
-                tx_hash = line.split("=", 1)[1].strip()
-            if line.startswith("BLOCK_HEIGHT="):
-                try:
-                    block_height = int(line.split("=", 1)[1].strip())
-                except Exception:
-                    pass
-        if not tx_hash:
-            raise RuntimeError(f"no TX_ID in worker output: {result.stdout[:300]}")
-        return tx_hash, block_height
+    # 5) Sign.
+    signed = _ergo_post(
+        ergo_base, "/wallet/transaction/sign", ergo_key,
+        {"tx": unsigned_tx, "inputsRaw": [box_bytes], "dataInputsRaw": []},
+        timeout=60,
+    )
 
-    raise RuntimeError("real-mode anchor not yet wired; deploy /root/rustchain/ergo_miner_anchor.py first")
+    # 6) Broadcast.
+    tx_id = _ergo_post(ergo_base, "/transactions", ergo_key, signed, timeout=30)
+    if isinstance(tx_id, dict):
+        tx_id = tx_id.get("id") or tx_id.get("transactionId") or ""
+    if not isinstance(tx_id, str) or len(tx_id) < 32:
+        raise RuntimeError(f"unexpected broadcast response: {tx_id!r}")
+
+    # 7) Poll for confirmation. block_height stays 0 if it never mines.
+    block_height = 0
+    deadline = time.time() + max_tx_wait
+    while time.time() < deadline:
+        time.sleep(10)
+        try:
+            tx_info = _ergo_get(
+                ergo_base, f"/wallet/transactionById?id={tx_id}", ergo_key, timeout=10,
+            )
+            num_confs = int((tx_info or {}).get("numConfirmations", 0) or 0)
+            if num_confs >= 1:
+                # height-of-tx isn't returned directly; use current chain height
+                # minus confirmations as an approximation.
+                cur = _ergo_get(ergo_base, "/info", ergo_key, timeout=10)
+                block_height = max(0, int(cur.get("fullHeight") or 0) - num_confs + 1)
+                break
+        except Exception:
+            continue
+
+    return tx_id, block_height
 
 
 def main():
@@ -229,12 +293,17 @@ def main():
         chain = "stub"
     else:
         ergo_key = os.environ.get("ERGO_API_KEY", "")
-        ergo_base = os.environ.get("ERGO_BASE", "http://localhost:9053")
+        ergo_base = os.environ.get("ERGO_BASE",
+                                   os.environ.get("ERGO_NODE", "http://localhost:9053"))
+        wallet_password = os.environ.get("ERGO_WALLET_PASSWORD", "rustchain123")
         if not ergo_key:
             sys.exit("ERGO_API_KEY env not set for --mode real")
         try:
-            tx_hash, block_height = anchor_real(root_hex, len(manifests), ergo_base, ergo_key)
-            chain = "ergo"
+            tx_hash, block_height = anchor_real(
+                root_hex, len(manifests), ergo_base, ergo_key,
+                wallet_password=wallet_password,
+            )
+            chain = "rustchain"
         except Exception as e:
             print(f"[anchor-worker] real anchor failed: {e}")
             _http(

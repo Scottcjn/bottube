@@ -41,16 +41,16 @@
 
 [Unit]
 Description=BoTTube provenance anchor worker (Phase 10.5)
-After=network-online.target bottube.service
+After=network-online.target bottube.service bottube-ergo-tunnel.service
 Wants=network-online.target
-Requires=bottube.service
+Requires=bottube.service bottube-ergo-tunnel.service
 
 [Service]
 Type=oneshot
 WorkingDirectory=/root/bottube
 EnvironmentFile=-/root/bottube/.env.anchor
 Environment="BOTTUBE_BASE=http://127.0.0.1:8097"
-ExecStart=/usr/bin/python3 /root/bottube/anchor_worker.py --mode stub --limit 200
+ExecStart=/usr/bin/python3 /root/bottube/anchor_worker.py --mode real --limit 200
 StandardOutput=append:/var/log/bottube_anchor.log
 StandardError=append:/var/log/bottube_anchor.log
 TimeoutStartSec=600
