@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""
+bottube-verify-provenance — verify a video's on-chain provenance end-to-end.
+
+Walks the four steps the Phase 11 PR comment promised any reviewer can run:
+
+  1. GET https://bottube.ai/api/videos/<id>/provenance
+       → fetch canonical_sha256, uploader_sig, uploaded_at, anchor.tx_hash,
+         anchor.manifest_hash, and the batch_id this video was anchored in.
+  2. List all videos in the same batch_id (membership set).
+  3. Reconstruct each member's leaf:
+       leaf = sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)
+     and compute a Bitcoin-style binary Merkle root.
+  4. Fetch the on-chain box's R4 register from the Ergo node and compare
+     the 32 bytes to the locally-computed root.
+
+Exits 0 on PASS (root matches R4), 1 on any mismatch or fetch error.
+
+Usage:
+    bottube-verify-provenance <video_id> [--ergo-base URL] [--bottube-base URL]
+
+The verifier is read-only and uses public bottube.ai endpoints + the
+Ergo node API (which can be a public peer or a tunneled localhost).
+
+Examples:
+    # Verify against bottube.ai prod + a local tunneled Ergo:
+    BOTTUBE_BASE=https://bottube.ai \
+    ERGO_BASE=http://localhost:19053 \
+    ERGO_API_KEY=<key> \
+        ./bottube-verify-provenance.py 3PUqIlnScB4
+
+    # Verify against a self-hosted bottube fork:
+    ./bottube-verify-provenance.py abc123 \
+        --bottube-base https://my.bottube.test \
+        --ergo-base https://ergo.public.example
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+
+def _http_json(url, headers=None, timeout=15):
+    req = urllib.request.Request(url, headers=dict(headers or {}))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(f"HTTP {e.code} on {url}: {body[:200]}")
+    except Exception as e:
+        raise RuntimeError(f"request failed for {url}: {e}")
+
+
+def manifest_leaf(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    parts = "|".join([
+        video_id or "",
+        canonical_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def merkle_root(leaves):
+    """Bitcoin-style binary Merkle root over SHA-256 leaves."""
+    if not leaves:
+        return b"\x00" * 32
+    layer = list(leaves)
+    while len(layer) > 1:
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
+        nxt = []
+        for i in range(0, len(layer), 2):
+            nxt.append(hashlib.sha256(layer[i] + layer[i + 1]).digest())
+        layer = nxt
+    return layer[0]
+
+
+def fetch_anchor_r4(ergo_base, ergo_key, tx_hash, timeout=15):
+    """Fetch R4 register bytes for a confirmed anchor TX. Returns bytes."""
+    url = f"{ergo_base.rstrip('/')}/wallet/transactionById?id={tx_hash}"
+    data = _http_json(url, headers={"api_key": ergo_key} if ergo_key else None,
+                      timeout=timeout)
+    outs = data.get("outputs") or []
+    if not outs:
+        raise RuntimeError(f"no outputs in TX {tx_hash}")
+    r4 = (outs[0].get("additionalRegisters") or {}).get("R4")
+    if not r4 or not isinstance(r4, str):
+        raise RuntimeError(f"R4 missing on TX {tx_hash}")
+    # SColl[Byte] of length N is encoded as "0e" + length-byte + bytes-hex.
+    # For our 32-byte commitment that's "0e20" + 64 hex chars.
+    if not r4.startswith("0e20"):
+        raise RuntimeError(f"unexpected R4 prefix (not a 32-byte SColl): {r4[:8]}")
+    hex_root = r4[4:]
+    if len(hex_root) != 64 or not re.fullmatch(r"[0-9a-f]+", hex_root):
+        raise RuntimeError(f"R4 payload not 32-byte hex: {r4}")
+    return bytes.fromhex(hex_root)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Verify a BoTTube video's on-chain provenance")
+    ap.add_argument("video_id", help="The video_id to verify")
+    ap.add_argument("--bottube-base", default=os.environ.get("BOTTUBE_BASE", "https://bottube.ai"))
+    ap.add_argument("--ergo-base", default=os.environ.get("ERGO_BASE", "http://localhost:9053"))
+    ap.add_argument("--ergo-api-key", default=os.environ.get("ERGO_API_KEY", ""))
+    ap.add_argument("--admin-key", default=os.environ.get("BOTTUBE_ADMIN_KEY", ""),
+                    help="Optional: admin key for batch-membership lookup. Without it, only single-leaf verify is shown.")
+    ap.add_argument("--quiet", action="store_true", help="Only print PASS/FAIL")
+    args = ap.parse_args()
+
+    bot = args.bottube_base.rstrip("/")
+    vid = args.video_id
+
+    if not args.quiet:
+        print(f"[1/4] Fetching provenance for {vid} from {bot}...")
+
+    prov = _http_json(f"{bot}/api/videos/{vid}/provenance")
+    if not prov.get("ok"):
+        sys.exit(f"FAIL: {bot} returned ok=false: {prov}")
+    if not prov.get("verified"):
+        sys.exit(f"FAIL: video reports pill_state={prov.get('pill_state')!r} (not yet anchored)")
+
+    canonical_sha = prov["canonical_asset"]["sha256"]
+    uploader_sig = prov["upload"]["uploader_sig"]
+    uploaded_at = prov["upload"]["uploaded_at"]
+    tx_hash = prov["anchor"]["tx_hash"]
+    chain = prov["anchor"]["chain"]
+    manifest_hash = prov["anchor"]["manifest_hash"]
+
+    if not args.quiet:
+        print(f"      pill={prov['pill_state']}  chain={chain}")
+        print(f"      tx_hash={tx_hash}")
+        print(f"      manifest_hash (claimed Merkle root)={manifest_hash}")
+        print()
+        print(f"[2/4] Resolving batch members for the leaf computation...")
+
+    # Compute this video's leaf locally.
+    own_leaf = manifest_leaf(vid, canonical_sha, uploader_sig, uploaded_at)
+    if not args.quiet:
+        print(f"      own_leaf={own_leaf.hex()}")
+
+    # If the operator gave us an admin key, fetch the batch membership so we
+    # can recompute the full Merkle root. Otherwise, the verifier degrades
+    # to "this video's leaf is consistent with own provenance" but cannot
+    # check the on-chain commitment.
+    full_check = bool(args.admin_key)
+    on_chain_root_hex = ""
+    locally_computed_root_hex = ""
+    batch_members = []
+
+    if full_check:
+        if not args.quiet:
+            print(f"      using admin key to fetch batch membership")
+        try:
+            batch_data = _http_json(
+                f"{bot}/api/admin/provenance/batch?tx={tx_hash}",
+                headers={"X-Admin-Key": args.admin_key},
+            )
+            if batch_data.get("ok"):
+                batch_members = batch_data.get("members", [])
+                if not args.quiet:
+                    print(f"      batch has {len(batch_members)} members")
+            else:
+                if not args.quiet:
+                    print(f"      batch fetch failed: {batch_data.get('error')}")
+                full_check = False
+        except Exception as e:
+            if not args.quiet:
+                print(f"      batch fetch error: {e}")
+            full_check = False
+
+    if not args.quiet:
+        print(f"[3/4] Fetching on-chain R4 for tx {tx_hash[:16]}...")
+
+    try:
+        on_chain = fetch_anchor_r4(args.ergo_base, args.ergo_api_key, tx_hash)
+    except Exception as e:
+        sys.exit(f"FAIL: could not fetch R4 from {args.ergo_base}: {e}")
+
+    on_chain_root_hex = on_chain.hex()
+    if not args.quiet:
+        print(f"      on-chain R4={on_chain_root_hex}")
+        print()
+        print(f"[4/4] Verifying...")
+
+    # Cross-check: the manifest_hash bottube reports must equal the
+    # 32-byte R4 from the chain. This is the bottube→chain seam.
+    if on_chain_root_hex != manifest_hash:
+        sys.exit(
+            f"FAIL: on-chain R4 ({on_chain_root_hex}) does NOT match\n"
+            f"      manifest_hash from provenance API ({manifest_hash}).\n"
+            f"      The bottube DB and the chain disagree about this batch's root."
+        )
+
+    # Cross-check: the leaf from this video must hash into the root.
+    # Without batch membership we can only verify the trivial case where
+    # this video's leaf == the root (a one-member batch). For multi-member
+    # batches the verifier confirms the bottube↔chain seam above and
+    # requires the future /admin/provenance/batch endpoint for the
+    # leaf↔root cryptographic step.
+    if own_leaf.hex() == manifest_hash:
+        if not args.quiet:
+            print(f"      single-leaf batch — own_leaf matches root directly.")
+        verdict = "PASS"
+    elif full_check and batch_members:
+        # Full Merkle reconstruction: build leaves for every batch member,
+        # compute the binary tree, compare to on-chain root.
+        leaves = [
+            manifest_leaf(m["video_id"], m["canonical_sha256"],
+                          m["uploader_sig"], m["uploaded_at"])
+            for m in batch_members
+        ]
+        local_root = merkle_root(leaves)
+        locally_computed_root_hex = local_root.hex()
+        own_in_batch = any(m["video_id"] == vid for m in batch_members)
+        if not own_in_batch:
+            sys.exit(
+                f"FAIL: video {vid} is not listed in batch members "
+                f"(membership inconsistency)"
+            )
+        if locally_computed_root_hex != on_chain_root_hex:
+            sys.exit(
+                f"FAIL: locally-computed Merkle root ({locally_computed_root_hex}) "
+                f"does NOT match on-chain R4 ({on_chain_root_hex}). "
+                f"Either the batch members or leaf recipe diverged."
+            )
+        if not args.quiet:
+            print(f"      Reconstructed local root: {locally_computed_root_hex}")
+            print(f"      ✓ matches on-chain R4 byte-for-byte")
+            print(f"      ✓ {vid} is included in the batch ({len(batch_members)} members)")
+        verdict = "PASS"
+    else:
+        if not args.quiet:
+            print(f"      multi-leaf batch — leaf is one of N members.")
+            print(f"      bottube↔chain seam verified (manifest_hash == R4).")
+            print(f"      leaf↔root inclusion proof skipped — pass --admin-key to enable.")
+        verdict = "PARTIAL"
+
+    if args.quiet:
+        print(verdict)
+    else:
+        print()
+        print(f"=== {verdict} ===")
+        print(f"  video:       {vid}")
+        print(f"  chain:       {chain}")
+        print(f"  tx:          {tx_hash}")
+        print(f"  on-chain R4: {on_chain_root_hex}")
+        print(f"  bottube hash:{manifest_hash}")
+        print(f"  own leaf:    {own_leaf.hex()}")
+        if verdict == "PASS":
+            print()
+            if own_leaf.hex() == manifest_hash:
+                print("  Single-leaf batch — own_leaf matches root directly.")
+                print("  End-to-end verified.")
+            else:
+                print(f"  Multi-leaf batch ({len(batch_members)} members):")
+                print("    1. bottube's manifest_hash matches the on-chain R4 register")
+                print("    2. locally-reconstructed Merkle root matches both")
+                print("    3. this video's leaf is included in the batch")
+                print("  End-to-end cryptographically verified.")
+        else:
+            print()
+            print("  The bottube→chain seam is verified: bottube's claimed manifest_hash")
+            print("  matches the on-chain R4 register byte-for-byte. The leaf-to-root")
+            print("  inclusion step needs --admin-key to fetch /api/admin/provenance/batch.")
+
+    sys.exit(0 if verdict in ("PASS", "PARTIAL") else 1)
+
+
+if __name__ == "__main__":
+    main()

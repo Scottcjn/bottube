@@ -19673,6 +19673,83 @@ def admin_provenance_anchor_result():
     })
 
 
+@app.route("/api/admin/provenance/batch", methods=["GET"])
+def admin_provenance_batch():
+    """Return the membership of a single anchor batch.
+
+    Used by external verifiers (e.g. bottube_verify_provenance.py) to
+    reconstruct the Merkle tree leaf-by-leaf and prove inclusion of a
+    specific video against the on-chain R4 root. Read-only, admin-key
+    gated to keep the membership graph from being trivially scraped.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _provenance_ensure_anchor_columns()
+
+    batch_id = (request.args.get("batch_id") or "").strip()
+    tx_hash = (request.args.get("tx") or request.args.get("tx_hash") or "").strip()
+    if not batch_id and not tx_hash:
+        return jsonify({"ok": False, "error": "batch_id or tx required"}), 400
+
+    db = get_db()
+    if batch_id and not re.fullmatch(r"batch_[a-f0-9]{8,32}", batch_id):
+        return jsonify({"ok": False, "error": "invalid batch_id"}), 400
+    if tx_hash and not re.fullmatch(r"[0-9a-fA-F]{32,128}", tx_hash):
+        return jsonify({"ok": False, "error": "invalid tx_hash"}), 400
+
+    if tx_hash and not batch_id:
+        row = db.execute(
+            "SELECT anchor_batch_id FROM video_provenance WHERE anchor_tx_hash = ? LIMIT 1",
+            (tx_hash,),
+        ).fetchone()
+        if not row or not row["anchor_batch_id"]:
+            return jsonify({"ok": False, "error": "tx_hash not found in any batch"}), 404
+        batch_id = row["anchor_batch_id"]
+
+    rows = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  anchor_chain, anchor_tx_hash, anchor_block_height,
+                  anchor_manifest_hash, anchor_status, anchored_at
+             FROM video_provenance
+            WHERE anchor_batch_id = ?
+            ORDER BY uploaded_at ASC, video_id ASC""",
+        (batch_id,),
+    ).fetchall()
+    if not rows:
+        return jsonify({"ok": False, "error": "no rows for batch"}), 404
+
+    members = [{
+        "video_id": r["video_id"],
+        "canonical_sha256": r["canonical_sha256"],
+        "uploader_sig": r["uploader_sig"],
+        "uploaded_at": r["uploaded_at"],
+    } for r in rows]
+    head = rows[0]
+    return jsonify({
+        "ok": True,
+        "batch_id": batch_id,
+        "anchor": {
+            "chain": head["anchor_chain"],
+            "tx_hash": head["anchor_tx_hash"],
+            "block_height": head["anchor_block_height"],
+            "manifest_hash": head["anchor_manifest_hash"],
+            "status": head["anchor_status"],
+            "anchored_at": head["anchored_at"],
+        },
+        "leaf_recipe": (
+            "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
+            "with '|' as the literal separator and uploaded_at as integer seconds"
+        ),
+        "merkle_recipe": (
+            "Bitcoin-style binary tree: pair adjacent leaves and hash, "
+            "duplicate the last node when a level has odd cardinality, "
+            "iterate until a single 32-byte root remains."
+        ),
+        "member_count": len(members),
+        "members": members,
+    })
+
+
 @app.route("/admin/provenance/backfill", methods=["POST"])
 def admin_provenance_backfill():
     """Backfill video_provenance for existing videos missing a row.
