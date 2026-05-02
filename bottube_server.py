@@ -8545,8 +8545,8 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         return None
     Q = Q / qn
 
-    # Cosine similarity to mean anchor
-    content_sim = M @ Q  # already L2-normalized → dot == cosine
+    # Cosine similarity to mean anchor (text path)
+    text_sim = M @ Q  # already L2-normalized → dot == cosine
 
     # Per-candidate "best matching anchor" for the why-label
     if A.shape[0] > 1:
@@ -8554,6 +8554,57 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         best_anchor_for_each = per_anchor.argmax(axis=1)
     else:
         best_anchor_for_each = _np.zeros(M.shape[0], dtype=int)
+
+    # ---- Phase 11.3: layer in the visual signal ---------------------------
+    # We hold a separate matrix for the visual-caption embeddings (gemini
+    # vision -> text -> gemini-embedding-2). At query time we project the
+    # anchors into the visual space too, compute a separate cosine, and
+    # blend at 0.65 text + 0.35 visual per candidate. Candidates not in
+    # the visual cache fall back to text-only — partial coverage degrades
+    # gracefully.
+    with _UV_CACHE_LOCK:
+        Vmat = _UV_CACHE.get("matrix")
+        Vids = _UV_CACHE.get("ids", [])
+        v_loaded = _UV_CACHE.get("loaded_at", 0)
+    if (Vmat is None or not Vids) or (time.time() - v_loaded > 600):
+        try:
+            _uv_cache_warm()
+        except Exception:
+            pass
+        with _UV_CACHE_LOCK:
+            Vmat = _UV_CACHE.get("matrix")
+            Vids = _UV_CACHE.get("ids", [])
+    visual_sim = None
+    visual_index = {}
+    if Vmat is not None and Vids:
+        visual_index = {vid: i for i, vid in enumerate(Vids)}
+        # Anchors that exist in the visual cache form the visual query vector.
+        v_anchor_idx = [visual_index[a] for a in anchors if a in visual_index]
+        if v_anchor_idx:
+            Vq = Vmat[v_anchor_idx].mean(axis=0)
+            vqn = float(_np.linalg.norm(Vq))
+            if vqn > 0:
+                Vq = Vq / vqn
+                # Compute per-candidate visual cosine, but candidates not in the
+                # visual cache get NaN so we can fall back to text-only later.
+                visual_sim_full = Vmat @ Vq      # for ids in Vmat
+                visual_sim = _np.full(M.shape[0], _np.nan, dtype=_np.float32)
+                for i, vid in enumerate(ids):
+                    j = visual_index.get(vid)
+                    if j is not None:
+                        visual_sim[i] = float(visual_sim_full[j])
+
+    if visual_sim is not None:
+        # Per-candidate blend: where visual is present, 0.65 text + 0.35 visual;
+        # otherwise just text.
+        has_visual = ~_np.isnan(visual_sim)
+        content_sim = _np.where(
+            has_visual,
+            0.65 * text_sim + 0.35 * _np.nan_to_num(visual_sim),
+            text_sim,
+        ).astype(_np.float32)
+    else:
+        content_sim = text_sim
 
     # Pull metadata needed for freshness + popularity in one query.
     placeholders = ",".join("?" for _ in ids)
@@ -8668,6 +8719,8 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         vid = ids[i]
         # "Why" label: pick the dominant signal by weighted contribution.
         c = float(content_sim[i])
+        t_only = float(text_sim[i])
+        v_only = (float(visual_sim[i]) if visual_sim is not None and not _np.isnan(visual_sim[i]) else None)
         f = float(freshness[i])
         p = float(popularity[i])
         cw = float(cowatch[i])
@@ -8683,7 +8736,12 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
             ai = int(best_anchor_for_each[i])
             anchor_vid = anchors[ai] if ai < len(anchors) else ""
             anchor_title = seen_anchor_titles.get(anchor_vid, "")
-            if anchor_title:
+            # If visual dominated within content, surface "Looks like" so
+            # the chip credits the right signal.
+            if v_only is not None and v_only > t_only and (v_only - t_only) > 0.03:
+                why = (f"Looks like \"{anchor_title[:55]}\"" if anchor_title
+                       else "Visual match")
+            elif anchor_title:
                 why = f"Like \"{anchor_title[:60]}\""
             else:
                 why = "Topical match"
@@ -8693,11 +8751,16 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
             why = "Just posted"
         else:
             why = "Trending now"
-        results.append((vid, float(score[i]), why,
-                         {"content_sim": round(c, 3),
-                          "freshness": round(f, 3),
-                          "cowatch": round(cw, 3),
-                          "popularity": round(p, 3)}))
+        comp = {
+            "content_sim": round(c, 3),
+            "text_sim": round(t_only, 3),
+            "freshness": round(f, 3),
+            "cowatch": round(cw, 3),
+            "popularity": round(p, 3),
+        }
+        if v_only is not None:
+            comp["visual_sim"] = round(v_only, 3)
+        results.append((vid, float(score[i]), why, comp))
         if len(results) >= per_page:
             break
     return results
@@ -17661,6 +17724,376 @@ _EMB_RATE_LOCK = _eng_Lock()
 _EMB_RATE_NEXT_OK_AT = [0.0]
 _EMB_RATE_MIN_GAP = 0.75
 _EMB_RATE_429_BACKOFF_FLOOR = 5.0
+
+
+# --- Phase 11.3: visual signal (describe-then-embed) ----------------------
+# Per Codex's review, CLIP late-fusion is the right next modality. We don't
+# have a CLIP server running, so we use Gemini vision to describe each
+# keyframe sprite in 1-2 sentences, then embed the description with the
+# same gemini-embedding-2 model the text path uses.
+#
+# Why "describe-then-embed" over true CLIP:
+#   * Both signals end up in the same 3072-d Gemini space, so blending at
+#     query time is a simple weighted cosine, not a cross-space alignment
+#     problem.
+#   * The caption is auditable (stored verbatim in `caption` column) — a
+#     reviewer can see what the model thought the video was about.
+#   * No new inference infrastructure required; reuses APIs already wired.
+#
+# Two costs:
+#   * Gemini-2.5-flash vision rate limits (~15 RPM free tier, separate
+#     from the embedContent 100 RPM and 1000/day buckets).
+#   * Visual signal is filtered through a language layer, so very visual-
+#     only differences (e.g., color palette, motion direction) may be
+#     lost. Acceptable trade for a v1 that keeps the implementation tight.
+
+VISUAL_MODEL_VISION = "gemini-2.5-flash-lite"
+VISUAL_MODEL_EMBED = "gemini-embedding-2"
+VISUAL_API_VISION_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    + VISUAL_MODEL_VISION
+    + ":generateContent"
+)
+VISUAL_PROMPT = (
+    "Describe this 6-frame sprite from an AI-generated video clip in 1-2 "
+    "sentences. Focus on subject, action, visual style, and mood. No "
+    "headers or markdown — return just the description as plain text."
+)
+VISUAL_CAPTION_MAX_LEN = 600
+
+_UV_CACHE = {"matrix": None, "ids": [], "loaded_at": 0.0}
+_UV_CACHE_LOCK = _eng_Lock()
+
+# Vision quota is independent of the text embedContent quota but still
+# rate-limited; 4 s gap = 15 RPM, matches free-tier ceiling.
+_UV_RATE_LOCK = _eng_Lock()
+_UV_RATE_NEXT_OK_AT = [0.0]
+_UV_RATE_MIN_GAP = 4.0
+
+
+def _uv_ensure_schema():
+    """Lazy-create video_visual_embeddings table."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS video_visual_embeddings (
+                video_id        TEXT PRIMARY KEY,
+                vision_model    TEXT NOT NULL,            -- gemini-2.5-flash
+                embed_model     TEXT NOT NULL,            -- gemini-embedding-2
+                dim             INTEGER NOT NULL,
+                bytes           BLOB NOT NULL,            -- numpy float32 .tobytes()
+                caption         TEXT NOT NULL,            -- the visual description
+                sprite_sha      TEXT DEFAULT '',          -- sha256 of source sprite jpeg
+                created_at      REAL NOT NULL,
+                updated_at      REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_visual_embed_updated
+                ON video_visual_embeddings(updated_at DESC);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _uv_rate_wait():
+    while True:
+        with _UV_RATE_LOCK:
+            now = time.time()
+            wait = _UV_RATE_NEXT_OK_AT[0] - now
+            if wait <= 0:
+                _UV_RATE_NEXT_OK_AT[0] = now + _UV_RATE_MIN_GAP
+                return
+        time.sleep(min(8.0, max(0.1, wait)))
+
+
+def _uv_describe_sprite(sprite_path):
+    """Call Gemini vision on a sprite jpeg. Returns (caption, error)."""
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        return "", "no_api_key"
+    try:
+        with open(sprite_path, "rb") as f:
+            sprite_bytes = f.read()
+    except Exception as e:
+        return "", f"sprite_read_failed:{e}"
+    if not sprite_bytes:
+        return "", "empty_sprite"
+
+    import base64 as _b64
+    body = json.dumps({
+        "contents": [{
+            "parts": [
+                {"text": VISUAL_PROMPT},
+                {"inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": _b64.b64encode(sprite_bytes).decode("ascii"),
+                }},
+            ],
+        }],
+    }).encode("utf-8")
+    req = _ue_urlreq.Request(
+        VISUAL_API_VISION_URL + "?key=" + key,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    _uv_rate_wait()
+    try:
+        with _ue_urlreq.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except _ue_urlerr.HTTPError as e:
+        if e.code == 429:
+            try:
+                with _UV_RATE_LOCK:
+                    _UV_RATE_NEXT_OK_AT[0] = time.time() + 60.0
+            except Exception:
+                pass
+        return "", f"http_{e.code}"
+    except Exception as e:
+        return "", f"req_failed:{e}"
+
+    cands = data.get("candidates", []) or []
+    if not cands:
+        return "", "no_candidates"
+    parts = (cands[0].get("content", {}).get("parts", []) or [])
+    text = ""
+    for p in parts:
+        text += (p.get("text") or "")
+    text = text.strip()
+    if not text:
+        return "", "empty_caption"
+    return text[:VISUAL_CAPTION_MAX_LEN], ""
+
+
+def _uv_record_for_video(video_id, ensure_sprite=True):
+    """Generate or refresh the visual embedding for one video.
+
+    Steps:
+      1. Look up the video record + filename.
+      2. Ensure the keyframe sprite exists (generate on demand if missing).
+      3. Hash the sprite. If we already have a row with matching sprite_sha,
+         skip — same as the text path's text_sha guard.
+      4. Call Gemini vision for a description.
+      5. Embed the description with gemini-embedding-2.
+      6. INSERT OR REPLACE.
+    """
+    _uv_ensure_schema()
+    try:
+        import numpy as _np
+    except ImportError:
+        return {"ok": False, "error": "numpy_missing"}
+
+    db = get_db()
+    video = db.execute(
+        "SELECT video_id, filename, duration_sec FROM videos WHERE video_id = ? AND COALESCE(is_removed,0)=0",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return {"ok": False, "error": "not_found"}
+
+    sprite_path = KEYFRAME_DIR / f"{video_id}.jpg"
+    if not sprite_path.exists() or sprite_path.stat().st_size < 256:
+        if not ensure_sprite:
+            return {"ok": False, "error": "sprite_missing"}
+        if not _renditions_ffmpeg_available() and not Path("/usr/bin/ffmpeg").is_file():
+            return {"ok": False, "error": "ffmpeg_missing"}
+        # Reuse the existing extraction path
+        video_path = VIDEO_DIR / (video["filename"] or "")
+        if not video_path.exists():
+            return {"ok": False, "error": "canonical_missing"}
+        try:
+            _generate_keyframe_sprite(video_path, sprite_path)
+        except Exception as e:
+            return {"ok": False, "error": f"sprite_gen_failed:{e}"}
+
+    try:
+        sprite_sha = _ts_sha256_file(sprite_path)
+    except Exception as e:
+        return {"ok": False, "error": f"sprite_hash_failed:{e}"}
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        existing = conn.execute(
+            "SELECT sprite_sha FROM video_visual_embeddings WHERE video_id = ?",
+            (video_id,),
+        ).fetchone()
+        if existing and existing[0] == sprite_sha:
+            return {"ok": True, "skipped": True, "reason": "unchanged"}
+    finally:
+        conn.close()
+
+    caption, err = _uv_describe_sprite(str(sprite_path))
+    if err or not caption:
+        return {"ok": False, "error": f"describe_failed:{err}"}
+
+    arr = _ue_embed_text("Visual: " + caption)
+    if arr is None:
+        return {"ok": False, "error": "embed_failed"}
+    arr = arr.astype("float32", copy=False)
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO video_visual_embeddings
+                   (video_id, vision_model, embed_model, dim, bytes,
+                    caption, sprite_sha,
+                    created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?,
+                       COALESCE((SELECT created_at FROM video_visual_embeddings WHERE video_id=?), ?),
+                       ?)""",
+            (video_id, VISUAL_MODEL_VISION, VISUAL_MODEL_EMBED,
+             int(arr.shape[0]), arr.tobytes(), caption, sprite_sha,
+             video_id, time.time(), time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with _UV_CACHE_LOCK:
+        _UV_CACHE.update({"matrix": None, "ids": [], "loaded_at": 0.0})
+    return {"ok": True, "dim": int(arr.shape[0]), "caption_len": len(caption)}
+
+
+def _uv_cache_warm():
+    try:
+        import numpy as _np
+    except ImportError:
+        return False
+    _uv_ensure_schema()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """SELECT v.video_id, ve.dim, ve.bytes
+                 FROM video_visual_embeddings ve
+                 JOIN videos v ON v.video_id = ve.video_id
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND ve.embed_model = ?
+                ORDER BY ve.video_id""",
+            (VISUAL_MODEL_EMBED,),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        with _UV_CACHE_LOCK:
+            _UV_CACHE.update({"matrix": None, "ids": [], "loaded_at": time.time()})
+        return False
+    n = len(rows)
+    dim = int(rows[0]["dim"])
+    M = _np.zeros((n, dim), dtype=_np.float32)
+    ids = []
+    for i, r in enumerate(rows):
+        if int(r["dim"]) != dim:
+            continue
+        try:
+            M[i] = _np.frombuffer(r["bytes"], dtype=_np.float32)
+        except Exception:
+            continue
+        ids.append(r["video_id"])
+    with _UV_CACHE_LOCK:
+        _UV_CACHE.update({"matrix": M, "ids": ids, "loaded_at": time.time()})
+    return True
+
+
+@app.route("/admin/visual/backfill", methods=["POST"])
+def admin_visual_backfill():
+    """Generate visual embeddings for videos missing them. Resumable."""
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _uv_ensure_schema()
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(50, int(data.get("limit", 10))))
+    except Exception:
+        limit = 10
+    since = (data.get("since_video_id") or "").strip()
+
+    db = get_db()
+    targeted = data.get("video_ids") or []
+    if isinstance(targeted, list) and targeted:
+        # Targeted mode: explicit video_ids to (re)embed. Useful for seeding
+        # specific anchors or refreshing after a sprite changes.
+        ids_clean = [v for v in targeted if isinstance(v, str)
+                     and re.fullmatch(r"[A-Za-z0-9_-]{5,32}", v)][:limit]
+        if not ids_clean:
+            return jsonify({"ok": False, "error": "no valid video_ids"}), 400
+        ph = ",".join("?" for _ in ids_clean)
+        rows = db.execute(
+            f"""SELECT video_id FROM videos
+                 WHERE video_id IN ({ph})
+                   AND COALESCE(is_removed,0)=0
+                 ORDER BY video_id ASC""",
+            ids_clean,
+        ).fetchall()
+    elif since:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 LEFT JOIN video_visual_embeddings ve ON ve.video_id = v.video_id
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND ve.video_id IS NULL
+                  AND v.video_id > ?
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (since, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 LEFT JOIN video_visual_embeddings ve ON ve.video_id = v.video_id
+                WHERE COALESCE(v.is_removed, 0) = 0
+                  AND ve.video_id IS NULL
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    started = time.time()
+    written, failed = 0, 0
+    last_id = ""
+    errors = []
+    sample_caption = ""
+    for r in rows:
+        last_id = r["video_id"]
+        result = _uv_record_for_video(r["video_id"])
+        if result.get("ok"):
+            written += 1
+            if result.get("skipped"):
+                pass
+            elif not sample_caption:
+                conn = sqlite3.connect(str(DB_PATH))
+                row = conn.execute(
+                    "SELECT caption FROM video_visual_embeddings WHERE video_id = ?",
+                    (r["video_id"],),
+                ).fetchone()
+                conn.close()
+                if row:
+                    sample_caption = (row[0] or "")[:200]
+        else:
+            failed += 1
+            if len(errors) < 10:
+                errors.append({"video_id": r["video_id"],
+                               "error": result.get("error", "unknown")})
+
+    elapsed = time.time() - started
+    return jsonify({
+        "ok": True,
+        "vision_model": VISUAL_MODEL_VISION,
+        "embed_model": VISUAL_MODEL_EMBED,
+        "written": written,
+        "failed": failed,
+        "elapsed_s": round(elapsed, 2),
+        "last_video_id": last_id,
+        "next_call": (
+            {"since_video_id": last_id, "limit": limit}
+            if rows and len(rows) >= limit else None
+        ),
+        "errors": errors,
+        "sample_caption": sample_caption,
+    })
 
 
 def _ue_ensure_schema():
