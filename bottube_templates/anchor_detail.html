@@ -91,6 +91,58 @@
     </div>
   </div>
 
+  <div class="ad-meta" id="chain-panel" style="background:rgba(74,210,122,0.06);border-color:rgba(74,210,122,0.4);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <strong style="color:#4ad27a;">On-chain data (live)</strong>
+      <span id="chain-status" style="font-size:11px;color:var(--text-secondary);">fetching…</span>
+    </div>
+    <div id="chain-rows" style="display:none;">
+      <div class="row"><span class="key">R4 (raw)</span><span class="val" id="chain-r4-raw">—</span></div>
+      <div class="row"><span class="key">R4 → Merkle root</span><span class="val" id="chain-r4-merkle">—</span></div>
+      <div class="row"><span class="key">Bottube ↔ chain</span><span class="val normal" id="chain-match">—</span></div>
+      <div class="row"><span class="key">Confirmations</span><span class="val normal" id="chain-confs">—</span></div>
+      <div class="row"><span class="key">Inclusion height</span><span class="val normal" id="chain-incl">—</span></div>
+      <div class="row"><span class="key">Anchor box value</span><span class="val normal" id="chain-value">—</span></div>
+      <div class="row"><span class="key">ergoTree (prefix)</span><span class="val" id="chain-tree">—</span></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var tx = "{{ batch.tx_hash }}";
+      var claimedRoot = "{{ batch.manifest_hash }}";
+      fetch("{{ P }}/api/anchors/" + tx + "/chain", { credentials: "omit" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var status = document.getElementById("chain-status");
+          var rows = document.getElementById("chain-rows");
+          if (!j || !j.ok) {
+            status.textContent = "chain unreachable: " + ((j && j.error) || "unknown");
+            status.style.color = "#e26060";
+            return;
+          }
+          var match = j.r4_merkle_root && j.r4_merkle_root === claimedRoot;
+          status.textContent = match ? "✓ root matches bottube's claim" : "✗ MISMATCH";
+          status.style.color = match ? "#4ad27a" : "#e26060";
+          rows.style.display = "block";
+          document.getElementById("chain-r4-raw").textContent = j.r4_raw || "—";
+          document.getElementById("chain-r4-merkle").textContent = j.r4_merkle_root || "—";
+          var matchEl = document.getElementById("chain-match");
+          matchEl.textContent = match ? "matches byte-for-byte ✓" : "DIFFERS — investigate ✗";
+          matchEl.style.color = match ? "#4ad27a" : "#e26060";
+          document.getElementById("chain-confs").textContent = j.num_confirmations;
+          document.getElementById("chain-incl").textContent = j.inclusion_height || "pending";
+          document.getElementById("chain-value").textContent = (j.anchor_value_nanoerg / 1e9).toFixed(6) + " ERG";
+          document.getElementById("chain-tree").textContent = (j.ergo_tree_short || "—") + "…";
+        })
+        .catch(function (e) {
+          var status = document.getElementById("chain-status");
+          status.textContent = "fetch failed";
+          status.style.color = "#e26060";
+        });
+    })();
+  </script>
+
   <div class="ad-verify">
     <strong>Verify this batch yourself:</strong>
     Pick any video below, then run the open-source verifier. It rebuilds the Merkle tree from

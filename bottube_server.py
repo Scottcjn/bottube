@@ -19710,6 +19710,59 @@ def _anchors_summary(limit=200):
     } for r in rows]
 
 
+@app.route("/federation")
+def federation_page():
+    """Public federation spec — Codex's spec-first commitment."""
+    return render_template("federation.html")
+
+
+@app.route("/api/anchors/<tx_hash>/chain")
+def anchor_chain_proxy(tx_hash):
+    """Public read-only proxy: fetch the on-chain TX from the configured Ergo
+    node and return the bits a verifier wants — R4 register, confirmations,
+    output value, ergoTree fingerprint. Lets the chain-side panel on
+    /anchors/<tx> render without exposing the operator's API key.
+    """
+    if not re.fullmatch(r"[0-9a-fA-F]{32,128}", tx_hash):
+        return jsonify({"ok": False, "error": "invalid tx_hash"}), 400
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_key = os.environ.get("ERGO_API_KEY", "")
+    try:
+        req = urllib.request.Request(
+            f"{ergo_base}/wallet/transactionById?id={tx_hash}",
+            headers={"api_key": ergo_key} if ergo_key else {},
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"chain unreachable: {e}"}), 502
+    if not isinstance(data, dict) or "outputs" not in data:
+        return jsonify({"ok": False, "error": data.get("error", "no outputs")}), 404
+
+    outs = data.get("outputs") or []
+    out0 = outs[0] if outs else {}
+    regs = out0.get("additionalRegisters") or {}
+    r4 = regs.get("R4", "")
+    r5 = regs.get("R5", "")
+    # Decode R4 from "0e20" + 64-hex into the raw 32-byte hex root.
+    merkle = ""
+    if r4.startswith("0e20") and len(r4) == 4 + 64:
+        merkle = r4[4:]
+    return jsonify({
+        "ok": True,
+        "tx_hash": data.get("id", tx_hash),
+        "num_confirmations": int(data.get("numConfirmations", 0) or 0),
+        "inclusion_height": data.get("inclusionHeight"),
+        "output_count": len(outs),
+        "anchor_value_nanoerg": int(out0.get("value", 0) or 0),
+        "ergo_tree_short": (out0.get("ergoTree") or "")[:24],
+        "r4_raw": r4,
+        "r4_merkle_root": merkle,
+        "r5_raw": r5,
+        "creation_height": int(out0.get("creationHeight", 0) or 0),
+    })
+
+
 @app.route("/anchors")
 def anchors_page():
     """Public chain anchor history."""
