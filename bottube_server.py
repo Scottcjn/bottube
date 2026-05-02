@@ -6428,6 +6428,22 @@ def upload_video():
             duration=duration,
             uploaded_at=time.time(),
         )
+        # Phase 11.12: additive thumbnail integrity hash. Doesn't change the
+        # anchored leaf format (no re-anchor needed) but lets verifiers
+        # detect thumbnail tampering.
+        try:
+            _provenance_ensure_thumb_column()
+            tsha = _provenance_thumbnail_sha(video_id, thumb_filename)
+            if tsha:
+                conn_t = sqlite3.connect(str(DB_PATH))
+                conn_t.execute(
+                    "UPDATE video_provenance SET thumbnail_sha256 = ?, updated_at = ? WHERE video_id = ?",
+                    (tsha, time.time(), video_id),
+                )
+                conn_t.commit()
+                conn_t.close()
+        except Exception as _t_e:
+            app.logger.warning("thumb sha failed for %s: %s", video_id, _t_e)
     except Exception as _prov_e:
         # Provenance failures must not block upload success.
         app.logger.warning("provenance record failed for %s: %s", video_id, _prov_e)
@@ -16513,6 +16529,14 @@ def _build_provenance_payload(video_row, prov_row, renditions):
     else:
         pill_state = "unverified"
 
+    # Phase 11.12: optional thumbnail integrity hash (additive, not in anchor leaf).
+    thumb_sha = ""
+    try:
+        if prov_row is not None and "thumbnail_sha256" in prov_row.keys():
+            thumb_sha = (prov_row["thumbnail_sha256"] or "")
+    except Exception:
+        thumb_sha = ""
+
     return {
         "video_id": vid,
         "pill_state": pill_state,
@@ -16522,6 +16546,13 @@ def _build_provenance_payload(video_row, prov_row, renditions):
             "duration": duration,
             "width": width,
             "height": height,
+        },
+        "thumbnail": {
+            "sha256": thumb_sha,
+            "in_anchor_leaf": False,
+            "note": ("Hashed at upload time and persisted, but not part of the "
+                     "anchored Merkle leaf in this manifest version. "
+                     "v1 anchors only commit canonical_sha256."),
         },
         "renditions": rends,
         "creator": creator,
@@ -16961,6 +16992,197 @@ def _mcp_descriptor():
         ],
         "license": "MIT",
     }
+
+
+# --- Phase 11.11: /xrpc/feed.firehose -------------------------------------
+# Federation spec §4 made partially live. Signed firehose of video.create
+# events with monotonic cursor pagination. Relay key is Ed25519, generated
+# on first request and persisted to disk. Public pubkey served at
+# /.well-known/relay/key.
+
+FIREHOSE_RELAY_KEY_PATH = BASE_DIR / "relay_ed25519.key"
+_FIREHOSE_RELAY = {"sk": None, "pk": None, "did": "did:web:bottube.ai"}
+_FIREHOSE_LOCK = threading.Lock()
+
+
+def _firehose_load_relay_key():
+    """Lazy-init relay Ed25519 keypair. Persists to /root/bottube/relay_ed25519.key."""
+    if _FIREHOSE_RELAY["sk"] is not None:
+        return
+    with _FIREHOSE_LOCK:
+        if _FIREHOSE_RELAY["sk"] is not None:
+            return
+        try:
+            import nacl.signing as _nacl_signing
+            import nacl.encoding as _nacl_encoding
+        except ImportError:
+            return
+        if FIREHOSE_RELAY_KEY_PATH.exists():
+            try:
+                seed = FIREHOSE_RELAY_KEY_PATH.read_bytes()
+                if len(seed) >= 32:
+                    sk = _nacl_signing.SigningKey(seed[:32])
+                else:
+                    sk = _nacl_signing.SigningKey.generate()
+                    FIREHOSE_RELAY_KEY_PATH.write_bytes(bytes(sk))
+                    os.chmod(FIREHOSE_RELAY_KEY_PATH, 0o600)
+            except Exception:
+                sk = _nacl_signing.SigningKey.generate()
+                FIREHOSE_RELAY_KEY_PATH.write_bytes(bytes(sk))
+                os.chmod(FIREHOSE_RELAY_KEY_PATH, 0o600)
+        else:
+            sk = _nacl_signing.SigningKey.generate()
+            FIREHOSE_RELAY_KEY_PATH.write_bytes(bytes(sk))
+            os.chmod(FIREHOSE_RELAY_KEY_PATH, 0o600)
+        _FIREHOSE_RELAY["sk"] = sk
+        _FIREHOSE_RELAY["pk"] = sk.verify_key
+
+
+def _firehose_canonical_json(obj):
+    """Stable JSON encoding for signing. Sorted keys, no whitespace."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
+def _firehose_sign(payload):
+    """Return base64-url Ed25519 signature over canonical JSON of payload."""
+    _firehose_load_relay_key()
+    sk = _FIREHOSE_RELAY.get("sk")
+    if sk is None:
+        return ""
+    import base64
+    sig = sk.sign(_firehose_canonical_json(payload)).signature
+    return base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+
+
+def _firehose_relay_pubkey_b64():
+    _firehose_load_relay_key()
+    pk = _FIREHOSE_RELAY.get("pk")
+    if pk is None:
+        return ""
+    import base64
+    return base64.urlsafe_b64encode(bytes(pk)).rstrip(b"=").decode("ascii")
+
+
+@app.route("/.well-known/relay/key")
+def well_known_relay_key():
+    """Public Ed25519 pubkey for the firehose relay signature verification."""
+    _firehose_load_relay_key()
+    pk_b64 = _firehose_relay_pubkey_b64()
+    if not pk_b64:
+        return jsonify({"ok": False, "error": "relay key unavailable"}), 503
+    payload = {
+        "@context": "https://www.w3.org/ns/did/v1",
+        "id": "did:web:bottube.ai#firehose-relay",
+        "controller": "did:web:bottube.ai",
+        "type": "Ed25519VerificationKey2020",
+        "publicKeyMultibase": pk_b64,
+        "publicKeyEncoding": "base64url-unpadded",
+        "service": [{
+            "id": "did:web:bottube.ai#firehose",
+            "type": "BoTTubeFirehose",
+            "serviceEndpoint": "https://bottube.ai/xrpc/feed.firehose",
+        }],
+    }
+    resp = jsonify(payload)
+    resp.headers["Content-Type"] = "application/did+json"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/xrpc/feed.firehose")
+def xrpc_feed_firehose():
+    """Phase 11.11: signed firehose of video.create events.
+
+    Cursor format: <created_at_ms>:<rowid>. Both segments are integers
+    drawn from the videos table, so consecutive paginated reads are
+    stable even as new uploads arrive.
+    """
+    cursor = (request.args.get("cursor") or "").strip()
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", 100))))
+    except Exception:
+        limit = 100
+    ip = _get_client_ip()
+    if not _rate_limit(f"firehose:{ip}", 30, 60):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    after_ms, after_rowid = 0, 0
+    if cursor:
+        m = re.match(r"^(\d+):(\d+)$", cursor)
+        if not m:
+            return jsonify({"ok": False, "error": "invalid cursor"}), 400
+        after_ms = int(m.group(1))
+        after_rowid = int(m.group(2))
+
+    db = get_db()
+    after_secs = after_ms / 1000.0
+    rows = db.execute(
+        """SELECT v.id AS rowid, v.video_id, v.title, v.thumbnail, v.duration_sec,
+                  v.created_at, a.agent_name,
+                  COALESCE(p.canonical_sha256, '') AS canonical_sha256,
+                  COALESCE(p.uploader_sig, '') AS uploader_sig,
+                  COALESCE(p.anchor_chain, '') AS anchor_chain,
+                  COALESCE(p.anchor_tx_hash, '') AS anchor_tx_hash,
+                  COALESCE(p.anchor_block_height, 0) AS anchor_block_height,
+                  COALESCE(p.anchor_manifest_hash, '') AS anchor_manifest_hash
+             FROM videos v
+             JOIN agents a ON a.id = v.agent_id
+             LEFT JOIN video_provenance p ON p.video_id = v.video_id
+            WHERE COALESCE(v.is_removed, 0) = 0
+              AND COALESCE(a.is_banned, 0) = 0
+              AND (
+                    v.created_at > ?
+                 OR (v.created_at = ? AND v.id > ?)
+                  )
+            ORDER BY v.created_at ASC, v.id ASC
+            LIMIT ?""",
+        (after_secs, after_secs, after_rowid, limit + 1),
+    ).fetchall()
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    events = []
+    for r in page:
+        ts_ms = int(float(r["created_at"] or 0) * 1000)
+        ev = {
+            "cursor": f"{ts_ms}:{r['rowid']}",
+            "ts": float(r["created_at"] or 0),
+            "op": "video.create",
+            "relay_did": "did:web:bottube.ai",
+            "actor_did": f"did:web:bottube.ai:{r['agent_name']}",
+            "video_id": r["video_id"],
+            "manifest_sha256": r["canonical_sha256"],
+            "anchor_tx_hash": r["anchor_tx_hash"],
+            "anchor_chain": r["anchor_chain"] or "rustchain",
+            "block_height": r["anchor_block_height"],
+            "merkle_root": r["anchor_manifest_hash"],
+            "canonical_url": f"https://bottube.ai/api/videos/{r['video_id']}/stream",
+            "watch_url": f"https://bottube.ai/watch/{r['video_id']}",
+            "title": r["title"] or "",
+            "duration_sec": r["duration_sec"] or 0,
+        }
+        # Sign the canonical JSON of the event minus the sig field.
+        ev["sig"] = _firehose_sign(ev)
+        events.append(ev)
+
+    next_cursor = events[-1]["cursor"] if events and has_more else None
+
+    payload = {
+        "ok": True,
+        "events": events,
+        "next_cursor": next_cursor,
+        "relay_did": "did:web:bottube.ai",
+        "relay_pubkey": _firehose_relay_pubkey_b64(),
+        "spec_version": "0.1",
+        "spec_url": "https://bottube.ai/federation",
+    }
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 
 
 @app.route("/.well-known/agent/<handle>")
@@ -19041,6 +19263,31 @@ def _provenance_optional_from_form(form):
         "seed": seed,
         "generated_at": generated_at,
     }
+
+
+def _provenance_thumbnail_sha(video_id, thumb_filename):
+    """SHA-256 of the served thumbnail file (best-effort)."""
+    if not thumb_filename:
+        return ""
+    try:
+        path = THUMB_DIR / thumb_filename
+        if not path.exists() or path.stat().st_size < 8:
+            return ""
+        return _ts_sha256_file(path)
+    except Exception:
+        return ""
+
+
+def _provenance_ensure_thumb_column():
+    """Idempotently add thumbnail_sha256 column to video_provenance."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "thumbnail_sha256" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN thumbnail_sha256 TEXT DEFAULT ''")
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def _provenance_record_for_upload(video_id, canonical_path, agent, form,
