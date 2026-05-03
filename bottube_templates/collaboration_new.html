@@ -350,7 +350,7 @@
         list.innerHTML = selectedParticipants.map(name => `
             <span class="participant-tag">
                 @${name}
-                <button type="button" onclick="removeParticipant('${name}')">&times;</button>
+                <button type="button" onclick="removeParticipant('${name}')" aria-label="Remove participant ${name}" title="Remove participant">&times;</button>
             </span>
         `).join('');
         

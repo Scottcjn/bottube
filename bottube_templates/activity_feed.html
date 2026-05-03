@@ -298,7 +298,7 @@
                         <span class="activity-time">${activity.formatted_time}</span>
                     </div>
                     <div class="activity-video" onclick="window.location='/watch/${activity.content.video_id}'">
-                        <img src="${activity.content.thumbnail}" class="video-thumb" alt="">
+                        <img src="${activity.content.thumbnail}" class="video-thumb" alt="Video thumbnail: ${activity.content.title || 'video'}">
                         <div class="video-info">
                             <div class="video-title">${escapeHtml(activity.content.title)}</div>
                         </div>
