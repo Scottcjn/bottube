@@ -15995,6 +15995,224 @@ def seen_on_bottube_badge():
 
 
 # ---------------------------------------------------------------------------
+# Phase 11.18: per-video verification badges
+# ---------------------------------------------------------------------------
+# Three artifacts so creators can broadcast on-chain provenance from their
+# own sites without bottube cooperation beyond serving public read-only
+# endpoints:
+#   1. /badge/verified/<video_id>.svg   — pure SVG, drop-in <img src>
+#   2. /embed/verify/<video_id>         — sandboxable HTML iframe widget
+#   3. /static/bottube-verify.js        — cross-origin JS that turns
+#       <div data-bottube-verify="<id>"> into a live pill on any page
+#
+# All three read the same /api/videos/<id>/provenance payload, so the
+# verification status they show is canonical — no separate code path
+# that could drift.
+
+def _verify_badge_svg(state, label, value, color, value_color="#fff"):
+    """Render a shields.io-style 2-tone badge for the verified state."""
+    # Width math: 6px/char (Verdana) + 12px padding per side per panel
+    pad = 10
+    label_w = max(70, len(label) * 6 + pad * 2)
+    value_w = max(80, len(value) * 6 + pad * 2)
+    total_w = label_w + value_w
+    # Truncate value if absurdly long (e.g. raw tx_hash)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" '
+        f'height="22" role="img" aria-label="{label}: {value}">'
+        f'<title>{label}: {value}</title>'
+        f'<linearGradient id="gloss" x2="0" y2="100%">'
+        f'<stop offset="0" stop-color="#fff" stop-opacity=".15"/>'
+        f'<stop offset="1" stop-opacity=".25"/></linearGradient>'
+        f'<rect width="{total_w}" height="22" rx="3" fill="#222"/>'
+        f'<rect x="{label_w}" width="{value_w}" height="22" rx="3" fill="{color}"/>'
+        f'<rect x="{label_w-2}" width="4" height="22" fill="{color}"/>'
+        f'<rect width="{total_w}" height="22" rx="3" fill="url(#gloss)"/>'
+        f'<g fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
+        f'font-size="11" text-rendering="geometricPrecision">'
+        f'<text x="{label_w//2}" y="15" fill="#000" fill-opacity=".25" '
+        f'text-anchor="middle">{label}</text>'
+        f'<text x="{label_w//2}" y="14" text-anchor="middle">{label}</text>'
+        f'<text x="{label_w + value_w//2}" y="15" fill="#000" fill-opacity=".25" '
+        f'text-anchor="middle">{value}</text>'
+        f'<text x="{label_w + value_w//2}" y="14" text-anchor="middle" '
+        f'fill="{value_color}">{value}</text>'
+        f'</g></svg>'
+    )
+
+
+def _verify_state_for_video(video_id):
+    """Look up the verification state for one video. Returns
+    (state, value_text, anchor_tx, manifest_version) where state is one of
+    'verified', 'pending', 'failed', 'unknown'.
+
+    Read-only, side-effect-free. Cached at the HTTP layer (the badge route
+    sets Cache-Control: public, max-age=300).
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id or ""):
+        return "unknown", "invalid id", "", 1
+    try:
+        _provenance_ensure_v2_columns()
+    except Exception:
+        pass
+    db = get_db()
+    try:
+        row = db.execute(
+            """SELECT COALESCE(anchor_tx_hash,'') AS tx,
+                      COALESCE(anchor_block_height,0) AS h,
+                      COALESCE(anchor_status,'pending') AS status,
+                      COALESCE(anchor_chain,'') AS chain,
+                      COALESCE(uploader_sig,'') AS sig,
+                      COALESCE(manifest_version,1) AS v
+                 FROM video_provenance
+                WHERE video_id = ?""",
+            (video_id,),
+        ).fetchone()
+    except Exception:
+        return "unknown", "no provenance", "", 1
+    if not row:
+        return "unknown", "no provenance", "", 1
+
+    tx = row["tx"]
+    h = int(row["h"] or 0)
+    v = int(row["v"] or 1)
+    if not tx:
+        return "pending", "pending", "", v
+    if not h or row["chain"] == "stub":
+        return "pending", "broadcasting", tx, v
+    return "verified", f"block {h} · v{v}", tx, v
+
+
+@app.route("/badge/verified/<video_id>.svg")
+def badge_verified_svg(video_id):
+    """Per-video provenance badge.
+
+    Returns a 2-tone SVG ("verified on RustChain" / "block N · vM") that
+    creators can drop on their own sites:
+
+        <a href="https://bottube.ai/anchors/<tx>">
+          <img src="https://bottube.ai/badge/verified/<id>.svg" alt="...">
+        </a>
+
+    Caching is set to 5 minutes — the verification state changes rarely
+    once a row is anchored, and a 5-min stale-read is a fair trade for
+    bounded server load.
+    """
+    state, value, _tx, _v = _verify_state_for_video(video_id)
+    if state == "verified":
+        color = "#0e7c2e"  # green
+        label = "verified on rustchain"
+    elif state == "pending":
+        color = "#b8860b"  # amber
+        label = "anchoring"
+    elif state == "failed":
+        color = "#a02020"  # red
+        label = "verify failed"
+    else:
+        color = "#666"
+        label = "bottube"
+    svg = _verify_badge_svg(state, label, value, color)
+    resp = Response(svg, mimetype="image/svg+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/embed/verify/<video_id>")
+def embed_verify_widget(video_id):
+    """Compact iframe-friendly verification widget.
+
+    Used as <iframe src="/embed/verify/<id>" width=320 height=80 ...>.
+    Renders identical state to the SVG badge but as styled HTML with a
+    backlink to /anchors/<tx>. iframe-safe headers are already applied
+    to /embed/* routes by the global response handler.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return Response("invalid video id", status=400, mimetype="text/plain")
+    state, value, tx, v = _verify_state_for_video(video_id)
+    return render_template(
+        "embed_verify.html",
+        video_id=video_id, state=state, value=value, tx=tx,
+        manifest_version=v,
+    )
+
+
+@app.route("/embed/bottube-verify.js")
+def bottube_verify_js():
+    """Drop-in JS that finds <div data-bottube-verify="<id>"> elements
+    and replaces them with a live-fetched verification pill.
+
+    Hosted under /embed/ (which already gets framing-permissive headers
+    and falls outside Flask's /static/ handler) so creators can simply
+    <script src="https://bottube.ai/embed/bottube-verify.js"></script>
+    on any page. The body is invariant — host is overridden via
+    data-host="<other-instance>" if the creator's site federates.
+    """
+    js = """/*! bottube-verify.js — public domain widget for on-chain provenance pills */
+(function(){
+  var HOST = (document.currentScript && document.currentScript.dataset && document.currentScript.dataset.host) || 'https://bottube.ai';
+  function pill(state, txt, href){
+    var a = document.createElement('a');
+    a.href = href || (HOST + '/transparency');
+    a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.className = 'btv-pill btv-' + state;
+    a.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;text-decoration:none;border:1px solid;line-height:1.4;';
+    var pal = state==='verified' ? ['#0e7c2e','#e8f7ec','#7ed091','✓']
+            : state==='pending'  ? ['#7b5800','#fff5da','#e8c477','⧗']
+            : state==='failed'   ? ['#a02020','#fde6e6','#e88080','✕']
+                                 :  ['#444','#eee','#999','?'];
+    a.style.color = pal[0]; a.style.background = pal[1]; a.style.borderColor = pal[2];
+    a.textContent = pal[3] + ' ' + txt;
+    a.title = 'BoTTube on-chain provenance';
+    return a;
+  }
+  function render(vid, target){
+    fetch(HOST + '/api/videos/' + encodeURIComponent(vid) + '/provenance', {credentials:'omit'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok){
+          target.replaceWith(pill('failed','no provenance', HOST + '/transparency'));
+          return;
+        }
+        var v = d.manifest_version || 1;
+        var anchor = d.anchor || {};
+        var verified = !!d.verified;
+        var state = verified ? 'verified' : (d.pill_state==='failed' ? 'failed' : 'pending');
+        var txt;
+        if (verified && anchor.block_height){
+          txt = 'Verified on RustChain · block ' + anchor.block_height + ' · v' + v;
+        } else if (verified){
+          txt = 'Verified · v' + v;
+        } else {
+          txt = (d.pill_state || 'pending');
+        }
+        var href = anchor.tx_hash ? (HOST + '/anchors/' + anchor.tx_hash) : (HOST + '/transparency');
+        target.replaceWith(pill(state, txt, href));
+      })
+      .catch(function(){
+        target.replaceWith(pill('failed','fetch error', HOST + '/transparency'));
+      });
+  }
+  function init(){
+    var nodes = document.querySelectorAll('[data-bottube-verify]');
+    for (var i=0;i<nodes.length;i++){
+      var el = nodes[i];
+      var vid = el.getAttribute('data-bottube-verify');
+      if (vid) render(vid, el);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+"""
+    resp = Response(js, mimetype="application/javascript; charset=utf-8")
+    # 1 hour CDN-friendly cache; updates roll out within 60 minutes
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Badges & Embed landing page
 # ---------------------------------------------------------------------------
 
