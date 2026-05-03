@@ -94,15 +94,44 @@ def merkle_root(leaves):
     return layer[0]
 
 
-def manifest_leaf(m):
-    """Build a leaf hash from a manifest entry."""
+_LEAF_DOMAIN_V2 = "bottube/v2"
+
+
+def manifest_leaf_v1(m):
+    """Legacy leaf: sha256(video_id|canonical_sha256|uploader_sig|uploaded_at)."""
     parts = "|".join([
-        m.get("video_id", ""),
-        m.get("canonical_sha256", ""),
-        m.get("uploader_sig", ""),
+        m.get("video_id", "") or "",
+        m.get("canonical_sha256", "") or "",
+        m.get("uploader_sig", "") or "",
         str(int(m.get("uploaded_at", 0) or 0)),
     ])
     return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def manifest_leaf_v2(m):
+    """v2 leaf: folds thumbnail_sha256 + canonical_360p_sha256 into the leaf
+    under a domain separator so v1 and v2 leaves can never collide.
+    """
+    parts = "|".join([
+        _LEAF_DOMAIN_V2,
+        m.get("video_id", "") or "",
+        m.get("canonical_sha256", "") or "",
+        m.get("thumbnail_sha256", "") or "",
+        m.get("canonical_360p_sha256", "") or "",
+        m.get("uploader_sig", "") or "",
+        str(int(m.get("uploaded_at", 0) or 0)),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def manifest_leaf(m):
+    """Dispatch by manifest_version. Legacy callers without the field
+    get v1 — preserves bit-exact behavior for already-anchored batches.
+    """
+    ver = int(m.get("manifest_version", 1) or 1)
+    if ver >= 2:
+        return manifest_leaf_v2(m)
+    return manifest_leaf_v1(m)
 
 
 def _ergo_get(base, path, key, timeout=20):
@@ -296,9 +325,17 @@ def main():
         print("[anchor-worker] no manifests pending — exiting")
         return
 
-    print(f"[anchor-worker] batch_id={batch_id}  count={len(manifests)}")
+    # Version histogram so the worker log makes the v1→v2 rollout visible
+    # to whoever's tailing journalctl. Phase 11.16: a batch may be mixed
+    # during the migration window.
+    versions = {}
+    for m in manifests:
+        v = int(m.get("manifest_version", 1) or 1)
+        versions[v] = versions.get(v, 0) + 1
+    ver_summary = ", ".join(f"v{k}={v}" for k, v in sorted(versions.items()))
+    print(f"[anchor-worker] batch_id={batch_id}  count={len(manifests)}  ({ver_summary})")
 
-    # 2. Compute Merkle root
+    # 2. Compute Merkle root — each leaf uses its own row's manifest_version
     leaves = [manifest_leaf(m) for m in manifests]
     root = merkle_root(leaves)
     root_hex = root.hex()

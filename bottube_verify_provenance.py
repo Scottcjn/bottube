@@ -60,7 +60,11 @@ def _http_json(url, headers=None, timeout=15):
         raise RuntimeError(f"request failed for {url}: {e}")
 
 
-def manifest_leaf(video_id, canonical_sha256, uploader_sig, uploaded_at):
+_LEAF_DOMAIN_V2 = "bottube/v2"
+
+
+def manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    """Legacy leaf — must stay bit-exact for already-anchored batches."""
     parts = "|".join([
         video_id or "",
         canonical_sha256 or "",
@@ -68,6 +72,34 @@ def manifest_leaf(video_id, canonical_sha256, uploader_sig, uploaded_at):
         str(int(float(uploaded_at or 0))),
     ])
     return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
+                     canonical_360p_sha256, uploader_sig, uploaded_at):
+    """v2 leaf folds thumbnail + 360p hashes into the anchored commitment."""
+    parts = "|".join([
+        _LEAF_DOMAIN_V2,
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def manifest_leaf(video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  manifest_version=1, thumbnail_sha256="",
+                  canonical_360p_sha256=""):
+    """Version dispatch. Defaults to v1 so older callers keep working."""
+    ver = int(manifest_version or 1)
+    if ver >= 2:
+        return manifest_leaf_v2(
+            video_id, canonical_sha256, thumbnail_sha256,
+            canonical_360p_sha256, uploader_sig, uploaded_at,
+        )
+    return manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at)
 
 
 def merkle_root(leaves):
@@ -123,7 +155,7 @@ def fetch_anchor_r4_via_proxy(bottube_base, tx_hash, timeout=15):
     return bytes.fromhex(root_hex)
 
 
-VERIFIER_VERSION = "0.1.0"
+VERIFIER_VERSION = "0.2.0"
 
 
 def main():
@@ -163,15 +195,28 @@ def main():
     chain = prov["anchor"]["chain"]
     manifest_hash = prov["anchor"]["manifest_hash"]
 
+    # Phase 11.16: pull the manifest version + v2-specific fields from the
+    # provenance response. Older anchors stay v1 — defaults are bit-exact
+    # backwards-compatible.
+    manifest_ver = int(prov.get("manifest_version", 1) or 1)
+    thumb_sha = (prov.get("thumbnail") or {}).get("sha256", "") or ""
+    p360_sha = (prov.get("canonical_360p") or {}).get("sha256", "") or ""
+
     if not args.quiet:
         print(f"      pill={prov['pill_state']}  chain={chain}")
+        print(f"      manifest_version=v{manifest_ver}")
         print(f"      tx_hash={tx_hash}")
         print(f"      manifest_hash (claimed Merkle root)={manifest_hash}")
         print()
         print(f"[2/4] Resolving batch members for the leaf computation...")
 
-    # Compute this video's leaf locally.
-    own_leaf = manifest_leaf(vid, canonical_sha, uploader_sig, uploaded_at)
+    # Compute this video's leaf locally with the correct recipe.
+    own_leaf = manifest_leaf(
+        vid, canonical_sha, uploader_sig, uploaded_at,
+        manifest_version=manifest_ver,
+        thumbnail_sha256=thumb_sha,
+        canonical_360p_sha256=p360_sha,
+    )
     if not args.quiet:
         print(f"      own_leaf={own_leaf.hex()}")
 
@@ -300,10 +345,17 @@ def main():
         verdict = "PASS"
     elif full_check and batch_members:
         # Full Merkle reconstruction: build leaves for every batch member,
-        # compute the binary tree, compare to on-chain root.
+        # compute the binary tree, compare to on-chain root. Each leaf must
+        # use its own row's manifest_version — a batch may be heterogeneous
+        # during the v1→v2 migration window.
         leaves = [
-            manifest_leaf(m["video_id"], m["canonical_sha256"],
-                          m["uploader_sig"], m["uploaded_at"])
+            manifest_leaf(
+                m["video_id"], m["canonical_sha256"],
+                m["uploader_sig"], m["uploaded_at"],
+                manifest_version=int(m.get("manifest_version", 1) or 1),
+                thumbnail_sha256=m.get("thumbnail_sha256", "") or "",
+                canonical_360p_sha256=m.get("canonical_360p_sha256", "") or "",
+            )
             for m in batch_members
         ]
         local_root = merkle_root(leaves)

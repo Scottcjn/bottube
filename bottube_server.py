@@ -6428,22 +6428,28 @@ def upload_video():
             duration=duration,
             uploaded_at=time.time(),
         )
-        # Phase 11.12: additive thumbnail integrity hash. Doesn't change the
-        # anchored leaf format (no re-anchor needed) but lets verifiers
-        # detect thumbnail tampering.
+        # Phase 11.12 + 11.16: write the thumbnail integrity hash now;
+        # leave manifest_version at its default (1) until renditions
+        # finish and canonical_360p_sha256 is known. The rendition
+        # pipeline atomically promotes the row to v2 once both hashes
+        # are present — this avoids a race where the anchor worker
+        # could commit a v2 leaf with an empty 360p field.
         try:
             _provenance_ensure_thumb_column()
+            _provenance_ensure_v2_columns()
             tsha = _provenance_thumbnail_sha(video_id, thumb_filename)
-            if tsha:
-                conn_t = sqlite3.connect(str(DB_PATH))
-                conn_t.execute(
-                    "UPDATE video_provenance SET thumbnail_sha256 = ?, updated_at = ? WHERE video_id = ?",
-                    (tsha, time.time(), video_id),
-                )
-                conn_t.commit()
-                conn_t.close()
+            conn_t = sqlite3.connect(str(DB_PATH))
+            conn_t.execute(
+                """UPDATE video_provenance
+                      SET thumbnail_sha256 = ?,
+                          updated_at = ?
+                    WHERE video_id = ?""",
+                (tsha or "", time.time(), video_id),
+            )
+            conn_t.commit()
+            conn_t.close()
         except Exception as _t_e:
-            app.logger.warning("thumb sha failed for %s: %s", video_id, _t_e)
+            app.logger.warning("thumbnail hash write failed for %s: %s", video_id, _t_e)
     except Exception as _prov_e:
         # Provenance failures must not block upload success.
         app.logger.warning("provenance record failed for %s: %s", video_id, _prov_e)
@@ -16530,15 +16536,28 @@ def _build_provenance_payload(video_row, prov_row, renditions):
         pill_state = "unverified"
 
     # Phase 11.12: optional thumbnail integrity hash (additive, not in anchor leaf).
+    # Phase 11.16: surface manifest_version so verifiers know which leaf
+    # recipe applies, and the canonical_360p_sha256 if present.
     thumb_sha = ""
+    p360_sha = ""
+    manifest_ver = 1
     try:
-        if prov_row is not None and "thumbnail_sha256" in prov_row.keys():
-            thumb_sha = (prov_row["thumbnail_sha256"] or "")
+        if prov_row is not None:
+            row_keys = prov_row.keys()
+            if "thumbnail_sha256" in row_keys:
+                thumb_sha = (prov_row["thumbnail_sha256"] or "")
+            if "canonical_360p_sha256" in row_keys:
+                p360_sha = (prov_row["canonical_360p_sha256"] or "")
+            if "manifest_version" in row_keys:
+                manifest_ver = int(prov_row["manifest_version"] or 1)
     except Exception:
-        thumb_sha = ""
+        pass
+
+    in_leaf_v2 = manifest_ver >= 2
 
     return {
         "video_id": vid,
+        "manifest_version": manifest_ver,
         "pill_state": pill_state,
         "verified": verified,
         "canonical_asset": {
@@ -16549,10 +16568,19 @@ def _build_provenance_payload(video_row, prov_row, renditions):
         },
         "thumbnail": {
             "sha256": thumb_sha,
-            "in_anchor_leaf": False,
-            "note": ("Hashed at upload time and persisted, but not part of the "
-                     "anchored Merkle leaf in this manifest version. "
-                     "v1 anchors only commit canonical_sha256."),
+            "in_anchor_leaf": in_leaf_v2 and bool(thumb_sha),
+            "note": (
+                "Hashed at upload time and folded into the anchored Merkle leaf "
+                "starting in manifest v2."
+                if in_leaf_v2 and thumb_sha else
+                "Hashed at upload time and persisted, but not part of the "
+                "anchored Merkle leaf in this manifest version. "
+                "v1 anchors only commit canonical_sha256."
+            ),
+        },
+        "canonical_360p": {
+            "sha256": p360_sha,
+            "in_anchor_leaf": in_leaf_v2 and bool(p360_sha),
         },
         "renditions": rends,
         "creator": creator,
@@ -19265,6 +19293,92 @@ def _provenance_optional_from_form(form):
     }
 
 
+# --- Phase 11.16: hash-tree v2 manifest ----------------------------------
+# v1 leaf:  sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)
+# v2 leaf:  sha256("bottube/v2"
+#                  | video_id
+#                  | canonical_sha256
+#                  | thumbnail_sha256
+#                  | canonical_360p_sha256
+#                  | uploader_sig
+#                  | uploaded_at)
+#
+# The "bottube/v2" prefix is a domain separator: a v1 leaf and a v2 leaf
+# can never collide even if all the other fields happen to match, because
+# the prefix differs. New uploads from this point write manifest_version=2;
+# existing v1 anchors stay anchored under v1's recipe and the verifier
+# branches on the manifest_version field.
+
+MANIFEST_V1 = 1
+MANIFEST_V2 = 2
+MANIFEST_CURRENT = MANIFEST_V2  # what new uploads write
+
+_LEAF_DOMAIN_V2 = "bottube/v2"
+
+
+def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    parts = "|".join([
+        video_id or "",
+        canonical_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
+                      canonical_360p_sha256, uploader_sig, uploaded_at):
+    parts = "|".join([
+        _LEAF_DOMAIN_V2,
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _manifest_leaf(version, video_id, canonical_sha256,
+                   thumbnail_sha256, canonical_360p_sha256,
+                   uploader_sig, uploaded_at):
+    """Dispatch based on manifest version."""
+    if int(version or 1) >= MANIFEST_V2:
+        return _manifest_leaf_v2(video_id, canonical_sha256,
+                                  thumbnail_sha256, canonical_360p_sha256,
+                                  uploader_sig, uploaded_at)
+    return _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at)
+
+
+def _manifest_leaf_recipe(version):
+    if int(version or 1) >= MANIFEST_V2:
+        return (
+            'sha256("bottube/v2" | video_id | canonical_sha256 | '
+            'thumbnail_sha256 | canonical_360p_sha256 | uploader_sig | '
+            'uploaded_at) with "|" as the literal separator and uploaded_at '
+            'as integer seconds'
+        )
+    return (
+        "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
+        "with '|' as the literal separator and uploaded_at as integer seconds"
+    )
+
+
+def _provenance_ensure_v2_columns():
+    """Add manifest_version + canonical_360p_sha256 columns idempotently."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "manifest_version" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN manifest_version INTEGER DEFAULT 1")
+        if "canonical_360p_sha256" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN canonical_360p_sha256 TEXT DEFAULT ''")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _provenance_thumbnail_sha(video_id, thumb_filename):
     """SHA-256 of the served thumbnail file (best-effort)."""
     if not thumb_filename:
@@ -19590,6 +19704,47 @@ def _renditions_process_video(video_id):
                 file_sha256=p360_sha, file_size=p360_size,
                 vmaf=round(vmaf_score, 2), is_canonical=False,
             )
+
+            # Phase 11.16: feed the 360p hash back into video_provenance
+            # AND atomically promote the row to manifest_version=2 — but
+            # ONLY if the row hasn't been claimed by the anchor worker
+            # yet. Once anchor_status='claimed' the worker has frozen its
+            # snapshot of (manifest_version, canonical_360p_sha256), and
+            # mutating the row here would silently desync the leaf the
+            # worker computed from the leaf the verifier later reads.
+            if p360_sha:
+                try:
+                    _provenance_ensure_v2_columns()
+                    conn_p = sqlite3.connect(str(DB_PATH))
+                    conn_p.execute(
+                        """UPDATE video_provenance
+                              SET canonical_360p_sha256 = ?,
+                                  manifest_version = ?,
+                                  updated_at = ?
+                            WHERE video_id = ?
+                              AND COALESCE(anchor_tx_hash, '') = ''
+                              AND COALESCE(anchor_status, 'pending')
+                                  IN ('pending', 'failed')""",
+                        (p360_sha, MANIFEST_CURRENT, time.time(), video_id),
+                    )
+                    # If the row was already claimed/anchored, fall back to
+                    # writing just the 360p hash without flipping the version
+                    # (post-anchor metadata only — does not affect the leaf).
+                    if conn_p.total_changes == 0:
+                        conn_p.execute(
+                            """UPDATE video_provenance
+                                  SET canonical_360p_sha256 = ?,
+                                      updated_at = ?
+                                WHERE video_id = ?
+                                  AND COALESCE(canonical_360p_sha256, '') = ''""",
+                            (p360_sha, time.time(), video_id),
+                        )
+                    conn_p.commit()
+                    conn_p.close()
+                except Exception as _e:
+                    app.logger.warning("provenance 360p sha update failed for %s: %s",
+                                        video_id, _e)
+
             return {
                 "ok": True, "video_id": video_id,
                 "vmaf_360p": round(vmaf_score, 2),
@@ -19781,6 +19936,7 @@ def admin_provenance_pending():
     if not _ts_admin_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     _provenance_ensure_anchor_columns()
+    _provenance_ensure_v2_columns()
     data = request.get_json(silent=True) or {}
     try:
         limit = max(1, min(500, int(data.get("limit", 100))))
@@ -19801,7 +19957,10 @@ def admin_provenance_pending():
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
             """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
-                      creator_agent_id, creator_pubkey, model, generated_at
+                      creator_agent_id, creator_pubkey, model, generated_at,
+                      COALESCE(manifest_version, 1) AS manifest_version,
+                      COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                      COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
                  FROM video_provenance
                 WHERE uploader_sig != ''
                   AND COALESCE(anchor_tx_hash, '') = ''
@@ -19809,6 +19968,16 @@ def admin_provenance_pending():
                         COALESCE(anchor_status, 'pending') IN ('pending', 'failed')
                      OR (COALESCE(anchor_status, 'pending') = 'claimed'
                          AND COALESCE(updated_at, 0) < ?)
+                      )
+                  AND (
+                        -- Phase 11.16: a v2 row is only eligible once the
+                        -- 360p rendition has produced its hash. A v1 row
+                        -- has no such gate. Without this, the worker could
+                        -- anchor a v2 leaf with an empty canonical_360p
+                        -- field and the verifier would later read the
+                        -- populated field and reject as a mismatch.
+                        COALESCE(manifest_version, 1) < 2
+                     OR COALESCE(canonical_360p_sha256, '') != ''
                       )
                 ORDER BY uploaded_at ASC
                 LIMIT ?""",
@@ -19854,6 +20023,12 @@ def admin_provenance_pending():
             "creator_pubkey": r["creator_pubkey"] or "",
             "model": r["model"] or "",
             "generated_at": r["generated_at"] or 0,
+            # Phase 11.16: v2 fields. Worker uses manifest_version to pick
+            # the correct leaf recipe; thumbnail_sha256/canonical_360p_sha256
+            # are empty strings on v1 rows.
+            "manifest_version": int(r["manifest_version"] or 1),
+            "thumbnail_sha256": r["thumbnail_sha256"] or "",
+            "canonical_360p_sha256": r["canonical_360p_sha256"] or "",
         })
     return jsonify({
         "ok": True,
@@ -19862,6 +20037,10 @@ def admin_provenance_pending():
         "claim_ttl_s": claim_ttl_s,
         "count": len(manifests),
         "manifests": manifests,
+        "leaf_recipes": {
+            "v1": _manifest_leaf_recipe(MANIFEST_V1),
+            "v2": _manifest_leaf_recipe(MANIFEST_V2),
+        },
     })
 
 
@@ -20266,15 +20445,20 @@ def _merkle_path_for_leaf(leaves, target_index):
     return path
 
 
-def _manifest_leaf_bytes(video_id, canonical_sha256, uploader_sig, uploaded_at):
-    """Same recipe used by the anchor worker."""
-    parts = "|".join([
-        video_id or "",
-        canonical_sha256 or "",
-        uploader_sig or "",
-        str(int(float(uploaded_at or 0))),
-    ])
-    return hashlib.sha256(parts.encode("utf-8")).digest()
+def _manifest_leaf_bytes(video_id, canonical_sha256, uploader_sig, uploaded_at,
+                         manifest_version=MANIFEST_V1, thumbnail_sha256="",
+                         canonical_360p_sha256=""):
+    """Version-aware Merkle leaf — must match anchor_worker + verifier.
+
+    v1 (legacy): sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)
+    v2: sha256("bottube/v2" | video_id | canonical_sha256 | thumbnail_sha256
+                | canonical_360p_sha256 | uploader_sig | uploaded_at)
+    """
+    return _manifest_leaf(
+        manifest_version, video_id, canonical_sha256,
+        thumbnail_sha256, canonical_360p_sha256,
+        uploader_sig, uploaded_at,
+    )
 
 
 @app.route("/api/videos/<video_id>/anchor-proof")
@@ -20288,11 +20472,15 @@ def api_video_anchor_proof(video_id):
     if not _rate_limit(f"merkle_proof:{ip}", 60, 600):
         return jsonify({"ok": False, "error": "rate limited"}), 429
 
+    _provenance_ensure_v2_columns()
     db = get_db()
     target = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
                   anchor_batch_id, anchor_tx_hash, anchor_chain,
-                  anchor_block_height, anchor_manifest_hash, anchor_status
+                  anchor_block_height, anchor_manifest_hash, anchor_status,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
              FROM video_provenance
             WHERE video_id = ?""",
         (video_id,),
@@ -20307,7 +20495,10 @@ def api_video_anchor_proof(video_id):
         }), 409
 
     rows = db.execute(
-        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
              FROM video_provenance
             WHERE anchor_batch_id = ?
             ORDER BY uploaded_at ASC, video_id ASC""",
@@ -20316,9 +20507,16 @@ def api_video_anchor_proof(video_id):
     if not rows:
         return jsonify({"ok": False, "error": "batch members not found"}), 404
 
+    # Each leaf must use the recipe its row was written under. A batch
+    # may be heterogeneous (v1 + v2) during the migration window.
     leaves = [
-        _manifest_leaf_bytes(r["video_id"], r["canonical_sha256"],
-                             r["uploader_sig"], r["uploaded_at"])
+        _manifest_leaf_bytes(
+            r["video_id"], r["canonical_sha256"],
+            r["uploader_sig"], r["uploaded_at"],
+            manifest_version=int(r["manifest_version"] or 1),
+            thumbnail_sha256=r["thumbnail_sha256"] or "",
+            canonical_360p_sha256=r["canonical_360p_sha256"] or "",
+        )
         for r in rows
     ]
     target_idx = next(
@@ -20329,15 +20527,24 @@ def api_video_anchor_proof(video_id):
 
     target_leaf = leaves[target_idx]
     path = _merkle_path_for_leaf(leaves, target_idx)
+    target_version = int(target["manifest_version"] or 1)
 
     return jsonify({
         "ok": True,
         "video_id": video_id,
+        "manifest_version": target_version,
         "leaf": target_leaf.hex(),
-        "leaf_recipe": (
-            "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
-            "with '|' as the literal separator and uploaded_at as integer seconds"
-        ),
+        "leaf_recipe": _manifest_leaf_recipe(target_version),
+        "leaf_inputs": {
+            "video_id": target["video_id"],
+            "canonical_sha256": target["canonical_sha256"],
+            "thumbnail_sha256": (target["thumbnail_sha256"] or "")
+                if target_version >= MANIFEST_V2 else "",
+            "canonical_360p_sha256": (target["canonical_360p_sha256"] or "")
+                if target_version >= MANIFEST_V2 else "",
+            "uploader_sig": target["uploader_sig"],
+            "uploaded_at": int(float(target["uploaded_at"] or 0)),
+        },
         "path": path,
         "path_recipe": (
             "for each step: side='R' means sibling is on the right "
@@ -20388,10 +20595,14 @@ def admin_provenance_batch():
             return jsonify({"ok": False, "error": "tx_hash not found in any batch"}), 404
         batch_id = row["anchor_batch_id"]
 
+    _provenance_ensure_v2_columns()
     rows = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
                   anchor_chain, anchor_tx_hash, anchor_block_height,
-                  anchor_manifest_hash, anchor_status, anchored_at
+                  anchor_manifest_hash, anchor_status, anchored_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
              FROM video_provenance
             WHERE anchor_batch_id = ?
             ORDER BY uploaded_at ASC, video_id ASC""",
@@ -20400,12 +20611,20 @@ def admin_provenance_batch():
     if not rows:
         return jsonify({"ok": False, "error": "no rows for batch"}), 404
 
-    members = [{
-        "video_id": r["video_id"],
-        "canonical_sha256": r["canonical_sha256"],
-        "uploader_sig": r["uploader_sig"],
-        "uploaded_at": r["uploaded_at"],
-    } for r in rows]
+    members = []
+    versions_present = set()
+    for r in rows:
+        ver = int(r["manifest_version"] or 1)
+        versions_present.add(ver)
+        members.append({
+            "video_id": r["video_id"],
+            "canonical_sha256": r["canonical_sha256"],
+            "uploader_sig": r["uploader_sig"],
+            "uploaded_at": r["uploaded_at"],
+            "manifest_version": ver,
+            "thumbnail_sha256": r["thumbnail_sha256"] or "",
+            "canonical_360p_sha256": r["canonical_360p_sha256"] or "",
+        })
     head = rows[0]
     return jsonify({
         "ok": True,
@@ -20418,14 +20637,20 @@ def admin_provenance_batch():
             "status": head["anchor_status"],
             "anchored_at": head["anchored_at"],
         },
-        "leaf_recipe": (
-            "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
-            "with '|' as the literal separator and uploaded_at as integer seconds"
+        "leaf_recipes": {
+            "v1": _manifest_leaf_recipe(MANIFEST_V1),
+            "v2": _manifest_leaf_recipe(MANIFEST_V2),
+        },
+        "leaf_recipe": _manifest_leaf_recipe(
+            max(versions_present) if versions_present else MANIFEST_V1
         ),
+        "manifest_versions_in_batch": sorted(versions_present),
         "merkle_recipe": (
             "Bitcoin-style binary tree: pair adjacent leaves and hash, "
             "duplicate the last node when a level has odd cardinality, "
-            "iterate until a single 32-byte root remains."
+            "iterate until a single 32-byte root remains. Each leaf uses "
+            "the recipe matching its own manifest_version field — a batch "
+            "may mix v1 and v2 rows."
         ),
         "member_count": len(members),
         "members": members,

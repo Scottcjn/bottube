@@ -51,15 +51,26 @@ $ bottube-verify dHZm0IAkmev
 
 ## What it actually checks
 
-1. **Pulls the public provenance JSON** from `https://bottube.ai/api/videos/<id>/provenance`. Reads the canonical SHA-256, uploader signature, uploaded-at timestamp, and the on-chain TX hash.
+1. **Pulls the public provenance JSON** from `https://bottube.ai/api/videos/<id>/provenance`. Reads the canonical SHA-256, the manifest version, uploader signature, uploaded-at timestamp, and the on-chain TX hash. For v2 manifests it also reads `thumbnail_sha256` and `canonical_360p_sha256`.
 
-2. **Reconstructs the Merkle leaf locally** with the recipe `sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)`. The recipe is documented in the response — there's no hidden state.
+2. **Reconstructs the Merkle leaf locally** using the recipe matching the manifest version (see below). The recipe is also documented in the API response — there's no hidden state.
 
 3. **Fetches a Merkle inclusion proof** from `https://bottube.ai/api/videos/<id>/anchor-proof`. The proof is just a sequence of sibling hashes — `O(log N)` bytes, doesn't reveal other videos in the batch.
 
 4. **Walks the proof path locally** to compute the root, then **fetches the on-chain TX** from your configured Ergo node and reads register R4. If the walked root matches R4 byte-for-byte, the verifier prints `PASS`.
 
 The strongest property: **anyone with curl + Python can verify any video's chain anchor**. No bottube cooperation needed beyond serving public read-only endpoints.
+
+### Leaf recipes
+
+| Manifest version | Leaf bytes |
+|---|---|
+| v1 (legacy) | `sha256(video_id \| canonical_sha256 \| uploader_sig \| uploaded_at)` |
+| v2 | `sha256("bottube/v2" \| video_id \| canonical_sha256 \| thumbnail_sha256 \| canonical_360p_sha256 \| uploader_sig \| uploaded_at)` |
+
+`|` is the literal ASCII pipe byte; `uploaded_at` is integer seconds. The `"bottube/v2"` domain separator guarantees a v1 leaf and a v2 leaf can never collide even if every other field is equal.
+
+A batch may mix v1 and v2 rows during the migration window — each row's leaf is computed under its own manifest_version, then combined with Bitcoin-style binary Merkle hashing.
 
 ## Configuration
 

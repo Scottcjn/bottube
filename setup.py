@@ -8,7 +8,7 @@ with open("VERIFIER_README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="bottube-verify",
-    version="0.1.0",
+    version="0.2.0",
     description=(
         "Open-source verifier for BoTTube on-chain provenance. "
         "Cryptographically prove any video on bottube.ai is correctly "
