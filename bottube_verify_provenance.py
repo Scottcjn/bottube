@@ -61,6 +61,7 @@ def _http_json(url, headers=None, timeout=15):
 
 
 _LEAF_DOMAIN_V2 = "bottube/v2"
+_LEAF_DOMAIN_V3 = "bottube/v3"
 
 
 def manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
@@ -89,17 +90,76 @@ def manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
     return hashlib.sha256(parts.encode("utf-8")).digest()
 
 
+def manifest_leaf_v3(video_id, canonical_sha256, thumbnail_sha256,
+                     canonical_360p_sha256, uploader_sig, uploaded_at,
+                     creator_pubkey, creator_signature):
+    """v3 leaf folds creator_pubkey + creator_signature so the chain
+    commits to a verifiable Ed25519 signature."""
+    parts = "|".join([
+        _LEAF_DOMAIN_V3,
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        uploader_sig or "",
+        creator_pubkey or "",
+        creator_signature or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
 def manifest_leaf(video_id, canonical_sha256, uploader_sig, uploaded_at,
                   manifest_version=1, thumbnail_sha256="",
-                  canonical_360p_sha256=""):
+                  canonical_360p_sha256="",
+                  creator_pubkey="", creator_signature=""):
     """Version dispatch. Defaults to v1 so older callers keep working."""
     ver = int(manifest_version or 1)
+    if ver >= 3:
+        return manifest_leaf_v3(
+            video_id, canonical_sha256, thumbnail_sha256,
+            canonical_360p_sha256, uploader_sig, uploaded_at,
+            creator_pubkey, creator_signature,
+        )
     if ver >= 2:
         return manifest_leaf_v2(
             video_id, canonical_sha256, thumbnail_sha256,
             canonical_360p_sha256, uploader_sig, uploaded_at,
         )
     return manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at)
+
+
+def verify_ed25519_signature(pubkey_hex, signature_hex,
+                              video_id, canonical_sha256,
+                              thumbnail_sha256, canonical_360p_sha256,
+                              uploaded_at):
+    """Verify the v3 Ed25519 creator signature against the v3 signing
+    message. Requires PyNaCl (imported lazily so the rest of the verifier
+    keeps working without it). Returns (verified: bool, detail: str).
+    """
+    try:
+        from nacl.signing import VerifyKey
+        from nacl.exceptions import BadSignatureError
+    except ImportError:
+        return False, "PyNaCl not installed; install with `pip install pynacl`"
+    if not pubkey_hex or not signature_hex:
+        return False, "missing creator_pubkey or creator_signature"
+    parts = "|".join([
+        "bottube/v3-sign",
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    msg = hashlib.sha256(parts.encode("utf-8")).digest()
+    try:
+        VerifyKey(bytes.fromhex(pubkey_hex)).verify(msg, bytes.fromhex(signature_hex))
+        return True, "Ed25519 signature valid against creator_pubkey"
+    except BadSignatureError:
+        return False, "Ed25519 signature invalid"
+    except Exception as e:
+        return False, f"verify failed: {e}"
 
 
 def merkle_root(leaves):
@@ -155,7 +215,7 @@ def fetch_anchor_r4_via_proxy(bottube_base, tx_hash, timeout=15):
     return bytes.fromhex(root_hex)
 
 
-VERIFIER_VERSION = "0.4.0"
+VERIFIER_VERSION = "0.5.0"
 
 
 def hash_asset_streaming(url, expected_sha256, max_mb=2048, chunk=64 * 1024):
@@ -193,25 +253,52 @@ def hash_asset_streaming(url, expected_sha256, max_mb=2048, chunk=64 * 1024):
     return (actual == expected), actual, total, ""
 
 
-def verify_receipt_offline(receipt):
+def verify_receipt_offline(receipt, platform_hmac_key=None):
     """Verify a downloaded provenance receipt without any network access.
 
     Returns (verdict, detail) where verdict is 'PASS' if all internal
     cryptographic invariants hold:
-      1. The leaf computed from manifest.leaf_inputs matches manifest.leaf.
-      2. Walking merkle_proof.path from manifest.leaf reaches
+      1. (optional) receipt_signature HMAC matches the canonical body bytes,
+         if platform_hmac_key is supplied — proves bottube issued the file.
+      2. The leaf computed from manifest.leaf_inputs matches manifest.leaf.
+      3. Walking merkle_proof.path from that leaf reaches
          merkle_proof.expected_root.
-      3. expected_root equals chain_anchor.manifest_hash.
+      4. expected_root equals chain_anchor.manifest_hash.
+      5. v3 receipts: the Ed25519 creator signature verifies against the
+         creator pubkey over the v3 signing message.
 
     Network-only steps (fetching R4 from chain) are NOT performed here;
     use the live mode for that. The offline check is still useful: if a
-    receipt has been edited mid-flight, the leaf or root will fail to
-    walk and we catch it before anyone hits the chain.
+    receipt has been edited mid-flight, the leaf or signature will fail
+    and we catch it before anyone hits the chain.
     """
     if not isinstance(receipt, dict):
         return "FAIL", "receipt is not a JSON object"
     if receipt.get("schema") != "bottube-provenance-receipt/v1":
         return "FAIL", f"unknown schema: {receipt.get('schema')!r}"
+
+    # Phase 11.23 fix: optional receipt_signature HMAC verification. If the
+    # caller supplied the platform HMAC key, verify it; mismatch = the
+    # receipt didn't come from bottube unaltered. Skip if no key — most
+    # callers don't have it; the cryptographic claims below stand
+    # regardless because the chain anchor is the actual proof.
+    if platform_hmac_key:
+        import hmac as _hmac
+        sig_block = receipt.get("receipt_signature") or {}
+        body = {k: v for k, v in receipt.items() if k != "receipt_signature"}
+        canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        expected = _hmac.new(
+            platform_hmac_key.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        actual = (sig_block.get("value") or "")
+        if not _hmac.compare_digest(actual.lower(), expected.lower()):
+            return "FAIL", (
+                "receipt_signature HMAC does not match canonical body — "
+                "the receipt was tampered after issuance, or the supplied "
+                "platform key is wrong."
+            )
 
     m = receipt.get("manifest") or {}
     inputs = m.get("leaf_inputs") or {}
@@ -227,6 +314,8 @@ def verify_receipt_offline(receipt):
         manifest_version=ver,
         thumbnail_sha256=inputs.get("thumbnail_sha256", ""),
         canonical_360p_sha256=inputs.get("canonical_360p_sha256", ""),
+        creator_pubkey=inputs.get("creator_pubkey", ""),
+        creator_signature=inputs.get("creator_signature", ""),
     )
     if computed.hex() != claimed_leaf:
         return "FAIL", (
@@ -234,6 +323,28 @@ def verify_receipt_offline(receipt):
             f"the leaf the receipt claims ({claimed_leaf}). The receipt "
             f"has been tampered with or the version dispatch is wrong."
         )
+
+    # Phase 11.23: on v3 receipts, additionally verify the Ed25519
+    # creator signature against the v3 signing message. Tampered fields
+    # would already have been caught by the leaf check above, but
+    # verifying the actual signature also catches "this leaf format
+    # doesn't actually correspond to the creator's signing key" — which
+    # would mean the chain commits to something nobody can vouch for.
+    if ver >= 3:
+        sig_ok, sig_detail = verify_ed25519_signature(
+            inputs.get("creator_pubkey", ""),
+            inputs.get("creator_signature", ""),
+            inputs.get("video_id", ""),
+            inputs.get("canonical_sha256", ""),
+            inputs.get("thumbnail_sha256", ""),
+            inputs.get("canonical_360p_sha256", ""),
+            inputs.get("uploaded_at", 0),
+        )
+        if not sig_ok:
+            return "FAIL", (
+                f"v3 receipt's creator_signature does not verify "
+                f"against creator_pubkey: {sig_detail}"
+            )
 
     # Walk the path.
     proof = receipt.get("merkle_proof") or {}
@@ -287,6 +398,12 @@ def main():
     ap.add_argument("--receipt", default="",
                     help="Path to a downloaded receipt JSON. If set, runs the "
                          "offline verification (no network) and exits.")
+    ap.add_argument("--platform-hmac-key", default=os.environ.get("BOTTUBE_PROVENANCE_KEY", ""),
+                    help="Platform HMAC key. If set in --receipt mode, the "
+                         "verifier additionally checks receipt_signature is "
+                         "a valid HMAC over the canonical body — useful for "
+                         "the bottube operator who wants to confirm a receipt "
+                         "came from their own server unaltered.")
     ap.add_argument("--check-asset", action="store_true",
                     help="Additionally fetch the canonical asset bytes from "
                          "bottube and SHA-256 them in-place, comparing to "
@@ -307,7 +424,9 @@ def main():
                 receipt = json.load(fh)
         except Exception as e:
             sys.exit(f"FAIL: could not read receipt file: {e}")
-        verdict, detail = verify_receipt_offline(receipt)
+        verdict, detail = verify_receipt_offline(
+            receipt, platform_hmac_key=args.platform_hmac_key or None,
+        )
         if args.quiet:
             print(verdict)
         else:
@@ -344,12 +463,17 @@ def main():
     chain = prov["anchor"]["chain"]
     manifest_hash = prov["anchor"]["manifest_hash"]
 
-    # Phase 11.16: pull the manifest version + v2-specific fields from the
-    # provenance response. Older anchors stay v1 — defaults are bit-exact
-    # backwards-compatible.
+    # Phase 11.16/11.23: pull manifest version + v2/v3-specific fields
+    # from the provenance response. Older anchors stay v1 — defaults are
+    # bit-exact backwards-compatible.
     manifest_ver = int(prov.get("manifest_version", 1) or 1)
     thumb_sha = (prov.get("thumbnail") or {}).get("sha256", "") or ""
     p360_sha = (prov.get("canonical_360p") or {}).get("sha256", "") or ""
+    # v3 fields surface via /api/videos/<id>/anchor-proof (leaf_inputs);
+    # we need them for the leaf reconstruction. Fetch them lazily later
+    # if we hit a v3 row.
+    creator_pubkey = ""
+    creator_signature = ""
 
     if not args.quiet:
         print(f"      pill={prov['pill_state']}  chain={chain}")
@@ -360,12 +484,45 @@ def main():
         print(f"[2/4] Resolving batch members for the leaf computation...")
 
     # Compute this video's leaf locally with the correct recipe.
+    # v3 needs creator_pubkey + creator_signature; pull them from the
+    # anchor-proof endpoint (which the public-proof path will fetch
+    # below anyway, but we need the values now to reconstruct the leaf).
+    if manifest_ver >= 3:
+        try:
+            ap = _http_json(f"{bot}/api/videos/{vid}/anchor-proof")
+            li = (ap.get("leaf_inputs") or {}) if ap.get("ok") else {}
+            creator_pubkey = li.get("creator_pubkey", "") or ""
+            creator_signature = li.get("creator_signature", "") or ""
+        except Exception as _e:
+            if not args.quiet:
+                print(f"      (warning) couldn't fetch v3 fields: {_e}")
     own_leaf = manifest_leaf(
         vid, canonical_sha, uploader_sig, uploaded_at,
         manifest_version=manifest_ver,
         thumbnail_sha256=thumb_sha,
         canonical_360p_sha256=p360_sha,
+        creator_pubkey=creator_pubkey,
+        creator_signature=creator_signature,
     )
+
+    # Phase 11.23: on v3 rows, additionally verify the Ed25519 signature
+    # against creator_pubkey before we even bother with the chain seam.
+    # If the signature doesn't match, the chain anchor commits to a
+    # verifiably-broken leaf and the verdict is FAIL regardless of the
+    # rest of the path.
+    if manifest_ver >= 3:
+        sig_ok, sig_detail = verify_ed25519_signature(
+            creator_pubkey, creator_signature,
+            vid, canonical_sha, thumb_sha, p360_sha, uploaded_at,
+        )
+        if not args.quiet:
+            print(f"      [v3] creator pubkey: {creator_pubkey[:16]}…")
+            print(f"      [v3] Ed25519: {'✓ ' if sig_ok else '✗ '}{sig_detail}")
+        if not sig_ok:
+            sys.exit(
+                f"FAIL: v3 manifest carries a creator_signature that does "
+                f"NOT verify against creator_pubkey: {sig_detail}"
+            )
     if not args.quiet:
         print(f"      own_leaf={own_leaf.hex()}")
 
@@ -496,7 +653,7 @@ def main():
         # Full Merkle reconstruction: build leaves for every batch member,
         # compute the binary tree, compare to on-chain root. Each leaf must
         # use its own row's manifest_version — a batch may be heterogeneous
-        # during the v1→v2 migration window.
+        # during the v1→v2→v3 migration window.
         leaves = [
             manifest_leaf(
                 m["video_id"], m["canonical_sha256"],
@@ -504,6 +661,8 @@ def main():
                 manifest_version=int(m.get("manifest_version", 1) or 1),
                 thumbnail_sha256=m.get("thumbnail_sha256", "") or "",
                 canonical_360p_sha256=m.get("canonical_360p_sha256", "") or "",
+                creator_pubkey=m.get("creator_pubkey", "") or "",
+                creator_signature=m.get("creator_signature", "") or "",
             )
             for m in batch_members
         ]
@@ -533,44 +692,80 @@ def main():
             print(f"      leaf↔root inclusion proof skipped — pass --admin-key to enable.")
         verdict = "PARTIAL"
 
-    # Phase 11.21: optional bytes-on-disk check.
-    # The chain-anchor verdict above proves "bottube's claimed canonical
-    # hash is the same one anchored on chain". --check-asset additionally
-    # proves "the bytes bottube serves *today* still hash to that same
-    # value" — closing the moderator-can't-hot-swap-content gap.
+    # Phase 11.21 + 11.24: optional bytes-on-disk check.
+    # Default: re-hashes the canonical asset.
+    # On v2 manifests, also re-hashes thumbnail + 360p, since those hashes
+    # are folded into the v2 leaf and a moderator could otherwise hot-swap
+    # them without breaking the chain seam.
     asset_check = None
+    asset_extras = []  # list of (label, kind, actual_hex, total, expected) tuples
     if args.check_asset:
-        asset_url_path = (prov.get("canonical_asset") or {}).get("url", "")
-        if asset_url_path.startswith("/"):
-            asset_url = bot + asset_url_path
-        else:
-            asset_url = asset_url_path
+        def _abs(u):
+            if not u:
+                return ""
+            return (bot + u) if u.startswith("/") else u
+
+        # Always check the canonical asset.
+        targets = [(
+            "canonical",
+            _abs((prov.get("canonical_asset") or {}).get("url", "")),
+            canonical_sha,
+        )]
+        # On v2+, add thumbnail and 360p.
+        if manifest_ver >= 2:
+            t = (prov.get("thumbnail") or {})
+            if t.get("sha256") and t.get("url"):
+                targets.append(("thumbnail", _abs(t.get("url")), t.get("sha256", "")))
+            p = (prov.get("canonical_360p") or {})
+            if p.get("sha256") and p.get("url"):
+                targets.append(("rendition_360p", _abs(p.get("url")), p.get("sha256", "")))
+
         if not args.quiet:
             print()
-            print(f"[bonus] --check-asset enabled; streaming bytes from {asset_url}")
-            print(f"        capping at {args.asset_max_mb} MB")
-        matched, actual_hex, total, err = hash_asset_streaming(
-            asset_url, canonical_sha,
-            max_mb=args.asset_max_mb,
-        )
-        if err and not actual_hex:
-            asset_check = ("error", err)
+            print(f"[bonus] --check-asset enabled; will hash {len(targets)} asset(s)")
+            print(f"        capping each at {args.asset_max_mb} MB")
+
+        any_mismatch = False
+        any_canonical_match = False
+        for (label, url, expected) in targets:
             if not args.quiet:
-                print(f"        asset fetch error: {err}")
-        elif matched:
-            asset_check = ("match", actual_hex, total)
-            if not args.quiet:
-                mb = total / (1024 * 1024)
-                print(f"        ✓ {total} bytes ({mb:.1f} MB) hashed locally")
-                print(f"        ✓ SHA-256 matches the anchored canonical_sha256")
-        else:
-            asset_check = ("mismatch", actual_hex, total)
-            if not args.quiet:
-                print(f"        ✗ ASSET MISMATCH")
-                print(f"          local SHA-256: {actual_hex}")
-                print(f"          anchored hash: {canonical_sha}")
-                print(f"          bottube is serving DIFFERENT bytes than what was anchored.")
+                print(f"        [{label}] streaming {url}")
+            matched, actual_hex, total, err = hash_asset_streaming(
+                url, expected, max_mb=args.asset_max_mb,
+            )
+            asset_extras.append({
+                "label": label, "url": url, "expected": expected,
+                "actual": actual_hex, "bytes": total, "matched": matched,
+                "error": err,
+            })
+            if err and not actual_hex:
+                if not args.quiet:
+                    print(f"        [{label}] ⚠ fetch error: {err}")
+                continue
+            if matched:
+                if not args.quiet:
+                    mb = total / (1024 * 1024)
+                    print(f"        [{label}] ✓ {total:,} bytes ({mb:.2f} MB) — SHA-256 matches anchored value")
+                if label == "canonical":
+                    any_canonical_match = True
+            else:
+                any_mismatch = True
+                if not args.quiet:
+                    print(f"        [{label}] ✗ MISMATCH")
+                    print(f"                   served {actual_hex}")
+                    print(f"                   anchored {expected}")
+                    print(f"                   bottube is serving DIFFERENT bytes than what was anchored.")
+
+        if any_mismatch:
+            asset_check = ("mismatch", asset_extras)
             verdict = "FAIL"
+        elif any_canonical_match:
+            asset_check = ("match", asset_extras)
+        else:
+            # Couldn't actually verify even the canonical asset (likely
+            # fetch error). Don't claim PASS for the asset bit; leave the
+            # chain verdict as-is but flag.
+            asset_check = ("error", asset_extras)
 
     if args.quiet:
         print(verdict)
@@ -585,12 +780,29 @@ def main():
         print(f"  own leaf:    {own_leaf.hex()}")
         if asset_check:
             kind = asset_check[0]
-            if kind == "match":
-                print(f"  asset bytes: ✓ MATCH ({asset_check[2]:,} bytes hashed locally)")
-            elif kind == "mismatch":
-                print(f"  asset bytes: ✗ MISMATCH (served {asset_check[1]}, anchored {canonical_sha})")
-            elif kind == "error":
-                print(f"  asset bytes: ⚠ check skipped: {asset_check[1]}")
+            extras = asset_check[1] if len(asset_check) > 1 else []
+            ok_count = sum(1 for e in extras if isinstance(e, dict) and e.get("matched"))
+            err_count = sum(1 for e in extras if isinstance(e, dict) and e.get("error") and not e.get("actual"))
+            mismatch_count = sum(
+                1 for e in extras
+                if isinstance(e, dict) and e.get("actual") and not e.get("matched")
+            )
+            print(
+                f"  asset bytes: "
+                f"{ok_count} matched · {mismatch_count} mismatched · "
+                f"{err_count} fetch error"
+            )
+            for e in extras:
+                if not isinstance(e, dict):
+                    continue
+                lbl = e.get("label", "?")
+                if e.get("matched"):
+                    sym = "✓"
+                elif e.get("actual"):
+                    sym = "✗"
+                else:
+                    sym = "⚠"
+                print(f"               {sym} {lbl}: {e.get('bytes', 0):,} B")
         if verdict == "PASS":
             print()
             if own_leaf.hex() == manifest_hash:

@@ -95,6 +95,7 @@ def merkle_root(leaves):
 
 
 _LEAF_DOMAIN_V2 = "bottube/v2"
+_LEAF_DOMAIN_V3 = "bottube/v3"
 
 
 def manifest_leaf_v1(m):
@@ -103,7 +104,7 @@ def manifest_leaf_v1(m):
         m.get("video_id", "") or "",
         m.get("canonical_sha256", "") or "",
         m.get("uploader_sig", "") or "",
-        str(int(m.get("uploaded_at", 0) or 0)),
+        str(int(float(m.get("uploaded_at", 0) or 0))),
     ])
     return hashlib.sha256(parts.encode("utf-8")).digest()
 
@@ -119,7 +120,25 @@ def manifest_leaf_v2(m):
         m.get("thumbnail_sha256", "") or "",
         m.get("canonical_360p_sha256", "") or "",
         m.get("uploader_sig", "") or "",
-        str(int(m.get("uploaded_at", 0) or 0)),
+        str(int(float(m.get("uploaded_at", 0) or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def manifest_leaf_v3(m):
+    """v3 leaf: folds creator_pubkey + creator_signature so the chain
+    commits to a verifiable Ed25519 signature, not just a platform HMAC.
+    """
+    parts = "|".join([
+        _LEAF_DOMAIN_V3,
+        m.get("video_id", "") or "",
+        m.get("canonical_sha256", "") or "",
+        m.get("thumbnail_sha256", "") or "",
+        m.get("canonical_360p_sha256", "") or "",
+        m.get("uploader_sig", "") or "",
+        m.get("creator_pubkey", "") or "",
+        m.get("creator_signature", "") or "",
+        str(int(float(m.get("uploaded_at", 0) or 0))),
     ])
     return hashlib.sha256(parts.encode("utf-8")).digest()
 
@@ -129,6 +148,8 @@ def manifest_leaf(m):
     get v1 — preserves bit-exact behavior for already-anchored batches.
     """
     ver = int(m.get("manifest_version", 1) or 1)
+    if ver >= 3:
+        return manifest_leaf_v3(m)
     if ver >= 2:
         return manifest_leaf_v2(m)
     return manifest_leaf_v1(m)

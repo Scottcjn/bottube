@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block title %}Verify a video — BoTTube{% endblock %}
+
+{% block meta_description %}Cryptographically verify any BoTTube video's on-chain provenance entirely in your browser. Walks the Merkle inclusion proof with subtle.crypto and compares to the RustChain anchor — no server-side trust, no install required.{% endblock %}
+
+{% block content %}
+<style>
+  .vrf-shell { max-width: 800px; margin: 0 auto; padding: 28px 22px 80px; color: var(--text-primary); }
+  .vrf-shell h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .vrf-sub { color: var(--text-secondary); margin: 0 0 24px; font-size: 14px; line-height: 1.55; }
+  .vrf-sub code { background: var(--bg-card); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  .vrf-form {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px;
+  }
+  .vrf-form input[type="text"] {
+    flex: 1; min-width: 200px;
+    padding: 10px 12px; background: var(--bg-secondary); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .vrf-form button {
+    padding: 10px 22px; background: #3ea6ff; color: #000; border: 0;
+    border-radius: 6px; cursor: pointer; font-weight: 600;
+  }
+  .vrf-form button:disabled { opacity: 0.55; cursor: wait; }
+  .vrf-out {
+    margin-top: 22px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px;
+  }
+  .vrf-step {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 0; border-bottom: 1px dashed var(--border);
+  }
+  .vrf-step:last-child { border-bottom: 0; }
+  .vrf-step .ico {
+    flex: 0 0 24px; height: 24px; line-height: 24px; text-align: center;
+    font-weight: 700; border-radius: 50%; font-size: 14px;
+  }
+  .vrf-step .ico.pending { background: #444; color: #ccc; }
+  .vrf-step .ico.running { background: #3ea6ff; color: #000; }
+  .vrf-step .ico.ok { background: #2ecc71; color: #000; }
+  .vrf-step .ico.fail { background: #e84545; color: #fff; }
+  .vrf-step .body { flex: 1; min-width: 0; }
+  .vrf-step .title { font-size: 14px; font-weight: 600; }
+  .vrf-step .detail {
+    font-size: 12px; color: var(--text-secondary); margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all;
+  }
+  .vrf-verdict {
+    margin-top: 18px; padding: 16px; border-radius: 8px;
+    font-weight: 700; text-align: center; font-size: 22px;
+    letter-spacing: 0.04em;
+  }
+  .vrf-verdict.pass { background: rgba(46, 204, 113, 0.15); color: #2ecc71; border: 1px solid #2ecc71; }
+  .vrf-verdict.fail { background: rgba(232, 69, 69, 0.15); color: #e84545; border: 1px solid #e84545; }
+  .vrf-foot { color: var(--text-secondary); font-size: 12px; margin-top: 18px; line-height: 1.55; }
+  .vrf-foot a { color: var(--text-primary); }
+</style>
+
+<div class="vrf-shell">
+  <h1>Verify a video</h1>
+  <p class="vrf-sub">
+    Type a BoTTube video ID and watch your browser walk the entire chain
+    of cryptographic proof — provenance fields, Merkle inclusion path,
+    on-chain R4 register — using <code>SubtleCrypto.subtle.digest()</code>
+    locally. No server-side verifier, no install. The browser itself is
+    the verifier.
+  </p>
+  <p class="vrf-sub">
+    Want to do this from a script, an air-gapped laptop, or CI?
+    <a href="/api/transparency">/api/transparency</a> ·
+    <code>pip install bottube-verify</code> ·
+    <a href="https://github.com/Scottcjn/bottube">source</a> ·
+    <a href="/.well-known/provenance-spec.json">/.well-known/provenance-spec.json</a>
+  </p>
+
+  <form id="vrf-form" class="vrf-form" onsubmit="event.preventDefault(); runVerify();">
+    <input type="text" id="vrf-vid" placeholder="video_id (e.g. lcqlfSGodNx)" autocomplete="off" autofocus>
+    <button type="submit" id="vrf-btn">Verify</button>
+    <button type="button" id="vrf-asset-btn" style="background:#999;color:#000" title="Stream the canonical asset bytes and re-hash" onclick="runVerify(true)">+ check asset bytes</button>
+  </form>
+
+  <div id="vrf-out" class="vrf-out" style="display:none">
+    <div id="vrf-steps"></div>
+    <div id="vrf-verdict"></div>
+  </div>
+
+  <p class="vrf-foot">
+    <strong>What is checked.</strong> (1) Provenance fields fetched from
+    <code>/api/videos/&lt;id&gt;/provenance</code>. (2) Merkle leaf
+    reconstructed from those fields using the same recipe published in
+    <a href="/.well-known/provenance-spec.json">provenance-spec.json</a>.
+    (3) Merkle inclusion proof walked locally to derive the root.
+    (4) On-chain R4 register fetched via the public chain proxy and
+    compared byte-for-byte to the walked root. Optional: re-hash the
+    canonical (and on v2, thumbnail + 360p) bytes locally to prove
+    bottube hasn't hot-swapped them. The same logic the
+    <code>bottube-verify</code> CLI runs, just in your browser.
+  </p>
+</div>
+
+<script>
+(function(){
+  // ----- helpers -----
+  async function sha256(buf){
+    const h = await crypto.subtle.digest('SHA-256', buf);
+    return new Uint8Array(h);
+  }
+  function hexToBytes(hex){
+    const out = new Uint8Array(hex.length/2);
+    for (let i=0; i<out.length; i++) out[i] = parseInt(hex.substr(i*2,2),16);
+    return out;
+  }
+  function bytesToHex(arr){
+    return Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  function utf8(str){
+    return new TextEncoder().encode(str);
+  }
+  function concat(a, b){
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a, 0); out.set(b, a.length);
+    return out;
+  }
+
+  async function leafBytes(inputs, version){
+    let parts;
+    if (version >= 2){
+      parts = [
+        'bottube/v2',
+        inputs.video_id || '',
+        inputs.canonical_sha256 || '',
+        inputs.thumbnail_sha256 || '',
+        inputs.canonical_360p_sha256 || '',
+        inputs.uploader_sig || '',
+        String(parseInt(inputs.uploaded_at || 0, 10)),
+      ];
+    } else {
+      parts = [
+        inputs.video_id || '',
+        inputs.canonical_sha256 || '',
+        inputs.uploader_sig || '',
+        String(parseInt(inputs.uploaded_at || 0, 10)),
+      ];
+    }
+    return await sha256(utf8(parts.join('|')));
+  }
+
+  async function walkMerkle(leaf, path){
+    let node = leaf;
+    for (const hop of path){
+      const sib = hexToBytes(hop.sibling);
+      if (hop.side === 'R')      node = await sha256(concat(node, sib));
+      else if (hop.side === 'L') node = await sha256(concat(sib, node));
+      else throw new Error('invalid path side: ' + hop.side);
+    }
+    return node;
+  }
+
+  async function streamHashAsset(url, expectedHex){
+    // Stream the canonical asset and SHA-256 it as we go.
+    const r = await fetch(url, {credentials: 'omit'});
+    if (!r.ok) throw new Error('asset fetch failed: HTTP ' + r.status);
+    // SubtleCrypto.digest doesn't support incremental hashing directly.
+    // Read the whole stream into memory (capped) and digest at the end.
+    const reader = r.body.getReader();
+    const chunks = [];
+    let total = 0;
+    const CAP = 512 * 1024 * 1024; // 512 MB browser cap (memory)
+    while (true){
+      const {done, value} = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > CAP) throw new Error('asset exceeded 512 MB browser cap');
+      chunks.push(value);
+    }
+    const buf = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks){ buf.set(c, off); off += c.length; }
+    const hexHash = bytesToHex(await sha256(buf));
+    return {bytes: total, hex: hexHash, matches: hexHash === (expectedHex || '').toLowerCase()};
+  }
+
+  // ----- UI -----
+  const stepsEl  = document.getElementById('vrf-steps');
+  const verdEl   = document.getElementById('vrf-verdict');
+  const outEl    = document.getElementById('vrf-out');
+  const vidInput = document.getElementById('vrf-vid');
+  const btn      = document.getElementById('vrf-btn');
+  const btn2     = document.getElementById('vrf-asset-btn');
+
+  function step(title){
+    const row = document.createElement('div');
+    row.className = 'vrf-step';
+    row.innerHTML = '<div class="ico running">…</div>'
+                  + '<div class="body"><div class="title"></div><div class="detail"></div></div>';
+    row.querySelector('.title').textContent = title;
+    stepsEl.appendChild(row);
+    return {
+      ok(detail){
+        row.querySelector('.ico').className = 'ico ok';
+        row.querySelector('.ico').textContent = '✓';
+        if (detail) row.querySelector('.detail').textContent = detail;
+      },
+      fail(detail){
+        row.querySelector('.ico').className = 'ico fail';
+        row.querySelector('.ico').textContent = '✗';
+        if (detail) row.querySelector('.detail').textContent = detail;
+      },
+      detail(detail){
+        row.querySelector('.detail').textContent = detail;
+      },
+    };
+  }
+
+  function reset(){
+    stepsEl.innerHTML = '';
+    verdEl.innerHTML = '';
+    outEl.style.display = 'block';
+  }
+
+  async function runVerify(checkAsset){
+    const vid = (vidInput.value || '').trim();
+    if (!/^[A-Za-z0-9_-]{5,32}$/.test(vid)){
+      reset();
+      step('Validate input').fail('video_id must be 5-32 chars [A-Za-z0-9_-]');
+      verdEl.className = 'vrf-verdict fail';
+      verdEl.textContent = 'FAIL';
+      return;
+    }
+    btn.disabled = true; btn2.disabled = true;
+    reset();
+
+    let prov, proof, chain;
+    const s1 = step('Fetch /api/videos/' + vid + '/provenance');
+    try {
+      prov = await (await fetch('/api/videos/' + vid + '/provenance')).json();
+      if (!prov.ok) throw new Error(prov.error || 'ok=false');
+      s1.ok('manifest_version=v' + (prov.manifest_version||1) + ' · pill=' + prov.pill_state);
+    } catch(e) { s1.fail(String(e)); finalize(false); return; }
+
+    if (!prov.verified || !(prov.anchor && prov.anchor.tx_hash)){
+      step('Anchor present').fail('this video is not yet anchored on chain');
+      finalize(false);
+      return;
+    }
+
+    const ver = prov.manifest_version || 1;
+    const inputs = {
+      video_id: vid,
+      canonical_sha256: prov.canonical_asset.sha256,
+      thumbnail_sha256: (prov.thumbnail||{}).sha256 || '',
+      canonical_360p_sha256: (prov.canonical_360p||{}).sha256 || '',
+      uploader_sig: prov.upload.uploader_sig,
+      uploaded_at: prov.upload.uploaded_at,
+    };
+
+    const s2 = step('Reconstruct Merkle leaf locally (v' + ver + ' recipe)');
+    let leaf;
+    try {
+      leaf = await leafBytes(inputs, ver);
+      s2.ok('leaf=' + bytesToHex(leaf));
+    } catch(e) { s2.fail(String(e)); finalize(false); return; }
+
+    const s3 = step('Fetch /api/videos/' + vid + '/anchor-proof');
+    try {
+      proof = await (await fetch('/api/videos/' + vid + '/anchor-proof')).json();
+      if (!proof.ok) throw new Error(proof.error || 'ok=false');
+      s3.ok('path length ' + proof.path.length + ' · batch size ' + proof.batch_size);
+    } catch(e) { s3.fail(String(e)); finalize(false); return; }
+
+    if (proof.leaf !== bytesToHex(leaf)){
+      step('Reconstructed leaf matches API leaf').fail(
+        'local leaf ' + bytesToHex(leaf) + ' != API leaf ' + proof.leaf
+      );
+      finalize(false);
+      return;
+    }
+
+    const s4 = step('Walk ' + proof.path.length + ' Merkle hops to the root');
+    let walked;
+    try {
+      walked = await walkMerkle(leaf, proof.path);
+      s4.ok('walked root=' + bytesToHex(walked));
+    } catch(e) { s4.fail(String(e)); finalize(false); return; }
+
+    if (bytesToHex(walked) !== (proof.expected_root||'').toLowerCase()){
+      step('Walked root matches expected_root').fail(
+        'walked ' + bytesToHex(walked) + ' != expected ' + proof.expected_root
+      );
+      finalize(false);
+      return;
+    }
+
+    const tx = prov.anchor.tx_hash;
+    const s5 = step('Fetch on-chain R4 register via /api/anchors/' + tx.substr(0,12) + '…/chain');
+    try {
+      chain = await (await fetch('/api/anchors/' + tx + '/chain')).json();
+      if (!chain.ok) throw new Error(chain.error || 'ok=false');
+      s5.ok('R4=' + chain.r4_merkle_root + ' · block ' + (chain.inclusion_height || '?'));
+    } catch(e) { s5.fail(String(e)); finalize(false); return; }
+
+    if ((chain.r4_merkle_root||'').toLowerCase() !== bytesToHex(walked)){
+      step('Walked root matches on-chain R4').fail(
+        'walked ' + bytesToHex(walked) + ' != R4 ' + chain.r4_merkle_root
+      );
+      finalize(false);
+      return;
+    }
+
+    step('Walked root matches on-chain R4').ok('byte-for-byte');
+
+    if (checkAsset){
+      const targets = [{
+        label: 'canonical asset',
+        url: prov.canonical_asset.url,
+        expected: prov.canonical_asset.sha256,
+      }];
+      if (ver >= 2){
+        const t = prov.thumbnail || {};
+        if (t.sha256 && t.url) targets.push({label: 'thumbnail', url: t.url, expected: t.sha256});
+        const p = prov.canonical_360p || {};
+        if (p.sha256 && p.url) targets.push({label: '360p rendition', url: p.url, expected: p.sha256});
+      }
+      let allOk = true;
+      for (const t of targets){
+        const sa = step('Re-hash ' + t.label);
+        try {
+          const r = await streamHashAsset(t.url, t.expected);
+          if (r.matches){
+            sa.ok((r.bytes/1024/1024).toFixed(2) + ' MB · SHA-256 matches anchored value');
+          } else {
+            sa.fail('served ' + r.hex + ' != anchored ' + t.expected);
+            allOk = false;
+          }
+        } catch(e) { sa.fail(String(e)); allOk = false; }
+      }
+      if (!allOk){ finalize(false); return; }
+    }
+
+    finalize(true);
+  }
+
+  function finalize(pass){
+    verdEl.className = 'vrf-verdict ' + (pass ? 'pass' : 'fail');
+    verdEl.textContent = pass ? 'PASS' : 'FAIL';
+    btn.disabled = false; btn2.disabled = false;
+  }
+
+  window.runVerify = runVerify;
+
+  // Pre-fill from query string for shareable links: /verify?v=lcqlfSGodNx
+  const params = new URLSearchParams(window.location.search);
+  const v = params.get('v');
+  if (v){
+    vidInput.value = v;
+    runVerify(false);
+  }
+})();
+</script>
+{% endblock %}

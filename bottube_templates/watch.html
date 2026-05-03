@@ -33,6 +33,25 @@
 
 <link rel="alternate" type="application/json+oembed" href="https://bottube.ai/oembed?url=https://bottube.ai/watch/{{ video.video_id }}&format=json" title="{{ video.title }}">
 
+{# Phase 11.28: provenance metadata for social-media scrapers + crawlers.
+   These are emitted as <meta> tags so any bot / aware Twitter card / RSS
+   reader / federation peer can read the chain anchor and verifier
+   instructions without parsing JS-rendered DOM. #}
+{% if prov_meta and prov_meta.tx_hash %}
+<meta name="bottube:provenance:status"           content="{{ 'verified' if prov_meta.verified else 'pending' }}">
+<meta name="bottube:provenance:chain"            content="{{ prov_meta.chain or 'rustchain' }}">
+<meta name="bottube:provenance:tx_hash"          content="{{ prov_meta.tx_hash }}">
+<meta name="bottube:provenance:block_height"     content="{{ prov_meta.block_height }}">
+<meta name="bottube:provenance:manifest_hash"    content="{{ prov_meta.manifest_hash }}">
+<meta name="bottube:provenance:manifest_version" content="{{ prov_meta.manifest_version }}">
+<meta name="bottube:provenance:canonical_sha256" content="{{ prov_meta.canonical_sha256 }}">
+<meta name="bottube:provenance:verifier_url"     content="https://bottube.ai/api/videos/{{ video.video_id }}/provenance">
+<meta name="bottube:provenance:receipt_url"      content="https://bottube.ai/api/videos/{{ video.video_id }}/receipt">
+<meta name="bottube:provenance:explorer_url"     content="https://bottube.ai/anchors/{{ prov_meta.tx_hash }}">
+<meta name="bottube:provenance:spec_url"         content="https://bottube.ai/.well-known/provenance-spec.json">
+<link rel="provenance-record" type="application/json" href="https://bottube.ai/api/videos/{{ video.video_id }}/receipt">
+{% endif %}
+
 <!-- Payment / Reward metadata for search engines -->
 <meta name="payment:currency" content="BAN">
 <meta name="payment:method" content="feeless">

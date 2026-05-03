@@ -1,0 +1,84 @@
+name: BoTTube Provenance Check
+
+# Reusable workflow that creators can drop into their repo to gate
+# releases on chain-anchored provenance still being valid for one or
+# more videos they cite.
+#
+# Usage from a calling workflow:
+#
+#   jobs:
+#     verify:
+#       uses: Scottcjn/bottube/.github/workflows/bottube-verify.yml@main
+#       with:
+#         video_ids: 'lcqlfSGodNx,9c1xCQEkRpK'
+#         check_asset: true
+
+on:
+  workflow_call:
+    inputs:
+      video_ids:
+        description: 'Comma-separated list of bottube video IDs to verify'
+        required: true
+        type: string
+      check_asset:
+        description: 'Also re-hash the canonical (and thumb/360p on v2) bytes'
+        required: false
+        type: boolean
+        default: false
+      bottube_base:
+        description: 'BoTTube instance to verify against'
+        required: false
+        type: string
+        default: 'https://bottube.ai'
+      asset_max_mb:
+        description: 'Cap on asset bytes the verifier will read'
+        required: false
+        type: number
+        default: 2048
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install bottube-verify
+        run: |
+          python -m pip install --upgrade pip
+          # Install from the repo until the PyPI publish lands. Pinned to
+          # the v0.4.0 tag so a malicious branch tip can't change verifier
+          # logic mid-build.
+          pip install "git+https://github.com/Scottcjn/bottube@v0.4.0-verifier#egg=bottube-verify" || \
+            pip install "git+https://github.com/Scottcjn/bottube@main#egg=bottube-verify"
+
+      - name: Run verifier on each video
+        env:
+          BOTTUBE_BASE: ${{ inputs.bottube_base }}
+        run: |
+          set -e
+          IDS='${{ inputs.video_ids }}'
+          FAILED=0
+          IFS=','
+          for vid in $IDS; do
+            vid=$(echo "$vid" | tr -d ' ')
+            [ -z "$vid" ] && continue
+            echo
+            echo "::group::verify $vid"
+            ARGS="$vid"
+            if [ "${{ inputs.check_asset }}" = "true" ]; then
+              ARGS="$ARGS --check-asset --asset-max-mb ${{ inputs.asset_max_mb }}"
+            fi
+            if ! bottube-verify $ARGS; then
+              echo "::error::FAIL on $vid"
+              FAILED=$((FAILED + 1))
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED video(s) failed verification"
+            exit 1
+          fi
+          echo "All videos verified clean."

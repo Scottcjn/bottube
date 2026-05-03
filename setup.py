@@ -8,7 +8,7 @@ with open("VERIFIER_README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="bottube-verify",
-    version="0.4.0",
+    version="0.5.0",
     description=(
         "Open-source verifier for BoTTube on-chain provenance. "
         "Cryptographically prove any video on bottube.ai is correctly "
@@ -22,8 +22,11 @@ setup(
     license="MIT",
     py_modules=["bottube_verify_provenance"],
     python_requires=">=3.9",
-    # No third-party deps — uses urllib + hashlib + json from stdlib
-    install_requires=[],
+    # Phase 11.23: PyNaCl is required for v3 manifest signatures.
+    # Older v1+v2 verification still works without it (stdlib-only)
+    # but the verifier will refuse to PASS a v3 anchor without
+    # actually verifying the Ed25519 signature.
+    install_requires=["PyNaCl>=1.5.0"],
     entry_points={
         "console_scripts": [
             "bottube-verify=bottube_verify_provenance:main",

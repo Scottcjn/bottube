@@ -11655,6 +11655,34 @@ def watch(video_id):
         interaction_likers = []
         interaction_outgoing = []
 
+    # Phase 11.28: pull provenance fields for OG metadata so the
+    # manifest_hash + chain anchor are visible to social-media scrapers
+    # and bots even before the page-level JS fires.
+    prov_meta = {}
+    try:
+        pr = db.execute(
+            """SELECT COALESCE(anchor_tx_hash, '') AS tx,
+                      COALESCE(anchor_block_height, 0) AS h,
+                      COALESCE(anchor_manifest_hash, '') AS root,
+                      COALESCE(anchor_chain, '') AS chain,
+                      COALESCE(canonical_sha256, '') AS canonical,
+                      COALESCE(manifest_version, 1) AS v
+                 FROM video_provenance WHERE video_id = ?""",
+            (video_id,),
+        ).fetchone()
+        if pr:
+            prov_meta = {
+                "tx_hash": pr["tx"],
+                "block_height": int(pr["h"] or 0),
+                "manifest_hash": pr["root"],
+                "chain": pr["chain"],
+                "canonical_sha256": pr["canonical"],
+                "manifest_version": int(pr["v"] or 1),
+                "verified": bool(pr["tx"] and pr["h"]),
+            }
+    except Exception:
+        prov_meta = {}
+
     return render_template(
         "watch.html",
         video=video,
@@ -11679,6 +11707,7 @@ def watch(video_id):
         response_videos=response_videos,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
+        prov_meta=prov_meta,
     )
 
 
@@ -16773,6 +16802,18 @@ def _build_provenance_payload(video_row, prov_row, renditions):
 
     in_leaf_v2 = manifest_ver >= 2
 
+    # Phase 11.24: also expose thumbnail URL + 360p rendition URL so the
+    # verifier can optionally re-hash them (--check-asset on v2 rows).
+    # Pull thumbnail filename from video_row (already joined upstream).
+    thumb_url = ""
+    try:
+        thumb_filename = video_row["thumbnail"] if "thumbnail" in video_row.keys() else ""
+        if thumb_filename:
+            thumb_url = f"/thumbnails/{thumb_filename}"
+    except Exception:
+        thumb_url = ""
+    p360_url = f"/renditions/{vid}/360p.mp4" if p360_sha else ""
+
     return {
         "video_id": vid,
         "manifest_version": manifest_ver,
@@ -16790,6 +16831,7 @@ def _build_provenance_payload(video_row, prov_row, renditions):
         },
         "thumbnail": {
             "sha256": thumb_sha,
+            "url": thumb_url,
             "in_anchor_leaf": in_leaf_v2 and bool(thumb_sha),
             "note": (
                 "Hashed at upload time and folded into the anchored Merkle leaf "
@@ -16802,6 +16844,7 @@ def _build_provenance_payload(video_row, prov_row, renditions):
         },
         "canonical_360p": {
             "sha256": p360_sha,
+            "url": p360_url,
             "in_anchor_leaf": in_leaf_v2 and bool(p360_sha),
         },
         "renditions": rends,
@@ -16820,6 +16863,7 @@ def video_provenance(video_id):
     db = get_db()
     video = db.execute(
         """SELECT v.video_id, v.agent_id, v.duration_sec, v.width, v.height, v.created_at,
+                  v.thumbnail,
                   a.agent_name, a.display_name
              FROM videos v JOIN agents a ON v.agent_id = a.id
             WHERE v.video_id = ?""",
@@ -17446,23 +17490,46 @@ def well_known_agent(handle):
     if not re.fullmatch(r"[a-z0-9_-]{2,32}", handle or ""):
         abort(404)
     db = get_db()
-    agent = db.execute(
-        """SELECT agent_name, display_name, bio, avatar_url, is_human,
-                  created_at,
-                  COALESCE(rtc_wallet, '') AS rtc_wallet,
-                  COALESCE(rtc_address, '') AS rtc_address
-             FROM agents WHERE agent_name = ?
-                                AND COALESCE(is_banned, 0) = 0
-                                AND COALESCE(is_suspended, 0) = 0""",
-        (handle,),
-    ).fetchone()
+    # Phase 11.23: also pull the Ed25519 keypair (idempotently created
+    # at first upload) so the actor doc exposes the real signing key.
+    try:
+        cols = {row[1] for row in db.execute("PRAGMA table_info(agents)").fetchall()}
+        ed_col = "ed25519_pubkey" if "ed25519_pubkey" in cols else None
+    except Exception:
+        ed_col = None
+
+    if ed_col:
+        agent = db.execute(
+            f"""SELECT id, agent_name, display_name, bio, avatar_url, is_human,
+                      created_at,
+                      COALESCE(rtc_wallet, '') AS rtc_wallet,
+                      COALESCE(rtc_address, '') AS rtc_address,
+                      COALESCE({ed_col}, '') AS ed25519_pubkey
+                 FROM agents WHERE agent_name = ?
+                                    AND COALESCE(is_banned, 0) = 0
+                                    AND COALESCE(is_suspended, 0) = 0""",
+            (handle,),
+        ).fetchone()
+    else:
+        agent = db.execute(
+            """SELECT id, agent_name, display_name, bio, avatar_url, is_human,
+                      created_at,
+                      COALESCE(rtc_wallet, '') AS rtc_wallet,
+                      COALESCE(rtc_address, '') AS rtc_address
+                 FROM agents WHERE agent_name = ?
+                                    AND COALESCE(is_banned, 0) = 0
+                                    AND COALESCE(is_suspended, 0) = 0""",
+            (handle,),
+        ).fetchone()
     if not agent:
         abort(404)
 
-    # Use the platform-level RTC wallet/address as the verification key for
-    # now — agents that bring their own DID-resolvable Ed25519 key can
-    # extend this later. The key field is intentionally optional.
-    pubkey = agent["rtc_wallet"] or agent["rtc_address"] or ""
+    rtc_addr = agent["rtc_wallet"] or agent["rtc_address"] or ""
+    ed_pub = ""
+    try:
+        ed_pub = agent["ed25519_pubkey"] if ed_col else ""
+    except Exception:
+        ed_pub = ""
 
     actor_doc = {
         "@context": "https://www.w3.org/ns/did/v1",
@@ -17484,17 +17551,36 @@ def well_known_agent(handle):
         "avatar": (agent["avatar_url"] or f"https://bottube.ai/avatar/{handle}.svg"),
         "createdAt": int(float(agent["created_at"] or 0)),
     }
-    if pubkey:
-        actor_doc["verificationMethod"] = [{
+    methods = []
+    if ed_pub:
+        # Phase 11.23: real Ed25519 signing key, used to verify the
+        # creator_signature field in v3 manifests.
+        methods.append({
+            "id": f"did:web:bottube.ai:{handle}#bottube-creator-key",
+            "type": "Ed25519VerificationKey2020",
+            "controller": f"did:web:bottube.ai:{handle}",
+            "publicKeyHex": ed_pub,
+            "purpose": "BoTTubeProvenanceV3",
+            "managed_by": "platform",
+            "note": (
+                "Server-managed Ed25519 keypair (v3a). Used to sign "
+                "creator_signature in /api/videos/<id>/provenance for "
+                "manifest_version >= 3. v3b will allow the agent to "
+                "bring their own keypair; the leaf shape stays the same."
+            ),
+        })
+    if rtc_addr:
+        methods.append({
             "id": f"did:web:bottube.ai:{handle}#wallet",
             "type": "Ed25519VerificationKey2020",
             "controller": f"did:web:bottube.ai:{handle}",
-            "publicKey": pubkey,
-            "note": ("Currently the agent's RustChain wallet address. Agents "
-                     "that bring their own DID-resolvable Ed25519 key can "
-                     "register additional verificationMethods via the "
-                     "federated relay protocol — see /federation."),
-        }]
+            "publicKey": rtc_addr,
+            "purpose": "RustChainWallet",
+            "note": "RustChain wallet address — separate from the "
+                    "BoTTubeProvenanceV3 signing key above.",
+        })
+    if methods:
+        actor_doc["verificationMethod"] = methods
 
     resp = jsonify(actor_doc)
     resp.headers["Content-Type"] = "application/did+json"
@@ -19628,9 +19714,201 @@ def _provenance_optional_from_form(form):
 
 MANIFEST_V1 = 1
 MANIFEST_V2 = 2
-MANIFEST_CURRENT = MANIFEST_V2  # what new uploads write
+MANIFEST_V3 = 3
+MANIFEST_CURRENT = MANIFEST_V3  # what new uploads write
 
 _LEAF_DOMAIN_V2 = "bottube/v2"
+_LEAF_DOMAIN_V3 = "bottube/v3"
+
+# ---------------------------------------------------------------------------
+# Phase 11.23: Ed25519 creator signatures
+# ---------------------------------------------------------------------------
+# v3 manifest folds creator_pubkey + creator_signature into the leaf, so
+# the chain anchor commits not just to *what* was uploaded but to *who*
+# signed it. v3a (this iteration) uses server-managed keypairs — the
+# server maintains an Ed25519 keypair per agent, signs uploads on behalf
+# of the agent, and exposes the public key via /.well-known/agent/<handle>.
+# v3b (future) lets agents bring their own keypair and sign uploads
+# client-side; the server-side surface stays the same since v3 already
+# binds to creator_pubkey + creator_signature without caring who held
+# the private key.
+#
+# Even server-managed v3a is strictly better than HMAC:
+#   - Each agent has a unique keypair, not a shared platform secret
+#   - Public key is independently checkable via DID:web actor doc
+#   - The chain commits to a *verifiable* signature, not an opaque blob
+#   - Future migration to client-managed is purely additive
+
+try:
+    from nacl.signing import SigningKey, VerifyKey
+    from nacl.exceptions import BadSignatureError
+    _ED25519_AVAILABLE = True
+except Exception:
+    _ED25519_AVAILABLE = False
+
+
+def _agent_ed25519_signing_key():
+    """Master key used to encrypt agent Ed25519 private keys at rest.
+
+    Falls back to the provenance signing key. In server-managed v3a this
+    is the only secret needed to forge any creator signature; rotating it
+    is non-trivial and a known operational risk. Mitigation: client-managed
+    v3b removes this surface entirely.
+    """
+    return _provenance_signing_key()
+
+
+def _agent_ed25519_seal(seckey_bytes):
+    """Wrap a 32-byte Ed25519 seed with a derived key + AES-style XOR.
+
+    Sufficient against opportunistic disk read; not a real KMS. The
+    upgrade path is per-agent encryption with agent-supplied passphrases
+    or a real KMS — out of scope for v3a.
+    """
+    if not seckey_bytes:
+        return ""
+    master = hashlib.sha256(_agent_ed25519_signing_key().encode("utf-8")).digest()
+    out = bytes(b ^ master[i % len(master)] for i, b in enumerate(seckey_bytes))
+    return out.hex()
+
+
+def _agent_ed25519_unseal(sealed_hex):
+    if not sealed_hex:
+        return b""
+    try:
+        sealed = bytes.fromhex(sealed_hex)
+    except Exception:
+        return b""
+    master = hashlib.sha256(_agent_ed25519_signing_key().encode("utf-8")).digest()
+    return bytes(b ^ master[i % len(master)] for i, b in enumerate(sealed))
+
+
+def _agent_ensure_keypair(agent_id):
+    """Ensure agent has an Ed25519 keypair. Returns (pubkey_hex, seckey_bytes).
+
+    Idempotent: if the keypair already exists, returns the stored values.
+    Otherwise generates a fresh Ed25519 seed, stores the public key in
+    plaintext and the private key XOR-sealed with the platform key.
+    """
+    if not _ED25519_AVAILABLE:
+        return "", b""
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        # Idempotent column adds.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+        if "ed25519_pubkey" not in cols:
+            conn.execute("ALTER TABLE agents ADD COLUMN ed25519_pubkey TEXT DEFAULT ''")
+        if "ed25519_seckey_sealed" not in cols:
+            conn.execute("ALTER TABLE agents ADD COLUMN ed25519_seckey_sealed TEXT DEFAULT ''")
+        if "ed25519_created_at" not in cols:
+            conn.execute("ALTER TABLE agents ADD COLUMN ed25519_created_at INTEGER DEFAULT 0")
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT ed25519_pubkey, ed25519_seckey_sealed FROM agents WHERE id = ?",
+            (agent_id,),
+        ).fetchone()
+        if row and row[0] and row[1]:
+            return row[0], _agent_ed25519_unseal(row[1])
+
+        # Generate a fresh Ed25519 keypair.
+        signing = SigningKey.generate()
+        pubkey_hex = bytes(signing.verify_key).hex()
+        seckey_seed = bytes(signing)  # 32-byte seed
+        sealed = _agent_ed25519_seal(seckey_seed)
+
+        conn.execute(
+            """UPDATE agents
+                  SET ed25519_pubkey = ?,
+                      ed25519_seckey_sealed = ?,
+                      ed25519_created_at = ?
+                WHERE id = ?""",
+            (pubkey_hex, sealed, int(time.time()), agent_id),
+        )
+        conn.commit()
+        return pubkey_hex, seckey_seed
+    finally:
+        conn.close()
+
+
+def _agent_get_pubkey(agent_id):
+    """Return the agent's Ed25519 public key hex, or "" if none yet."""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            row = conn.execute(
+                "SELECT ed25519_pubkey FROM agents WHERE id = ?", (agent_id,),
+            ).fetchone()
+            return (row[0] or "") if row else ""
+        finally:
+            conn.close()
+    except Exception:
+        return ""
+
+
+def _v3_signing_message(video_id, canonical_sha256, thumbnail_sha256,
+                         canonical_360p_sha256, uploaded_at):
+    """The 32-byte digest that an agent (or the server on its behalf)
+    signs with Ed25519 for v3 provenance. Folded into the v3 leaf so the
+    chain anchor commits to the signature."""
+    parts = "|".join([
+        "bottube/v3-sign",
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _agent_sign_v3(agent_id, video_id, canonical_sha256,
+                   thumbnail_sha256, canonical_360p_sha256, uploaded_at):
+    """Server-managed v3 signing. Returns (pubkey_hex, signature_hex).
+
+    Used at upload time to produce a v3 manifest. v3b will replace this
+    with client-supplied signatures, but the leaf shape is unchanged.
+    Returns ("", "") if Ed25519 is unavailable so the caller can fall
+    back to v2 cleanly.
+    """
+    if not _ED25519_AVAILABLE:
+        return "", ""
+    pubkey_hex, seed = _agent_ensure_keypair(agent_id)
+    if not pubkey_hex or not seed:
+        return "", ""
+    msg = _v3_signing_message(
+        video_id, canonical_sha256,
+        thumbnail_sha256, canonical_360p_sha256,
+        uploaded_at,
+    )
+    try:
+        signing = SigningKey(seed)
+        signed = signing.sign(msg)
+        # signed.signature is 64 raw bytes
+        return pubkey_hex, signed.signature.hex()
+    except Exception:
+        return "", ""
+
+
+def _verify_v3_signature(pubkey_hex, signature_hex, video_id,
+                          canonical_sha256, thumbnail_sha256,
+                          canonical_360p_sha256, uploaded_at):
+    """Verify an Ed25519 signature against the v3 signing message."""
+    if not _ED25519_AVAILABLE:
+        return False
+    if not pubkey_hex or not signature_hex:
+        return False
+    try:
+        msg = _v3_signing_message(
+            video_id, canonical_sha256,
+            thumbnail_sha256, canonical_360p_sha256,
+            uploaded_at,
+        )
+        VerifyKey(bytes.fromhex(pubkey_hex)).verify(msg, bytes.fromhex(signature_hex))
+        return True
+    except (BadSignatureError, ValueError, Exception):
+        return False
 
 
 def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
@@ -19657,11 +19935,41 @@ def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
     return hashlib.sha256(parts.encode("utf-8")).digest()
 
 
+def _manifest_leaf_v3(video_id, canonical_sha256, thumbnail_sha256,
+                       canonical_360p_sha256, uploader_sig, uploaded_at,
+                       creator_pubkey, creator_signature):
+    """v3 leaf: folds creator_pubkey + creator_signature so the chain
+    commits to a verifiable Ed25519 signature, not just a platform HMAC.
+    Backwards-incompatible with v2 by design — domain separator differs
+    so v2 and v3 leaves can never collide."""
+    parts = "|".join([
+        _LEAF_DOMAIN_V3,
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        uploader_sig or "",
+        creator_pubkey or "",
+        creator_signature or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
 def _manifest_leaf(version, video_id, canonical_sha256,
                    thumbnail_sha256, canonical_360p_sha256,
-                   uploader_sig, uploaded_at):
+                   uploader_sig, uploaded_at,
+                   creator_pubkey="", creator_signature=""):
     """Dispatch based on manifest version."""
-    if int(version or 1) >= MANIFEST_V2:
+    v = int(version or 1)
+    if v >= MANIFEST_V3:
+        return _manifest_leaf_v3(
+            video_id, canonical_sha256,
+            thumbnail_sha256, canonical_360p_sha256,
+            uploader_sig, uploaded_at,
+            creator_pubkey, creator_signature,
+        )
+    if v >= MANIFEST_V2:
         return _manifest_leaf_v2(video_id, canonical_sha256,
                                   thumbnail_sha256, canonical_360p_sha256,
                                   uploader_sig, uploaded_at)
@@ -19669,7 +19977,19 @@ def _manifest_leaf(version, video_id, canonical_sha256,
 
 
 def _manifest_leaf_recipe(version):
-    if int(version or 1) >= MANIFEST_V2:
+    v = int(version or 1)
+    if v >= MANIFEST_V3:
+        return (
+            'sha256("bottube/v3" | video_id | canonical_sha256 | '
+            'thumbnail_sha256 | canonical_360p_sha256 | uploader_sig | '
+            'creator_pubkey | creator_signature | uploaded_at) with "|" '
+            'as the literal separator. creator_signature is the hex-encoded '
+            '64-byte Ed25519 signature over '
+            'sha256("bottube/v3-sign" | video_id | canonical_sha256 | '
+            'thumbnail_sha256 | canonical_360p_sha256 | uploaded_at), '
+            'verifiable against creator_pubkey.'
+        )
+    if v >= MANIFEST_V2:
         return (
             'sha256("bottube/v2" | video_id | canonical_sha256 | '
             'thumbnail_sha256 | canonical_360p_sha256 | uploader_sig | '
@@ -19691,6 +20011,22 @@ def _provenance_ensure_v2_columns():
             conn.execute("ALTER TABLE video_provenance ADD COLUMN manifest_version INTEGER DEFAULT 1")
         if "canonical_360p_sha256" not in cols:
             conn.execute("ALTER TABLE video_provenance ADD COLUMN canonical_360p_sha256 TEXT DEFAULT ''")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _provenance_ensure_v3_columns():
+    """Phase 11.23: add creator_signature column for v3 leaves.
+    creator_pubkey already exists from earlier phases."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "creator_signature" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN creator_signature TEXT DEFAULT ''")
+        # creator_pubkey almost certainly exists, but defensively:
+        if "creator_pubkey" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN creator_pubkey TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -19731,6 +20067,8 @@ def _provenance_record_for_upload(video_id, canonical_path, agent, form,
     """
     try:
         _ensure_provenance_schema()
+        _provenance_ensure_v2_columns()
+        _provenance_ensure_v3_columns()
         if uploaded_at is None:
             uploaded_at = time.time()
         sha = _ts_sha256_file(canonical_path)
@@ -19754,6 +20092,13 @@ def _provenance_record_for_upload(video_id, canonical_path, agent, form,
 
         conn = sqlite3.connect(str(DB_PATH))
         try:
+            # Phase 11.23: NEW uploads default to manifest_version=MANIFEST_CURRENT (v3).
+            # The pending-claim eligibility gates already require that
+            # canonical_360p_sha256 != '' AND creator_signature != '' before
+            # a v3 row can be claimed by the worker. So writing v3 here makes
+            # the row non-anchorable until the rendition pipeline finishes
+            # populating those fields — closing the upload→anchor race
+            # codex review identified.
             conn.execute(
                 """INSERT OR REPLACE INTO video_provenance
                        (video_id, canonical_sha256, duration_sec, width, height,
@@ -19762,15 +20107,17 @@ def _provenance_record_for_upload(video_id, canonical_path, agent, form,
                         generated_at, uploader_sig, uploaded_at,
                         anchor_chain, anchor_tx_hash, anchor_block_height,
                         anchor_manifest_hash, parents_json, renditions_json,
+                        manifest_version,
                         verified, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (video_id, sha, duration, width, height,
                  agent_id, creator_pubkey, creator_beacon,
                  opt["model"], opt["provider"], opt["workflow_hash"],
                  opt["prompt_hash"], opt["seed"],
                  opt["generated_at"] or uploaded_at, sig, uploaded_at,
                  "", "", 0, "", "[]", "[]",
+                 MANIFEST_CURRENT,
                  0, time.time(), time.time()),
             )
             conn.commit()
@@ -20022,32 +20369,69 @@ def _renditions_process_video(video_id):
                 vmaf=round(vmaf_score, 2), is_canonical=False,
             )
 
-            # Phase 11.16: feed the 360p hash back into video_provenance
-            # AND atomically promote the row to manifest_version=2 — but
+            # Phase 11.16 + 11.23: feed the 360p hash back into
+            # video_provenance AND atomically promote the row to v3 — but
             # ONLY if the row hasn't been claimed by the anchor worker
             # yet. Once anchor_status='claimed' the worker has frozen its
-            # snapshot of (manifest_version, canonical_360p_sha256), and
-            # mutating the row here would silently desync the leaf the
-            # worker computed from the leaf the verifier later reads.
+            # snapshot of leaf inputs, and mutating the row here would
+            # silently desync the leaf.
+            #
+            # v3 promotion path:
+            #   1. Ensure the agent has an Ed25519 keypair
+            #   2. Compute creator_signature over the v3 signing message
+            #   3. Promote row to manifest_version=3 + write pubkey + sig
+            # If Ed25519 isn't available (PyNaCl missing), we silently
+            # downgrade to v2 — the rest of the pipeline still works.
             if p360_sha:
                 try:
                     _provenance_ensure_v2_columns()
+                    _provenance_ensure_v3_columns()
+                    # Pull the data we need to sign: agent_id + uploader fields
+                    conn_q = sqlite3.connect(str(DB_PATH))
+                    conn_q.row_factory = sqlite3.Row
+                    pre = conn_q.execute(
+                        """SELECT video_id, canonical_sha256, uploader_sig,
+                                  uploaded_at, creator_agent_id,
+                                  COALESCE(thumbnail_sha256, '') AS thumb,
+                                  COALESCE(manifest_version, 1) AS mv
+                             FROM video_provenance WHERE video_id = ?""",
+                        (video_id,),
+                    ).fetchone()
+                    conn_q.close()
+
+                    creator_pubkey, creator_sig = "", ""
+                    target_version = MANIFEST_V2  # default if Ed25519 fails
+                    if pre and _ED25519_AVAILABLE and pre["creator_agent_id"]:
+                        creator_pubkey, creator_sig = _agent_sign_v3(
+                            int(pre["creator_agent_id"]),
+                            video_id,
+                            pre["canonical_sha256"] or "",
+                            pre["thumb"] or "",
+                            p360_sha,
+                            pre["uploaded_at"] or 0,
+                        )
+                        if creator_pubkey and creator_sig:
+                            target_version = MANIFEST_V3
+
                     conn_p = sqlite3.connect(str(DB_PATH))
                     conn_p.execute(
                         """UPDATE video_provenance
                               SET canonical_360p_sha256 = ?,
                                   manifest_version = ?,
+                                  creator_pubkey = COALESCE(NULLIF(?, ''), creator_pubkey),
+                                  creator_signature = ?,
                                   updated_at = ?
                             WHERE video_id = ?
                               AND COALESCE(anchor_tx_hash, '') = ''
                               AND COALESCE(anchor_status, 'pending')
                                   IN ('pending', 'failed')""",
-                        (p360_sha, MANIFEST_CURRENT, time.time(), video_id),
+                        (p360_sha, target_version,
+                         creator_pubkey, creator_sig,
+                         time.time(), video_id),
                     )
-                    # If the row was already claimed/anchored, fall back to
-                    # writing just the 360p hash without flipping the version
-                    # (post-anchor metadata only — does not affect the leaf).
                     if conn_p.total_changes == 0:
+                        # Row already claimed/anchored — write the 360p
+                        # hash only, without changing leaf-affecting fields.
                         conn_p.execute(
                             """UPDATE video_provenance
                                   SET canonical_360p_sha256 = ?,
@@ -20268,16 +20652,19 @@ def admin_provenance_pending():
     now = time.time()
     stale_cutoff = now - claim_ttl_s
 
+    _provenance_ensure_v3_columns()
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
             """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
-                      creator_agent_id, creator_pubkey, model, generated_at,
+                      creator_agent_id, model, generated_at,
                       COALESCE(manifest_version, 1) AS manifest_version,
                       COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
-                      COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+                      COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                      COALESCE(creator_pubkey, '') AS creator_pubkey,
+                      COALESCE(creator_signature, '') AS creator_signature
                  FROM video_provenance
                 WHERE uploader_sig != ''
                   AND COALESCE(anchor_tx_hash, '') = ''
@@ -20287,14 +20674,19 @@ def admin_provenance_pending():
                          AND COALESCE(updated_at, 0) < ?)
                       )
                   AND (
-                        -- Phase 11.16: a v2 row is only eligible once the
-                        -- 360p rendition has produced its hash. A v1 row
-                        -- has no such gate. Without this, the worker could
-                        -- anchor a v2 leaf with an empty canonical_360p
-                        -- field and the verifier would later read the
-                        -- populated field and reject as a mismatch.
+                        -- v2 / v3 rows only eligible once the rendition
+                        -- pipeline has filled in canonical_360p_sha256
+                        -- (v3 also requires creator_signature; gated below).
                         COALESCE(manifest_version, 1) < 2
                      OR COALESCE(canonical_360p_sha256, '') != ''
+                      )
+                  AND (
+                        -- Phase 11.23: v3 rows must additionally have a
+                        -- creator_signature. Without it the worker would
+                        -- anchor a v3 leaf with an empty signature field
+                        -- and the verifier would reject.
+                        COALESCE(manifest_version, 1) < 3
+                     OR COALESCE(creator_signature, '') != ''
                       )
                 ORDER BY uploaded_at ASC
                 LIMIT ?""",
@@ -20338,11 +20730,12 @@ def admin_provenance_pending():
             "uploaded_at": r["uploaded_at"],
             "creator_agent_id": r["creator_agent_id"],
             "creator_pubkey": r["creator_pubkey"] or "",
+            "creator_signature": r["creator_signature"] or "",
             "model": r["model"] or "",
             "generated_at": r["generated_at"] or 0,
-            # Phase 11.16: v2 fields. Worker uses manifest_version to pick
-            # the correct leaf recipe; thumbnail_sha256/canonical_360p_sha256
-            # are empty strings on v1 rows.
+            # Phase 11.16/11.23: v2/v3 fields. Worker uses manifest_version
+            # to pick the correct leaf recipe; thumb / 360p / pubkey / sig
+            # default to empty strings on lower versions.
             "manifest_version": int(r["manifest_version"] or 1),
             "thumbnail_sha256": r["thumbnail_sha256"] or "",
             "canonical_360p_sha256": r["canonical_360p_sha256"] or "",
@@ -20357,6 +20750,7 @@ def admin_provenance_pending():
         "leaf_recipes": {
             "v1": _manifest_leaf_recipe(MANIFEST_V1),
             "v2": _manifest_leaf_recipe(MANIFEST_V2),
+            "v3": _manifest_leaf_recipe(MANIFEST_V3),
         },
     })
 
@@ -21210,6 +21604,16 @@ def transparency_page():
     return render_template("transparency.html", t=data)
 
 
+@app.route("/verify")
+def verify_page():
+    """Phase 11.25: browser-side verifier. Walks the entire cryptographic
+    chain (provenance fields → Merkle leaf → inclusion proof → on-chain R4)
+    using SubtleCrypto.subtle.digest() in the user's browser. No install
+    required, no server-side trust beyond the public read-only endpoints.
+    """
+    return render_template("verify.html")
+
+
 @app.route("/api/anchors/<tx_hash>/chain")
 def anchor_chain_proxy(tx_hash):
     """Public read-only proxy: fetch the on-chain TX from the configured Ergo
@@ -21357,17 +21761,23 @@ def _merkle_path_for_leaf(leaves, target_index):
 
 def _manifest_leaf_bytes(video_id, canonical_sha256, uploader_sig, uploaded_at,
                          manifest_version=MANIFEST_V1, thumbnail_sha256="",
-                         canonical_360p_sha256=""):
+                         canonical_360p_sha256="",
+                         creator_pubkey="", creator_signature=""):
     """Version-aware Merkle leaf — must match anchor_worker + verifier.
 
     v1 (legacy): sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)
     v2: sha256("bottube/v2" | video_id | canonical_sha256 | thumbnail_sha256
                 | canonical_360p_sha256 | uploader_sig | uploaded_at)
+    v3: sha256("bottube/v3" | video_id | canonical_sha256 | thumbnail_sha256
+                | canonical_360p_sha256 | uploader_sig | creator_pubkey
+                | creator_signature | uploaded_at)
     """
     return _manifest_leaf(
         manifest_version, video_id, canonical_sha256,
         thumbnail_sha256, canonical_360p_sha256,
         uploader_sig, uploaded_at,
+        creator_pubkey=creator_pubkey,
+        creator_signature=creator_signature,
     )
 
 
@@ -21383,6 +21793,7 @@ def api_video_anchor_proof(video_id):
         return jsonify({"ok": False, "error": "rate limited"}), 429
 
     _provenance_ensure_v2_columns()
+    _provenance_ensure_v3_columns()
     db = get_db()
     target = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
@@ -21390,7 +21801,9 @@ def api_video_anchor_proof(video_id):
                   anchor_block_height, anchor_manifest_hash, anchor_status,
                   COALESCE(manifest_version, 1) AS manifest_version,
                   COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
-                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
              FROM video_provenance
             WHERE video_id = ?""",
         (video_id,),
@@ -21408,7 +21821,9 @@ def api_video_anchor_proof(video_id):
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
                   COALESCE(manifest_version, 1) AS manifest_version,
                   COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
-                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
              FROM video_provenance
             WHERE anchor_batch_id = ?
             ORDER BY uploaded_at ASC, video_id ASC""",
@@ -21418,7 +21833,7 @@ def api_video_anchor_proof(video_id):
         return jsonify({"ok": False, "error": "batch members not found"}), 404
 
     # Each leaf must use the recipe its row was written under. A batch
-    # may be heterogeneous (v1 + v2) during the migration window.
+    # may be heterogeneous (v1 + v2 + v3) during the migration window.
     leaves = [
         _manifest_leaf_bytes(
             r["video_id"], r["canonical_sha256"],
@@ -21426,6 +21841,8 @@ def api_video_anchor_proof(video_id):
             manifest_version=int(r["manifest_version"] or 1),
             thumbnail_sha256=r["thumbnail_sha256"] or "",
             canonical_360p_sha256=r["canonical_360p_sha256"] or "",
+            creator_pubkey=r["creator_pubkey"] if "creator_pubkey" in r.keys() else "",
+            creator_signature=r["creator_signature"] if "creator_signature" in r.keys() else "",
         )
         for r in rows
     ]
@@ -21453,6 +21870,14 @@ def api_video_anchor_proof(video_id):
             "canonical_360p_sha256": (target["canonical_360p_sha256"] or "")
                 if target_version >= MANIFEST_V2 else "",
             "uploader_sig": target["uploader_sig"],
+            "creator_pubkey": (
+                target["creator_pubkey"] if (target_version >= MANIFEST_V3
+                    and "creator_pubkey" in target.keys()) else ""
+            ),
+            "creator_signature": (
+                target["creator_signature"] if (target_version >= MANIFEST_V3
+                    and "creator_signature" in target.keys()) else ""
+            ),
             "uploaded_at": int(float(target["uploaded_at"] or 0)),
         },
         "path": path,
@@ -21487,51 +21912,39 @@ def api_video_anchor_proof(video_id):
 # receipt + the corresponding canonical asset, and a third party can verify
 # both the asset hash and the chain anchor *without* trusting bottube.
 
-@app.route("/api/videos/<video_id>/receipt")
-def api_video_receipt(video_id):
-    """Self-contained provenance receipt as a downloadable JSON.
+def _build_receipt_for_video(video_id, db):
+    """Compute and return a self-contained receipt dict for a video.
 
-    The receipt body is signed with the platform HMAC so any subsequent
-    edit is detectable. The signature only gates "did this receipt come
-    from bottube unaltered" — the chain anchor itself is the cryptographic
-    proof of provenance and stays valid even if the platform signing key
-    rotates.
+    Returns (receipt_dict, error_str). On error, receipt_dict is None and
+    error_str is one of: "invalid_id", "not_found", "not_anchored".
+
+    Pure / read-only — used by both the single-video receipt endpoint
+    and the per-agent batch endpoint.
     """
     if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
-        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+        return None, "invalid_id"
 
-    # Light per-IP rate limit — receipts are cheap but scrapers could
-    # otherwise enumerate the platform via this route.
-    ip = _get_client_ip()
-    if not _rate_limit(f"receipt:{ip}", 60, 600):
-        return jsonify({"ok": False, "error": "rate limited"}), 429
-
-    _provenance_ensure_v2_columns()
-    db = get_db()
+    _provenance_ensure_v3_columns()
     target = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
-                  creator_agent_id, creator_pubkey, model, generated_at,
+                  creator_agent_id, model, generated_at,
                   anchor_batch_id, anchor_tx_hash, anchor_chain,
                   anchor_block_height, anchor_manifest_hash, anchor_status,
                   anchored_at,
                   COALESCE(manifest_version, 1) AS manifest_version,
                   COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
-                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
              FROM video_provenance
             WHERE video_id = ?""",
         (video_id,),
     ).fetchone()
     if not target:
-        return jsonify({"ok": False, "error": "video not found"}), 404
+        return None, "not_found"
     if not target["anchor_tx_hash"]:
-        return jsonify({
-            "ok": False,
-            "error": "video not yet anchored",
-            "anchor_status": target["anchor_status"] or "pending",
-        }), 409
+        return None, "not_anchored"
 
-    # Pull the same Merkle proof the verifier uses, but inline so the
-    # receipt is self-contained.
     target_version = int(target["manifest_version"] or 1)
     own_leaf = _manifest_leaf_bytes(
         target["video_id"], target["canonical_sha256"],
@@ -21539,14 +21952,17 @@ def api_video_receipt(video_id):
         manifest_version=target_version,
         thumbnail_sha256=target["thumbnail_sha256"] or "",
         canonical_360p_sha256=target["canonical_360p_sha256"] or "",
+        creator_pubkey=target["creator_pubkey"] or "",
+        creator_signature=target["creator_signature"] or "",
     )
 
-    # Walk the batch and compute the path
     rows = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
                   COALESCE(manifest_version, 1) AS manifest_version,
                   COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
-                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
              FROM video_provenance
             WHERE anchor_batch_id = ?
             ORDER BY uploaded_at ASC, video_id ASC""",
@@ -21559,6 +21975,8 @@ def api_video_receipt(video_id):
             manifest_version=int(r["manifest_version"] or 1),
             thumbnail_sha256=r["thumbnail_sha256"] or "",
             canonical_360p_sha256=r["canonical_360p_sha256"] or "",
+            creator_pubkey=r["creator_pubkey"] or "",
+            creator_signature=r["creator_signature"] or "",
         )
         for r in rows
     ]
@@ -21567,7 +21985,6 @@ def api_video_receipt(video_id):
     )
     merkle_path = _merkle_path_for_leaf(leaves, target_idx) if target_idx >= 0 else []
 
-    # Pull the title for human-readable identification (best-effort).
     title = ""
     try:
         v = db.execute(
@@ -21588,7 +22005,6 @@ def api_video_receipt(video_id):
             "video_id": target["video_id"],
             "title": title,
             "url": f"https://bottube.ai/v/{target['video_id']}",
-            # Phase 11.21: canonical asset stream URL for --check-asset
             "canonical_asset_url":
                 f"https://bottube.ai/api/videos/{target['video_id']}/stream",
         },
@@ -21601,9 +22017,18 @@ def api_video_receipt(video_id):
                 "thumbnail_sha256": target["thumbnail_sha256"] or "",
                 "canonical_360p_sha256": target["canonical_360p_sha256"] or "",
                 "uploader_sig": target["uploader_sig"],
+                "creator_pubkey": (target["creator_pubkey"] or "")
+                    if target_version >= MANIFEST_V3 else "",
+                "creator_signature": (target["creator_signature"] or "")
+                    if target_version >= MANIFEST_V3 else "",
                 "uploaded_at": int(float(target["uploaded_at"] or 0)),
             },
             "leaf": own_leaf.hex(),
+            "creator_signature_recipe": (
+                'sha256("bottube/v3-sign" | video_id | canonical_sha256 | '
+                'thumbnail_sha256 | canonical_360p_sha256 | uploaded_at) '
+                'signed with Ed25519 by creator_pubkey'
+            ) if target_version >= MANIFEST_V3 else None,
         },
         "merkle_proof": {
             "path": merkle_path,
@@ -21628,7 +22053,7 @@ def api_video_receipt(video_id):
         },
         "verifier": {
             "source": "https://github.com/Scottcjn/bottube",
-            "package": "bottube-verify (>=0.2.0)",
+            "package": "bottube-verify (>=0.4.0)",
             "cli": f"pip install bottube-verify && bottube-verify {target['video_id']}",
             "minimum_endpoints": [
                 f"https://bottube.ai/api/videos/{target['video_id']}/provenance",
@@ -21638,12 +22063,6 @@ def api_video_receipt(video_id):
         },
     }
 
-    # HMAC over the *canonical* JSON of `body` (sorted keys, no whitespace
-    # variance) so the signature is reproducible. The receipt remains
-    # cryptographically meaningful even without this — the chain anchor is
-    # the actual proof of provenance — but the signature lets anyone catch
-    # mid-flight tampering of a downloaded receipt before they bother
-    # verifying the chain.
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     sig = hmac.new(
         _provenance_signing_key().encode("utf-8"),
@@ -21664,15 +22083,363 @@ def api_video_receipt(video_id):
             "gates 'did this file come from bottube unaltered'."
         ),
     }
+    return receipt, ""
 
-    # Set Content-Disposition so a browser hit downloads the file with a
-    # sensible name instead of rendering it as a JSON pageview.
+
+@app.route("/api/videos/<video_id>/receipt")
+def api_video_receipt(video_id):
+    """Self-contained provenance receipt as a downloadable JSON.
+
+    The receipt body is signed with the platform HMAC so any subsequent
+    edit is detectable. The signature only gates "did this receipt come
+    from bottube unaltered" — the chain anchor itself is the cryptographic
+    proof of provenance and stays valid even if the platform signing key
+    rotates.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+
+    # Light per-IP rate limit — receipts are cheap but scrapers could
+    # otherwise enumerate the platform via this route.
+    ip = _get_client_ip()
+    if not _rate_limit(f"receipt:{ip}", 60, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    _provenance_ensure_v2_columns()
+    db = get_db()
+    receipt, err = _build_receipt_for_video(video_id, db)
+    if err == "invalid_id":
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+    if err == "not_found":
+        return jsonify({"ok": False, "error": "video not found"}), 404
+    if err == "not_anchored":
+        return jsonify({
+            "ok": False,
+            "error": "video not yet anchored",
+        }), 409
+
     payload = json.dumps(receipt, indent=2, sort_keys=True)
     resp = Response(payload, mimetype="application/json")
     resp.headers["Content-Disposition"] = (
-        f'attachment; filename="bottube-receipt-{target["video_id"]}.json"'
+        f'attachment; filename="bottube-receipt-{video_id}.json"'
     )
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.29: per-agent receipt batch download
+# ---------------------------------------------------------------------------
+# /api/agents/<name>/receipts.zip — streams a zip of all that agent's
+# anchored video receipts. Useful for "I want offline proof of every video
+# I made". Capped, rate-limited.
+
+_RECEIPTS_BATCH_MAX = 500
+
+
+@app.route("/api/agents/<agent_name>/receipts.zip")
+def api_agent_receipts_zip(agent_name):
+    """Stream a ZIP of all this agent's anchored receipts.
+
+    For "I want offline proof of every video I made" use cases. Each
+    file in the zip is a standalone bottube-receipt-<id>.json that
+    verifies independently with `bottube-verify --receipt FILE`.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", agent_name or ""):
+        return jsonify({"ok": False, "error": "invalid agent name"}), 400
+
+    ip = _get_client_ip()
+    if not _rate_limit(f"receipts_zip:{ip}", 6, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    _provenance_ensure_v2_columns()
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return jsonify({"ok": False, "error": "agent not found"}), 404
+
+    # Cap at a reasonable batch — agents with thousands of videos can
+    # paginate via ?since_video_id=, but the common case is "small enough
+    # to fit in one zip".
+    try:
+        limit = max(1, min(_RECEIPTS_BATCH_MAX,
+                           int(request.args.get("limit", 200))))
+    except Exception:
+        limit = 200
+    since = (request.args.get("since_video_id") or "").strip()
+
+    if since:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 JOIN video_provenance p ON p.video_id = v.video_id
+                WHERE v.agent_id = ?
+                  AND COALESCE(p.anchor_tx_hash,'') != ''
+                  AND v.video_id > ?
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (agent["id"], since, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 JOIN video_provenance p ON p.video_id = v.video_id
+                WHERE v.agent_id = ?
+                  AND COALESCE(p.anchor_tx_hash,'') != ''
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (agent["id"], limit),
+        ).fetchall()
+
+    if not rows:
+        return jsonify({
+            "ok": False,
+            "error": "no anchored receipts for this agent",
+            "agent": agent_name,
+        }), 404
+
+    # Build the zip in memory. Average receipt ~3KB, * 500 cap = ~1.5MB —
+    # comfortably under any reasonable buffer cap.
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    written = 0
+    skipped = 0
+    last_id = ""
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Top-level manifest of what's inside, for casual inspection
+        manifest = {
+            "schema": "bottube-receipts-batch/v1",
+            "issuer": "https://bottube.ai",
+            "issued_at": int(time.time()),
+            "agent": agent_name,
+            "video_ids": [],
+        }
+        for row in rows:
+            vid = row["video_id"]
+            receipt, err = _build_receipt_for_video(vid, db)
+            if err or not receipt:
+                skipped += 1
+                continue
+            payload = json.dumps(receipt, indent=2, sort_keys=True)
+            zf.writestr(f"bottube-receipt-{vid}.json", payload)
+            manifest["video_ids"].append(vid)
+            written += 1
+            last_id = max(last_id, vid)
+        manifest["count"] = written
+        manifest["skipped"] = skipped
+        zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2, sort_keys=True))
+        readme = (
+            f"BoTTube provenance receipts for @{agent_name}\n"
+            f"Issued {datetime.datetime.utcnow().isoformat()}Z by https://bottube.ai\n"
+            f"{written} receipts in this archive (capped at {limit}).\n\n"
+            f"Each file is a self-contained signed JSON receipt. Verify any\n"
+            f"of them offline with:\n\n"
+            f"  pip install bottube-verify\n"
+            f"  bottube-verify --receipt bottube-receipt-<video_id>.json\n\n"
+            f"Or live (re-checks chain anchor):\n\n"
+            f"  bottube-verify <video_id>\n"
+            f"  bottube-verify <video_id> --check-asset\n\n"
+            f"Source: https://github.com/Scottcjn/bottube\n"
+        )
+        zf.writestr("README.txt", readme)
+
+    buf.seek(0)
+    resp = Response(buf.read(), mimetype="application/zip")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="bottube-receipts-{agent_name}.zip"'
+    )
+    resp.headers["Cache-Control"] = "private, max-age=60"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["X-Bottube-Receipts-Count"] = str(written)
+    resp.headers["X-Bottube-Receipts-Skipped"] = str(skipped)
+    if rows and len(rows) >= limit and last_id:
+        resp.headers["X-Bottube-Receipts-Continue"] = (
+            f"?since_video_id={last_id}&limit={limit}"
+        )
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.26: daily Merkle rollup (defense-in-depth)
+# ---------------------------------------------------------------------------
+# Public, reproducible Merkle root over every RustChain anchor TX from a
+# given UTC day. Anyone (a third-party watchdog, a journalist, a court)
+# can mirror this root to a secondary chain themselves — Bitcoin OP_RETURN,
+# Ergo mainnet, Ethereum calldata — without bottube needing to operate
+# wallets on those chains. The cryptographic chain becomes:
+#
+#   day's anchor TXs  →  daily-rollup root  →  third-party secondary anchor
+#
+# If RustChain ever vanishes, the daily rollups remain independently
+# verifiable as long as the secondary chain stays alive.
+
+def _daily_rollup_for_date(date_str):
+    """Build a deterministic Merkle root over all anchor TXs from a UTC day.
+
+    date_str is YYYY-MM-DD. Returns a dict with the leaves, root, and
+    metadata, or None if the date string is malformed.
+    """
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str or ""):
+        return None
+    try:
+        # UTC day boundaries
+        d = datetime.datetime.strptime(date_str, "%Y-%m-%d").replace(
+            tzinfo=datetime.timezone.utc,
+        )
+    except Exception:
+        return None
+    start = int(d.timestamp())
+    end = start + 86400
+
+    db = get_db()
+    rows = db.execute(
+        """SELECT anchor_tx_hash AS tx,
+                  MIN(anchor_block_height) AS h,
+                  MIN(anchor_manifest_hash) AS root,
+                  MIN(anchored_at) AS anchored_at,
+                  COUNT(*) AS member_count
+             FROM video_provenance
+            WHERE COALESCE(anchor_tx_hash,'') != ''
+              AND COALESCE(anchored_at, 0) >= ?
+              AND COALESCE(anchored_at, 0) <  ?
+              AND COALESCE(anchor_block_height, 0) > 0
+              AND anchor_chain != 'stub'
+            GROUP BY anchor_tx_hash
+            ORDER BY anchored_at ASC, anchor_tx_hash ASC""",
+        (start, end),
+    ).fetchall()
+
+    leaves = []
+    members = []
+    for r in rows:
+        tx = r["tx"]
+        root = (r["root"] or "")
+        # Each leaf binds: sha256(tx_hash | manifest_hash | block_height)
+        # — under a v1 rollup domain separator. Block height pins anchor
+        # ordering and prevents cross-day collisions of identical tx_hash
+        # values (which shouldn't happen but defense-in-depth).
+        msg = "|".join([
+            "bottube/rollup/v1",
+            tx,
+            root,
+            str(int(r["h"] or 0)),
+        ])
+        leaves.append(hashlib.sha256(msg.encode("utf-8")).digest())
+        members.append({
+            "tx_hash": tx,
+            "manifest_hash": root,
+            "block_height": int(r["h"] or 0),
+            "anchored_at": int(r["anchored_at"] or 0),
+            "member_count": int(r["member_count"] or 0),
+        })
+
+    if not leaves:
+        return {
+            "date": date_str,
+            "start_utc": start,
+            "end_utc": end,
+            "anchor_count": 0,
+            "rollup_root": "",
+            "members": [],
+            "leaf_recipe": (
+                'sha256("bottube/rollup/v1" | tx_hash | manifest_hash | block_height) '
+                'with "|" as the literal separator'
+            ),
+            "merkle_recipe": (
+                "Bitcoin-style binary tree: pair adjacent leaves and hash, "
+                "duplicate the last node when a level has odd cardinality, "
+                "iterate until a single 32-byte root remains."
+            ),
+        }
+
+    # Reuse the existing merkle_root helper (defined elsewhere as binary).
+    layer = list(leaves)
+    while len(layer) > 1:
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
+        nxt = []
+        for i in range(0, len(layer), 2):
+            nxt.append(hashlib.sha256(layer[i] + layer[i + 1]).digest())
+        layer = nxt
+    rollup_root = layer[0].hex()
+
+    return {
+        "date": date_str,
+        "start_utc": start,
+        "end_utc": end,
+        "anchor_count": len(leaves),
+        "rollup_root": rollup_root,
+        "members": members,
+        "leaf_recipe": (
+            'sha256("bottube/rollup/v1" | tx_hash | manifest_hash | block_height) '
+            'with "|" as the literal separator'
+        ),
+        "merkle_recipe": (
+            "Bitcoin-style binary tree: pair adjacent leaves and hash, "
+            "duplicate the last node when a level has odd cardinality, "
+            "iterate until a single 32-byte root remains."
+        ),
+    }
+
+
+@app.route("/api/anchors/daily-rollup/<date>")
+def api_daily_rollup(date):
+    """Public daily Merkle rollup over every confirmed RustChain anchor TX.
+
+    Designed to be mirrored to a secondary chain (Bitcoin OP_RETURN /
+    Ergo mainnet / Ethereum calldata) by anyone who cares — bottube does
+    not have to run wallets on those chains. The signed rollup_root is
+    the only thing the secondary chain needs to commit to.
+
+    Path param: YYYY-MM-DD (UTC).
+    """
+    payload = _daily_rollup_for_date(date)
+    if payload is None:
+        return jsonify({"ok": False, "error": "invalid date format (expect YYYY-MM-DD)"}), 400
+
+    # Sign the rollup body so any mid-flight tampering of the JSON is
+    # detectable. Same HMAC pattern as receipts.
+    body = dict(payload)
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    sig = hmac.new(
+        _provenance_signing_key().encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    body["rollup_signature"] = {
+        "alg": "HMAC-SHA256",
+        "key_id": "bottube-platform-v1",
+        "value": sig,
+        "covers": (
+            "the canonical JSON of every field above, sorted-keys, no "
+            "whitespace. The chain anchors themselves are the actual "
+            "cryptographic proof; this signature only gates 'did this "
+            "rollup come from bottube unaltered'."
+        ),
+    }
+    body["ok"] = True
+    body["secondary_anchor_recipe"] = (
+        "Anyone may anchor `rollup_root` (32-byte hex) on any public "
+        "chain (Bitcoin OP_RETURN, Ergo mainnet, Ethereum calldata, etc.) "
+        "to defense-in-depth the bottube provenance pipeline. The "
+        "rollup is independently verifiable: re-fetch this endpoint, "
+        "recompute the leaves and root from `members`, compare to the "
+        "secondary-chain commitment."
+    )
+
+    resp = jsonify(body)
+    # Past days never change → long cache. Today is incomplete → short.
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    if date < today:
+        resp.headers["Cache-Control"] = "public, max-age=86400, immutable"
+    else:
+        resp.headers["Cache-Control"] = "public, max-age=300"
     resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
 
@@ -21711,13 +22478,16 @@ def admin_provenance_batch():
         batch_id = row["anchor_batch_id"]
 
     _provenance_ensure_v2_columns()
+    _provenance_ensure_v3_columns()
     rows = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
                   anchor_chain, anchor_tx_hash, anchor_block_height,
                   anchor_manifest_hash, anchor_status, anchored_at,
                   COALESCE(manifest_version, 1) AS manifest_version,
                   COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
-                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
              FROM video_provenance
             WHERE anchor_batch_id = ?
             ORDER BY uploaded_at ASC, video_id ASC""",
@@ -21739,6 +22509,10 @@ def admin_provenance_batch():
             "manifest_version": ver,
             "thumbnail_sha256": r["thumbnail_sha256"] or "",
             "canonical_360p_sha256": r["canonical_360p_sha256"] or "",
+            # Phase 11.23: v3 batch reconstruction needs these — without
+            # them the verifier's full-batch path can't compute v3 leaves.
+            "creator_pubkey": r["creator_pubkey"] or "",
+            "creator_signature": r["creator_signature"] or "",
         })
     head = rows[0]
     return jsonify({
@@ -21755,6 +22529,7 @@ def admin_provenance_batch():
         "leaf_recipes": {
             "v1": _manifest_leaf_recipe(MANIFEST_V1),
             "v2": _manifest_leaf_recipe(MANIFEST_V2),
+            "v3": _manifest_leaf_recipe(MANIFEST_V3),
         },
         "leaf_recipe": _manifest_leaf_recipe(
             max(versions_present) if versions_present else MANIFEST_V1
