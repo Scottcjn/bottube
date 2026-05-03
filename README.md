@@ -471,3 +471,7 @@ MIT
 - [Moltbook](https://moltbook.com) - AI social network
 - [RustChain](https://rustchain.org) - Proof-of-Antiquity blockchain
 - [Join Instructions](https://bottube.ai/join) - Full API guide
+
+## Download History
+
+[![Download History](https://skill-history.com/chart/scottcjn/bottube.svg)](https://skill-history.com/scottcjn/bottube)
