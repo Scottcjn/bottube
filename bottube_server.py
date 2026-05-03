@@ -20300,6 +20300,295 @@ def federation_page():
     return render_template("federation.html")
 
 
+# ---------------------------------------------------------------------------
+# Phase 11.17: public transparency dashboard
+# ---------------------------------------------------------------------------
+# Operational honesty by default: anyone — including reviewers who don't have
+# admin access — can read live anchor lag, manifest version distribution,
+# pending backlog, federation peer count, and recent anchor cadence. Cached
+# in-memory for 60s so a hammered page doesn't beat up the DB.
+
+_TRANSPARENCY_CACHE = {"at": 0.0, "data": None}
+_TRANSPARENCY_TTL_S = 60.0
+
+
+def _percentiles(samples, ps=(0.5, 0.95, 0.99)):
+    """Closest-rank percentiles. Returns ints (seconds). [] -> 0s for all."""
+    if not samples:
+        return {f"p{int(p*100)}": 0 for p in ps}
+    s = sorted(samples)
+    out = {}
+    for p in ps:
+        idx = max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))
+        out[f"p{int(p*100)}"] = int(s[idx])
+    return out
+
+
+def _compute_transparency_snapshot():
+    """Compute the transparency dashboard payload from current DB state.
+
+    Read-only, side-effect-free. All counters are best-effort against the
+    operational SQLite — we explicitly do NOT promise atomic consistency,
+    only directional honesty (the v1/v2 ratio is real, the lag is real,
+    a stale 60s cache is acceptable for an external dashboard).
+    """
+    db = get_db()
+    now = int(time.time())
+
+    def _scalar(sql, *args, default=0):
+        try:
+            r = db.execute(sql, args).fetchone()
+            if r is None:
+                return default
+            v = r[0]
+            return v if v is not None else default
+        except Exception:
+            return default
+
+    total_anchored_rows = _scalar(
+        "SELECT COUNT(*) FROM video_provenance WHERE COALESCE(anchor_tx_hash,'') != ''"
+    )
+    total_anchor_txs = _scalar(
+        "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') != ''"
+    )
+    total_provenance_rows = _scalar(
+        "SELECT COUNT(*) FROM video_provenance"
+    )
+    pending_anchor = _scalar(
+        "SELECT COUNT(*) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') = '' AND COALESCE(uploader_sig,'') != ''"
+    )
+    confirmed_anchors = _scalar(
+        "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') != '' "
+        "  AND COALESCE(anchor_block_height,0) > 0"
+    )
+    awaiting_confirmation = _scalar(
+        "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') != '' "
+        "  AND COALESCE(anchor_block_height,0) = 0 "
+        "  AND anchor_chain != 'stub'"
+    )
+
+    # Manifest version distribution. v2 should slowly take over once new
+    # uploads start landing. Surfaces v1→v2 rollout in real time.
+    v_rows = []
+    try:
+        v_rows = db.execute(
+            "SELECT COALESCE(manifest_version,1) AS v, "
+            "       COUNT(*) AS n FROM video_provenance "
+            " WHERE COALESCE(anchor_tx_hash,'') != '' "
+            " GROUP BY v"
+        ).fetchall()
+    except Exception:
+        v_rows = []
+    by_version = {int(r["v"]): int(r["n"]) for r in v_rows}
+
+    # Anchor cadence: last 24h, last 7d, last 30d (distinct TXs).
+    def _txs_since(seconds):
+        try:
+            return _scalar(
+                "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+                "WHERE COALESCE(anchor_tx_hash,'') != '' "
+                "  AND COALESCE(anchored_at, 0) >= ?",
+                now - seconds,
+            )
+        except Exception:
+            return 0
+
+    txs_24h = _txs_since(86400)
+    txs_7d = _txs_since(86400 * 7)
+    txs_30d = _txs_since(86400 * 30)
+
+    # Lag = upload-to-anchored, in seconds. Restrict to videos uploaded
+    # within the last 30 days so the percentile reflects *current*
+    # operational behavior — historical backfill anchors of long-old
+    # uploads would otherwise dominate the distribution.
+    lag_samples = []
+    try:
+        lag_rows = db.execute(
+            """SELECT (anchored_at - uploaded_at) AS lag_s
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchored_at, 0) > 0
+                  AND COALESCE(uploaded_at, 0) > 0
+                  AND anchored_at > uploaded_at
+                  AND uploaded_at >= ?
+                ORDER BY anchored_at DESC
+                LIMIT 200""",
+            (now - 86400 * 30,),
+        ).fetchall()
+        lag_samples = [int(r["lag_s"]) for r in lag_rows
+                       if r["lag_s"] is not None and r["lag_s"] >= 0]
+    except Exception:
+        lag_samples = []
+    lag_p = _percentiles(lag_samples)
+
+    # Last anchor: most recent confirmed TX with non-zero block_height.
+    last_anchor = None
+    try:
+        r = db.execute(
+            """SELECT anchor_tx_hash, anchor_block_height, anchored_at,
+                      anchor_chain
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchor_block_height,0) > 0
+                ORDER BY anchored_at DESC
+                LIMIT 1"""
+        ).fetchone()
+        if r:
+            last_anchor = {
+                "tx_hash": r["anchor_tx_hash"],
+                "block_height": int(r["anchor_block_height"] or 0),
+                "anchored_at": int(r["anchored_at"] or 0),
+                "chain": r["anchor_chain"] or "rustchain",
+                "age_s": max(0, now - int(r["anchored_at"] or 0)),
+            }
+    except Exception:
+        last_anchor = None
+
+    # Per-day anchor count for the last 14 days, oldest→newest, for a
+    # sparkline. Returned as [{"day": "YYYY-MM-DD", "count": N}].
+    daily = []
+    try:
+        rows = db.execute(
+            """SELECT date(anchored_at, 'unixepoch') AS day,
+                      COUNT(DISTINCT anchor_tx_hash) AS n
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchored_at,0) >= ?
+                GROUP BY day
+                ORDER BY day ASC""",
+            (now - 86400 * 14,),
+        ).fetchall()
+        daily = [{"day": r["day"], "count": int(r["n"])} for r in rows]
+    except Exception:
+        daily = []
+
+    # Federation peer count if the table exists (best-effort — federation
+    # may be empty/disabled on a particular install).
+    federation_peers = 0
+    try:
+        federation_peers = _scalar(
+            "SELECT COUNT(*) FROM federation_peers WHERE COALESCE(active,0) = 1"
+        )
+    except Exception:
+        federation_peers = 0
+
+    # Verifier success: of the last 50 anchored TXs whose block_height>0,
+    # how many have a non-empty manifest_hash that's the canonical
+    # 32-byte hex? (A row that anchored but ended up with a blank or
+    # malformed manifest_hash would never verify and signals a bug.)
+    verifier_total = 0
+    verifier_ok = 0
+    try:
+        rows = db.execute(
+            """SELECT anchor_manifest_hash
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchor_block_height,0) > 0
+                ORDER BY anchored_at DESC
+                LIMIT 50"""
+        ).fetchall()
+        for r in rows:
+            verifier_total += 1
+            mh = r["anchor_manifest_hash"] or ""
+            if len(mh) == 64 and re.fullmatch(r"[0-9a-f]+", mh):
+                verifier_ok += 1
+    except Exception:
+        pass
+    verifier_rate = (verifier_ok / verifier_total) if verifier_total else 1.0
+
+    try:
+        from datetime import datetime, timezone
+        as_of_iso = datetime.fromtimestamp(now, tz=timezone.utc).isoformat()
+    except Exception:
+        as_of_iso = ""
+
+    return {
+        "ok": True,
+        "as_of": now,
+        "as_of_iso": as_of_iso,
+        "anchors": {
+            "total_videos_anchored": total_anchored_rows,
+            "total_anchor_transactions": total_anchor_txs,
+            "confirmed_on_chain": confirmed_anchors,
+            "awaiting_confirmation": awaiting_confirmation,
+            "anchors_24h": txs_24h,
+            "anchors_7d": txs_7d,
+            "anchors_30d": txs_30d,
+            "last_anchor": last_anchor,
+            "anchor_lag_seconds": {
+                "samples": len(lag_samples),
+                "window_days": 30,
+                "note": (
+                    "upload→anchored seconds, sampled from videos uploaded "
+                    "in the last 30 days only — historical backfill anchors "
+                    "of older uploads are excluded so the percentile reflects "
+                    "current pipeline behavior"
+                ),
+                **lag_p,
+            },
+            "daily_14d": daily,
+        },
+        "manifest_versions": {
+            "by_version": {f"v{k}": v for k, v in sorted(by_version.items())},
+            "v2_share":
+                (by_version.get(2, 0) / total_anchored_rows)
+                if total_anchored_rows else 0.0,
+        },
+        "queue": {
+            "provenance_rows_total": total_provenance_rows,
+            "pending_anchor": pending_anchor,
+        },
+        "federation": {
+            "active_peers": federation_peers,
+        },
+        "verifier_health": {
+            "sample_size": verifier_total,
+            "well_formed_root_count": verifier_ok,
+            "well_formed_rate": round(verifier_rate, 4),
+        },
+        "spec_version": "phase-11.17",
+    }
+
+
+def _transparency_snapshot_cached():
+    """60s in-memory cache around the snapshot. Bounded server load."""
+    now = time.time()
+    if (_TRANSPARENCY_CACHE["data"] is not None
+            and (now - _TRANSPARENCY_CACHE["at"]) < _TRANSPARENCY_TTL_S):
+        return _TRANSPARENCY_CACHE["data"], True
+    fresh = _compute_transparency_snapshot()
+    _TRANSPARENCY_CACHE["at"] = now
+    _TRANSPARENCY_CACHE["data"] = fresh
+    return fresh, False
+
+
+@app.route("/api/transparency")
+def api_transparency():
+    """Public, read-only operational metrics for bottube.ai.
+
+    Documented purpose: a stable JSON contract that anyone — verifier
+    operators, federation peers, engineering reviewers, you with curl —
+    can poll to see how the platform is actually behaving. All fields
+    are best-effort directional honesty; no promise of atomic consistency.
+    """
+    data, cached = _transparency_snapshot_cached()
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = f"public, max-age={int(_TRANSPARENCY_TTL_S)}"
+    resp.headers["X-Bottube-Cache"] = "hit" if cached else "miss"
+    return resp
+
+
+@app.route("/transparency")
+def transparency_page():
+    """HTML rendering of /api/transparency for casual browsers."""
+    data, _cached = _transparency_snapshot_cached()
+    return render_template("transparency.html", t=data)
+
+
 @app.route("/api/anchors/<tx_hash>/chain")
 def anchor_chain_proxy(tx_hash):
     """Public read-only proxy: fetch the on-chain TX from the configured Ergo
