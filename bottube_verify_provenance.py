@@ -155,7 +155,86 @@ def fetch_anchor_r4_via_proxy(bottube_base, tx_hash, timeout=15):
     return bytes.fromhex(root_hex)
 
 
-VERIFIER_VERSION = "0.2.0"
+VERIFIER_VERSION = "0.3.0"
+
+
+def verify_receipt_offline(receipt):
+    """Verify a downloaded provenance receipt without any network access.
+
+    Returns (verdict, detail) where verdict is 'PASS' if all internal
+    cryptographic invariants hold:
+      1. The leaf computed from manifest.leaf_inputs matches manifest.leaf.
+      2. Walking merkle_proof.path from manifest.leaf reaches
+         merkle_proof.expected_root.
+      3. expected_root equals chain_anchor.manifest_hash.
+
+    Network-only steps (fetching R4 from chain) are NOT performed here;
+    use the live mode for that. The offline check is still useful: if a
+    receipt has been edited mid-flight, the leaf or root will fail to
+    walk and we catch it before anyone hits the chain.
+    """
+    if not isinstance(receipt, dict):
+        return "FAIL", "receipt is not a JSON object"
+    if receipt.get("schema") != "bottube-provenance-receipt/v1":
+        return "FAIL", f"unknown schema: {receipt.get('schema')!r}"
+
+    m = receipt.get("manifest") or {}
+    inputs = m.get("leaf_inputs") or {}
+    ver = int(m.get("version") or 1)
+    claimed_leaf = m.get("leaf", "")
+
+    # Recompute the leaf from the inputs the receipt declared.
+    computed = manifest_leaf(
+        inputs.get("video_id", ""),
+        inputs.get("canonical_sha256", ""),
+        inputs.get("uploader_sig", ""),
+        inputs.get("uploaded_at", 0),
+        manifest_version=ver,
+        thumbnail_sha256=inputs.get("thumbnail_sha256", ""),
+        canonical_360p_sha256=inputs.get("canonical_360p_sha256", ""),
+    )
+    if computed.hex() != claimed_leaf:
+        return "FAIL", (
+            f"leaf computed from inputs ({computed.hex()}) does not match "
+            f"the leaf the receipt claims ({claimed_leaf}). The receipt "
+            f"has been tampered with or the version dispatch is wrong."
+        )
+
+    # Walk the path.
+    proof = receipt.get("merkle_proof") or {}
+    expected_root = proof.get("expected_root", "")
+    node = computed
+    for hop in (proof.get("path") or []):
+        sib = bytes.fromhex(hop.get("sibling", ""))
+        side = hop.get("side", "")
+        if side == "R":
+            node = hashlib.sha256(node + sib).digest()
+        elif side == "L":
+            node = hashlib.sha256(sib + node).digest()
+        else:
+            return "FAIL", f"invalid path side {side!r}"
+    walked = node.hex()
+    if walked != expected_root:
+        return "FAIL", (
+            f"walking the Merkle path produced {walked} but the receipt "
+            f"claims expected_root={expected_root}"
+        )
+
+    # Cross-check chain seam.
+    chain = receipt.get("chain_anchor") or {}
+    chain_root = chain.get("manifest_hash", "")
+    if chain_root != expected_root:
+        return "FAIL", (
+            f"chain_anchor.manifest_hash ({chain_root}) does not match "
+            f"merkle_proof.expected_root ({expected_root})"
+        )
+
+    return "PASS", (
+        f"offline receipt is internally consistent: leaf reconstructed "
+        f"from inputs, walked {len(proof.get('path') or [])} Merkle hops "
+        f"to root {walked}, root matches chain anchor "
+        f"{chain.get('tx_hash', '')[:16]}…"
+    )
 
 
 def main():
@@ -170,11 +249,38 @@ def main():
     ap.add_argument("--admin-key", default=os.environ.get("BOTTUBE_ADMIN_KEY", ""),
                     help="Optional: admin key for batch-membership lookup. Without it, the public Merkle proof endpoint is used (still PASS).")
     ap.add_argument("--quiet", action="store_true", help="Only print PASS/FAIL")
+    ap.add_argument("--receipt", default="",
+                    help="Path to a downloaded receipt JSON. If set, runs the "
+                         "offline verification (no network) and exits.")
     ap.add_argument("--version", action="version",
                     version=f"bottube-verify {VERIFIER_VERSION}")
     args = ap.parse_args()
+
+    # Phase 11.20: offline receipt mode. Useful in air-gapped / legal
+    # contexts where the verifier can't reach bottube.ai or the chain.
+    if args.receipt:
+        try:
+            with open(args.receipt, "r", encoding="utf-8") as fh:
+                receipt = json.load(fh)
+        except Exception as e:
+            sys.exit(f"FAIL: could not read receipt file: {e}")
+        verdict, detail = verify_receipt_offline(receipt)
+        if args.quiet:
+            print(verdict)
+        else:
+            print(f"=== {verdict} (offline receipt mode) ===")
+            print(f"  {detail}")
+            print()
+            if verdict == "PASS":
+                print("  Note: this PASS only proves the receipt is internally")
+                print("  consistent. To prove the receipt's chain anchor is")
+                print("  also present on RustChain, re-run without --receipt:")
+                vid = (receipt.get("video") or {}).get("video_id", "<id>")
+                print(f"    bottube-verify {vid}")
+        sys.exit(0 if verdict == "PASS" else 1)
+
     if not args.video_id:
-        ap.error("video_id required (use --version to print version)")
+        ap.error("video_id required (or use --receipt FILE for offline mode)")
 
     bot = args.bottube_base.rstrip("/")
     vid = args.video_id

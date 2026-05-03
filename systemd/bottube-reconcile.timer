@@ -1,0 +1,14 @@
+[Unit]
+Description=Trigger BoTTube anchor reconciliation every 6 hours
+Documentation=https://bottube.ai/transparency
+
+[Timer]
+# First run 30 minutes after boot, then every 6 hours.
+OnBootSec=30min
+OnUnitActiveSec=6h
+RandomizedDelaySec=600
+Persistent=true
+Unit=bottube-reconcile.service
+
+[Install]
+WantedBy=timers.target

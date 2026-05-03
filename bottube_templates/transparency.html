@@ -159,6 +159,68 @@
     </div>
   </div>
 
+  {# --- Phase 11.19: continuous reconciliation health --- #}
+  {% if t.reconciliation %}
+  <div class="tx-section">
+    <h2>Continuous reconciliation</h2>
+    <p class="tx-sub" style="margin-bottom: 14px;">
+      Every 6 hours, bottube re-fetches R4 from chain for a random sample of
+      already-anchored transactions and compares against its own DB. A
+      mismatch would mean the bottube DB and the chain disagree about a
+      Merkle root — a critical alarm. The match rate below is the
+      ground-truth audit signal.
+    </p>
+    <div class="tx-grid">
+      <div class="tx-stat">
+        <div class="label">Match rate (24h)</div>
+        <div class="value">
+          {{ (t.reconciliation.last_24h.match_rate * 100)|round(2) }}%
+          {% if t.reconciliation.alarm %}
+            <span class="tx-pill amber" style="color:#a02020;border-color:#a02020;">alarm</span>
+          {% elif t.reconciliation.last_24h.matched > 0 %}
+            <span class="tx-pill green">clean</span>
+          {% endif %}
+        </div>
+        <div class="sub">
+          {{ t.reconciliation.last_24h.matched }} matched ·
+          {{ t.reconciliation.last_24h.mismatched }} mismatched ·
+          {{ t.reconciliation.last_24h.errored }} chain errors
+        </div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">Match rate (7d)</div>
+        <div class="value">
+          {{ (t.reconciliation.last_7d.match_rate * 100)|round(2) }}%
+        </div>
+        <div class="sub">
+          {{ t.reconciliation.last_7d.checked }} TXs re-verified this week
+        </div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">Last reconciliation</div>
+        {% if t.reconciliation.last_check_age_s is not none %}
+          <div class="value">
+            {% if t.reconciliation.last_check_age_s < 3600 %}
+              {{ (t.reconciliation.last_check_age_s / 60)|round(0)|int }} min ago
+            {% else %}
+              {{ (t.reconciliation.last_check_age_s / 3600)|round(1) }} h ago
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="value" style="font-size:18px;color:var(--text-secondary);">never</div>
+        {% endif %}
+        <div class="sub">
+          {% if t.reconciliation.last_mismatch_at %}
+            ⚠ last mismatch: {{ t.reconciliation.last_mismatch_at }} (epoch)
+          {% else %}
+            no mismatches on record
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {# --- Last anchor + verifier health + federation --- #}
   <div class="tx-section">
     <h2>Live state</h2>

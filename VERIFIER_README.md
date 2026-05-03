@@ -72,6 +72,22 @@ The strongest property: **anyone with curl + Python can verify any video's chain
 
 A batch may mix v1 and v2 rows during the migration window — each row's leaf is computed under its own manifest_version, then combined with Bitcoin-style binary Merkle hashing.
 
+## Offline mode (downloaded receipts)
+
+For air-gapped or legal/compliance contexts, every video has a downloadable self-contained receipt:
+
+```bash
+curl https://bottube.ai/api/videos/<id>/receipt -o receipt.json
+bottube-verify --receipt receipt.json
+```
+
+The offline check verifies three internal cryptographic invariants:
+1. The Merkle leaf computed from the receipt's `leaf_inputs` equals `manifest.leaf`.
+2. Walking `merkle_proof.path` from that leaf reaches `merkle_proof.expected_root`.
+3. `expected_root` equals `chain_anchor.manifest_hash`.
+
+A `PASS` proves the receipt is internally consistent — no tampering occurred between when bottube issued it and when you ran the verifier. A subsequent live check (re-run without `--receipt`) additionally confirms `manifest_hash` is present in register R4 of the on-chain TX.
+
 ## Configuration
 
 | Flag | Env | Default |

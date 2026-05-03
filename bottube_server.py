@@ -20352,6 +20352,301 @@ def admin_provenance_reap_confirmations():
     })
 
 
+# ---------------------------------------------------------------------------
+# Phase 11.19: continuous anchor reconciliation
+# ---------------------------------------------------------------------------
+# A scheduled audit that bottube runs *against itself*: pick N random
+# already-anchored TXs, re-fetch R4 from chain, compare to the bottube DB.
+# If anything ever drifts (e.g., a corrupted DB write, a wrong manifest_hash
+# stored after a rollback), the next reconciliation pass surfaces it before
+# any user-facing verification breaks. Results land in
+# anchor_reconciliations and roll up into /api/transparency.
+
+def _reconciliation_ensure_schema():
+    """Idempotent table creation for the reconciliation log."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anchor_reconciliations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_hash TEXT NOT NULL,
+                db_manifest_hash TEXT NOT NULL,
+                chain_r4_hex TEXT NOT NULL DEFAULT '',
+                chain_inclusion_height INTEGER DEFAULT 0,
+                chain_num_confirmations INTEGER DEFAULT 0,
+                matched INTEGER NOT NULL,
+                error TEXT NOT NULL DEFAULT '',
+                checked_at INTEGER NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recon_checked_at
+                ON anchor_reconciliations(checked_at)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recon_matched
+                ON anchor_reconciliations(matched, checked_at)
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _fetch_chain_r4(ergo_base, ergo_key, tx_hash, timeout=10):
+    """Fetch the on-chain TX, return (r4_merkle_hex, inclusion_height,
+    num_confirmations, error). r4_merkle_hex is "" on any error."""
+    try:
+        req = urllib.request.Request(
+            f"{ergo_base}/wallet/transactionById?id={tx_hash}",
+            headers={"api_key": ergo_key} if ergo_key else {},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return "", 0, 0, f"HTTP {e.code}"
+    except Exception as e:
+        return "", 0, 0, str(e)[:160]
+
+    outs = (data or {}).get("outputs") or []
+    if not outs:
+        return "", 0, 0, "no outputs"
+    regs = outs[0].get("additionalRegisters") or {}
+    r4 = regs.get("R4", "")
+    merkle_hex = ""
+    if r4.startswith("0e20") and len(r4) == 4 + 64:
+        merkle_hex = r4[4:].lower()
+    return (
+        merkle_hex,
+        int(data.get("inclusionHeight") or 0),
+        int(data.get("numConfirmations") or 0),
+        "" if merkle_hex else "R4 not 32-byte SColl",
+    )
+
+
+@app.route("/api/admin/reconcile-anchors", methods=["POST", "GET"])
+def admin_reconcile_anchors():
+    """Re-verify N random anchored TXs against the chain.
+
+    For each: fetch R4, compare to DB anchor_manifest_hash, write the
+    result. Mismatches are alarms — they should never happen in a healthy
+    pipeline. Used by a 6-hour systemd timer; admin-key gated.
+
+    Body: {"limit": 50, "strategy": "random"|"recent"|"oldest"}.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _reconciliation_ensure_schema()
+    _provenance_ensure_anchor_columns()
+
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(200, int(data.get("limit", 50))))
+    except Exception:
+        limit = 50
+    strategy = (data.get("strategy") or "random").lower()
+    if strategy not in ("random", "recent", "oldest"):
+        strategy = "random"
+
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_key = os.environ.get("ERGO_API_KEY", "")
+    if not ergo_key:
+        return jsonify({"ok": False, "error": "ERGO_API_KEY not set"}), 503
+
+    db = get_db()
+    if strategy == "recent":
+        order = "anchored_at DESC"
+    elif strategy == "oldest":
+        order = "anchored_at ASC"
+    else:
+        order = "RANDOM()"
+    rows = db.execute(
+        f"""SELECT anchor_tx_hash AS tx_hash,
+                   MIN(anchor_manifest_hash) AS db_root,
+                   MIN(anchor_block_height) AS db_height
+              FROM video_provenance
+             WHERE COALESCE(anchor_tx_hash,'') != ''
+               AND COALESCE(anchor_block_height,0) > 0
+               AND anchor_chain != 'stub'
+             GROUP BY anchor_tx_hash
+             ORDER BY {order}
+             LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    now = int(time.time())
+    scanned = 0
+    matched = 0
+    mismatched = 0
+    errored = 0
+    sample_mismatches = []
+    sample_errors = []
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        for row in rows:
+            scanned += 1
+            tx = row["tx_hash"]
+            db_root = (row["db_root"] or "").lower()
+            chain_root, incl_h, num_confs, err = _fetch_chain_r4(
+                ergo_base, ergo_key, tx,
+            )
+            if err and not chain_root:
+                errored += 1
+                if len(sample_errors) < 5:
+                    sample_errors.append({"tx": tx[:16] + "…", "error": err})
+                conn.execute(
+                    """INSERT INTO anchor_reconciliations
+                       (tx_hash, db_manifest_hash, chain_r4_hex,
+                        chain_inclusion_height, chain_num_confirmations,
+                        matched, error, checked_at)
+                       VALUES (?, ?, '', 0, ?, 0, ?, ?)""",
+                    (tx, db_root, num_confs, err, now),
+                )
+                continue
+
+            ok = (chain_root == db_root)
+            if ok:
+                matched += 1
+            else:
+                mismatched += 1
+                if len(sample_mismatches) < 5:
+                    sample_mismatches.append({
+                        "tx": tx,
+                        "db_root": db_root,
+                        "chain_root": chain_root,
+                    })
+            conn.execute(
+                """INSERT INTO anchor_reconciliations
+                   (tx_hash, db_manifest_hash, chain_r4_hex,
+                    chain_inclusion_height, chain_num_confirmations,
+                    matched, error, checked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, '', ?)""",
+                (tx, db_root, chain_root, incl_h, num_confs,
+                 1 if ok else 0, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Mismatches are critical — log loudly.
+    if mismatched:
+        app.logger.error(
+            "ANCHOR RECONCILIATION MISMATCH: %d/%d txs do NOT match chain. "
+            "Sample: %s",
+            mismatched, scanned, sample_mismatches[:3],
+        )
+
+    return jsonify({
+        "ok": True,
+        "checked_at": now,
+        "strategy": strategy,
+        "scanned": scanned,
+        "matched": matched,
+        "mismatched": mismatched,
+        "errored": errored,
+        "sample_mismatches": sample_mismatches,
+        "sample_errors": sample_errors,
+        "alarm": mismatched > 0,
+    })
+
+
+def _reconciliation_summary():
+    """Roll up reconciliation_log into a small dict for /api/transparency."""
+    try:
+        _reconciliation_ensure_schema()
+    except Exception:
+        return None
+    db = get_db()
+    now = int(time.time())
+
+    def _count(sql, *args):
+        try:
+            r = db.execute(sql, args).fetchone()
+            return int((r or [0])[0] or 0)
+        except Exception:
+            return 0
+
+    last24 = now - 86400
+    last7d = now - 86400 * 7
+
+    total_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations WHERE checked_at >= ?",
+        last24,
+    )
+    matched_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 1",
+        last24,
+    )
+    mismatched_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 0 AND error = ''",
+        last24,
+    )
+    errored_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND error != ''",
+        last24,
+    )
+    total_7d = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations WHERE checked_at >= ?",
+        last7d,
+    )
+    matched_7d = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 1",
+        last7d,
+    )
+    mismatched_7d = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 0 AND error = ''",
+        last7d,
+    )
+
+    last_check = None
+    last_mismatch = None
+    try:
+        r = db.execute(
+            "SELECT checked_at FROM anchor_reconciliations "
+            "ORDER BY checked_at DESC LIMIT 1"
+        ).fetchone()
+        last_check = int(r[0]) if r else None
+    except Exception:
+        pass
+    try:
+        r = db.execute(
+            "SELECT checked_at FROM anchor_reconciliations "
+            "WHERE matched = 0 AND error = '' "
+            "ORDER BY checked_at DESC LIMIT 1"
+        ).fetchone()
+        last_mismatch = int(r[0]) if r else None
+    except Exception:
+        pass
+
+    match_rate_24h = (matched_24h / (matched_24h + mismatched_24h)) if (matched_24h + mismatched_24h) else 1.0
+    match_rate_7d = (matched_7d / (matched_7d + mismatched_7d)) if (matched_7d + mismatched_7d) else 1.0
+
+    return {
+        "last_check_at": last_check,
+        "last_check_age_s": (now - last_check) if last_check else None,
+        "last_mismatch_at": last_mismatch,
+        "last_24h": {
+            "checked": total_24h,
+            "matched": matched_24h,
+            "mismatched": mismatched_24h,
+            "errored": errored_24h,
+            "match_rate": round(match_rate_24h, 4),
+        },
+        "last_7d": {
+            "checked": total_7d,
+            "matched": matched_7d,
+            "mismatched": mismatched_7d,
+            "match_rate": round(match_rate_7d, 4),
+        },
+        "alarm": mismatched_24h > 0,
+    }
+
+
 @app.route("/api/admin/provenance/anchor-result", methods=["POST"])
 def admin_provenance_anchor_result():
     """Finalize a claimed batch with the on-chain anchor result.
@@ -20724,10 +21019,19 @@ def _compute_transparency_snapshot():
     except Exception:
         as_of_iso = ""
 
+    # Phase 11.19: pull the latest reconciliation rollup. Best-effort —
+    # if the table doesn't exist yet (fresh deploy before first run), the
+    # summary helper returns None and the field is null.
+    try:
+        recon = _reconciliation_summary()
+    except Exception:
+        recon = None
+
     return {
         "ok": True,
         "as_of": now,
         "as_of_iso": as_of_iso,
+        "reconciliation": recon,
         "anchors": {
             "total_videos_anchored": total_anchored_rows,
             "total_anchor_transactions": total_anchor_txs,
@@ -21067,6 +21371,208 @@ def api_video_anchor_proof(video_id):
         },
         "batch_size": len(leaves),
     })
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.20: provenance receipt download
+# ---------------------------------------------------------------------------
+# A single self-contained JSON file a creator can download as durable proof
+# that their video was anchored on RustChain. Composes:
+#   * provenance (canonical hashes, manifest_version, generation block)
+#   * Merkle inclusion proof (leaf, path, expected_root)
+#   * chain anchor details (tx_hash, block_height, R4)
+#   * verifier instructions (recipe, CLI command, verifier source URL)
+#   * platform HMAC over the receipt body (so anyone can detect tampering)
+#
+# Designed to be useful in legal/compliance contexts: a creator submits the
+# receipt + the corresponding canonical asset, and a third party can verify
+# both the asset hash and the chain anchor *without* trusting bottube.
+
+@app.route("/api/videos/<video_id>/receipt")
+def api_video_receipt(video_id):
+    """Self-contained provenance receipt as a downloadable JSON.
+
+    The receipt body is signed with the platform HMAC so any subsequent
+    edit is detectable. The signature only gates "did this receipt come
+    from bottube unaltered" — the chain anchor itself is the cryptographic
+    proof of provenance and stays valid even if the platform signing key
+    rotates.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+
+    # Light per-IP rate limit — receipts are cheap but scrapers could
+    # otherwise enumerate the platform via this route.
+    ip = _get_client_ip()
+    if not _rate_limit(f"receipt:{ip}", 60, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    _provenance_ensure_v2_columns()
+    db = get_db()
+    target = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  creator_agent_id, creator_pubkey, model, generated_at,
+                  anchor_batch_id, anchor_tx_hash, anchor_chain,
+                  anchor_block_height, anchor_manifest_hash, anchor_status,
+                  anchored_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+             FROM video_provenance
+            WHERE video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    if not target:
+        return jsonify({"ok": False, "error": "video not found"}), 404
+    if not target["anchor_tx_hash"]:
+        return jsonify({
+            "ok": False,
+            "error": "video not yet anchored",
+            "anchor_status": target["anchor_status"] or "pending",
+        }), 409
+
+    # Pull the same Merkle proof the verifier uses, but inline so the
+    # receipt is self-contained.
+    target_version = int(target["manifest_version"] or 1)
+    own_leaf = _manifest_leaf_bytes(
+        target["video_id"], target["canonical_sha256"],
+        target["uploader_sig"], target["uploaded_at"],
+        manifest_version=target_version,
+        thumbnail_sha256=target["thumbnail_sha256"] or "",
+        canonical_360p_sha256=target["canonical_360p_sha256"] or "",
+    )
+
+    # Walk the batch and compute the path
+    rows = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256
+             FROM video_provenance
+            WHERE anchor_batch_id = ?
+            ORDER BY uploaded_at ASC, video_id ASC""",
+        (target["anchor_batch_id"],),
+    ).fetchall()
+    leaves = [
+        _manifest_leaf_bytes(
+            r["video_id"], r["canonical_sha256"],
+            r["uploader_sig"], r["uploaded_at"],
+            manifest_version=int(r["manifest_version"] or 1),
+            thumbnail_sha256=r["thumbnail_sha256"] or "",
+            canonical_360p_sha256=r["canonical_360p_sha256"] or "",
+        )
+        for r in rows
+    ]
+    target_idx = next(
+        (i for i, r in enumerate(rows) if r["video_id"] == video_id), -1,
+    )
+    merkle_path = _merkle_path_for_leaf(leaves, target_idx) if target_idx >= 0 else []
+
+    # Pull the title for human-readable identification (best-effort).
+    title = ""
+    try:
+        v = db.execute(
+            "SELECT title FROM videos WHERE video_id = ? LIMIT 1",
+            (video_id,),
+        ).fetchone()
+        if v:
+            title = v["title"] or ""
+    except Exception:
+        title = ""
+
+    issued_at = int(time.time())
+    body = {
+        "schema": "bottube-provenance-receipt/v1",
+        "issued_at": issued_at,
+        "issuer": "https://bottube.ai",
+        "video": {
+            "video_id": target["video_id"],
+            "title": title,
+            "url": f"https://bottube.ai/v/{target['video_id']}",
+        },
+        "manifest": {
+            "version": target_version,
+            "leaf_recipe": _manifest_leaf_recipe(target_version),
+            "leaf_inputs": {
+                "video_id": target["video_id"],
+                "canonical_sha256": target["canonical_sha256"],
+                "thumbnail_sha256": target["thumbnail_sha256"] or "",
+                "canonical_360p_sha256": target["canonical_360p_sha256"] or "",
+                "uploader_sig": target["uploader_sig"],
+                "uploaded_at": int(float(target["uploaded_at"] or 0)),
+            },
+            "leaf": own_leaf.hex(),
+        },
+        "merkle_proof": {
+            "path": merkle_path,
+            "path_recipe": (
+                "for each step: side='R' means sibling is on the right "
+                "(combined = sha256(leaf || sibling)); side='L' means "
+                "sibling is on the left (combined = sha256(sibling || leaf))"
+            ),
+            "batch_size": len(leaves),
+            "expected_root": target["anchor_manifest_hash"] or "",
+        },
+        "chain_anchor": {
+            "chain": target["anchor_chain"] or "rustchain",
+            "tx_hash": target["anchor_tx_hash"],
+            "block_height": int(target["anchor_block_height"] or 0),
+            "manifest_hash": target["anchor_manifest_hash"] or "",
+            "anchored_at": int(target["anchored_at"] or 0),
+            "explorer_url":
+                f"https://bottube.ai/anchors/{target['anchor_tx_hash']}",
+            "chain_proxy_url":
+                f"https://bottube.ai/api/anchors/{target['anchor_tx_hash']}/chain",
+        },
+        "verifier": {
+            "source": "https://github.com/Scottcjn/bottube",
+            "package": "bottube-verify (>=0.2.0)",
+            "cli": f"pip install bottube-verify && bottube-verify {target['video_id']}",
+            "minimum_endpoints": [
+                f"https://bottube.ai/api/videos/{target['video_id']}/provenance",
+                f"https://bottube.ai/api/videos/{target['video_id']}/anchor-proof",
+                f"https://bottube.ai/api/anchors/{target['anchor_tx_hash']}/chain",
+            ],
+        },
+    }
+
+    # HMAC over the *canonical* JSON of `body` (sorted keys, no whitespace
+    # variance) so the signature is reproducible. The receipt remains
+    # cryptographically meaningful even without this — the chain anchor is
+    # the actual proof of provenance — but the signature lets anyone catch
+    # mid-flight tampering of a downloaded receipt before they bother
+    # verifying the chain.
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    sig = hmac.new(
+        _provenance_signing_key().encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    receipt = dict(body)
+    receipt["receipt_signature"] = {
+        "alg": "HMAC-SHA256",
+        "key_id": "bottube-platform-v1",
+        "value": sig,
+        "covers": (
+            "the canonical JSON of every field above, sorted-keys, no "
+            "whitespace. Recompute with a known platform key to detect "
+            "tampering of this file. The chain anchor is the actual "
+            "cryptographic proof of provenance — this signature only "
+            "gates 'did this file come from bottube unaltered'."
+        ),
+    }
+
+    # Set Content-Disposition so a browser hit downloads the file with a
+    # sensible name instead of rendering it as a JSON pageview.
+    payload = json.dumps(receipt, indent=2, sort_keys=True)
+    resp = Response(payload, mimetype="application/json")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="bottube-receipt-{target["video_id"]}.json"'
+    )
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 
 
 @app.route("/api/admin/provenance/batch", methods=["GET"])

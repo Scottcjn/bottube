@@ -4041,6 +4041,23 @@ function reportVideo() {
             rendsHTML = '<div class="ps-explain">Only the canonical AI artifact (8 s &middot; 720&times;720 MP4) is published for this video. Adaptive renditions are added during the human-watch lane rollout.</div>';
         }
 
+        // Phase 11.20: only show the download link when an anchor TX
+        // exists (otherwise the receipt endpoint correctly 409s).
+        var receiptHTML = '';
+        if (an.tx_hash) {
+            receiptHTML =
+                '<div class="ps-section"><h4>Receipt</h4>' +
+                '<p class="ps-explain" style="margin:0 0 8px;">' +
+                'Self-contained JSON: Merkle proof + chain anchor + verifier instructions. ' +
+                'Verifies offline with <code>bottube-verify --receipt FILE</code>.' +
+                '</p>' +
+                '<a href="/api/videos/' + encodeURIComponent(VIDEO_ID) + '/receipt" ' +
+                '   download="bottube-receipt-' + _esc(VIDEO_ID) + '.json" ' +
+                '   style="display:inline-block;padding:6px 12px;border:1px solid #3ea6ff;' +
+                '          color:#3ea6ff;border-radius:6px;text-decoration:none;font-size:12px;">' +
+                '↓ Download provenance receipt</a></div>';
+        }
+
         body.innerHTML =
             '<h3>Verified Provenance' +
             '<button class="ps-close" onclick="toggleProvenanceSheet()" aria-label="Close">×</button>' +
@@ -4053,7 +4070,8 @@ function reportVideo() {
             '<div class="ps-section"><h4>Canonical asset</h4>' + assetRows + '</div>' +
             '<div class="ps-section"><h4>Generation</h4>' + genRows + '</div>' +
             '<div class="ps-section"><h4>Renditions</h4>' + rendsHTML + '</div>' +
-            '<div class="ps-section"><h4>RustChain anchor</h4>' + anchorRows + '</div>';
+            '<div class="ps-section"><h4>RustChain anchor</h4>' + anchorRows + '</div>' +
+            receiptHTML;
     }
 
     fetch('/api/videos/' + encodeURIComponent(VIDEO_ID) + '/provenance', { credentials: 'omit' })
