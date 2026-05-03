@@ -123,16 +123,26 @@ def fetch_anchor_r4_via_proxy(bottube_base, tx_hash, timeout=15):
     return bytes.fromhex(root_hex)
 
 
+VERIFIER_VERSION = "0.1.0"
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Verify a BoTTube video's on-chain provenance")
-    ap.add_argument("video_id", help="The video_id to verify")
+    ap = argparse.ArgumentParser(
+        description="Verify a BoTTube video's on-chain provenance",
+        epilog="Source: https://github.com/Scottcjn/bottube",
+    )
+    ap.add_argument("video_id", nargs="?", help="The video_id to verify")
     ap.add_argument("--bottube-base", default=os.environ.get("BOTTUBE_BASE", "https://bottube.ai"))
     ap.add_argument("--ergo-base", default=os.environ.get("ERGO_BASE", "http://localhost:9053"))
     ap.add_argument("--ergo-api-key", default=os.environ.get("ERGO_API_KEY", ""))
     ap.add_argument("--admin-key", default=os.environ.get("BOTTUBE_ADMIN_KEY", ""),
-                    help="Optional: admin key for batch-membership lookup. Without it, only single-leaf verify is shown.")
+                    help="Optional: admin key for batch-membership lookup. Without it, the public Merkle proof endpoint is used (still PASS).")
     ap.add_argument("--quiet", action="store_true", help="Only print PASS/FAIL")
+    ap.add_argument("--version", action="version",
+                    version=f"bottube-verify {VERIFIER_VERSION}")
     args = ap.parse_args()
+    if not args.video_id:
+        ap.error("video_id required (use --version to print version)")
 
     bot = args.bottube_base.rstrip("/")
     vid = args.video_id
