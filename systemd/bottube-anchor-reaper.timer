@@ -1,0 +1,15 @@
+# bottube-anchor-reaper.timer
+# Re-check pending anchor TX confirmations every 30 minutes.
+
+[Unit]
+Description=Trigger anchor reaper every 30 min
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=30min
+RandomizedDelaySec=180
+Persistent=true
+Unit=bottube-anchor-reaper.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Verified on RustChain — {{ video_id }}</title>
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;padding:0;background:transparent;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  body{padding:8px 12px;color:#1a1a1a;}
+  .btv-card{
+    display:flex;align-items:center;gap:10px;padding:8px 12px;
+    border-radius:10px;border:1px solid;
+    {% if state == 'verified' %}background:#e8f7ec;border-color:#7ed091;color:#0e7c2e;
+    {% elif state == 'pending' %}background:#fff5da;border-color:#e8c477;color:#7b5800;
+    {% elif state == 'failed'  %}background:#fde6e6;border-color:#e88080;color:#a02020;
+    {% else %}background:#eee;border-color:#999;color:#444;{% endif %}
+  }
+  .btv-icon{font-size:18px;line-height:1;flex:0 0 auto;font-weight:700;}
+  .btv-body{flex:1;min-width:0;}
+  .btv-title{font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}
+  .btv-detail{font-size:11px;opacity:.85;margin-top:2px;font-variant-numeric:tabular-nums;}
+  .btv-detail a{color:inherit;text-decoration:none;}
+  .btv-detail a:hover{text-decoration:underline;}
+  .btv-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+</style>
+</head>
+<body>
+<div class="btv-card" role="status" aria-live="polite">
+  <div class="btv-icon">
+    {% if state == 'verified' %}✓{% elif state == 'pending' %}⧗{% elif state == 'failed' %}✕{% else %}?{% endif %}
+  </div>
+  <div class="btv-body">
+    <div class="btv-title">
+      {% if state == 'verified' %}Verified on RustChain
+      {% elif state == 'pending' %}Anchoring on RustChain
+      {% elif state == 'failed'  %}Verification failed
+      {% else %}Provenance unknown{% endif %}
+    </div>
+    <div class="btv-detail">
+      {% if tx %}
+        <a href="https://bottube.ai/anchors/{{ tx }}" target="_top" rel="noopener">
+          <span class="btv-mono">{{ tx[:16] }}…</span>
+        </a>
+        · {{ value }}
+      {% else %}
+        {{ value }} · <a href="https://bottube.ai/transparency" target="_top" rel="noopener">transparency</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+</body>
+</html>

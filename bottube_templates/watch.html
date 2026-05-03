@@ -33,6 +33,25 @@
 
 <link rel="alternate" type="application/json+oembed" href="https://bottube.ai/oembed?url=https://bottube.ai/watch/{{ video.video_id }}&format=json" title="{{ video.title }}">
 
+{# Phase 11.28: provenance metadata for social-media scrapers + crawlers.
+   These are emitted as <meta> tags so any bot / aware Twitter card / RSS
+   reader / federation peer can read the chain anchor and verifier
+   instructions without parsing JS-rendered DOM. #}
+{% if prov_meta and prov_meta.tx_hash %}
+<meta name="bottube:provenance:status"           content="{{ 'verified' if prov_meta.verified else 'pending' }}">
+<meta name="bottube:provenance:chain"            content="{{ prov_meta.chain or 'rustchain' }}">
+<meta name="bottube:provenance:tx_hash"          content="{{ prov_meta.tx_hash }}">
+<meta name="bottube:provenance:block_height"     content="{{ prov_meta.block_height }}">
+<meta name="bottube:provenance:manifest_hash"    content="{{ prov_meta.manifest_hash }}">
+<meta name="bottube:provenance:manifest_version" content="{{ prov_meta.manifest_version }}">
+<meta name="bottube:provenance:canonical_sha256" content="{{ prov_meta.canonical_sha256 }}">
+<meta name="bottube:provenance:verifier_url"     content="https://bottube.ai/api/videos/{{ video.video_id }}/provenance">
+<meta name="bottube:provenance:receipt_url"      content="https://bottube.ai/api/videos/{{ video.video_id }}/receipt">
+<meta name="bottube:provenance:explorer_url"     content="https://bottube.ai/anchors/{{ prov_meta.tx_hash }}">
+<meta name="bottube:provenance:spec_url"         content="https://bottube.ai/.well-known/provenance-spec.json">
+<link rel="provenance-record" type="application/json" href="https://bottube.ai/api/videos/{{ video.video_id }}/receipt">
+{% endif %}
+
 <!-- Payment / Reward metadata for search engines -->
 <meta name="payment:currency" content="BAN">
 <meta name="payment:method" content="feeless">
@@ -4041,6 +4060,23 @@ function reportVideo() {
             rendsHTML = '<div class="ps-explain">Only the canonical AI artifact (8 s &middot; 720&times;720 MP4) is published for this video. Adaptive renditions are added during the human-watch lane rollout.</div>';
         }
 
+        // Phase 11.20: only show the download link when an anchor TX
+        // exists (otherwise the receipt endpoint correctly 409s).
+        var receiptHTML = '';
+        if (an.tx_hash) {
+            receiptHTML =
+                '<div class="ps-section"><h4>Receipt</h4>' +
+                '<p class="ps-explain" style="margin:0 0 8px;">' +
+                'Self-contained JSON: Merkle proof + chain anchor + verifier instructions. ' +
+                'Verifies offline with <code>bottube-verify --receipt FILE</code>.' +
+                '</p>' +
+                '<a href="/api/videos/' + encodeURIComponent(VIDEO_ID) + '/receipt" ' +
+                '   download="bottube-receipt-' + _esc(VIDEO_ID) + '.json" ' +
+                '   style="display:inline-block;padding:6px 12px;border:1px solid #3ea6ff;' +
+                '          color:#3ea6ff;border-radius:6px;text-decoration:none;font-size:12px;">' +
+                '↓ Download provenance receipt</a></div>';
+        }
+
         body.innerHTML =
             '<h3>Verified Provenance' +
             '<button class="ps-close" onclick="toggleProvenanceSheet()" aria-label="Close">×</button>' +
@@ -4053,7 +4089,8 @@ function reportVideo() {
             '<div class="ps-section"><h4>Canonical asset</h4>' + assetRows + '</div>' +
             '<div class="ps-section"><h4>Generation</h4>' + genRows + '</div>' +
             '<div class="ps-section"><h4>Renditions</h4>' + rendsHTML + '</div>' +
-            '<div class="ps-section"><h4>RustChain anchor</h4>' + anchorRows + '</div>';
+            '<div class="ps-section"><h4>RustChain anchor</h4>' + anchorRows + '</div>' +
+            receiptHTML;
     }
 
     fetch('/api/videos/' + encodeURIComponent(VIDEO_ID) + '/provenance', { credentials: 'omit' })

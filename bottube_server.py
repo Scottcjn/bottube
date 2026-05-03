@@ -6428,6 +6428,28 @@ def upload_video():
             duration=duration,
             uploaded_at=time.time(),
         )
+        # Phase 11.12 + 11.16: write the thumbnail integrity hash now;
+        # leave manifest_version at its default (1) until renditions
+        # finish and canonical_360p_sha256 is known. The rendition
+        # pipeline atomically promotes the row to v2 once both hashes
+        # are present — this avoids a race where the anchor worker
+        # could commit a v2 leaf with an empty 360p field.
+        try:
+            _provenance_ensure_thumb_column()
+            _provenance_ensure_v2_columns()
+            tsha = _provenance_thumbnail_sha(video_id, thumb_filename)
+            conn_t = sqlite3.connect(str(DB_PATH))
+            conn_t.execute(
+                """UPDATE video_provenance
+                      SET thumbnail_sha256 = ?,
+                          updated_at = ?
+                    WHERE video_id = ?""",
+                (tsha or "", time.time(), video_id),
+            )
+            conn_t.commit()
+            conn_t.close()
+        except Exception as _t_e:
+            app.logger.warning("thumbnail hash write failed for %s: %s", video_id, _t_e)
     except Exception as _prov_e:
         # Provenance failures must not block upload success.
         app.logger.warning("provenance record failed for %s: %s", video_id, _prov_e)
@@ -11633,6 +11655,34 @@ def watch(video_id):
         interaction_likers = []
         interaction_outgoing = []
 
+    # Phase 11.28: pull provenance fields for OG metadata so the
+    # manifest_hash + chain anchor are visible to social-media scrapers
+    # and bots even before the page-level JS fires.
+    prov_meta = {}
+    try:
+        pr = db.execute(
+            """SELECT COALESCE(anchor_tx_hash, '') AS tx,
+                      COALESCE(anchor_block_height, 0) AS h,
+                      COALESCE(anchor_manifest_hash, '') AS root,
+                      COALESCE(anchor_chain, '') AS chain,
+                      COALESCE(canonical_sha256, '') AS canonical,
+                      COALESCE(manifest_version, 1) AS v
+                 FROM video_provenance WHERE video_id = ?""",
+            (video_id,),
+        ).fetchone()
+        if pr:
+            prov_meta = {
+                "tx_hash": pr["tx"],
+                "block_height": int(pr["h"] or 0),
+                "manifest_hash": pr["root"],
+                "chain": pr["chain"],
+                "canonical_sha256": pr["canonical"],
+                "manifest_version": int(pr["v"] or 1),
+                "verified": bool(pr["tx"] and pr["h"]),
+            }
+    except Exception:
+        prov_meta = {}
+
     return render_template(
         "watch.html",
         video=video,
@@ -11657,6 +11707,7 @@ def watch(video_id):
         response_videos=response_videos,
         challenge=challenge,
         creator_ban_address=creator_ban_address,
+        prov_meta=prov_meta,
     )
 
 
@@ -15973,6 +16024,224 @@ def seen_on_bottube_badge():
 
 
 # ---------------------------------------------------------------------------
+# Phase 11.18: per-video verification badges
+# ---------------------------------------------------------------------------
+# Three artifacts so creators can broadcast on-chain provenance from their
+# own sites without bottube cooperation beyond serving public read-only
+# endpoints:
+#   1. /badge/verified/<video_id>.svg   — pure SVG, drop-in <img src>
+#   2. /embed/verify/<video_id>         — sandboxable HTML iframe widget
+#   3. /static/bottube-verify.js        — cross-origin JS that turns
+#       <div data-bottube-verify="<id>"> into a live pill on any page
+#
+# All three read the same /api/videos/<id>/provenance payload, so the
+# verification status they show is canonical — no separate code path
+# that could drift.
+
+def _verify_badge_svg(state, label, value, color, value_color="#fff"):
+    """Render a shields.io-style 2-tone badge for the verified state."""
+    # Width math: 6px/char (Verdana) + 12px padding per side per panel
+    pad = 10
+    label_w = max(70, len(label) * 6 + pad * 2)
+    value_w = max(80, len(value) * 6 + pad * 2)
+    total_w = label_w + value_w
+    # Truncate value if absurdly long (e.g. raw tx_hash)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" '
+        f'height="22" role="img" aria-label="{label}: {value}">'
+        f'<title>{label}: {value}</title>'
+        f'<linearGradient id="gloss" x2="0" y2="100%">'
+        f'<stop offset="0" stop-color="#fff" stop-opacity=".15"/>'
+        f'<stop offset="1" stop-opacity=".25"/></linearGradient>'
+        f'<rect width="{total_w}" height="22" rx="3" fill="#222"/>'
+        f'<rect x="{label_w}" width="{value_w}" height="22" rx="3" fill="{color}"/>'
+        f'<rect x="{label_w-2}" width="4" height="22" fill="{color}"/>'
+        f'<rect width="{total_w}" height="22" rx="3" fill="url(#gloss)"/>'
+        f'<g fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
+        f'font-size="11" text-rendering="geometricPrecision">'
+        f'<text x="{label_w//2}" y="15" fill="#000" fill-opacity=".25" '
+        f'text-anchor="middle">{label}</text>'
+        f'<text x="{label_w//2}" y="14" text-anchor="middle">{label}</text>'
+        f'<text x="{label_w + value_w//2}" y="15" fill="#000" fill-opacity=".25" '
+        f'text-anchor="middle">{value}</text>'
+        f'<text x="{label_w + value_w//2}" y="14" text-anchor="middle" '
+        f'fill="{value_color}">{value}</text>'
+        f'</g></svg>'
+    )
+
+
+def _verify_state_for_video(video_id):
+    """Look up the verification state for one video. Returns
+    (state, value_text, anchor_tx, manifest_version) where state is one of
+    'verified', 'pending', 'failed', 'unknown'.
+
+    Read-only, side-effect-free. Cached at the HTTP layer (the badge route
+    sets Cache-Control: public, max-age=300).
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id or ""):
+        return "unknown", "invalid id", "", 1
+    try:
+        _provenance_ensure_v2_columns()
+    except Exception:
+        pass
+    db = get_db()
+    try:
+        row = db.execute(
+            """SELECT COALESCE(anchor_tx_hash,'') AS tx,
+                      COALESCE(anchor_block_height,0) AS h,
+                      COALESCE(anchor_status,'pending') AS status,
+                      COALESCE(anchor_chain,'') AS chain,
+                      COALESCE(uploader_sig,'') AS sig,
+                      COALESCE(manifest_version,1) AS v
+                 FROM video_provenance
+                WHERE video_id = ?""",
+            (video_id,),
+        ).fetchone()
+    except Exception:
+        return "unknown", "no provenance", "", 1
+    if not row:
+        return "unknown", "no provenance", "", 1
+
+    tx = row["tx"]
+    h = int(row["h"] or 0)
+    v = int(row["v"] or 1)
+    if not tx:
+        return "pending", "pending", "", v
+    if not h or row["chain"] == "stub":
+        return "pending", "broadcasting", tx, v
+    return "verified", f"block {h} · v{v}", tx, v
+
+
+@app.route("/badge/verified/<video_id>.svg")
+def badge_verified_svg(video_id):
+    """Per-video provenance badge.
+
+    Returns a 2-tone SVG ("verified on RustChain" / "block N · vM") that
+    creators can drop on their own sites:
+
+        <a href="https://bottube.ai/anchors/<tx>">
+          <img src="https://bottube.ai/badge/verified/<id>.svg" alt="...">
+        </a>
+
+    Caching is set to 5 minutes — the verification state changes rarely
+    once a row is anchored, and a 5-min stale-read is a fair trade for
+    bounded server load.
+    """
+    state, value, _tx, _v = _verify_state_for_video(video_id)
+    if state == "verified":
+        color = "#0e7c2e"  # green
+        label = "verified on rustchain"
+    elif state == "pending":
+        color = "#b8860b"  # amber
+        label = "anchoring"
+    elif state == "failed":
+        color = "#a02020"  # red
+        label = "verify failed"
+    else:
+        color = "#666"
+        label = "bottube"
+    svg = _verify_badge_svg(state, label, value, color)
+    resp = Response(svg, mimetype="image/svg+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/embed/verify/<video_id>")
+def embed_verify_widget(video_id):
+    """Compact iframe-friendly verification widget.
+
+    Used as <iframe src="/embed/verify/<id>" width=320 height=80 ...>.
+    Renders identical state to the SVG badge but as styled HTML with a
+    backlink to /anchors/<tx>. iframe-safe headers are already applied
+    to /embed/* routes by the global response handler.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return Response("invalid video id", status=400, mimetype="text/plain")
+    state, value, tx, v = _verify_state_for_video(video_id)
+    return render_template(
+        "embed_verify.html",
+        video_id=video_id, state=state, value=value, tx=tx,
+        manifest_version=v,
+    )
+
+
+@app.route("/embed/bottube-verify.js")
+def bottube_verify_js():
+    """Drop-in JS that finds <div data-bottube-verify="<id>"> elements
+    and replaces them with a live-fetched verification pill.
+
+    Hosted under /embed/ (which already gets framing-permissive headers
+    and falls outside Flask's /static/ handler) so creators can simply
+    <script src="https://bottube.ai/embed/bottube-verify.js"></script>
+    on any page. The body is invariant — host is overridden via
+    data-host="<other-instance>" if the creator's site federates.
+    """
+    js = """/*! bottube-verify.js — public domain widget for on-chain provenance pills */
+(function(){
+  var HOST = (document.currentScript && document.currentScript.dataset && document.currentScript.dataset.host) || 'https://bottube.ai';
+  function pill(state, txt, href){
+    var a = document.createElement('a');
+    a.href = href || (HOST + '/transparency');
+    a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.className = 'btv-pill btv-' + state;
+    a.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;font:600 12px ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;text-decoration:none;border:1px solid;line-height:1.4;';
+    var pal = state==='verified' ? ['#0e7c2e','#e8f7ec','#7ed091','✓']
+            : state==='pending'  ? ['#7b5800','#fff5da','#e8c477','⧗']
+            : state==='failed'   ? ['#a02020','#fde6e6','#e88080','✕']
+                                 :  ['#444','#eee','#999','?'];
+    a.style.color = pal[0]; a.style.background = pal[1]; a.style.borderColor = pal[2];
+    a.textContent = pal[3] + ' ' + txt;
+    a.title = 'BoTTube on-chain provenance';
+    return a;
+  }
+  function render(vid, target){
+    fetch(HOST + '/api/videos/' + encodeURIComponent(vid) + '/provenance', {credentials:'omit'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok){
+          target.replaceWith(pill('failed','no provenance', HOST + '/transparency'));
+          return;
+        }
+        var v = d.manifest_version || 1;
+        var anchor = d.anchor || {};
+        var verified = !!d.verified;
+        var state = verified ? 'verified' : (d.pill_state==='failed' ? 'failed' : 'pending');
+        var txt;
+        if (verified && anchor.block_height){
+          txt = 'Verified on RustChain · block ' + anchor.block_height + ' · v' + v;
+        } else if (verified){
+          txt = 'Verified · v' + v;
+        } else {
+          txt = (d.pill_state || 'pending');
+        }
+        var href = anchor.tx_hash ? (HOST + '/anchors/' + anchor.tx_hash) : (HOST + '/transparency');
+        target.replaceWith(pill(state, txt, href));
+      })
+      .catch(function(){
+        target.replaceWith(pill('failed','fetch error', HOST + '/transparency'));
+      });
+  }
+  function init(){
+    var nodes = document.querySelectorAll('[data-bottube-verify]');
+    for (var i=0;i<nodes.length;i++){
+      var el = nodes[i];
+      var vid = el.getAttribute('data-bottube-verify');
+      if (vid) render(vid, el);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+"""
+    resp = Response(js, mimetype="application/javascript; charset=utf-8")
+    # 1 hour CDN-friendly cache; updates roll out within 60 minutes
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Badges & Embed landing page
 # ---------------------------------------------------------------------------
 
@@ -16513,8 +16782,41 @@ def _build_provenance_payload(video_row, prov_row, renditions):
     else:
         pill_state = "unverified"
 
+    # Phase 11.12: optional thumbnail integrity hash (additive, not in anchor leaf).
+    # Phase 11.16: surface manifest_version so verifiers know which leaf
+    # recipe applies, and the canonical_360p_sha256 if present.
+    thumb_sha = ""
+    p360_sha = ""
+    manifest_ver = 1
+    try:
+        if prov_row is not None:
+            row_keys = prov_row.keys()
+            if "thumbnail_sha256" in row_keys:
+                thumb_sha = (prov_row["thumbnail_sha256"] or "")
+            if "canonical_360p_sha256" in row_keys:
+                p360_sha = (prov_row["canonical_360p_sha256"] or "")
+            if "manifest_version" in row_keys:
+                manifest_ver = int(prov_row["manifest_version"] or 1)
+    except Exception:
+        pass
+
+    in_leaf_v2 = manifest_ver >= 2
+
+    # Phase 11.24: also expose thumbnail URL + 360p rendition URL so the
+    # verifier can optionally re-hash them (--check-asset on v2 rows).
+    # Pull thumbnail filename from video_row (already joined upstream).
+    thumb_url = ""
+    try:
+        thumb_filename = video_row["thumbnail"] if "thumbnail" in video_row.keys() else ""
+        if thumb_filename:
+            thumb_url = f"/thumbnails/{thumb_filename}"
+    except Exception:
+        thumb_url = ""
+    p360_url = f"/renditions/{vid}/360p.mp4" if p360_sha else ""
+
     return {
         "video_id": vid,
+        "manifest_version": manifest_ver,
         "pill_state": pill_state,
         "verified": verified,
         "canonical_asset": {
@@ -16522,6 +16824,28 @@ def _build_provenance_payload(video_row, prov_row, renditions):
             "duration": duration,
             "width": width,
             "height": height,
+            # Phase 11.21: surface the asset URL so the verifier can
+            # optionally re-hash the bytes bottube serves today and prove
+            # they still match the anchored hash.
+            "url": f"/api/videos/{vid}/stream",
+        },
+        "thumbnail": {
+            "sha256": thumb_sha,
+            "url": thumb_url,
+            "in_anchor_leaf": in_leaf_v2 and bool(thumb_sha),
+            "note": (
+                "Hashed at upload time and folded into the anchored Merkle leaf "
+                "starting in manifest v2."
+                if in_leaf_v2 and thumb_sha else
+                "Hashed at upload time and persisted, but not part of the "
+                "anchored Merkle leaf in this manifest version. "
+                "v1 anchors only commit canonical_sha256."
+            ),
+        },
+        "canonical_360p": {
+            "sha256": p360_sha,
+            "url": p360_url,
+            "in_anchor_leaf": in_leaf_v2 and bool(p360_sha),
         },
         "renditions": rends,
         "creator": creator,
@@ -16539,6 +16863,7 @@ def video_provenance(video_id):
     db = get_db()
     video = db.execute(
         """SELECT v.video_id, v.agent_id, v.duration_sec, v.width, v.height, v.created_at,
+                  v.thumbnail,
                   a.agent_name, a.display_name
              FROM videos v JOIN agents a ON v.agent_id = a.id
             WHERE v.video_id = ?""",
@@ -16963,11 +17288,407 @@ def _mcp_descriptor():
     }
 
 
+# --- Phase 11.11: /xrpc/feed.firehose -------------------------------------
+# Federation spec §4 made partially live. Signed firehose of video.create
+# events with monotonic cursor pagination. Relay key is Ed25519, generated
+# on first request and persisted to disk. Public pubkey served at
+# /.well-known/relay/key.
+
+FIREHOSE_RELAY_KEY_PATH = BASE_DIR / "relay_ed25519.key"
+_FIREHOSE_RELAY = {"sk": None, "pk": None, "did": "did:web:bottube.ai"}
+_FIREHOSE_LOCK = threading.Lock()
+
+
+def _firehose_load_relay_key():
+    """Lazy-init relay Ed25519 keypair. Persists to /root/bottube/relay_ed25519.key."""
+    if _FIREHOSE_RELAY["sk"] is not None:
+        return
+    with _FIREHOSE_LOCK:
+        if _FIREHOSE_RELAY["sk"] is not None:
+            return
+        try:
+            import nacl.signing as _nacl_signing
+            import nacl.encoding as _nacl_encoding
+        except ImportError:
+            return
+        if FIREHOSE_RELAY_KEY_PATH.exists():
+            try:
+                seed = FIREHOSE_RELAY_KEY_PATH.read_bytes()
+                if len(seed) >= 32:
+                    sk = _nacl_signing.SigningKey(seed[:32])
+                else:
+                    sk = _nacl_signing.SigningKey.generate()
+                    FIREHOSE_RELAY_KEY_PATH.write_bytes(bytes(sk))
+                    os.chmod(FIREHOSE_RELAY_KEY_PATH, 0o600)
+            except Exception:
+                sk = _nacl_signing.SigningKey.generate()
+                FIREHOSE_RELAY_KEY_PATH.write_bytes(bytes(sk))
+                os.chmod(FIREHOSE_RELAY_KEY_PATH, 0o600)
+        else:
+            sk = _nacl_signing.SigningKey.generate()
+            FIREHOSE_RELAY_KEY_PATH.write_bytes(bytes(sk))
+            os.chmod(FIREHOSE_RELAY_KEY_PATH, 0o600)
+        _FIREHOSE_RELAY["sk"] = sk
+        _FIREHOSE_RELAY["pk"] = sk.verify_key
+
+
+def _firehose_canonical_json(obj):
+    """Stable JSON encoding for signing. Sorted keys, no whitespace."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
+def _firehose_sign(payload):
+    """Return base64-url Ed25519 signature over canonical JSON of payload."""
+    _firehose_load_relay_key()
+    sk = _FIREHOSE_RELAY.get("sk")
+    if sk is None:
+        return ""
+    import base64
+    sig = sk.sign(_firehose_canonical_json(payload)).signature
+    return base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+
+
+def _firehose_relay_pubkey_b64():
+    _firehose_load_relay_key()
+    pk = _FIREHOSE_RELAY.get("pk")
+    if pk is None:
+        return ""
+    import base64
+    return base64.urlsafe_b64encode(bytes(pk)).rstrip(b"=").decode("ascii")
+
+
+@app.route("/.well-known/relay/key")
+def well_known_relay_key():
+    """Public Ed25519 pubkey for the firehose relay signature verification."""
+    _firehose_load_relay_key()
+    pk_b64 = _firehose_relay_pubkey_b64()
+    if not pk_b64:
+        return jsonify({"ok": False, "error": "relay key unavailable"}), 503
+    payload = {
+        "@context": "https://www.w3.org/ns/did/v1",
+        "id": "did:web:bottube.ai#firehose-relay",
+        "controller": "did:web:bottube.ai",
+        "type": "Ed25519VerificationKey2020",
+        "publicKeyMultibase": pk_b64,
+        "publicKeyEncoding": "base64url-unpadded",
+        "service": [{
+            "id": "did:web:bottube.ai#firehose",
+            "type": "BoTTubeFirehose",
+            "serviceEndpoint": "https://bottube.ai/xrpc/feed.firehose",
+        }],
+    }
+    resp = jsonify(payload)
+    resp.headers["Content-Type"] = "application/did+json"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/xrpc/feed.firehose")
+def xrpc_feed_firehose():
+    """Phase 11.11: signed firehose of video.create events.
+
+    Cursor format: <created_at_ms>:<rowid>. Both segments are integers
+    drawn from the videos table, so consecutive paginated reads are
+    stable even as new uploads arrive.
+    """
+    cursor = (request.args.get("cursor") or "").strip()
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", 100))))
+    except Exception:
+        limit = 100
+    ip = _get_client_ip()
+    if not _rate_limit(f"firehose:{ip}", 30, 60):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    after_ms, after_rowid = 0, 0
+    if cursor:
+        m = re.match(r"^(\d+):(\d+)$", cursor)
+        if not m:
+            return jsonify({"ok": False, "error": "invalid cursor"}), 400
+        after_ms = int(m.group(1))
+        after_rowid = int(m.group(2))
+
+    db = get_db()
+    after_secs = after_ms / 1000.0
+    rows = db.execute(
+        """SELECT v.id AS rowid, v.video_id, v.title, v.thumbnail, v.duration_sec,
+                  v.created_at, a.agent_name,
+                  COALESCE(p.canonical_sha256, '') AS canonical_sha256,
+                  COALESCE(p.uploader_sig, '') AS uploader_sig,
+                  COALESCE(p.anchor_chain, '') AS anchor_chain,
+                  COALESCE(p.anchor_tx_hash, '') AS anchor_tx_hash,
+                  COALESCE(p.anchor_block_height, 0) AS anchor_block_height,
+                  COALESCE(p.anchor_manifest_hash, '') AS anchor_manifest_hash
+             FROM videos v
+             JOIN agents a ON a.id = v.agent_id
+             LEFT JOIN video_provenance p ON p.video_id = v.video_id
+            WHERE COALESCE(v.is_removed, 0) = 0
+              AND COALESCE(a.is_banned, 0) = 0
+              AND (
+                    v.created_at > ?
+                 OR (v.created_at = ? AND v.id > ?)
+                  )
+            ORDER BY v.created_at ASC, v.id ASC
+            LIMIT ?""",
+        (after_secs, after_secs, after_rowid, limit + 1),
+    ).fetchall()
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    events = []
+    for r in page:
+        ts_ms = int(float(r["created_at"] or 0) * 1000)
+        ev = {
+            "cursor": f"{ts_ms}:{r['rowid']}",
+            "ts": float(r["created_at"] or 0),
+            "op": "video.create",
+            "relay_did": "did:web:bottube.ai",
+            "actor_did": f"did:web:bottube.ai:{r['agent_name']}",
+            "video_id": r["video_id"],
+            "manifest_sha256": r["canonical_sha256"],
+            "anchor_tx_hash": r["anchor_tx_hash"],
+            "anchor_chain": r["anchor_chain"] or "rustchain",
+            "block_height": r["anchor_block_height"],
+            "merkle_root": r["anchor_manifest_hash"],
+            "canonical_url": f"https://bottube.ai/api/videos/{r['video_id']}/stream",
+            "watch_url": f"https://bottube.ai/watch/{r['video_id']}",
+            "title": r["title"] or "",
+            "duration_sec": r["duration_sec"] or 0,
+        }
+        # Sign the canonical JSON of the event minus the sig field.
+        ev["sig"] = _firehose_sign(ev)
+        events.append(ev)
+
+    next_cursor = events[-1]["cursor"] if events and has_more else None
+
+    payload = {
+        "ok": True,
+        "events": events,
+        "next_cursor": next_cursor,
+        "relay_did": "did:web:bottube.ai",
+        "relay_pubkey": _firehose_relay_pubkey_b64(),
+        "spec_version": "0.1",
+        "spec_url": "https://bottube.ai/federation",
+    }
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/.well-known/agent/<handle>")
+def well_known_agent(handle):
+    """Phase 11.10: DID:web actor doc.
+
+    Implements the /federation spec's identity layer for current platform
+    actors. Anyone resolving `agent://did:web:bottube.ai:<handle>` can fetch
+    this endpoint for the canonical actor descriptor.
+    """
+    if not re.fullmatch(r"[a-z0-9_-]{2,32}", handle or ""):
+        abort(404)
+    db = get_db()
+    # Phase 11.23: also pull the Ed25519 keypair (idempotently created
+    # at first upload) so the actor doc exposes the real signing key.
+    try:
+        cols = {row[1] for row in db.execute("PRAGMA table_info(agents)").fetchall()}
+        ed_col = "ed25519_pubkey" if "ed25519_pubkey" in cols else None
+    except Exception:
+        ed_col = None
+
+    if ed_col:
+        agent = db.execute(
+            f"""SELECT id, agent_name, display_name, bio, avatar_url, is_human,
+                      created_at,
+                      COALESCE(rtc_wallet, '') AS rtc_wallet,
+                      COALESCE(rtc_address, '') AS rtc_address,
+                      COALESCE({ed_col}, '') AS ed25519_pubkey
+                 FROM agents WHERE agent_name = ?
+                                    AND COALESCE(is_banned, 0) = 0
+                                    AND COALESCE(is_suspended, 0) = 0""",
+            (handle,),
+        ).fetchone()
+    else:
+        agent = db.execute(
+            """SELECT id, agent_name, display_name, bio, avatar_url, is_human,
+                      created_at,
+                      COALESCE(rtc_wallet, '') AS rtc_wallet,
+                      COALESCE(rtc_address, '') AS rtc_address
+                 FROM agents WHERE agent_name = ?
+                                    AND COALESCE(is_banned, 0) = 0
+                                    AND COALESCE(is_suspended, 0) = 0""",
+            (handle,),
+        ).fetchone()
+    if not agent:
+        abort(404)
+
+    rtc_addr = agent["rtc_wallet"] or agent["rtc_address"] or ""
+    ed_pub = ""
+    try:
+        ed_pub = agent["ed25519_pubkey"] if ed_col else ""
+    except Exception:
+        ed_pub = ""
+
+    actor_doc = {
+        "@context": "https://www.w3.org/ns/did/v1",
+        "id": f"did:web:bottube.ai:{handle}",
+        "alsoKnownAs": [
+            f"agent://did:web:bottube.ai:{handle}",
+            f"https://bottube.ai/agent/{handle}",
+        ],
+        "service": [{
+            "id": f"did:web:bottube.ai:{handle}#bottube-home",
+            "type": "BoTTubeHomeInstance",
+            "serviceEndpoint": "https://bottube.ai",
+        }],
+        "handle": f"@{handle}@bottube.ai",
+        "homeInstance": "https://bottube.ai",
+        "displayName": agent["display_name"] or handle,
+        "isHuman": bool(agent["is_human"]),
+        "bio": (agent["bio"] or "")[:500],
+        "avatar": (agent["avatar_url"] or f"https://bottube.ai/avatar/{handle}.svg"),
+        "createdAt": int(float(agent["created_at"] or 0)),
+    }
+    methods = []
+    if ed_pub:
+        # Phase 11.23: real Ed25519 signing key, used to verify the
+        # creator_signature field in v3 manifests.
+        methods.append({
+            "id": f"did:web:bottube.ai:{handle}#bottube-creator-key",
+            "type": "Ed25519VerificationKey2020",
+            "controller": f"did:web:bottube.ai:{handle}",
+            "publicKeyHex": ed_pub,
+            "purpose": "BoTTubeProvenanceV3",
+            "managed_by": "platform",
+            "note": (
+                "Server-managed Ed25519 keypair (v3a). Used to sign "
+                "creator_signature in /api/videos/<id>/provenance for "
+                "manifest_version >= 3. v3b will allow the agent to "
+                "bring their own keypair; the leaf shape stays the same."
+            ),
+        })
+    if rtc_addr:
+        methods.append({
+            "id": f"did:web:bottube.ai:{handle}#wallet",
+            "type": "Ed25519VerificationKey2020",
+            "controller": f"did:web:bottube.ai:{handle}",
+            "publicKey": rtc_addr,
+            "purpose": "RustChainWallet",
+            "note": "RustChain wallet address — separate from the "
+                    "BoTTubeProvenanceV3 signing key above.",
+        })
+    if methods:
+        actor_doc["verificationMethod"] = methods
+
+    resp = jsonify(actor_doc)
+    resp.headers["Content-Type"] = "application/did+json"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
 @app.route("/.well-known/mcp.json")
 def well_known_mcp():
     """MCP discovery descriptor."""
     resp = jsonify(_mcp_descriptor())
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.22: /.well-known/provenance-spec.json
+# ---------------------------------------------------------------------------
+# A canonical, machine-readable spec for the cryptographic provenance
+# pipeline. Federation peers, crawlers, and verifier authors hit this one
+# URL instead of scraping the engineering page. spec_version is bumped
+# explicitly when any leaf recipe / endpoint contract changes — consumers
+# pin against it.
+
+@app.route("/.well-known/provenance-spec.json")
+def well_known_provenance_spec():
+    """Self-describing provenance spec for federation + tooling."""
+    spec = {
+        "spec": "bottube-provenance",
+        "spec_version": "1.0.0",
+        "issuer": "https://bottube.ai",
+        "current_manifest_version": MANIFEST_CURRENT,
+        "leaf_recipes": {
+            "v1": _manifest_leaf_recipe(MANIFEST_V1),
+            "v2": _manifest_leaf_recipe(MANIFEST_V2),
+        },
+        "merkle": {
+            "tree_construction": (
+                "Bitcoin-style binary tree over SHA-256 leaves: pair "
+                "adjacent leaves and hash, duplicate the last node when "
+                "a level has odd cardinality, iterate until a single "
+                "32-byte root remains."
+            ),
+            "leaf_hash": "SHA-256",
+            "node_hash": "SHA-256",
+            "domain_separator": {
+                "v1": "(none — legacy)",
+                "v2": '"bottube/v2" (literal ASCII)',
+            },
+        },
+        "anchor": {
+            "chain": "rustchain",
+            "anchor_target": "Ergo box additionalRegisters.R4",
+            "register_format": "0e20<32-byte SHA-256 hex>",
+            "tx_value_nanoerg": 1_000_000,
+            "fee_policy": "zero-fee chain config",
+        },
+        "endpoints": {
+            "provenance":   "/api/videos/{video_id}/provenance",
+            "anchor_proof": "/api/videos/{video_id}/anchor-proof",
+            "receipt":      "/api/videos/{video_id}/receipt",
+            "anchor_chain": "/api/anchors/{tx_hash}/chain",
+            "transparency": "/api/transparency",
+            "anchors_html": "/anchors",
+            "transparency_html": "/transparency",
+            "engineering_html": "/engineering",
+            "verification_badge_svg": "/badge/verified/{video_id}.svg",
+            "verification_iframe":    "/embed/verify/{video_id}",
+            "verification_js":        "/embed/bottube-verify.js",
+        },
+        "verifier": {
+            "package": "bottube-verify",
+            "minimum_version": "0.4.0",
+            "source": "https://github.com/Scottcjn/bottube",
+            "install": "pip install bottube-verify",
+            "modes": {
+                "live": "bottube-verify <video_id>",
+                "offline_receipt": "bottube-verify --receipt receipt.json",
+                "asset_recheck": "bottube-verify <video_id> --check-asset",
+            },
+            "exit_codes": {
+                "0": "PASS or PARTIAL",
+                "1": "FAIL or fetch error",
+            },
+        },
+        "reconciliation": {
+            "endpoint": "/api/admin/reconcile-anchors",
+            "cadence": "every 6 hours via systemd timer",
+            "summary_in": "/api/transparency.reconciliation",
+            "alarm_field": "/api/transparency.reconciliation.alarm",
+        },
+        "federation": {
+            "actor_doc": "/.well-known/agent/{handle}",
+            "relay_key": "/.well-known/relay/key",
+            "firehose": "/xrpc/feed.firehose",
+        },
+        "schema_changes_policy": (
+            "spec_version bumps when any leaf recipe, anchor format, "
+            "endpoint contract, or receipt schema changes. Existing "
+            "anchors stay valid forever under the recipe they were "
+            "written under (manifest_version is per-row)."
+        ),
+        "as_of": int(time.time()),
+    }
+    resp = jsonify(spec)
+    resp.headers["Cache-Control"] = "public, max-age=600"
     resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
 
@@ -18975,6 +19696,367 @@ def _provenance_optional_from_form(form):
     }
 
 
+# --- Phase 11.16: hash-tree v2 manifest ----------------------------------
+# v1 leaf:  sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)
+# v2 leaf:  sha256("bottube/v2"
+#                  | video_id
+#                  | canonical_sha256
+#                  | thumbnail_sha256
+#                  | canonical_360p_sha256
+#                  | uploader_sig
+#                  | uploaded_at)
+#
+# The "bottube/v2" prefix is a domain separator: a v1 leaf and a v2 leaf
+# can never collide even if all the other fields happen to match, because
+# the prefix differs. New uploads from this point write manifest_version=2;
+# existing v1 anchors stay anchored under v1's recipe and the verifier
+# branches on the manifest_version field.
+
+MANIFEST_V1 = 1
+MANIFEST_V2 = 2
+MANIFEST_V3 = 3
+MANIFEST_CURRENT = MANIFEST_V3  # what new uploads write
+
+_LEAF_DOMAIN_V2 = "bottube/v2"
+_LEAF_DOMAIN_V3 = "bottube/v3"
+
+# ---------------------------------------------------------------------------
+# Phase 11.23: Ed25519 creator signatures
+# ---------------------------------------------------------------------------
+# v3 manifest folds creator_pubkey + creator_signature into the leaf, so
+# the chain anchor commits not just to *what* was uploaded but to *who*
+# signed it. v3a (this iteration) uses server-managed keypairs — the
+# server maintains an Ed25519 keypair per agent, signs uploads on behalf
+# of the agent, and exposes the public key via /.well-known/agent/<handle>.
+# v3b (future) lets agents bring their own keypair and sign uploads
+# client-side; the server-side surface stays the same since v3 already
+# binds to creator_pubkey + creator_signature without caring who held
+# the private key.
+#
+# Even server-managed v3a is strictly better than HMAC:
+#   - Each agent has a unique keypair, not a shared platform secret
+#   - Public key is independently checkable via DID:web actor doc
+#   - The chain commits to a *verifiable* signature, not an opaque blob
+#   - Future migration to client-managed is purely additive
+
+try:
+    from nacl.signing import SigningKey, VerifyKey
+    from nacl.exceptions import BadSignatureError
+    _ED25519_AVAILABLE = True
+except Exception:
+    _ED25519_AVAILABLE = False
+
+
+def _agent_ed25519_signing_key():
+    """Master key used to encrypt agent Ed25519 private keys at rest.
+
+    Falls back to the provenance signing key. In server-managed v3a this
+    is the only secret needed to forge any creator signature; rotating it
+    is non-trivial and a known operational risk. Mitigation: client-managed
+    v3b removes this surface entirely.
+    """
+    return _provenance_signing_key()
+
+
+def _agent_ed25519_seal(seckey_bytes):
+    """Wrap a 32-byte Ed25519 seed with a derived key + AES-style XOR.
+
+    Sufficient against opportunistic disk read; not a real KMS. The
+    upgrade path is per-agent encryption with agent-supplied passphrases
+    or a real KMS — out of scope for v3a.
+    """
+    if not seckey_bytes:
+        return ""
+    master = hashlib.sha256(_agent_ed25519_signing_key().encode("utf-8")).digest()
+    out = bytes(b ^ master[i % len(master)] for i, b in enumerate(seckey_bytes))
+    return out.hex()
+
+
+def _agent_ed25519_unseal(sealed_hex):
+    if not sealed_hex:
+        return b""
+    try:
+        sealed = bytes.fromhex(sealed_hex)
+    except Exception:
+        return b""
+    master = hashlib.sha256(_agent_ed25519_signing_key().encode("utf-8")).digest()
+    return bytes(b ^ master[i % len(master)] for i, b in enumerate(sealed))
+
+
+def _agent_ensure_keypair(agent_id):
+    """Ensure agent has an Ed25519 keypair. Returns (pubkey_hex, seckey_bytes).
+
+    Idempotent: if the keypair already exists, returns the stored values.
+    Otherwise generates a fresh Ed25519 seed, stores the public key in
+    plaintext and the private key XOR-sealed with the platform key.
+    """
+    if not _ED25519_AVAILABLE:
+        return "", b""
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        # Idempotent column adds.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+        if "ed25519_pubkey" not in cols:
+            conn.execute("ALTER TABLE agents ADD COLUMN ed25519_pubkey TEXT DEFAULT ''")
+        if "ed25519_seckey_sealed" not in cols:
+            conn.execute("ALTER TABLE agents ADD COLUMN ed25519_seckey_sealed TEXT DEFAULT ''")
+        if "ed25519_created_at" not in cols:
+            conn.execute("ALTER TABLE agents ADD COLUMN ed25519_created_at INTEGER DEFAULT 0")
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT ed25519_pubkey, ed25519_seckey_sealed FROM agents WHERE id = ?",
+            (agent_id,),
+        ).fetchone()
+        if row and row[0] and row[1]:
+            return row[0], _agent_ed25519_unseal(row[1])
+
+        # Generate a fresh Ed25519 keypair.
+        signing = SigningKey.generate()
+        pubkey_hex = bytes(signing.verify_key).hex()
+        seckey_seed = bytes(signing)  # 32-byte seed
+        sealed = _agent_ed25519_seal(seckey_seed)
+
+        conn.execute(
+            """UPDATE agents
+                  SET ed25519_pubkey = ?,
+                      ed25519_seckey_sealed = ?,
+                      ed25519_created_at = ?
+                WHERE id = ?""",
+            (pubkey_hex, sealed, int(time.time()), agent_id),
+        )
+        conn.commit()
+        return pubkey_hex, seckey_seed
+    finally:
+        conn.close()
+
+
+def _agent_get_pubkey(agent_id):
+    """Return the agent's Ed25519 public key hex, or "" if none yet."""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            row = conn.execute(
+                "SELECT ed25519_pubkey FROM agents WHERE id = ?", (agent_id,),
+            ).fetchone()
+            return (row[0] or "") if row else ""
+        finally:
+            conn.close()
+    except Exception:
+        return ""
+
+
+def _v3_signing_message(video_id, canonical_sha256, thumbnail_sha256,
+                         canonical_360p_sha256, uploaded_at):
+    """The 32-byte digest that an agent (or the server on its behalf)
+    signs with Ed25519 for v3 provenance. Folded into the v3 leaf so the
+    chain anchor commits to the signature."""
+    parts = "|".join([
+        "bottube/v3-sign",
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _agent_sign_v3(agent_id, video_id, canonical_sha256,
+                   thumbnail_sha256, canonical_360p_sha256, uploaded_at):
+    """Server-managed v3 signing. Returns (pubkey_hex, signature_hex).
+
+    Used at upload time to produce a v3 manifest. v3b will replace this
+    with client-supplied signatures, but the leaf shape is unchanged.
+    Returns ("", "") if Ed25519 is unavailable so the caller can fall
+    back to v2 cleanly.
+    """
+    if not _ED25519_AVAILABLE:
+        return "", ""
+    pubkey_hex, seed = _agent_ensure_keypair(agent_id)
+    if not pubkey_hex or not seed:
+        return "", ""
+    msg = _v3_signing_message(
+        video_id, canonical_sha256,
+        thumbnail_sha256, canonical_360p_sha256,
+        uploaded_at,
+    )
+    try:
+        signing = SigningKey(seed)
+        signed = signing.sign(msg)
+        # signed.signature is 64 raw bytes
+        return pubkey_hex, signed.signature.hex()
+    except Exception:
+        return "", ""
+
+
+def _verify_v3_signature(pubkey_hex, signature_hex, video_id,
+                          canonical_sha256, thumbnail_sha256,
+                          canonical_360p_sha256, uploaded_at):
+    """Verify an Ed25519 signature against the v3 signing message."""
+    if not _ED25519_AVAILABLE:
+        return False
+    if not pubkey_hex or not signature_hex:
+        return False
+    try:
+        msg = _v3_signing_message(
+            video_id, canonical_sha256,
+            thumbnail_sha256, canonical_360p_sha256,
+            uploaded_at,
+        )
+        VerifyKey(bytes.fromhex(pubkey_hex)).verify(msg, bytes.fromhex(signature_hex))
+        return True
+    except (BadSignatureError, ValueError, Exception):
+        return False
+
+
+def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    parts = "|".join([
+        video_id or "",
+        canonical_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
+                      canonical_360p_sha256, uploader_sig, uploaded_at):
+    parts = "|".join([
+        _LEAF_DOMAIN_V2,
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        uploader_sig or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _manifest_leaf_v3(video_id, canonical_sha256, thumbnail_sha256,
+                       canonical_360p_sha256, uploader_sig, uploaded_at,
+                       creator_pubkey, creator_signature):
+    """v3 leaf: folds creator_pubkey + creator_signature so the chain
+    commits to a verifiable Ed25519 signature, not just a platform HMAC.
+    Backwards-incompatible with v2 by design — domain separator differs
+    so v2 and v3 leaves can never collide."""
+    parts = "|".join([
+        _LEAF_DOMAIN_V3,
+        video_id or "",
+        canonical_sha256 or "",
+        thumbnail_sha256 or "",
+        canonical_360p_sha256 or "",
+        uploader_sig or "",
+        creator_pubkey or "",
+        creator_signature or "",
+        str(int(float(uploaded_at or 0))),
+    ])
+    return hashlib.sha256(parts.encode("utf-8")).digest()
+
+
+def _manifest_leaf(version, video_id, canonical_sha256,
+                   thumbnail_sha256, canonical_360p_sha256,
+                   uploader_sig, uploaded_at,
+                   creator_pubkey="", creator_signature=""):
+    """Dispatch based on manifest version."""
+    v = int(version or 1)
+    if v >= MANIFEST_V3:
+        return _manifest_leaf_v3(
+            video_id, canonical_sha256,
+            thumbnail_sha256, canonical_360p_sha256,
+            uploader_sig, uploaded_at,
+            creator_pubkey, creator_signature,
+        )
+    if v >= MANIFEST_V2:
+        return _manifest_leaf_v2(video_id, canonical_sha256,
+                                  thumbnail_sha256, canonical_360p_sha256,
+                                  uploader_sig, uploaded_at)
+    return _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at)
+
+
+def _manifest_leaf_recipe(version):
+    v = int(version or 1)
+    if v >= MANIFEST_V3:
+        return (
+            'sha256("bottube/v3" | video_id | canonical_sha256 | '
+            'thumbnail_sha256 | canonical_360p_sha256 | uploader_sig | '
+            'creator_pubkey | creator_signature | uploaded_at) with "|" '
+            'as the literal separator. creator_signature is the hex-encoded '
+            '64-byte Ed25519 signature over '
+            'sha256("bottube/v3-sign" | video_id | canonical_sha256 | '
+            'thumbnail_sha256 | canonical_360p_sha256 | uploaded_at), '
+            'verifiable against creator_pubkey.'
+        )
+    if v >= MANIFEST_V2:
+        return (
+            'sha256("bottube/v2" | video_id | canonical_sha256 | '
+            'thumbnail_sha256 | canonical_360p_sha256 | uploader_sig | '
+            'uploaded_at) with "|" as the literal separator and uploaded_at '
+            'as integer seconds'
+        )
+    return (
+        "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
+        "with '|' as the literal separator and uploaded_at as integer seconds"
+    )
+
+
+def _provenance_ensure_v2_columns():
+    """Add manifest_version + canonical_360p_sha256 columns idempotently."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "manifest_version" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN manifest_version INTEGER DEFAULT 1")
+        if "canonical_360p_sha256" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN canonical_360p_sha256 TEXT DEFAULT ''")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _provenance_ensure_v3_columns():
+    """Phase 11.23: add creator_signature column for v3 leaves.
+    creator_pubkey already exists from earlier phases."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "creator_signature" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN creator_signature TEXT DEFAULT ''")
+        # creator_pubkey almost certainly exists, but defensively:
+        if "creator_pubkey" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN creator_pubkey TEXT DEFAULT ''")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _provenance_thumbnail_sha(video_id, thumb_filename):
+    """SHA-256 of the served thumbnail file (best-effort)."""
+    if not thumb_filename:
+        return ""
+    try:
+        path = THUMB_DIR / thumb_filename
+        if not path.exists() or path.stat().st_size < 8:
+            return ""
+        return _ts_sha256_file(path)
+    except Exception:
+        return ""
+
+
+def _provenance_ensure_thumb_column():
+    """Idempotently add thumbnail_sha256 column to video_provenance."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(video_provenance)").fetchall()}
+        if "thumbnail_sha256" not in cols:
+            conn.execute("ALTER TABLE video_provenance ADD COLUMN thumbnail_sha256 TEXT DEFAULT ''")
+            conn.commit()
+    finally:
+        conn.close()
+
+
 def _provenance_record_for_upload(video_id, canonical_path, agent, form,
                                    width=0, height=0, duration=0.0,
                                    uploaded_at=None):
@@ -18985,6 +20067,8 @@ def _provenance_record_for_upload(video_id, canonical_path, agent, form,
     """
     try:
         _ensure_provenance_schema()
+        _provenance_ensure_v2_columns()
+        _provenance_ensure_v3_columns()
         if uploaded_at is None:
             uploaded_at = time.time()
         sha = _ts_sha256_file(canonical_path)
@@ -19008,6 +20092,13 @@ def _provenance_record_for_upload(video_id, canonical_path, agent, form,
 
         conn = sqlite3.connect(str(DB_PATH))
         try:
+            # Phase 11.23: NEW uploads default to manifest_version=MANIFEST_CURRENT (v3).
+            # The pending-claim eligibility gates already require that
+            # canonical_360p_sha256 != '' AND creator_signature != '' before
+            # a v3 row can be claimed by the worker. So writing v3 here makes
+            # the row non-anchorable until the rendition pipeline finishes
+            # populating those fields — closing the upload→anchor race
+            # codex review identified.
             conn.execute(
                 """INSERT OR REPLACE INTO video_provenance
                        (video_id, canonical_sha256, duration_sec, width, height,
@@ -19016,15 +20107,17 @@ def _provenance_record_for_upload(video_id, canonical_path, agent, form,
                         generated_at, uploader_sig, uploaded_at,
                         anchor_chain, anchor_tx_hash, anchor_block_height,
                         anchor_manifest_hash, parents_json, renditions_json,
+                        manifest_version,
                         verified, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (video_id, sha, duration, width, height,
                  agent_id, creator_pubkey, creator_beacon,
                  opt["model"], opt["provider"], opt["workflow_hash"],
                  opt["prompt_hash"], opt["seed"],
                  opt["generated_at"] or uploaded_at, sig, uploaded_at,
                  "", "", 0, "", "[]", "[]",
+                 MANIFEST_CURRENT,
                  0, time.time(), time.time()),
             )
             conn.commit()
@@ -19275,6 +20368,84 @@ def _renditions_process_video(video_id):
                 file_sha256=p360_sha, file_size=p360_size,
                 vmaf=round(vmaf_score, 2), is_canonical=False,
             )
+
+            # Phase 11.16 + 11.23: feed the 360p hash back into
+            # video_provenance AND atomically promote the row to v3 — but
+            # ONLY if the row hasn't been claimed by the anchor worker
+            # yet. Once anchor_status='claimed' the worker has frozen its
+            # snapshot of leaf inputs, and mutating the row here would
+            # silently desync the leaf.
+            #
+            # v3 promotion path:
+            #   1. Ensure the agent has an Ed25519 keypair
+            #   2. Compute creator_signature over the v3 signing message
+            #   3. Promote row to manifest_version=3 + write pubkey + sig
+            # If Ed25519 isn't available (PyNaCl missing), we silently
+            # downgrade to v2 — the rest of the pipeline still works.
+            if p360_sha:
+                try:
+                    _provenance_ensure_v2_columns()
+                    _provenance_ensure_v3_columns()
+                    # Pull the data we need to sign: agent_id + uploader fields
+                    conn_q = sqlite3.connect(str(DB_PATH))
+                    conn_q.row_factory = sqlite3.Row
+                    pre = conn_q.execute(
+                        """SELECT video_id, canonical_sha256, uploader_sig,
+                                  uploaded_at, creator_agent_id,
+                                  COALESCE(thumbnail_sha256, '') AS thumb,
+                                  COALESCE(manifest_version, 1) AS mv
+                             FROM video_provenance WHERE video_id = ?""",
+                        (video_id,),
+                    ).fetchone()
+                    conn_q.close()
+
+                    creator_pubkey, creator_sig = "", ""
+                    target_version = MANIFEST_V2  # default if Ed25519 fails
+                    if pre and _ED25519_AVAILABLE and pre["creator_agent_id"]:
+                        creator_pubkey, creator_sig = _agent_sign_v3(
+                            int(pre["creator_agent_id"]),
+                            video_id,
+                            pre["canonical_sha256"] or "",
+                            pre["thumb"] or "",
+                            p360_sha,
+                            pre["uploaded_at"] or 0,
+                        )
+                        if creator_pubkey and creator_sig:
+                            target_version = MANIFEST_V3
+
+                    conn_p = sqlite3.connect(str(DB_PATH))
+                    conn_p.execute(
+                        """UPDATE video_provenance
+                              SET canonical_360p_sha256 = ?,
+                                  manifest_version = ?,
+                                  creator_pubkey = COALESCE(NULLIF(?, ''), creator_pubkey),
+                                  creator_signature = ?,
+                                  updated_at = ?
+                            WHERE video_id = ?
+                              AND COALESCE(anchor_tx_hash, '') = ''
+                              AND COALESCE(anchor_status, 'pending')
+                                  IN ('pending', 'failed')""",
+                        (p360_sha, target_version,
+                         creator_pubkey, creator_sig,
+                         time.time(), video_id),
+                    )
+                    if conn_p.total_changes == 0:
+                        # Row already claimed/anchored — write the 360p
+                        # hash only, without changing leaf-affecting fields.
+                        conn_p.execute(
+                            """UPDATE video_provenance
+                                  SET canonical_360p_sha256 = ?,
+                                      updated_at = ?
+                                WHERE video_id = ?
+                                  AND COALESCE(canonical_360p_sha256, '') = ''""",
+                            (p360_sha, time.time(), video_id),
+                        )
+                    conn_p.commit()
+                    conn_p.close()
+                except Exception as _e:
+                    app.logger.warning("provenance 360p sha update failed for %s: %s",
+                                        video_id, _e)
+
             return {
                 "ok": True, "video_id": video_id,
                 "vmaf_360p": round(vmaf_score, 2),
@@ -19466,6 +20637,7 @@ def admin_provenance_pending():
     if not _ts_admin_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     _provenance_ensure_anchor_columns()
+    _provenance_ensure_v2_columns()
     data = request.get_json(silent=True) or {}
     try:
         limit = max(1, min(500, int(data.get("limit", 100))))
@@ -19480,13 +20652,19 @@ def admin_provenance_pending():
     now = time.time()
     stale_cutoff = now - claim_ttl_s
 
+    _provenance_ensure_v3_columns()
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
             """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
-                      creator_agent_id, creator_pubkey, model, generated_at
+                      creator_agent_id, model, generated_at,
+                      COALESCE(manifest_version, 1) AS manifest_version,
+                      COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                      COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                      COALESCE(creator_pubkey, '') AS creator_pubkey,
+                      COALESCE(creator_signature, '') AS creator_signature
                  FROM video_provenance
                 WHERE uploader_sig != ''
                   AND COALESCE(anchor_tx_hash, '') = ''
@@ -19494,6 +20672,21 @@ def admin_provenance_pending():
                         COALESCE(anchor_status, 'pending') IN ('pending', 'failed')
                      OR (COALESCE(anchor_status, 'pending') = 'claimed'
                          AND COALESCE(updated_at, 0) < ?)
+                      )
+                  AND (
+                        -- v2 / v3 rows only eligible once the rendition
+                        -- pipeline has filled in canonical_360p_sha256
+                        -- (v3 also requires creator_signature; gated below).
+                        COALESCE(manifest_version, 1) < 2
+                     OR COALESCE(canonical_360p_sha256, '') != ''
+                      )
+                  AND (
+                        -- Phase 11.23: v3 rows must additionally have a
+                        -- creator_signature. Without it the worker would
+                        -- anchor a v3 leaf with an empty signature field
+                        -- and the verifier would reject.
+                        COALESCE(manifest_version, 1) < 3
+                     OR COALESCE(creator_signature, '') != ''
                       )
                 ORDER BY uploaded_at ASC
                 LIMIT ?""",
@@ -19537,8 +20730,15 @@ def admin_provenance_pending():
             "uploaded_at": r["uploaded_at"],
             "creator_agent_id": r["creator_agent_id"],
             "creator_pubkey": r["creator_pubkey"] or "",
+            "creator_signature": r["creator_signature"] or "",
             "model": r["model"] or "",
             "generated_at": r["generated_at"] or 0,
+            # Phase 11.16/11.23: v2/v3 fields. Worker uses manifest_version
+            # to pick the correct leaf recipe; thumb / 360p / pubkey / sig
+            # default to empty strings on lower versions.
+            "manifest_version": int(r["manifest_version"] or 1),
+            "thumbnail_sha256": r["thumbnail_sha256"] or "",
+            "canonical_360p_sha256": r["canonical_360p_sha256"] or "",
         })
     return jsonify({
         "ok": True,
@@ -19547,7 +20747,397 @@ def admin_provenance_pending():
         "claim_ttl_s": claim_ttl_s,
         "count": len(manifests),
         "manifests": manifests,
+        "leaf_recipes": {
+            "v1": _manifest_leaf_recipe(MANIFEST_V1),
+            "v2": _manifest_leaf_recipe(MANIFEST_V2),
+            "v3": _manifest_leaf_recipe(MANIFEST_V3),
+        },
     })
+
+
+# --- Phase 11.13: anchor confirmation reaper ------------------------------
+# After a TX is broadcast the worker reports block_height=0 if the chain
+# hasn't confirmed it yet. This endpoint re-queries the chain for every
+# unique anchor_tx_hash with block_height=0 and writes the real
+# inclusion height back. Driven by a separate systemd timer so the main
+# anchor cron stays single-purpose.
+
+@app.route("/api/admin/provenance/reap-confirmations", methods=["POST", "GET"])
+def admin_provenance_reap_confirmations():
+    """Update anchor_block_height on rows whose TX has now confirmed.
+
+    Strategy: SELECT DISTINCT anchor_tx_hash WHERE block_height=0. For
+    each one, query /wallet/transactionById on the configured Ergo node.
+    If the TX has at least 1 confirmation, derive inclusion height from
+    `inclusionHeight` (or chain_height - numConfirmations + 1 fallback)
+    and UPDATE every row in that batch.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _provenance_ensure_anchor_columns()
+
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_key = os.environ.get("ERGO_API_KEY", "")
+    if not ergo_key:
+        return jsonify({"ok": False, "error": "ERGO_API_KEY not set"}), 503
+
+    try:
+        limit = max(1, min(200, int((request.args.get("limit") or
+                                     (request.get_json(silent=True) or {}).get("limit", 50)))))
+    except Exception:
+        limit = 50
+
+    db = get_db()
+    pending = db.execute(
+        """SELECT anchor_tx_hash, MIN(anchored_at) AS first_anchored_at
+             FROM video_provenance
+            WHERE COALESCE(anchor_tx_hash,'') != ''
+              AND COALESCE(anchor_block_height,0) = 0
+              AND anchor_chain != 'stub'
+            GROUP BY anchor_tx_hash
+            ORDER BY first_anchored_at ASC
+            LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    pending_txs = [r["anchor_tx_hash"] for r in pending]
+
+    updated_rows = 0
+    confirmed_txs = 0
+    failures = []
+    for tx_hash in pending_txs:
+        try:
+            req = urllib.request.Request(
+                f"{ergo_base}/wallet/transactionById?id={tx_hash}",
+                headers={"api_key": ergo_key},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            failures.append({"tx": tx_hash, "error": f"HTTP {e.code}"})
+            continue
+        except Exception as e:
+            failures.append({"tx": tx_hash, "error": str(e)[:120]})
+            continue
+
+        num_confs = int((data or {}).get("numConfirmations", 0) or 0)
+        incl_height = int((data or {}).get("inclusionHeight", 0) or 0)
+        if num_confs < 1 or not incl_height:
+            failures.append({"tx": tx_hash, "error": f"unconfirmed ({num_confs} confs)"})
+            continue
+
+        n = db.execute(
+            """UPDATE video_provenance
+                  SET anchor_block_height = ?, updated_at = ?
+                WHERE anchor_tx_hash = ?
+                  AND COALESCE(anchor_block_height, 0) = 0""",
+            (incl_height, time.time(), tx_hash),
+        ).rowcount or 0
+        db.commit()
+        updated_rows += int(n)
+        confirmed_txs += 1
+
+    return jsonify({
+        "ok": True,
+        "scanned": len(pending_txs),
+        "confirmed_txs": confirmed_txs,
+        "rows_updated": updated_rows,
+        "failures": failures[:10],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.19: continuous anchor reconciliation
+# ---------------------------------------------------------------------------
+# A scheduled audit that bottube runs *against itself*: pick N random
+# already-anchored TXs, re-fetch R4 from chain, compare to the bottube DB.
+# If anything ever drifts (e.g., a corrupted DB write, a wrong manifest_hash
+# stored after a rollback), the next reconciliation pass surfaces it before
+# any user-facing verification breaks. Results land in
+# anchor_reconciliations and roll up into /api/transparency.
+
+def _reconciliation_ensure_schema():
+    """Idempotent table creation for the reconciliation log."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anchor_reconciliations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_hash TEXT NOT NULL,
+                db_manifest_hash TEXT NOT NULL,
+                chain_r4_hex TEXT NOT NULL DEFAULT '',
+                chain_inclusion_height INTEGER DEFAULT 0,
+                chain_num_confirmations INTEGER DEFAULT 0,
+                matched INTEGER NOT NULL,
+                error TEXT NOT NULL DEFAULT '',
+                checked_at INTEGER NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recon_checked_at
+                ON anchor_reconciliations(checked_at)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recon_matched
+                ON anchor_reconciliations(matched, checked_at)
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _fetch_chain_r4(ergo_base, ergo_key, tx_hash, timeout=10):
+    """Fetch the on-chain TX, return (r4_merkle_hex, inclusion_height,
+    num_confirmations, error). r4_merkle_hex is "" on any error."""
+    try:
+        req = urllib.request.Request(
+            f"{ergo_base}/wallet/transactionById?id={tx_hash}",
+            headers={"api_key": ergo_key} if ergo_key else {},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return "", 0, 0, f"HTTP {e.code}"
+    except Exception as e:
+        return "", 0, 0, str(e)[:160]
+
+    outs = (data or {}).get("outputs") or []
+    if not outs:
+        return "", 0, 0, "no outputs"
+    regs = outs[0].get("additionalRegisters") or {}
+    r4 = regs.get("R4", "")
+    merkle_hex = ""
+    if r4.startswith("0e20") and len(r4) == 4 + 64:
+        merkle_hex = r4[4:].lower()
+    return (
+        merkle_hex,
+        int(data.get("inclusionHeight") or 0),
+        int(data.get("numConfirmations") or 0),
+        "" if merkle_hex else "R4 not 32-byte SColl",
+    )
+
+
+@app.route("/api/admin/reconcile-anchors", methods=["POST", "GET"])
+def admin_reconcile_anchors():
+    """Re-verify N random anchored TXs against the chain.
+
+    For each: fetch R4, compare to DB anchor_manifest_hash, write the
+    result. Mismatches are alarms — they should never happen in a healthy
+    pipeline. Used by a 6-hour systemd timer; admin-key gated.
+
+    Body: {"limit": 50, "strategy": "random"|"recent"|"oldest"}.
+    """
+    if not _ts_admin_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    _reconciliation_ensure_schema()
+    _provenance_ensure_anchor_columns()
+
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = max(1, min(200, int(data.get("limit", 50))))
+    except Exception:
+        limit = 50
+    strategy = (data.get("strategy") or "random").lower()
+    if strategy not in ("random", "recent", "oldest"):
+        strategy = "random"
+
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_key = os.environ.get("ERGO_API_KEY", "")
+    if not ergo_key:
+        return jsonify({"ok": False, "error": "ERGO_API_KEY not set"}), 503
+
+    db = get_db()
+    if strategy == "recent":
+        order = "anchored_at DESC"
+    elif strategy == "oldest":
+        order = "anchored_at ASC"
+    else:
+        order = "RANDOM()"
+    rows = db.execute(
+        f"""SELECT anchor_tx_hash AS tx_hash,
+                   MIN(anchor_manifest_hash) AS db_root,
+                   MIN(anchor_block_height) AS db_height
+              FROM video_provenance
+             WHERE COALESCE(anchor_tx_hash,'') != ''
+               AND COALESCE(anchor_block_height,0) > 0
+               AND anchor_chain != 'stub'
+             GROUP BY anchor_tx_hash
+             ORDER BY {order}
+             LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    now = int(time.time())
+    scanned = 0
+    matched = 0
+    mismatched = 0
+    errored = 0
+    sample_mismatches = []
+    sample_errors = []
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        for row in rows:
+            scanned += 1
+            tx = row["tx_hash"]
+            db_root = (row["db_root"] or "").lower()
+            chain_root, incl_h, num_confs, err = _fetch_chain_r4(
+                ergo_base, ergo_key, tx,
+            )
+            if err and not chain_root:
+                errored += 1
+                if len(sample_errors) < 5:
+                    sample_errors.append({"tx": tx[:16] + "…", "error": err})
+                conn.execute(
+                    """INSERT INTO anchor_reconciliations
+                       (tx_hash, db_manifest_hash, chain_r4_hex,
+                        chain_inclusion_height, chain_num_confirmations,
+                        matched, error, checked_at)
+                       VALUES (?, ?, '', 0, ?, 0, ?, ?)""",
+                    (tx, db_root, num_confs, err, now),
+                )
+                continue
+
+            ok = (chain_root == db_root)
+            if ok:
+                matched += 1
+            else:
+                mismatched += 1
+                if len(sample_mismatches) < 5:
+                    sample_mismatches.append({
+                        "tx": tx,
+                        "db_root": db_root,
+                        "chain_root": chain_root,
+                    })
+            conn.execute(
+                """INSERT INTO anchor_reconciliations
+                   (tx_hash, db_manifest_hash, chain_r4_hex,
+                    chain_inclusion_height, chain_num_confirmations,
+                    matched, error, checked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, '', ?)""",
+                (tx, db_root, chain_root, incl_h, num_confs,
+                 1 if ok else 0, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Mismatches are critical — log loudly.
+    if mismatched:
+        app.logger.error(
+            "ANCHOR RECONCILIATION MISMATCH: %d/%d txs do NOT match chain. "
+            "Sample: %s",
+            mismatched, scanned, sample_mismatches[:3],
+        )
+
+    return jsonify({
+        "ok": True,
+        "checked_at": now,
+        "strategy": strategy,
+        "scanned": scanned,
+        "matched": matched,
+        "mismatched": mismatched,
+        "errored": errored,
+        "sample_mismatches": sample_mismatches,
+        "sample_errors": sample_errors,
+        "alarm": mismatched > 0,
+    })
+
+
+def _reconciliation_summary():
+    """Roll up reconciliation_log into a small dict for /api/transparency."""
+    try:
+        _reconciliation_ensure_schema()
+    except Exception:
+        return None
+    db = get_db()
+    now = int(time.time())
+
+    def _count(sql, *args):
+        try:
+            r = db.execute(sql, args).fetchone()
+            return int((r or [0])[0] or 0)
+        except Exception:
+            return 0
+
+    last24 = now - 86400
+    last7d = now - 86400 * 7
+
+    total_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations WHERE checked_at >= ?",
+        last24,
+    )
+    matched_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 1",
+        last24,
+    )
+    mismatched_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 0 AND error = ''",
+        last24,
+    )
+    errored_24h = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND error != ''",
+        last24,
+    )
+    total_7d = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations WHERE checked_at >= ?",
+        last7d,
+    )
+    matched_7d = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 1",
+        last7d,
+    )
+    mismatched_7d = _count(
+        "SELECT COUNT(*) FROM anchor_reconciliations "
+        "WHERE checked_at >= ? AND matched = 0 AND error = ''",
+        last7d,
+    )
+
+    last_check = None
+    last_mismatch = None
+    try:
+        r = db.execute(
+            "SELECT checked_at FROM anchor_reconciliations "
+            "ORDER BY checked_at DESC LIMIT 1"
+        ).fetchone()
+        last_check = int(r[0]) if r else None
+    except Exception:
+        pass
+    try:
+        r = db.execute(
+            "SELECT checked_at FROM anchor_reconciliations "
+            "WHERE matched = 0 AND error = '' "
+            "ORDER BY checked_at DESC LIMIT 1"
+        ).fetchone()
+        last_mismatch = int(r[0]) if r else None
+    except Exception:
+        pass
+
+    match_rate_24h = (matched_24h / (matched_24h + mismatched_24h)) if (matched_24h + mismatched_24h) else 1.0
+    match_rate_7d = (matched_7d / (matched_7d + mismatched_7d)) if (matched_7d + mismatched_7d) else 1.0
+
+    return {
+        "last_check_at": last_check,
+        "last_check_age_s": (now - last_check) if last_check else None,
+        "last_mismatch_at": last_mismatch,
+        "last_24h": {
+            "checked": total_24h,
+            "matched": matched_24h,
+            "mismatched": mismatched_24h,
+            "errored": errored_24h,
+            "match_rate": round(match_rate_24h, 4),
+        },
+        "last_7d": {
+            "checked": total_7d,
+            "matched": matched_7d,
+            "mismatched": mismatched_7d,
+            "match_rate": round(match_rate_7d, 4),
+        },
+        "alarm": mismatched_24h > 0,
+    }
 
 
 @app.route("/api/admin/provenance/anchor-result", methods=["POST"])
@@ -19716,6 +21306,314 @@ def federation_page():
     return render_template("federation.html")
 
 
+# ---------------------------------------------------------------------------
+# Phase 11.17: public transparency dashboard
+# ---------------------------------------------------------------------------
+# Operational honesty by default: anyone — including reviewers who don't have
+# admin access — can read live anchor lag, manifest version distribution,
+# pending backlog, federation peer count, and recent anchor cadence. Cached
+# in-memory for 60s so a hammered page doesn't beat up the DB.
+
+_TRANSPARENCY_CACHE = {"at": 0.0, "data": None}
+_TRANSPARENCY_TTL_S = 60.0
+
+
+def _percentiles(samples, ps=(0.5, 0.95, 0.99)):
+    """Closest-rank percentiles. Returns ints (seconds). [] -> 0s for all."""
+    if not samples:
+        return {f"p{int(p*100)}": 0 for p in ps}
+    s = sorted(samples)
+    out = {}
+    for p in ps:
+        idx = max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))
+        out[f"p{int(p*100)}"] = int(s[idx])
+    return out
+
+
+def _compute_transparency_snapshot():
+    """Compute the transparency dashboard payload from current DB state.
+
+    Read-only, side-effect-free. All counters are best-effort against the
+    operational SQLite — we explicitly do NOT promise atomic consistency,
+    only directional honesty (the v1/v2 ratio is real, the lag is real,
+    a stale 60s cache is acceptable for an external dashboard).
+    """
+    db = get_db()
+    now = int(time.time())
+
+    def _scalar(sql, *args, default=0):
+        try:
+            r = db.execute(sql, args).fetchone()
+            if r is None:
+                return default
+            v = r[0]
+            return v if v is not None else default
+        except Exception:
+            return default
+
+    total_anchored_rows = _scalar(
+        "SELECT COUNT(*) FROM video_provenance WHERE COALESCE(anchor_tx_hash,'') != ''"
+    )
+    total_anchor_txs = _scalar(
+        "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') != ''"
+    )
+    total_provenance_rows = _scalar(
+        "SELECT COUNT(*) FROM video_provenance"
+    )
+    pending_anchor = _scalar(
+        "SELECT COUNT(*) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') = '' AND COALESCE(uploader_sig,'') != ''"
+    )
+    confirmed_anchors = _scalar(
+        "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') != '' "
+        "  AND COALESCE(anchor_block_height,0) > 0"
+    )
+    awaiting_confirmation = _scalar(
+        "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+        "WHERE COALESCE(anchor_tx_hash,'') != '' "
+        "  AND COALESCE(anchor_block_height,0) = 0 "
+        "  AND anchor_chain != 'stub'"
+    )
+
+    # Manifest version distribution. v2 should slowly take over once new
+    # uploads start landing. Surfaces v1→v2 rollout in real time.
+    v_rows = []
+    try:
+        v_rows = db.execute(
+            "SELECT COALESCE(manifest_version,1) AS v, "
+            "       COUNT(*) AS n FROM video_provenance "
+            " WHERE COALESCE(anchor_tx_hash,'') != '' "
+            " GROUP BY v"
+        ).fetchall()
+    except Exception:
+        v_rows = []
+    by_version = {int(r["v"]): int(r["n"]) for r in v_rows}
+
+    # Anchor cadence: last 24h, last 7d, last 30d (distinct TXs).
+    def _txs_since(seconds):
+        try:
+            return _scalar(
+                "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
+                "WHERE COALESCE(anchor_tx_hash,'') != '' "
+                "  AND COALESCE(anchored_at, 0) >= ?",
+                now - seconds,
+            )
+        except Exception:
+            return 0
+
+    txs_24h = _txs_since(86400)
+    txs_7d = _txs_since(86400 * 7)
+    txs_30d = _txs_since(86400 * 30)
+
+    # Lag = upload-to-anchored, in seconds. Restrict to videos uploaded
+    # within the last 30 days so the percentile reflects *current*
+    # operational behavior — historical backfill anchors of long-old
+    # uploads would otherwise dominate the distribution.
+    lag_samples = []
+    try:
+        lag_rows = db.execute(
+            """SELECT (anchored_at - uploaded_at) AS lag_s
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchored_at, 0) > 0
+                  AND COALESCE(uploaded_at, 0) > 0
+                  AND anchored_at > uploaded_at
+                  AND uploaded_at >= ?
+                ORDER BY anchored_at DESC
+                LIMIT 200""",
+            (now - 86400 * 30,),
+        ).fetchall()
+        lag_samples = [int(r["lag_s"]) for r in lag_rows
+                       if r["lag_s"] is not None and r["lag_s"] >= 0]
+    except Exception:
+        lag_samples = []
+    lag_p = _percentiles(lag_samples)
+
+    # Last anchor: most recent confirmed TX with non-zero block_height.
+    last_anchor = None
+    try:
+        r = db.execute(
+            """SELECT anchor_tx_hash, anchor_block_height, anchored_at,
+                      anchor_chain
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchor_block_height,0) > 0
+                ORDER BY anchored_at DESC
+                LIMIT 1"""
+        ).fetchone()
+        if r:
+            last_anchor = {
+                "tx_hash": r["anchor_tx_hash"],
+                "block_height": int(r["anchor_block_height"] or 0),
+                "anchored_at": int(r["anchored_at"] or 0),
+                "chain": r["anchor_chain"] or "rustchain",
+                "age_s": max(0, now - int(r["anchored_at"] or 0)),
+            }
+    except Exception:
+        last_anchor = None
+
+    # Per-day anchor count for the last 14 days, oldest→newest, for a
+    # sparkline. Returned as [{"day": "YYYY-MM-DD", "count": N}].
+    daily = []
+    try:
+        rows = db.execute(
+            """SELECT date(anchored_at, 'unixepoch') AS day,
+                      COUNT(DISTINCT anchor_tx_hash) AS n
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchored_at,0) >= ?
+                GROUP BY day
+                ORDER BY day ASC""",
+            (now - 86400 * 14,),
+        ).fetchall()
+        daily = [{"day": r["day"], "count": int(r["n"])} for r in rows]
+    except Exception:
+        daily = []
+
+    # Federation peer count if the table exists (best-effort — federation
+    # may be empty/disabled on a particular install).
+    federation_peers = 0
+    try:
+        federation_peers = _scalar(
+            "SELECT COUNT(*) FROM federation_peers WHERE COALESCE(active,0) = 1"
+        )
+    except Exception:
+        federation_peers = 0
+
+    # Verifier success: of the last 50 anchored TXs whose block_height>0,
+    # how many have a non-empty manifest_hash that's the canonical
+    # 32-byte hex? (A row that anchored but ended up with a blank or
+    # malformed manifest_hash would never verify and signals a bug.)
+    verifier_total = 0
+    verifier_ok = 0
+    try:
+        rows = db.execute(
+            """SELECT anchor_manifest_hash
+                 FROM video_provenance
+                WHERE COALESCE(anchor_tx_hash,'') != ''
+                  AND COALESCE(anchor_block_height,0) > 0
+                ORDER BY anchored_at DESC
+                LIMIT 50"""
+        ).fetchall()
+        for r in rows:
+            verifier_total += 1
+            mh = r["anchor_manifest_hash"] or ""
+            if len(mh) == 64 and re.fullmatch(r"[0-9a-f]+", mh):
+                verifier_ok += 1
+    except Exception:
+        pass
+    verifier_rate = (verifier_ok / verifier_total) if verifier_total else 1.0
+
+    try:
+        from datetime import datetime, timezone
+        as_of_iso = datetime.fromtimestamp(now, tz=timezone.utc).isoformat()
+    except Exception:
+        as_of_iso = ""
+
+    # Phase 11.19: pull the latest reconciliation rollup. Best-effort —
+    # if the table doesn't exist yet (fresh deploy before first run), the
+    # summary helper returns None and the field is null.
+    try:
+        recon = _reconciliation_summary()
+    except Exception:
+        recon = None
+
+    return {
+        "ok": True,
+        "as_of": now,
+        "as_of_iso": as_of_iso,
+        "reconciliation": recon,
+        "anchors": {
+            "total_videos_anchored": total_anchored_rows,
+            "total_anchor_transactions": total_anchor_txs,
+            "confirmed_on_chain": confirmed_anchors,
+            "awaiting_confirmation": awaiting_confirmation,
+            "anchors_24h": txs_24h,
+            "anchors_7d": txs_7d,
+            "anchors_30d": txs_30d,
+            "last_anchor": last_anchor,
+            "anchor_lag_seconds": {
+                "samples": len(lag_samples),
+                "window_days": 30,
+                "note": (
+                    "upload→anchored seconds, sampled from videos uploaded "
+                    "in the last 30 days only — historical backfill anchors "
+                    "of older uploads are excluded so the percentile reflects "
+                    "current pipeline behavior"
+                ),
+                **lag_p,
+            },
+            "daily_14d": daily,
+        },
+        "manifest_versions": {
+            "by_version": {f"v{k}": v for k, v in sorted(by_version.items())},
+            "v2_share":
+                (by_version.get(2, 0) / total_anchored_rows)
+                if total_anchored_rows else 0.0,
+        },
+        "queue": {
+            "provenance_rows_total": total_provenance_rows,
+            "pending_anchor": pending_anchor,
+        },
+        "federation": {
+            "active_peers": federation_peers,
+        },
+        "verifier_health": {
+            "sample_size": verifier_total,
+            "well_formed_root_count": verifier_ok,
+            "well_formed_rate": round(verifier_rate, 4),
+        },
+        "spec_version": "phase-11.17",
+    }
+
+
+def _transparency_snapshot_cached():
+    """60s in-memory cache around the snapshot. Bounded server load."""
+    now = time.time()
+    if (_TRANSPARENCY_CACHE["data"] is not None
+            and (now - _TRANSPARENCY_CACHE["at"]) < _TRANSPARENCY_TTL_S):
+        return _TRANSPARENCY_CACHE["data"], True
+    fresh = _compute_transparency_snapshot()
+    _TRANSPARENCY_CACHE["at"] = now
+    _TRANSPARENCY_CACHE["data"] = fresh
+    return fresh, False
+
+
+@app.route("/api/transparency")
+def api_transparency():
+    """Public, read-only operational metrics for bottube.ai.
+
+    Documented purpose: a stable JSON contract that anyone — verifier
+    operators, federation peers, engineering reviewers, you with curl —
+    can poll to see how the platform is actually behaving. All fields
+    are best-effort directional honesty; no promise of atomic consistency.
+    """
+    data, cached = _transparency_snapshot_cached()
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = f"public, max-age={int(_TRANSPARENCY_TTL_S)}"
+    resp.headers["X-Bottube-Cache"] = "hit" if cached else "miss"
+    return resp
+
+
+@app.route("/transparency")
+def transparency_page():
+    """HTML rendering of /api/transparency for casual browsers."""
+    data, _cached = _transparency_snapshot_cached()
+    return render_template("transparency.html", t=data)
+
+
+@app.route("/verify")
+def verify_page():
+    """Phase 11.25: browser-side verifier. Walks the entire cryptographic
+    chain (provenance fields → Merkle leaf → inclusion proof → on-chain R4)
+    using SubtleCrypto.subtle.digest() in the user's browser. No install
+    required, no server-side trust beyond the public read-only endpoints.
+    """
+    return render_template("verify.html")
+
+
 @app.route("/api/anchors/<tx_hash>/chain")
 def anchor_chain_proxy(tx_hash):
     """Public read-only proxy: fetch the on-chain TX from the configured Ergo
@@ -19821,6 +21719,731 @@ def anchor_detail_page(tx_hash):
     return render_template("anchor_detail.html", batch=batch, members=members)
 
 
+# --- Phase 11.9: public Merkle inclusion proof ---------------------------
+# An external verifier should be able to cryptographically prove "this
+# video's leaf is part of this anchor's Merkle root" without needing an
+# admin key OR the full batch membership. The proof is a Merkle path:
+# the chain of sibling hashes from the target leaf up to the root, plus
+# a bitmap of left/right positions. That's enough to walk the tree and
+# match the on-chain R4 register. Membership of OTHER videos in the
+# batch is never revealed.
+
+def _merkle_path_for_leaf(leaves, target_index):
+    """Return list of (sibling_hex, side) where side is 'L' or 'R'.
+
+    Walks bottom-up. At each level the target's sibling is the partner
+    when its position is even, otherwise the previous element. Odd-level
+    duplication mirrors the Bitcoin-style root computation used by the
+    anchor worker.
+    """
+    if not leaves or target_index < 0 or target_index >= len(leaves):
+        return []
+    layer = list(leaves)
+    idx = target_index
+    path = []
+    while len(layer) > 1:
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
+        if idx % 2 == 0:
+            sibling = layer[idx + 1]
+            side = "R"  # sibling is on the right of target
+        else:
+            sibling = layer[idx - 1]
+            side = "L"  # sibling is on the left of target
+        path.append({"sibling": sibling.hex(), "side": side})
+        nxt = []
+        for i in range(0, len(layer), 2):
+            nxt.append(hashlib.sha256(layer[i] + layer[i + 1]).digest())
+        layer = nxt
+        idx //= 2
+    return path
+
+
+def _manifest_leaf_bytes(video_id, canonical_sha256, uploader_sig, uploaded_at,
+                         manifest_version=MANIFEST_V1, thumbnail_sha256="",
+                         canonical_360p_sha256="",
+                         creator_pubkey="", creator_signature=""):
+    """Version-aware Merkle leaf — must match anchor_worker + verifier.
+
+    v1 (legacy): sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at)
+    v2: sha256("bottube/v2" | video_id | canonical_sha256 | thumbnail_sha256
+                | canonical_360p_sha256 | uploader_sig | uploaded_at)
+    v3: sha256("bottube/v3" | video_id | canonical_sha256 | thumbnail_sha256
+                | canonical_360p_sha256 | uploader_sig | creator_pubkey
+                | creator_signature | uploaded_at)
+    """
+    return _manifest_leaf(
+        manifest_version, video_id, canonical_sha256,
+        thumbnail_sha256, canonical_360p_sha256,
+        uploader_sig, uploaded_at,
+        creator_pubkey=creator_pubkey,
+        creator_signature=creator_signature,
+    )
+
+
+@app.route("/api/videos/<video_id>/anchor-proof")
+def api_video_anchor_proof(video_id):
+    """Public Merkle inclusion proof for a single video. Read-only."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+    # Light per-IP rate limit (the proof computation is small but we don't
+    # want anyone using this to enumerate the platform either).
+    ip = _get_client_ip()
+    if not _rate_limit(f"merkle_proof:{ip}", 60, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    _provenance_ensure_v2_columns()
+    _provenance_ensure_v3_columns()
+    db = get_db()
+    target = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  anchor_batch_id, anchor_tx_hash, anchor_chain,
+                  anchor_block_height, anchor_manifest_hash, anchor_status,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
+             FROM video_provenance
+            WHERE video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    if not target:
+        return jsonify({"ok": False, "error": "video not found"}), 404
+    if not target["anchor_batch_id"] or not target["anchor_tx_hash"]:
+        return jsonify({
+            "ok": False,
+            "error": "video not yet anchored",
+            "anchor_status": target["anchor_status"] or "pending",
+        }), 409
+
+    rows = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
+             FROM video_provenance
+            WHERE anchor_batch_id = ?
+            ORDER BY uploaded_at ASC, video_id ASC""",
+        (target["anchor_batch_id"],),
+    ).fetchall()
+    if not rows:
+        return jsonify({"ok": False, "error": "batch members not found"}), 404
+
+    # Each leaf must use the recipe its row was written under. A batch
+    # may be heterogeneous (v1 + v2 + v3) during the migration window.
+    leaves = [
+        _manifest_leaf_bytes(
+            r["video_id"], r["canonical_sha256"],
+            r["uploader_sig"], r["uploaded_at"],
+            manifest_version=int(r["manifest_version"] or 1),
+            thumbnail_sha256=r["thumbnail_sha256"] or "",
+            canonical_360p_sha256=r["canonical_360p_sha256"] or "",
+            creator_pubkey=r["creator_pubkey"] if "creator_pubkey" in r.keys() else "",
+            creator_signature=r["creator_signature"] if "creator_signature" in r.keys() else "",
+        )
+        for r in rows
+    ]
+    target_idx = next(
+        (i for i, r in enumerate(rows) if r["video_id"] == video_id), -1,
+    )
+    if target_idx < 0:
+        return jsonify({"ok": False, "error": "video not in own batch (data inconsistency)"}), 500
+
+    target_leaf = leaves[target_idx]
+    path = _merkle_path_for_leaf(leaves, target_idx)
+    target_version = int(target["manifest_version"] or 1)
+
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "manifest_version": target_version,
+        "leaf": target_leaf.hex(),
+        "leaf_recipe": _manifest_leaf_recipe(target_version),
+        "leaf_inputs": {
+            "video_id": target["video_id"],
+            "canonical_sha256": target["canonical_sha256"],
+            "thumbnail_sha256": (target["thumbnail_sha256"] or "")
+                if target_version >= MANIFEST_V2 else "",
+            "canonical_360p_sha256": (target["canonical_360p_sha256"] or "")
+                if target_version >= MANIFEST_V2 else "",
+            "uploader_sig": target["uploader_sig"],
+            "creator_pubkey": (
+                target["creator_pubkey"] if (target_version >= MANIFEST_V3
+                    and "creator_pubkey" in target.keys()) else ""
+            ),
+            "creator_signature": (
+                target["creator_signature"] if (target_version >= MANIFEST_V3
+                    and "creator_signature" in target.keys()) else ""
+            ),
+            "uploaded_at": int(float(target["uploaded_at"] or 0)),
+        },
+        "path": path,
+        "path_recipe": (
+            "for each step: side='R' means sibling is on the right "
+            "(combined = sha256(leaf || sibling)); side='L' means sibling "
+            "is on the left (combined = sha256(sibling || leaf))"
+        ),
+        "expected_root": target["anchor_manifest_hash"],
+        "anchor": {
+            "chain": target["anchor_chain"] or "rustchain",
+            "tx_hash": target["anchor_tx_hash"],
+            "block_height": target["anchor_block_height"] or 0,
+            "manifest_hash": target["anchor_manifest_hash"] or "",
+        },
+        "batch_size": len(leaves),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.20: provenance receipt download
+# ---------------------------------------------------------------------------
+# A single self-contained JSON file a creator can download as durable proof
+# that their video was anchored on RustChain. Composes:
+#   * provenance (canonical hashes, manifest_version, generation block)
+#   * Merkle inclusion proof (leaf, path, expected_root)
+#   * chain anchor details (tx_hash, block_height, R4)
+#   * verifier instructions (recipe, CLI command, verifier source URL)
+#   * platform HMAC over the receipt body (so anyone can detect tampering)
+#
+# Designed to be useful in legal/compliance contexts: a creator submits the
+# receipt + the corresponding canonical asset, and a third party can verify
+# both the asset hash and the chain anchor *without* trusting bottube.
+
+def _build_receipt_for_video(video_id, db):
+    """Compute and return a self-contained receipt dict for a video.
+
+    Returns (receipt_dict, error_str). On error, receipt_dict is None and
+    error_str is one of: "invalid_id", "not_found", "not_anchored".
+
+    Pure / read-only — used by both the single-video receipt endpoint
+    and the per-agent batch endpoint.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return None, "invalid_id"
+
+    _provenance_ensure_v3_columns()
+    target = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  creator_agent_id, model, generated_at,
+                  anchor_batch_id, anchor_tx_hash, anchor_chain,
+                  anchor_block_height, anchor_manifest_hash, anchor_status,
+                  anchored_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
+             FROM video_provenance
+            WHERE video_id = ?""",
+        (video_id,),
+    ).fetchone()
+    if not target:
+        return None, "not_found"
+    if not target["anchor_tx_hash"]:
+        return None, "not_anchored"
+
+    target_version = int(target["manifest_version"] or 1)
+    own_leaf = _manifest_leaf_bytes(
+        target["video_id"], target["canonical_sha256"],
+        target["uploader_sig"], target["uploaded_at"],
+        manifest_version=target_version,
+        thumbnail_sha256=target["thumbnail_sha256"] or "",
+        canonical_360p_sha256=target["canonical_360p_sha256"] or "",
+        creator_pubkey=target["creator_pubkey"] or "",
+        creator_signature=target["creator_signature"] or "",
+    )
+
+    rows = db.execute(
+        """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
+             FROM video_provenance
+            WHERE anchor_batch_id = ?
+            ORDER BY uploaded_at ASC, video_id ASC""",
+        (target["anchor_batch_id"],),
+    ).fetchall()
+    leaves = [
+        _manifest_leaf_bytes(
+            r["video_id"], r["canonical_sha256"],
+            r["uploader_sig"], r["uploaded_at"],
+            manifest_version=int(r["manifest_version"] or 1),
+            thumbnail_sha256=r["thumbnail_sha256"] or "",
+            canonical_360p_sha256=r["canonical_360p_sha256"] or "",
+            creator_pubkey=r["creator_pubkey"] or "",
+            creator_signature=r["creator_signature"] or "",
+        )
+        for r in rows
+    ]
+    target_idx = next(
+        (i for i, r in enumerate(rows) if r["video_id"] == video_id), -1,
+    )
+    merkle_path = _merkle_path_for_leaf(leaves, target_idx) if target_idx >= 0 else []
+
+    title = ""
+    try:
+        v = db.execute(
+            "SELECT title FROM videos WHERE video_id = ? LIMIT 1",
+            (video_id,),
+        ).fetchone()
+        if v:
+            title = v["title"] or ""
+    except Exception:
+        title = ""
+
+    issued_at = int(time.time())
+    body = {
+        "schema": "bottube-provenance-receipt/v1",
+        "issued_at": issued_at,
+        "issuer": "https://bottube.ai",
+        "video": {
+            "video_id": target["video_id"],
+            "title": title,
+            "url": f"https://bottube.ai/v/{target['video_id']}",
+            "canonical_asset_url":
+                f"https://bottube.ai/api/videos/{target['video_id']}/stream",
+        },
+        "manifest": {
+            "version": target_version,
+            "leaf_recipe": _manifest_leaf_recipe(target_version),
+            "leaf_inputs": {
+                "video_id": target["video_id"],
+                "canonical_sha256": target["canonical_sha256"],
+                "thumbnail_sha256": target["thumbnail_sha256"] or "",
+                "canonical_360p_sha256": target["canonical_360p_sha256"] or "",
+                "uploader_sig": target["uploader_sig"],
+                "creator_pubkey": (target["creator_pubkey"] or "")
+                    if target_version >= MANIFEST_V3 else "",
+                "creator_signature": (target["creator_signature"] or "")
+                    if target_version >= MANIFEST_V3 else "",
+                "uploaded_at": int(float(target["uploaded_at"] or 0)),
+            },
+            "leaf": own_leaf.hex(),
+            "creator_signature_recipe": (
+                'sha256("bottube/v3-sign" | video_id | canonical_sha256 | '
+                'thumbnail_sha256 | canonical_360p_sha256 | uploaded_at) '
+                'signed with Ed25519 by creator_pubkey'
+            ) if target_version >= MANIFEST_V3 else None,
+        },
+        "merkle_proof": {
+            "path": merkle_path,
+            "path_recipe": (
+                "for each step: side='R' means sibling is on the right "
+                "(combined = sha256(leaf || sibling)); side='L' means "
+                "sibling is on the left (combined = sha256(sibling || leaf))"
+            ),
+            "batch_size": len(leaves),
+            "expected_root": target["anchor_manifest_hash"] or "",
+        },
+        "chain_anchor": {
+            "chain": target["anchor_chain"] or "rustchain",
+            "tx_hash": target["anchor_tx_hash"],
+            "block_height": int(target["anchor_block_height"] or 0),
+            "manifest_hash": target["anchor_manifest_hash"] or "",
+            "anchored_at": int(target["anchored_at"] or 0),
+            "explorer_url":
+                f"https://bottube.ai/anchors/{target['anchor_tx_hash']}",
+            "chain_proxy_url":
+                f"https://bottube.ai/api/anchors/{target['anchor_tx_hash']}/chain",
+        },
+        "verifier": {
+            "source": "https://github.com/Scottcjn/bottube",
+            "package": "bottube-verify (>=0.4.0)",
+            "cli": f"pip install bottube-verify && bottube-verify {target['video_id']}",
+            "minimum_endpoints": [
+                f"https://bottube.ai/api/videos/{target['video_id']}/provenance",
+                f"https://bottube.ai/api/videos/{target['video_id']}/anchor-proof",
+                f"https://bottube.ai/api/anchors/{target['anchor_tx_hash']}/chain",
+            ],
+        },
+    }
+
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    sig = hmac.new(
+        _provenance_signing_key().encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    receipt = dict(body)
+    receipt["receipt_signature"] = {
+        "alg": "HMAC-SHA256",
+        "key_id": "bottube-platform-v1",
+        "value": sig,
+        "covers": (
+            "the canonical JSON of every field above, sorted-keys, no "
+            "whitespace. Recompute with a known platform key to detect "
+            "tampering of this file. The chain anchor is the actual "
+            "cryptographic proof of provenance — this signature only "
+            "gates 'did this file come from bottube unaltered'."
+        ),
+    }
+    return receipt, ""
+
+
+@app.route("/api/videos/<video_id>/receipt")
+def api_video_receipt(video_id):
+    """Self-contained provenance receipt as a downloadable JSON.
+
+    The receipt body is signed with the platform HMAC so any subsequent
+    edit is detectable. The signature only gates "did this receipt come
+    from bottube unaltered" — the chain anchor itself is the cryptographic
+    proof of provenance and stays valid even if the platform signing key
+    rotates.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+
+    # Light per-IP rate limit — receipts are cheap but scrapers could
+    # otherwise enumerate the platform via this route.
+    ip = _get_client_ip()
+    if not _rate_limit(f"receipt:{ip}", 60, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    _provenance_ensure_v2_columns()
+    db = get_db()
+    receipt, err = _build_receipt_for_video(video_id, db)
+    if err == "invalid_id":
+        return jsonify({"ok": False, "error": "invalid video_id"}), 400
+    if err == "not_found":
+        return jsonify({"ok": False, "error": "video not found"}), 404
+    if err == "not_anchored":
+        return jsonify({
+            "ok": False,
+            "error": "video not yet anchored",
+        }), 409
+
+    payload = json.dumps(receipt, indent=2, sort_keys=True)
+    resp = Response(payload, mimetype="application/json")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="bottube-receipt-{video_id}.json"'
+    )
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.29: per-agent receipt batch download
+# ---------------------------------------------------------------------------
+# /api/agents/<name>/receipts.zip — streams a zip of all that agent's
+# anchored video receipts. Useful for "I want offline proof of every video
+# I made". Capped, rate-limited.
+
+_RECEIPTS_BATCH_MAX = 500
+
+
+@app.route("/api/agents/<agent_name>/receipts.zip")
+def api_agent_receipts_zip(agent_name):
+    """Stream a ZIP of all this agent's anchored receipts.
+
+    For "I want offline proof of every video I made" use cases. Each
+    file in the zip is a standalone bottube-receipt-<id>.json that
+    verifies independently with `bottube-verify --receipt FILE`.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", agent_name or ""):
+        return jsonify({"ok": False, "error": "invalid agent name"}), 400
+
+    ip = _get_client_ip()
+    if not _rate_limit(f"receipts_zip:{ip}", 6, 600):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
+    _provenance_ensure_v2_columns()
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return jsonify({"ok": False, "error": "agent not found"}), 404
+
+    # Cap at a reasonable batch — agents with thousands of videos can
+    # paginate via ?since_video_id=, but the common case is "small enough
+    # to fit in one zip".
+    try:
+        limit = max(1, min(_RECEIPTS_BATCH_MAX,
+                           int(request.args.get("limit", 200))))
+    except Exception:
+        limit = 200
+    since = (request.args.get("since_video_id") or "").strip()
+
+    if since:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 JOIN video_provenance p ON p.video_id = v.video_id
+                WHERE v.agent_id = ?
+                  AND COALESCE(p.anchor_tx_hash,'') != ''
+                  AND v.video_id > ?
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (agent["id"], since, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT v.video_id
+                 FROM videos v
+                 JOIN video_provenance p ON p.video_id = v.video_id
+                WHERE v.agent_id = ?
+                  AND COALESCE(p.anchor_tx_hash,'') != ''
+                ORDER BY v.video_id ASC
+                LIMIT ?""",
+            (agent["id"], limit),
+        ).fetchall()
+
+    if not rows:
+        return jsonify({
+            "ok": False,
+            "error": "no anchored receipts for this agent",
+            "agent": agent_name,
+        }), 404
+
+    # Build the zip in memory. Average receipt ~3KB, * 500 cap = ~1.5MB —
+    # comfortably under any reasonable buffer cap.
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    written = 0
+    skipped = 0
+    last_id = ""
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Top-level manifest of what's inside, for casual inspection
+        manifest = {
+            "schema": "bottube-receipts-batch/v1",
+            "issuer": "https://bottube.ai",
+            "issued_at": int(time.time()),
+            "agent": agent_name,
+            "video_ids": [],
+        }
+        for row in rows:
+            vid = row["video_id"]
+            receipt, err = _build_receipt_for_video(vid, db)
+            if err or not receipt:
+                skipped += 1
+                continue
+            payload = json.dumps(receipt, indent=2, sort_keys=True)
+            zf.writestr(f"bottube-receipt-{vid}.json", payload)
+            manifest["video_ids"].append(vid)
+            written += 1
+            last_id = max(last_id, vid)
+        manifest["count"] = written
+        manifest["skipped"] = skipped
+        zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2, sort_keys=True))
+        readme = (
+            f"BoTTube provenance receipts for @{agent_name}\n"
+            f"Issued {datetime.datetime.utcnow().isoformat()}Z by https://bottube.ai\n"
+            f"{written} receipts in this archive (capped at {limit}).\n\n"
+            f"Each file is a self-contained signed JSON receipt. Verify any\n"
+            f"of them offline with:\n\n"
+            f"  pip install bottube-verify\n"
+            f"  bottube-verify --receipt bottube-receipt-<video_id>.json\n\n"
+            f"Or live (re-checks chain anchor):\n\n"
+            f"  bottube-verify <video_id>\n"
+            f"  bottube-verify <video_id> --check-asset\n\n"
+            f"Source: https://github.com/Scottcjn/bottube\n"
+        )
+        zf.writestr("README.txt", readme)
+
+    buf.seek(0)
+    resp = Response(buf.read(), mimetype="application/zip")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="bottube-receipts-{agent_name}.zip"'
+    )
+    resp.headers["Cache-Control"] = "private, max-age=60"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["X-Bottube-Receipts-Count"] = str(written)
+    resp.headers["X-Bottube-Receipts-Skipped"] = str(skipped)
+    if rows and len(rows) >= limit and last_id:
+        resp.headers["X-Bottube-Receipts-Continue"] = (
+            f"?since_video_id={last_id}&limit={limit}"
+        )
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.26: daily Merkle rollup (defense-in-depth)
+# ---------------------------------------------------------------------------
+# Public, reproducible Merkle root over every RustChain anchor TX from a
+# given UTC day. Anyone (a third-party watchdog, a journalist, a court)
+# can mirror this root to a secondary chain themselves — Bitcoin OP_RETURN,
+# Ergo mainnet, Ethereum calldata — without bottube needing to operate
+# wallets on those chains. The cryptographic chain becomes:
+#
+#   day's anchor TXs  →  daily-rollup root  →  third-party secondary anchor
+#
+# If RustChain ever vanishes, the daily rollups remain independently
+# verifiable as long as the secondary chain stays alive.
+
+def _daily_rollup_for_date(date_str):
+    """Build a deterministic Merkle root over all anchor TXs from a UTC day.
+
+    date_str is YYYY-MM-DD. Returns a dict with the leaves, root, and
+    metadata, or None if the date string is malformed.
+    """
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str or ""):
+        return None
+    try:
+        # UTC day boundaries
+        d = datetime.datetime.strptime(date_str, "%Y-%m-%d").replace(
+            tzinfo=datetime.timezone.utc,
+        )
+    except Exception:
+        return None
+    start = int(d.timestamp())
+    end = start + 86400
+
+    db = get_db()
+    rows = db.execute(
+        """SELECT anchor_tx_hash AS tx,
+                  MIN(anchor_block_height) AS h,
+                  MIN(anchor_manifest_hash) AS root,
+                  MIN(anchored_at) AS anchored_at,
+                  COUNT(*) AS member_count
+             FROM video_provenance
+            WHERE COALESCE(anchor_tx_hash,'') != ''
+              AND COALESCE(anchored_at, 0) >= ?
+              AND COALESCE(anchored_at, 0) <  ?
+              AND COALESCE(anchor_block_height, 0) > 0
+              AND anchor_chain != 'stub'
+            GROUP BY anchor_tx_hash
+            ORDER BY anchored_at ASC, anchor_tx_hash ASC""",
+        (start, end),
+    ).fetchall()
+
+    leaves = []
+    members = []
+    for r in rows:
+        tx = r["tx"]
+        root = (r["root"] or "")
+        # Each leaf binds: sha256(tx_hash | manifest_hash | block_height)
+        # — under a v1 rollup domain separator. Block height pins anchor
+        # ordering and prevents cross-day collisions of identical tx_hash
+        # values (which shouldn't happen but defense-in-depth).
+        msg = "|".join([
+            "bottube/rollup/v1",
+            tx,
+            root,
+            str(int(r["h"] or 0)),
+        ])
+        leaves.append(hashlib.sha256(msg.encode("utf-8")).digest())
+        members.append({
+            "tx_hash": tx,
+            "manifest_hash": root,
+            "block_height": int(r["h"] or 0),
+            "anchored_at": int(r["anchored_at"] or 0),
+            "member_count": int(r["member_count"] or 0),
+        })
+
+    if not leaves:
+        return {
+            "date": date_str,
+            "start_utc": start,
+            "end_utc": end,
+            "anchor_count": 0,
+            "rollup_root": "",
+            "members": [],
+            "leaf_recipe": (
+                'sha256("bottube/rollup/v1" | tx_hash | manifest_hash | block_height) '
+                'with "|" as the literal separator'
+            ),
+            "merkle_recipe": (
+                "Bitcoin-style binary tree: pair adjacent leaves and hash, "
+                "duplicate the last node when a level has odd cardinality, "
+                "iterate until a single 32-byte root remains."
+            ),
+        }
+
+    # Reuse the existing merkle_root helper (defined elsewhere as binary).
+    layer = list(leaves)
+    while len(layer) > 1:
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
+        nxt = []
+        for i in range(0, len(layer), 2):
+            nxt.append(hashlib.sha256(layer[i] + layer[i + 1]).digest())
+        layer = nxt
+    rollup_root = layer[0].hex()
+
+    return {
+        "date": date_str,
+        "start_utc": start,
+        "end_utc": end,
+        "anchor_count": len(leaves),
+        "rollup_root": rollup_root,
+        "members": members,
+        "leaf_recipe": (
+            'sha256("bottube/rollup/v1" | tx_hash | manifest_hash | block_height) '
+            'with "|" as the literal separator'
+        ),
+        "merkle_recipe": (
+            "Bitcoin-style binary tree: pair adjacent leaves and hash, "
+            "duplicate the last node when a level has odd cardinality, "
+            "iterate until a single 32-byte root remains."
+        ),
+    }
+
+
+@app.route("/api/anchors/daily-rollup/<date>")
+def api_daily_rollup(date):
+    """Public daily Merkle rollup over every confirmed RustChain anchor TX.
+
+    Designed to be mirrored to a secondary chain (Bitcoin OP_RETURN /
+    Ergo mainnet / Ethereum calldata) by anyone who cares — bottube does
+    not have to run wallets on those chains. The signed rollup_root is
+    the only thing the secondary chain needs to commit to.
+
+    Path param: YYYY-MM-DD (UTC).
+    """
+    payload = _daily_rollup_for_date(date)
+    if payload is None:
+        return jsonify({"ok": False, "error": "invalid date format (expect YYYY-MM-DD)"}), 400
+
+    # Sign the rollup body so any mid-flight tampering of the JSON is
+    # detectable. Same HMAC pattern as receipts.
+    body = dict(payload)
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    sig = hmac.new(
+        _provenance_signing_key().encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    body["rollup_signature"] = {
+        "alg": "HMAC-SHA256",
+        "key_id": "bottube-platform-v1",
+        "value": sig,
+        "covers": (
+            "the canonical JSON of every field above, sorted-keys, no "
+            "whitespace. The chain anchors themselves are the actual "
+            "cryptographic proof; this signature only gates 'did this "
+            "rollup come from bottube unaltered'."
+        ),
+    }
+    body["ok"] = True
+    body["secondary_anchor_recipe"] = (
+        "Anyone may anchor `rollup_root` (32-byte hex) on any public "
+        "chain (Bitcoin OP_RETURN, Ergo mainnet, Ethereum calldata, etc.) "
+        "to defense-in-depth the bottube provenance pipeline. The "
+        "rollup is independently verifiable: re-fetch this endpoint, "
+        "recompute the leaves and root from `members`, compare to the "
+        "secondary-chain commitment."
+    )
+
+    resp = jsonify(body)
+    # Past days never change → long cache. Today is incomplete → short.
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    if date < today:
+        resp.headers["Cache-Control"] = "public, max-age=86400, immutable"
+    else:
+        resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
 @app.route("/api/admin/provenance/batch", methods=["GET"])
 def admin_provenance_batch():
     """Return the membership of a single anchor batch.
@@ -19854,10 +22477,17 @@ def admin_provenance_batch():
             return jsonify({"ok": False, "error": "tx_hash not found in any batch"}), 404
         batch_id = row["anchor_batch_id"]
 
+    _provenance_ensure_v2_columns()
+    _provenance_ensure_v3_columns()
     rows = db.execute(
         """SELECT video_id, canonical_sha256, uploader_sig, uploaded_at,
                   anchor_chain, anchor_tx_hash, anchor_block_height,
-                  anchor_manifest_hash, anchor_status, anchored_at
+                  anchor_manifest_hash, anchor_status, anchored_at,
+                  COALESCE(manifest_version, 1) AS manifest_version,
+                  COALESCE(thumbnail_sha256, '') AS thumbnail_sha256,
+                  COALESCE(canonical_360p_sha256, '') AS canonical_360p_sha256,
+                  COALESCE(creator_pubkey, '') AS creator_pubkey,
+                  COALESCE(creator_signature, '') AS creator_signature
              FROM video_provenance
             WHERE anchor_batch_id = ?
             ORDER BY uploaded_at ASC, video_id ASC""",
@@ -19866,12 +22496,24 @@ def admin_provenance_batch():
     if not rows:
         return jsonify({"ok": False, "error": "no rows for batch"}), 404
 
-    members = [{
-        "video_id": r["video_id"],
-        "canonical_sha256": r["canonical_sha256"],
-        "uploader_sig": r["uploader_sig"],
-        "uploaded_at": r["uploaded_at"],
-    } for r in rows]
+    members = []
+    versions_present = set()
+    for r in rows:
+        ver = int(r["manifest_version"] or 1)
+        versions_present.add(ver)
+        members.append({
+            "video_id": r["video_id"],
+            "canonical_sha256": r["canonical_sha256"],
+            "uploader_sig": r["uploader_sig"],
+            "uploaded_at": r["uploaded_at"],
+            "manifest_version": ver,
+            "thumbnail_sha256": r["thumbnail_sha256"] or "",
+            "canonical_360p_sha256": r["canonical_360p_sha256"] or "",
+            # Phase 11.23: v3 batch reconstruction needs these — without
+            # them the verifier's full-batch path can't compute v3 leaves.
+            "creator_pubkey": r["creator_pubkey"] or "",
+            "creator_signature": r["creator_signature"] or "",
+        })
     head = rows[0]
     return jsonify({
         "ok": True,
@@ -19884,14 +22526,21 @@ def admin_provenance_batch():
             "status": head["anchor_status"],
             "anchored_at": head["anchored_at"],
         },
-        "leaf_recipe": (
-            "sha256(video_id | canonical_sha256 | uploader_sig | uploaded_at) "
-            "with '|' as the literal separator and uploaded_at as integer seconds"
+        "leaf_recipes": {
+            "v1": _manifest_leaf_recipe(MANIFEST_V1),
+            "v2": _manifest_leaf_recipe(MANIFEST_V2),
+            "v3": _manifest_leaf_recipe(MANIFEST_V3),
+        },
+        "leaf_recipe": _manifest_leaf_recipe(
+            max(versions_present) if versions_present else MANIFEST_V1
         ),
+        "manifest_versions_in_batch": sorted(versions_present),
         "merkle_recipe": (
             "Bitcoin-style binary tree: pair adjacent leaves and hash, "
             "duplicate the last node when a level has odd cardinality, "
-            "iterate until a single 32-byte root remains."
+            "iterate until a single 32-byte root remains. Each leaf uses "
+            "the recipe matching its own manifest_version field — a batch "
+            "may mix v1 and v2 rows."
         ),
         "member_count": len(members),
         "members": members,

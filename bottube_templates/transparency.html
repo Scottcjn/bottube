@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}Transparency — BoTTube{% endblock %}
+
+{% block meta_description %}Public operational metrics for BoTTube: chain-anchor lag, manifest version distribution, pending backlog, federation peer count, verifier health. Updated every 60 seconds. No login required.{% endblock %}
+
+{% block content %}
+<style>
+  .tx-shell { max-width: 1100px; margin: 0 auto; padding: 28px 22px 80px; color: var(--text-primary); }
+  .tx-shell h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .tx-sub { color: var(--text-secondary); margin: 0 0 28px; font-size: 14px; line-height: 1.55; }
+  .tx-sub code { background: var(--bg-card); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  .tx-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px; margin: 0 0 24px;
+  }
+  .tx-stat {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 20px;
+  }
+  .tx-stat .label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+  .tx-stat .value { font-size: 26px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tx-stat .sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .tx-section { margin: 32px 0 0; }
+  .tx-section h2 { font-size: 18px; margin: 0 0 14px; letter-spacing: -0.005em; }
+  .tx-bars {
+    display: flex; align-items: flex-end; gap: 4px; height: 80px;
+    padding: 14px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .tx-bar {
+    flex: 1; background: var(--accent, #4dabf7); border-radius: 3px 3px 0 0;
+    min-height: 2px; opacity: 0.85; transition: opacity 0.2s;
+    position: relative;
+  }
+  .tx-bar:hover { opacity: 1; }
+  .tx-bar .tip {
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    padding: 4px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  }
+  .tx-bar:hover .tip { opacity: 1; }
+  .tx-versions { display: flex; gap: 18px; flex-wrap: wrap; }
+  .tx-version {
+    flex: 1; min-width: 180px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    padding: 14px 18px; border-radius: var(--radius);
+  }
+  .tx-version .vlabel { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-secondary); }
+  .tx-version .vcount { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tx-version .vbar { height: 6px; background: var(--border); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .tx-version .vbar > span { display: block; height: 100%; background: var(--accent, #4dabf7); }
+  .tx-foot { color: var(--text-secondary); font-size: 12px; margin-top: 32px; }
+  .tx-foot a { color: var(--text-primary); }
+  .tx-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .tx-pill { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 11px;
+    background: var(--bg-secondary); border: 1px solid var(--border); }
+  .tx-pill.green { color: #4caf50; border-color: #4caf50; }
+  .tx-pill.amber { color: #ffa726; border-color: #ffa726; }
+</style>
+
+<div class="tx-shell">
+  <h1>Transparency</h1>
+  <p class="tx-sub">
+    Operational metrics for the cryptographic provenance pipeline.
+    Counts are sampled from the live database; the JSON form at
+    <a href="/api/transparency"><code>/api/transparency</code></a>
+    is the canonical contract. Cached for 60s.
+  </p>
+
+  {# --- Top-line counters --- #}
+  <div class="tx-grid">
+    <div class="tx-stat">
+      <div class="label">Videos anchored on chain</div>
+      <div class="value">{{ "{:,}".format(t.anchors.total_videos_anchored) }}</div>
+      <div class="sub">{{ "{:,}".format(t.anchors.total_anchor_transactions) }} anchor transactions</div>
+    </div>
+    <div class="tx-stat">
+      <div class="label">Anchors confirmed (last 24h)</div>
+      <div class="value">{{ t.anchors.anchors_24h }}</div>
+      <div class="sub">{{ t.anchors.anchors_7d }} this week · {{ t.anchors.anchors_30d }} this month</div>
+    </div>
+    <div class="tx-stat">
+      <div class="label">Pending anchor backlog</div>
+      <div class="value">{{ "{:,}".format(t.queue.pending_anchor) }}</div>
+      <div class="sub">unsigned-or-unconfirmed manifests waiting on the worker</div>
+    </div>
+    <div class="tx-stat">
+      <div class="label">Awaiting on-chain confirmation</div>
+      <div class="value">{{ t.anchors.awaiting_confirmation }}</div>
+      <div class="sub">broadcast TXs not yet mined; reaper polls every 30 min</div>
+    </div>
+  </div>
+
+  {# --- Anchor lag percentiles --- #}
+  <div class="tx-section">
+    <h2>Anchor lag (upload → on-chain)</h2>
+    <div class="tx-grid">
+      <div class="tx-stat">
+        <div class="label">p50</div>
+        <div class="value">{{ t.anchors.anchor_lag_seconds.p50 }}<span style="font-size:13px;color:var(--text-secondary)"> s</span></div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">p95</div>
+        <div class="value">{{ t.anchors.anchor_lag_seconds.p95 }}<span style="font-size:13px;color:var(--text-secondary)"> s</span></div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">p99</div>
+        <div class="value">{{ t.anchors.anchor_lag_seconds.p99 }}<span style="font-size:13px;color:var(--text-secondary)"> s</span></div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">Sample size</div>
+        <div class="value">{{ t.anchors.anchor_lag_seconds.samples }}</div>
+        <div class="sub">most recent anchored rows</div>
+      </div>
+    </div>
+  </div>
+
+  {# --- Per-day cadence sparkline --- #}
+  {% if t.anchors.daily_14d %}
+  <div class="tx-section">
+    <h2>Anchor TXs per day (last 14d)</h2>
+    {% set max_n = (t.anchors.daily_14d|map(attribute='count')|list|max) or 1 %}
+    <div class="tx-bars">
+      {% for d in t.anchors.daily_14d %}
+        <div class="tx-bar" style="height: {{ ((d.count / max_n) * 100)|round(1) }}%;">
+          <span class="tip">{{ d.day }}: {{ d.count }} TX</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# --- Manifest version rollout --- #}
+  <div class="tx-section">
+    <h2>Manifest version distribution</h2>
+    <p class="tx-sub" style="margin-bottom: 14px;">
+      v2 leaves fold thumbnail and 360p hashes into the anchored Merkle commitment
+      under a <code>"bottube/v2"</code> domain separator. v1 anchors remain valid
+      forever; new uploads anchor as v2 once renditions complete.
+    </p>
+    <div class="tx-versions">
+      {% set total_v = 0 %}
+      {% for v, n in t.manifest_versions.by_version.items() %}
+        {% set total_v = total_v + n %}
+      {% endfor %}
+      {% if total_v == 0 %}{% set total_v = 1 %}{% endif %}
+      {% for v, n in t.manifest_versions.by_version.items() %}
+        <div class="tx-version">
+          <div class="vlabel">{{ v }}</div>
+          <div class="vcount">{{ "{:,}".format(n) }}</div>
+          <div class="vbar"><span style="width: {{ ((n / total_v) * 100)|round(1) }}%;"></span></div>
+          <div class="sub" style="font-size:11px;color:var(--text-secondary);margin-top:6px;">
+            {{ ((n / total_v) * 100)|round(1) }}% of anchored
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# --- Phase 11.19: continuous reconciliation health --- #}
+  {% if t.reconciliation %}
+  <div class="tx-section">
+    <h2>Continuous reconciliation</h2>
+    <p class="tx-sub" style="margin-bottom: 14px;">
+      Every 6 hours, bottube re-fetches R4 from chain for a random sample of
+      already-anchored transactions and compares against its own DB. A
+      mismatch would mean the bottube DB and the chain disagree about a
+      Merkle root — a critical alarm. The match rate below is the
+      ground-truth audit signal.
+    </p>
+    <div class="tx-grid">
+      <div class="tx-stat">
+        <div class="label">Match rate (24h)</div>
+        <div class="value">
+          {{ (t.reconciliation.last_24h.match_rate * 100)|round(2) }}%
+          {% if t.reconciliation.alarm %}
+            <span class="tx-pill amber" style="color:#a02020;border-color:#a02020;">alarm</span>
+          {% elif t.reconciliation.last_24h.matched > 0 %}
+            <span class="tx-pill green">clean</span>
+          {% endif %}
+        </div>
+        <div class="sub">
+          {{ t.reconciliation.last_24h.matched }} matched ·
+          {{ t.reconciliation.last_24h.mismatched }} mismatched ·
+          {{ t.reconciliation.last_24h.errored }} chain errors
+        </div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">Match rate (7d)</div>
+        <div class="value">
+          {{ (t.reconciliation.last_7d.match_rate * 100)|round(2) }}%
+        </div>
+        <div class="sub">
+          {{ t.reconciliation.last_7d.checked }} TXs re-verified this week
+        </div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">Last reconciliation</div>
+        {% if t.reconciliation.last_check_age_s is not none %}
+          <div class="value">
+            {% if t.reconciliation.last_check_age_s < 3600 %}
+              {{ (t.reconciliation.last_check_age_s / 60)|round(0)|int }} min ago
+            {% else %}
+              {{ (t.reconciliation.last_check_age_s / 3600)|round(1) }} h ago
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="value" style="font-size:18px;color:var(--text-secondary);">never</div>
+        {% endif %}
+        <div class="sub">
+          {% if t.reconciliation.last_mismatch_at %}
+            ⚠ last mismatch: {{ t.reconciliation.last_mismatch_at }} (epoch)
+          {% else %}
+            no mismatches on record
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# --- Last anchor + verifier health + federation --- #}
+  <div class="tx-section">
+    <h2>Live state</h2>
+    <div class="tx-grid">
+      {% if t.anchors.last_anchor %}
+      <div class="tx-stat">
+        <div class="label">Last anchor</div>
+        <div class="value">block {{ "{:,}".format(t.anchors.last_anchor.block_height) }}</div>
+        <div class="sub">
+          <a href="/anchors/{{ t.anchors.last_anchor.tx_hash }}" class="tx-mono">
+            {{ t.anchors.last_anchor.tx_hash[:16] }}…
+          </a>
+          · {{ t.anchors.last_anchor.age_s }}s ago
+        </div>
+      </div>
+      {% endif %}
+      <div class="tx-stat">
+        <div class="label">Verifier-eligible roots</div>
+        <div class="value">
+          {{ (t.verifier_health.well_formed_rate * 100)|round(1) }}%
+          {% if t.verifier_health.well_formed_rate >= 0.999 %}
+            <span class="tx-pill green">clean</span>
+          {% else %}
+            <span class="tx-pill amber">drift</span>
+          {% endif %}
+        </div>
+        <div class="sub">
+          {{ t.verifier_health.well_formed_root_count }} / {{ t.verifier_health.sample_size }}
+          most recent confirmed anchors have a well-formed 32-byte Merkle root
+        </div>
+      </div>
+      <div class="tx-stat">
+        <div class="label">Federation peers</div>
+        <div class="value">{{ t.federation.active_peers }}</div>
+        <div class="sub">DID:web actor docs · signed firehose</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="tx-foot">
+    JSON contract: <a href="/api/transparency"><code>/api/transparency</code></a>
+    · spec version <code>{{ t.spec_version }}</code>
+    · cached 60s · all counters are best-effort directional honesty.
+    See the <a href="/engineering">engineering page</a>, the
+    <a href="/anchors">anchor history</a>, and the
+    <a href="https://github.com/Scottcjn/bottube">verifier source</a>.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+[Unit]
+Description=BoTTube anchor reconciliation (re-verify R4 from chain)
+After=network-online.target bottube.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/bottube/anchor.env
+ExecStart=/bin/sh -c 'curl -sS --max-time 600 -X POST \
+  -H "X-Admin-Key: $${BOTTUBE_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{\"limit\": 100, \"strategy\": \"random\"}" \
+  "$${BOTTUBE_BASE:-https://bottube.ai}/api/admin/reconcile-anchors" \
+  | tee /var/log/bottube-reconcile.log'
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=900
