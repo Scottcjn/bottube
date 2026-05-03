@@ -16783,6 +16783,10 @@ def _build_provenance_payload(video_row, prov_row, renditions):
             "duration": duration,
             "width": width,
             "height": height,
+            # Phase 11.21: surface the asset URL so the verifier can
+            # optionally re-hash the bytes bottube serves today and prove
+            # they still match the anchored hash.
+            "url": f"/api/videos/{vid}/stream",
         },
         "thumbnail": {
             "sha256": thumb_sha,
@@ -17504,6 +17508,101 @@ def well_known_mcp():
     """MCP discovery descriptor."""
     resp = jsonify(_mcp_descriptor())
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.22: /.well-known/provenance-spec.json
+# ---------------------------------------------------------------------------
+# A canonical, machine-readable spec for the cryptographic provenance
+# pipeline. Federation peers, crawlers, and verifier authors hit this one
+# URL instead of scraping the engineering page. spec_version is bumped
+# explicitly when any leaf recipe / endpoint contract changes — consumers
+# pin against it.
+
+@app.route("/.well-known/provenance-spec.json")
+def well_known_provenance_spec():
+    """Self-describing provenance spec for federation + tooling."""
+    spec = {
+        "spec": "bottube-provenance",
+        "spec_version": "1.0.0",
+        "issuer": "https://bottube.ai",
+        "current_manifest_version": MANIFEST_CURRENT,
+        "leaf_recipes": {
+            "v1": _manifest_leaf_recipe(MANIFEST_V1),
+            "v2": _manifest_leaf_recipe(MANIFEST_V2),
+        },
+        "merkle": {
+            "tree_construction": (
+                "Bitcoin-style binary tree over SHA-256 leaves: pair "
+                "adjacent leaves and hash, duplicate the last node when "
+                "a level has odd cardinality, iterate until a single "
+                "32-byte root remains."
+            ),
+            "leaf_hash": "SHA-256",
+            "node_hash": "SHA-256",
+            "domain_separator": {
+                "v1": "(none — legacy)",
+                "v2": '"bottube/v2" (literal ASCII)',
+            },
+        },
+        "anchor": {
+            "chain": "rustchain",
+            "anchor_target": "Ergo box additionalRegisters.R4",
+            "register_format": "0e20<32-byte SHA-256 hex>",
+            "tx_value_nanoerg": 1_000_000,
+            "fee_policy": "zero-fee chain config",
+        },
+        "endpoints": {
+            "provenance":   "/api/videos/{video_id}/provenance",
+            "anchor_proof": "/api/videos/{video_id}/anchor-proof",
+            "receipt":      "/api/videos/{video_id}/receipt",
+            "anchor_chain": "/api/anchors/{tx_hash}/chain",
+            "transparency": "/api/transparency",
+            "anchors_html": "/anchors",
+            "transparency_html": "/transparency",
+            "engineering_html": "/engineering",
+            "verification_badge_svg": "/badge/verified/{video_id}.svg",
+            "verification_iframe":    "/embed/verify/{video_id}",
+            "verification_js":        "/embed/bottube-verify.js",
+        },
+        "verifier": {
+            "package": "bottube-verify",
+            "minimum_version": "0.4.0",
+            "source": "https://github.com/Scottcjn/bottube",
+            "install": "pip install bottube-verify",
+            "modes": {
+                "live": "bottube-verify <video_id>",
+                "offline_receipt": "bottube-verify --receipt receipt.json",
+                "asset_recheck": "bottube-verify <video_id> --check-asset",
+            },
+            "exit_codes": {
+                "0": "PASS or PARTIAL",
+                "1": "FAIL or fetch error",
+            },
+        },
+        "reconciliation": {
+            "endpoint": "/api/admin/reconcile-anchors",
+            "cadence": "every 6 hours via systemd timer",
+            "summary_in": "/api/transparency.reconciliation",
+            "alarm_field": "/api/transparency.reconciliation.alarm",
+        },
+        "federation": {
+            "actor_doc": "/.well-known/agent/{handle}",
+            "relay_key": "/.well-known/relay/key",
+            "firehose": "/xrpc/feed.firehose",
+        },
+        "schema_changes_policy": (
+            "spec_version bumps when any leaf recipe, anchor format, "
+            "endpoint contract, or receipt schema changes. Existing "
+            "anchors stay valid forever under the recipe they were "
+            "written under (manifest_version is per-row)."
+        ),
+        "as_of": int(time.time()),
+    }
+    resp = jsonify(spec)
+    resp.headers["Cache-Control"] = "public, max-age=600"
     resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
 
@@ -21489,6 +21588,9 @@ def api_video_receipt(video_id):
             "video_id": target["video_id"],
             "title": title,
             "url": f"https://bottube.ai/v/{target['video_id']}",
+            # Phase 11.21: canonical asset stream URL for --check-asset
+            "canonical_asset_url":
+                f"https://bottube.ai/api/videos/{target['video_id']}/stream",
         },
         "manifest": {
             "version": target_version,

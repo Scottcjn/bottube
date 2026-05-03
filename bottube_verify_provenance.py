@@ -155,7 +155,42 @@ def fetch_anchor_r4_via_proxy(bottube_base, tx_hash, timeout=15):
     return bytes.fromhex(root_hex)
 
 
-VERIFIER_VERSION = "0.3.0"
+VERIFIER_VERSION = "0.4.0"
+
+
+def hash_asset_streaming(url, expected_sha256, max_mb=2048, chunk=64 * 1024):
+    """Stream-hash an asset URL and compare to the expected SHA-256.
+
+    Returns (matched: bool, actual_hex: str, bytes_read: int, error: str).
+    Bounded by max_mb so a malicious server can't make us spool forever.
+    Uses urllib (stdlib) — no requests/aiohttp dependency.
+    """
+    if not url:
+        return False, "", 0, "no canonical asset URL"
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return False, "", 0, f"refusing non-http(s) URL: {url!r}"
+    h = hashlib.sha256()
+    total = 0
+    cap = max_mb * 1024 * 1024
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r:
+            while True:
+                buf = r.read(chunk)
+                if not buf:
+                    break
+                total += len(buf)
+                if total > cap:
+                    return False, h.hexdigest(), total, (
+                        f"asset exceeded max {max_mb} MB cap; aborting"
+                    )
+                h.update(buf)
+    except urllib.error.HTTPError as e:
+        return False, "", 0, f"HTTP {e.code} fetching asset"
+    except Exception as e:
+        return False, "", 0, f"asset fetch failed: {e}"
+    actual = h.hexdigest()
+    expected = (expected_sha256 or "").lower()
+    return (actual == expected), actual, total, ""
 
 
 def verify_receipt_offline(receipt):
@@ -252,6 +287,14 @@ def main():
     ap.add_argument("--receipt", default="",
                     help="Path to a downloaded receipt JSON. If set, runs the "
                          "offline verification (no network) and exits.")
+    ap.add_argument("--check-asset", action="store_true",
+                    help="Additionally fetch the canonical asset bytes from "
+                         "bottube and SHA-256 them in-place, comparing to "
+                         "the anchored canonical_sha256. Closes the "
+                         "'are the served bytes still the anchored bytes?' "
+                         "gap. Network-bound; can be slow for large videos.")
+    ap.add_argument("--asset-max-mb", type=int, default=2048,
+                    help="Cap on asset bytes the verifier will read (default 2048 MB).")
     ap.add_argument("--version", action="version",
                     version=f"bottube-verify {VERIFIER_VERSION}")
     args = ap.parse_args()
@@ -490,6 +533,45 @@ def main():
             print(f"      leaf↔root inclusion proof skipped — pass --admin-key to enable.")
         verdict = "PARTIAL"
 
+    # Phase 11.21: optional bytes-on-disk check.
+    # The chain-anchor verdict above proves "bottube's claimed canonical
+    # hash is the same one anchored on chain". --check-asset additionally
+    # proves "the bytes bottube serves *today* still hash to that same
+    # value" — closing the moderator-can't-hot-swap-content gap.
+    asset_check = None
+    if args.check_asset:
+        asset_url_path = (prov.get("canonical_asset") or {}).get("url", "")
+        if asset_url_path.startswith("/"):
+            asset_url = bot + asset_url_path
+        else:
+            asset_url = asset_url_path
+        if not args.quiet:
+            print()
+            print(f"[bonus] --check-asset enabled; streaming bytes from {asset_url}")
+            print(f"        capping at {args.asset_max_mb} MB")
+        matched, actual_hex, total, err = hash_asset_streaming(
+            asset_url, canonical_sha,
+            max_mb=args.asset_max_mb,
+        )
+        if err and not actual_hex:
+            asset_check = ("error", err)
+            if not args.quiet:
+                print(f"        asset fetch error: {err}")
+        elif matched:
+            asset_check = ("match", actual_hex, total)
+            if not args.quiet:
+                mb = total / (1024 * 1024)
+                print(f"        ✓ {total} bytes ({mb:.1f} MB) hashed locally")
+                print(f"        ✓ SHA-256 matches the anchored canonical_sha256")
+        else:
+            asset_check = ("mismatch", actual_hex, total)
+            if not args.quiet:
+                print(f"        ✗ ASSET MISMATCH")
+                print(f"          local SHA-256: {actual_hex}")
+                print(f"          anchored hash: {canonical_sha}")
+                print(f"          bottube is serving DIFFERENT bytes than what was anchored.")
+            verdict = "FAIL"
+
     if args.quiet:
         print(verdict)
     else:
@@ -501,6 +583,14 @@ def main():
         print(f"  on-chain R4: {on_chain_root_hex}")
         print(f"  bottube hash:{manifest_hash}")
         print(f"  own leaf:    {own_leaf.hex()}")
+        if asset_check:
+            kind = asset_check[0]
+            if kind == "match":
+                print(f"  asset bytes: ✓ MATCH ({asset_check[2]:,} bytes hashed locally)")
+            elif kind == "mismatch":
+                print(f"  asset bytes: ✗ MISMATCH (served {asset_check[1]}, anchored {canonical_sha})")
+            elif kind == "error":
+                print(f"  asset bytes: ⚠ check skipped: {asset_check[1]}")
         if verdict == "PASS":
             print()
             if own_leaf.hex() == manifest_hash:

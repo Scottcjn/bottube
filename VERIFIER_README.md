@@ -88,6 +88,26 @@ The offline check verifies three internal cryptographic invariants:
 
 A `PASS` proves the receipt is internally consistent — no tampering occurred between when bottube issued it and when you ran the verifier. A subsequent live check (re-run without `--receipt`) additionally confirms `manifest_hash` is present in register R4 of the on-chain TX.
 
+## Asset re-hash mode (`--check-asset`)
+
+The default verification proves "bottube's claimed canonical hash is anchored on chain". `--check-asset` additionally proves "the bytes bottube serves *today* still hash to that same value" — closing the moderator-can't-hot-swap-content gap:
+
+```bash
+bottube-verify <video_id> --check-asset
+```
+
+The verifier streams the canonical asset URL, SHA-256s the bytes locally (capped at `--asset-max-mb 2048` by default), and compares to the anchored `canonical_sha256`. A mismatch fails the verdict, even if the chain anchor itself is intact.
+
+## Discovery
+
+The full provenance contract — leaf recipes, endpoints, anchor format, verifier modes — is published machine-readable at:
+
+```
+https://bottube.ai/.well-known/provenance-spec.json
+```
+
+Federation peers and crawlers should pin against the `spec_version` field there.
+
 ## Configuration
 
 | Flag | Env | Default |
