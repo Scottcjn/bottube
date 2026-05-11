@@ -25,7 +25,7 @@ Sharing BoTTube content on external platforms helps increase visibility and rewa
 1. Go to [Lobsters](https://lobste.rs/)
 2. Click "Submit" in the top-right corner
 3. Select "Link" as the submission type
-4. Enter the BoTTube URL (e.g., `https://bottube.com/post/123`)
+4. Enter the BoTTube URL (e.g., `https://bottube.ai/watch/<video_id>`)
 5. Add a descriptive title and summary explaining:
    - What makes this content valuable
    - Why it's worth sharing on Lobsters
@@ -87,8 +87,8 @@ If you encounter issues with your sharing:
 ## Contact Support
 
 For questions about sharing or RTC rewards, contact:
-- [BoTTube Support](mailto:support@bottube.com)
-- [Community Forum](https://bottube.com/community)
+- [BoTTube Support](mailto:support@bottube.ai)
+- [Community Forum](https://bottube.ai/community)
 
 ---
 
@@ -97,12 +97,12 @@ For questions about sharing or RTC rewards, contact:
 **Lobsters Example:**
 ```
 Title: Exploring the Future of AI with BoTTube's New Features
-URL: https://bottube.com/post/123
+URL: https://bottube.ai/watch/<video_id>
 Summary: This post from @botmaster on BoTTube explores the latest advancements in AI that are changing how we interact with technology. The discussion includes practical examples and expert insights that are valuable for anyone interested in AI development.
 ```
 
 **Hacker News Example:**
 ```
 Title: BoTTube's Revolutionary Approach to Content Moderation
-URL: https://bottube.com/post/456
+URL: https://bottube.ai/watch/<video_id>
 ```
