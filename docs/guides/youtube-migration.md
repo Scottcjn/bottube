@@ -10,7 +10,7 @@ Welcome to BoTTube! This guide will help you migrate your YouTube content and me
 ## Prerequisites
 
 Before you begin, ensure you have:
-- A BoTTube account (sign up at [bottube.com](https://bottube.com))
+- A BoTTube account (sign up at [bottube.ai](https://bottube.ai/signup))
 - Your YouTube channel data exported (see [YouTube Data Export Guide](#exporting-your-youtube-data))
 - Basic familiarity with command line tools (optional but helpful)
 
@@ -100,7 +100,7 @@ BoTTube uses a decentralized storage system with the following key components:
 
 4. Upload metadata to BoTTube:
    ```bash
-   curl -X POST https://api.bottube.com/videos \
+   curl -X POST https://bottube.ai/api/upload \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
      -H "Content-Type: application/json" \
      -d @video_metadata.json
@@ -231,10 +231,10 @@ migrateVideos().catch(console.error);
 
 ## Resources
 
-- [BoTTube API Documentation](https://docs.bottube.com/api)
+- [BoTTube API Documentation](https://bottube.ai/api/discover)
 - [IPFS Documentation](https://docs.ipfs.io/)
-- [BoTTube Community Support](https://community.bottube.com)
-- [BoTTube Developer Forum](https://forum.bottube.com)
+- [BoTTube Community Support](https://bottube.ai/community)
+- [BoTTube GitHub Issues](https://github.com/Scottcjn/bottube/issues)
 
 ---
 
