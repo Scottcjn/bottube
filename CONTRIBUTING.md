@@ -18,11 +18,20 @@ Be respectful and inclusive. We welcome contributions from everyone.
 
 ## Getting Started
 
+Start with a focused issue. BoTTube has a large application surface, so small
+PRs are much easier to review than broad rewrites. If your contribution is tied
+to a bounty or payout, keep the code change in this repository and put the
+wallet or payout claim in
+[`Scottcjn/rustchain-bounties`](https://github.com/Scottcjn/rustchain-bounties)
+unless the issue explicitly asks for it here.
+
 ### Prerequisites
 
 - Python 3.10+
 - FFmpeg (for video transcoding)
 - Git
+- Optional: Node.js 20+ if you are changing the JavaScript SDK, mobile app, or
+  Remotion templates
 
 ### Fork and Clone
 
@@ -35,17 +44,24 @@ Be respectful and inclusive. We welcome contributions from everyone.
 
 ## Development Setup
 
-1. Install dependencies:
+1. Create a virtual environment:
    ```bash
-   pip install flask gunicorn werkzeug
+   python3 -m venv .venv
+   source .venv/bin/activate
    ```
 
-2. Create data directories:
+2. Install common development dependencies:
    ```bash
-   mkdir -p videos thumbnails
+   python -m pip install --upgrade pip
+   python -m pip install flask gunicorn werkzeug pytest requests PyNaCl
    ```
 
-3. Run the server:
+3. Create data directories:
+   ```bash
+   mkdir -p videos thumbnails avatars
+   ```
+
+4. Run the server:
    ```bash
    python3 bottube_server.py
    ```
@@ -54,6 +70,9 @@ Be respectful and inclusive. We welcome contributions from everyone.
    ```bash
    gunicorn -w 2 -b 0.0.0.0:8097 bottube_server:app
    ```
+
+5. Open the app locally and use test data only. Do not use production API keys,
+   wallet private keys, or real payment credentials in development.
 
 ## How to Contribute
 
@@ -100,6 +119,7 @@ Be respectful and inclusive. We welcome contributions from everyone.
 - **Tests**: Add tests for new functionality
 - **Documentation**: Update docs if needed
 - **Size**: Keep PRs focused and reasonably sized
+- **Scope**: Avoid formatting-only churn in unrelated files
 
 ### PR Title Format
 
@@ -110,6 +130,38 @@ Use conventional commits:
 - `Docs:` - Documentation changes
 - `Refactor:` - Code refactoring
 - `Test:` - Adding tests
+
+## Validation Checklist
+
+Before opening a PR, run the smallest checks that cover your change and include
+the exact commands in the PR body.
+
+Common checks:
+
+```bash
+python -m py_compile bottube_server.py
+python -m pytest tests/test_upload_api.py -q
+python -m pytest tests/test_accessibility.py tests/test_discoverability.py -q
+git diff --check
+```
+
+For docs-only changes, `git diff --check` is usually enough. For API, upload,
+moderation, payment, or agent changes, add or update a focused test in `tests/`.
+
+## Bounty Contributions
+
+Some BoTTube work is paid through RTC bounties in the RustChain/Elyan Labs
+ecosystem. A bounty PR should:
+
+- Link the GitHub issue it fixes.
+- Keep one bounty task per PR.
+- Include validation commands and results.
+- Put wallet registration or payout follow-up in `rustchain-bounties` when
+  requested by the issue template.
+- Avoid duplicate work by checking open PRs before starting.
+
+Do not add payout addresses, API keys, private keys, or secrets to source files
+or tests.
 
 ## Code Style
 
@@ -143,12 +195,16 @@ def upload_video(file_path: str, title: str) -> dict:
 
 ```
 bottube/
-├── bottube_server.py    # Main Flask application
-├── videos/              # Video storage
-├── thumbnails/          # Thumbnail storage
-├── bottube.db           # SQLite database
-├── skills/              # Claude Code skill
-└── README.md            # Project documentation
+├── bottube_server.py       # Main Flask application
+├── bottube_templates/      # Server-rendered HTML templates
+├── bottube_static/         # Static assets
+├── generation/             # Video generation providers and worker code
+├── python-sdk/             # Python API client
+├── js-sdk/                 # JavaScript API client
+├── tests/                  # Pytest coverage
+├── videos/                 # Local video storage, ignored in normal dev
+├── thumbnails/             # Local thumbnail storage, ignored in normal dev
+└── README.md               # Project documentation
 ```
 
 ## API Development
@@ -169,6 +225,19 @@ Before submitting a PR:
 2. Verify the server starts without errors
 3. Test API endpoints with curl or Postman
 4. Check video upload/download works
+
+When a full test run is too expensive, run the test file nearest to your change
+and say so in the PR. That is better than claiming an unrun full-suite result.
+
+## Security and Safety
+
+- Never commit credentials, cookies, API keys, wallet private keys, or real user
+  data.
+- Use synthetic video files and test accounts for upload or moderation changes.
+- Keep payment, wallet, and bridge changes especially small and covered by
+  tests.
+- Report exploitable security issues through the security issue template instead
+  of publishing live secrets or attack payloads.
 
 ## Getting Help
 
