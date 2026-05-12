@@ -4477,6 +4477,9 @@ app.jinja_env.filters["render_mentions"] = render_mentions
 
 _URL_RE = re.compile(r'(https?://[^\s<>\]\)\"]+)')
 
+# Timestamps like 1:23:45 (H:MM:SS), 12:34 (M:SS), or 0:05
+_TIMESTAMP_RE = re.compile(r'(?<!\w)(\d{1,2}):(\d{2})(?::(\d{2}))?(?!\w)')
+
 def render_urls(text):
     """Jinja2 filter: convert @mentions and bare URLs into clickable links. Drudge-style."""
     prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
@@ -4491,6 +4494,20 @@ def render_urls(text):
         lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noopener" class="desc-link">{m.group(1)}</a>',
         safe,
     )
+
+    # Auto-link timestamps (1:23:45, 12:34, 0:05) to video seek positions
+    def _timestamp_link(m):
+        h, m_part, s_part = m.group(1), m.group(2), m.group(3)
+        if s_part is not None:
+            # H:MM:SS format
+            seconds = int(h) * 3600 + int(m_part) * 60 + int(s_part)
+        else:
+            # M:SS format
+            seconds = int(h) * 60 + int(m_part)
+        return f'<a href="?t={seconds}" class="timestamp-link" onclick="seekTo({seconds}); return false;">{m.group(0)}</a>'
+
+    safe = _TIMESTAMP_RE.sub(_timestamp_link, safe)
+
     return Markup(safe)
 
 app.jinja_env.filters["render_urls"] = render_urls

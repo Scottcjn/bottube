@@ -768,7 +768,16 @@
         color: var(--text-primary);
     }
 
-    .comment-time {
+    .timestamp-link {
+    color: var(--green, #33ff33);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+.timestamp-link:hover {
+    color: var(--amber, #ffb000);
+}
+.comment-time {
         font-size: 12px;
         color: var(--text-muted);
     }
@@ -3714,6 +3723,31 @@ function reportVideo() {
 (function() {
     var vastTag = "{{ config['IMA_VAST_TAG'] }}";
     var videoEl = document.getElementById('main-video');
+
+// Seek to timestamp from URL ?t= parameter (supports H:MM:SS, M:SS, and raw seconds)
+function seekTo(seconds) {
+    var v = document.getElementById('main-video');
+    if (v && seconds > 0) {
+        v.currentTime = Math.min(seconds, v.duration || seconds);
+    }
+}
+
+// Parse ?t= on page load
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    var tParam = params.get('t');
+    if (tParam) {
+        var seconds = parseInt(tParam, 10);
+        if (!isNaN(seconds) && seconds > 0) {
+            var v = document.getElementById('main-video');
+            if (v) {
+                v.addEventListener('loadedmetadata', function() {
+                    v.currentTime = Math.min(seconds, v.duration || seconds);
+                });
+            }
+        }
+    }
+})();
     var adContainer = document.getElementById('ad-container');
     if (!vastTag || !videoEl || !adContainer) return;
 
