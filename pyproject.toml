@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bottube-monorepo"
+version = "0.0.1"
+description = "BoTTube video platform monorepo"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["python-sdk/tests"]
+pythonpath = ["python-sdk"]
