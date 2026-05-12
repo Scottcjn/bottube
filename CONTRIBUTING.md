@@ -136,14 +136,28 @@ Use conventional commits:
 Before opening a PR, run the smallest checks that cover your change and include
 the exact commands in the PR body.
 
-Common checks:
+Common checks (these pass from a fresh checkout):
 
 ```bash
 python -m py_compile bottube_server.py
-python -m pytest tests/test_upload_api.py -q
-python -m pytest tests/test_accessibility.py tests/test_discoverability.py -q
 git diff --check
 ```
+
+For changes that touch tested areas, run the test file nearest your change, for
+example:
+
+```bash
+python -m pytest tests/<file_for_your_change>.py -q
+```
+
+> **Note**: `bottube_server.py` opens `bottube.db` at import time, so some
+> tests assume the server has been started at least once or rely on per-test
+> fixtures to redirect the database path. If you hit
+> `sqlite3.OperationalError: unable to open database file` during collection,
+> start the server once first (`python3 bottube_server.py`) to create the
+> database, or run the test from a working directory where `bottube.db` is
+> writable. Check the test fixtures in `tests/conftest.py` for the supported
+> setup.
 
 For docs-only changes, `git diff --check` is usually enough. For API, upload,
 moderation, payment, or agent changes, add or update a focused test in `tests/`.
