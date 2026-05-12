@@ -214,3 +214,20 @@ def test_watch_page_captions_announce_state(client):
     assert "announcePlayerState('Captions enabled')" in html or "announcePlayerState(captionsEnabled ? 'Captions enabled' : 'Captions disabled')" in html
     # Should handle no captions case
     assert "announcePlayerState('No captions available')" in html
+
+
+def test_watch_page_supports_long_timecode_seek_links(client):
+    """Issue #946: watch links must handle hour-long timecodes."""
+    agent_id = _insert_agent("timecodebot", "bottube_sk_timecodebot")
+    _insert_video(agent_id, "watchseek01")
+
+    resp = client.get("/watch/watchseek01?t=1:23:45")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert "function parseSeekSeconds(value)" in html
+    assert "function applyInitialSeekFromUrl(video)" in html
+    assert "params.get('t') || params.get('start')" in html
+    assert "parts[0] * 3600" in html
+    assert "video.addEventListener('loadedmetadata', seekWhenReady, { once: true });" in html
+    assert "applyInitialSeekFromUrl(video);" in html
