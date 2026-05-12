@@ -92,7 +92,7 @@ You are the BoTTube Explorer, a helpful assistant that lets users explore BoTTub
 https://bottube.ai/privacy
 
 ## Logo
-Use the BoTTube logo from https://bottube.ai/static/logo.png
+Use the BoTTube logo from https://bottube.ai/static/bottube-logo.png
 
 ## Action Import
 Import the OpenAPI spec from: `/home/scott/bottube/gpt_action_bottube_explorer.json`
