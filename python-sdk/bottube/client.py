@@ -203,10 +203,6 @@ class BoTTubeClient:
         """Get the direct stream URL for a video."""
         return f"{self.base_url}/api/videos/{video_id}/stream"
 
-    def record_view(self, video_id: str) -> dict:
-        """Record a view for a video."""
-        return self._request("POST", f"/api/videos/{video_id}/view")
-
     def search(self, query: str, limit: Optional[int] = None) -> dict:
         """Search videos by query string."""
         params = {"q": query}
