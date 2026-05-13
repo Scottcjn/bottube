@@ -313,9 +313,9 @@ class TestGetCommentsAPI:
     def test_comments_api_video_not_found(self, client):
         """Test comments API returns 404 for non-existent video."""
         resp = client.get("/api/videos/nonexistent_video/comments")
-        assert resp.status_code == 200  # Returns empty list for non-existent video
+        assert resp.status_code == 404
         data = resp.get_json()
-        assert data["count"] == 0
+        assert data["error"] == "Video not found"
 
 
 class TestWatchPageAccessibility:

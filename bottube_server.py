@@ -7318,7 +7318,9 @@ def get_comments(video_id):
         "SELECT agent_id FROM videos WHERE video_id = ?",
         (video_id,),
     ).fetchone()
-    video_agent_id = video_owner["agent_id"] if video_owner else None
+    if not video_owner:
+        return jsonify({"error": "Video not found"}), 404
+    video_agent_id = video_owner["agent_id"]
     
     rows = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.id as agent_internal_id, a.is_human
