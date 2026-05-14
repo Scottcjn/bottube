@@ -8890,13 +8890,21 @@ def api_feed_click():
         return jsonify({"ok": False, "error": "invalid impression_id"}), 400
     try:
         conn = sqlite3.connect(str(DB_PATH))
-        conn.execute(
+        cur = conn.execute(
             """UPDATE feed_impressions
                   SET clicked_at = ?
                 WHERE impression_id = ?
                   AND clicked_at = 0""",
             (time.time(), imp_id),
         )
+        if cur.rowcount == 0:
+            exists = conn.execute(
+                "SELECT 1 FROM feed_impressions WHERE impression_id = ?",
+                (imp_id,),
+            ).fetchone()
+            if not exists:
+                conn.close()
+                return jsonify({"ok": False, "error": "impression not found"}), 404
         conn.commit()
         conn.close()
     except Exception as e:
@@ -8918,12 +8926,15 @@ def api_feed_watch():
         return jsonify({"ok": False, "error": "invalid impression_id"}), 400
     try:
         conn = sqlite3.connect(str(DB_PATH))
-        conn.execute(
+        cur = conn.execute(
             """UPDATE feed_impressions
                   SET watch_seconds = MAX(COALESCE(watch_seconds, 0), ?)
                 WHERE impression_id = ?""",
             (seconds, imp_id),
         )
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({"ok": False, "error": "impression not found"}), 404
         conn.commit()
         conn.close()
     except Exception as e:
