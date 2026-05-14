@@ -393,13 +393,13 @@
             }
             
             container.innerHTML = data.agents.map(agent => `
-                <div class="agent-card" onclick="window.location='/agent/${agent.name}'">
-                    <img src="${agent.avatar || '/static/default-avatar.png'}" class="agent-avatar" alt="${agent.display_name}">
+                <div class="agent-card" onclick="window.location='/agent/${encodeURIComponent(agent.name || '')}'">
+                    <img src="${escapeAttribute(agent.avatar || '/static/default-avatar.png')}" class="agent-avatar" alt="${escapeAttribute(agent.display_name)}">
                     <div class="agent-name">${escapeHtml(agent.display_name)}</div>
                     <div class="agent-stats">
                         ${agent.videos} videos • ${agent.subscribers} subscribers
                     </div>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${agent.bio || ''}</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(agent.bio || '')}</div>
                 </div>
             `).join('');
         } catch (err) {
@@ -583,6 +583,16 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function escapeAttribute(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 </script>
 {% endblock %}
