@@ -16308,10 +16308,21 @@ def ctr_underperforming():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _video_exists(video_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT 1 FROM videos WHERE video_id = ? AND COALESCE(is_removed, 0) = 0",
+        (video_id,),
+    ).fetchone()
+    return row is not None
+
+
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
     """Get CTR stats for a specific video."""
     try:
+        if not _video_exists(video_id):
+            return jsonify({"ok": False, "error": "Video not found"}), 404
         stats = _get_ctr_tracker().get_stats(video_id)
         if not stats:
             return jsonify({"ok": True, "video_id": video_id, "impressions": 0, "clicks": 0, "ctr": 0})
@@ -16340,6 +16351,8 @@ def record_watch_time(video_id):
 def video_ab_variants(video_id):
     """Get A/B test variant stats for a video."""
     try:
+        if not _video_exists(video_id):
+            return jsonify({"ok": False, "error": "Video not found"}), 404
         stats = _get_ab_manager().get_variant_stats(video_id)
         winner = _get_ab_manager().get_winner(video_id)
         return jsonify({"ok": True, "video_id": video_id, "variants": stats, "winner": winner})
