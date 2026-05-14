@@ -133,6 +133,23 @@ def init_ban_tables(db=None):
         db.close()
 
 
+def _parse_pagination_param(name, default, min_value=None, max_value=None):
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    if min_value is not None and value < min_value:
+        return None
+    if max_value is not None:
+        value = min(value, max_value)
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Banano RPC helpers
 # ---------------------------------------------------------------------------
@@ -396,8 +413,10 @@ def ban_transactions(agent_name):
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
-    limit = min(int(request.args.get("limit", 50)), 100)
-    offset = int(request.args.get("offset", 0))
+    limit = _parse_pagination_param("limit", default=50, min_value=1, max_value=100)
+    offset = _parse_pagination_param("offset", default=0, min_value=0)
+    if limit is None or offset is None:
+        return jsonify({"error": "Invalid pagination parameter"}), 400
 
     txs = db.execute(
         "SELECT * FROM ban_transactions WHERE agent_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
