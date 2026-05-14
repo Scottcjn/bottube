@@ -374,6 +374,29 @@ class TestAnalyticsApiPeriod:
 
 
 # =============================================================================
+# Analytics Blueprint Query Param Validation Tests
+# =============================================================================
+
+class TestAnalyticsBlueprintQueryParams:
+    """Test public analytics blueprint query parameter validation."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/analytics/api/views?agent_id=scout&period=abc",
+            "/analytics/api/engagement?agent_id=scout&period=abc",
+            "/analytics/api/top-videos?agent_id=scout&limit=abc",
+        ],
+    )
+    def test_malformed_query_params_return_json_400(self, client, path):
+        response = client.get(path)
+
+        assert response.status_code == 400
+        assert response.content_type.startswith("application/json")
+        assert "error" in response.get_json()
+
+
+# =============================================================================
 # Analytics Dashboard Integration Tests
 # =============================================================================
 

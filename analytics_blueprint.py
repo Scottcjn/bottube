@@ -15,6 +15,12 @@ from functools import wraps
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
+VALID_PERIODS = {
+    '7d': 7,
+    '30d': 30,
+    '90d': 90,
+}
+
 
 def get_db():
     """Get database connection from Flask app context or create new one."""
@@ -37,6 +43,19 @@ def login_required(f):
     return decorated_function
 
 
+def _parse_period(value):
+    period = (value or '30d').lower()
+    return period, VALID_PERIODS.get(period)
+
+
+def _parse_limit(value, default=10, maximum=50):
+    try:
+        limit = int(value if value is not None else default)
+    except (TypeError, ValueError):
+        return None
+    return min(max(limit, 1), maximum)
+
+
 @analytics_bp.route('/')
 def analytics_dashboard():
     """Render the analytics dashboard page."""
@@ -55,11 +74,12 @@ def api_views():
     if not agent_id:
         return jsonify({"error": "agent_id required"}), 400
     
-    period = request.args.get('period', '30d')
+    period, days = _parse_period(request.args.get('period', '30d'))
+    if days is None:
+        return jsonify({"error": "period must be one of: 7d, 30d, 90d"}), 400
     video_id = request.args.get('video_id')
     
     # Calculate date range
-    days = int(period.replace('d', ''))
     start_date = datetime.now() - timedelta(days=days)
     start_timestamp = start_date.timestamp()
     
@@ -131,8 +151,9 @@ def api_engagement():
     if not agent_id:
         return jsonify({"error": "agent_id required"}), 400
     
-    period = request.args.get('period', '30d')
-    days = int(period.replace('d', ''))
+    period, days = _parse_period(request.args.get('period', '30d'))
+    if days is None:
+        return jsonify({"error": "period must be one of: 7d, 30d, 90d"}), 400
     start_date = datetime.now() - timedelta(days=days)
     start_timestamp = start_date.timestamp()
     
@@ -228,7 +249,9 @@ def api_top_videos():
         return jsonify({"error": "agent_id required"}), 400
     
     metric = request.args.get('metric', 'views')
-    limit = min(int(request.args.get('limit', 10)), 50)
+    limit = _parse_limit(request.args.get('limit'), default=10, maximum=50)
+    if limit is None:
+        return jsonify({"error": "limit must be an integer"}), 400
     
     db = get_db()
     
