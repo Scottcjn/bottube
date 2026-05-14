@@ -48,6 +48,8 @@ sqlite3.connect = _orig_sqlite_connect
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     db_path = tmp_path / "bottube_captions_test.db"
+    monkeypatch.setenv("BOTTUBE_DB_PATH", str(db_path))
+    monkeypatch.setenv("BOTTUBE_DB", str(db_path))
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(captions_blueprint, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(captions_blueprint, "OPENAI_API_KEY", "", raising=False)
@@ -116,6 +118,7 @@ def test_caption_table_migrates_to_multi_format(monkeypatch, tmp_path):
         )
         db.commit()
 
+    monkeypatch.setenv("BOTTUBE_DB_PATH", str(db_path))
     monkeypatch.setattr(captions_blueprint, "DB_PATH", db_path, raising=False)
     captions_blueprint.init_captions_tables()
 
@@ -173,6 +176,23 @@ def test_caption_endpoints_support_vtt_and_srt(client):
     assert status_resp.status_code == 200
     formats = {row["format"] for row in status_resp.get_json()["captions"]}
     assert formats == {"srt", "vtt"}
+
+
+def test_caption_status_returns_404_for_missing_video(client):
+    resp = client.get("/api/videos/bt_missing_caption_status_probe/captions/status")
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"ok": False, "error": "video not found"}
+
+
+def test_caption_status_preserves_empty_list_for_existing_video(client):
+    agent_id = _insert_agent("captionless", "bottube_sk_captionless")
+    _insert_video(agent_id, "captionlessvid")
+
+    resp = client.get("/api/videos/captionlessvid/captions/status")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"video_id": "captionlessvid", "captions": []}
 
 
 def test_api_search_matches_caption_text(client):

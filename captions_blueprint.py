@@ -532,6 +532,13 @@ def get_captions(video_id):
 def caption_status(video_id):
     """Check which caption tracks exist for a video."""
     with _connect_db() as db:
+        video = db.execute(
+            "SELECT 1 FROM videos WHERE video_id = ? AND COALESCE(is_removed, 0) = 0",
+            (video_id,),
+        ).fetchone()
+        if not video:
+            return jsonify({"ok": False, "error": "video not found"}), 404
+
         rows = db.execute(
             """
             SELECT language, format, source, created_at
