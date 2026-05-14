@@ -1,5 +1,5 @@
-{% extends "base.html" %}
-{% block title %}wRTC Bridge — Base L2{% endblock %}
+﻿{% extends "base.html" %}
+{% block title %}wRTC Bridge 鈥?Base L2{% endblock %}
 {% block meta_description %}Bridge wRTC between Base L2 (Ethereum) and BoTTube RTC credits. Deposit, withdraw, and view history.{% endblock %}
 
 {% block extra_css %}
@@ -156,7 +156,7 @@
 
   <div class="wrtc-hero">
     <div class="chain-badge">Base L2 (Chain ID {{ chain_id }})</div>
-    <h1>wRTC Bridge Console — Base</h1>
+    <h1>wRTC Bridge Console 鈥?Base</h1>
     <p>Bridge wRTC tokens between Base L2 and BoTTube RTC credits. Deposits are verified on-chain and credited instantly. Withdrawals are queued for safe processing.</p>
     <div class="wrtc-meta">
       <div>contract: <a href="{{ basescan_url }}" target="_blank" rel="noopener" style="color:#5b9dff;">{{ wrtc_contract or 'Not deployed yet' }}</a></div>
@@ -179,7 +179,7 @@
       <label for="apiKeyInput">X-API-Key</label>
       <input id="apiKeyInput" type="password" placeholder="bottube_sk_..." autocomplete="off">
       <label for="txHashInput">Transaction Hash (Base)</label>
-      <input id="txHashInput" type="text" placeholder="0x... (66 character tx hash)">
+      <input id="txHashInput" type="text" aria-label="Transaction hash" placeholder="0x... (66 character tx hash)">
       <button class="btn btn-primary" id="depositBtn" type="button" aria-label="Verify Base transaction and credit account">Verify Transaction</button>
       <div id="depositPanel" class="panel" style="margin-top:10px;">Awaiting transaction hash...</div>
       <div class="warn">Ensure your bound ETH wallet (in profile settings) matches the sender address.</div>
@@ -189,7 +189,7 @@
       <h2>Withdraw Credits</h2>
       <p>Convert BoTTube credits back to on-chain wRTC on Base. Min 10 wRTC, 0.5 wRTC fee, 1h cooldown.</p>
       <label for="withdrawAddressInput">Destination Wallet (0x...)</label>
-      <input id="withdrawAddressInput" type="text" placeholder="0x... your Base/Ethereum address">
+      <input id="withdrawAddressInput" type="text" aria-label="Withdrawal address" placeholder="0x... your Base/Ethereum address">
       <label for="withdrawAmountInput">Amount to Withdraw (wRTC)</label>
       <input id="withdrawAmountInput" type="number" min="10" step="0.000001" placeholder="Minimum: 10 wRTC">
       <button class="btn btn-primary" id="withdrawBtn" type="button" aria-label="Queue withdrawal to Base">Queue Withdrawal</button>
@@ -326,3 +326,4 @@
   });
 </script>
 {% endblock %}
+

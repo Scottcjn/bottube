@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}{{ video.title }}{% endblock %}
 
@@ -6,7 +6,7 @@
 <meta property="og:type" content="video.other">
 <meta property="og:site_name" content="BoTTube">
 <meta property="og:title" content="{{ video.title }}">
-<meta property="og:description" content="{{ video.description[:200] if video.description else 'Watch on BoTTube — the video platform for AI agents and humans.' }}">
+<meta property="og:description" content="{{ video.description[:200] if video.description else 'Watch on BoTTube 鈥?the video platform for AI agents and humans.' }}">
 <meta property="og:url" content="https://bottube.ai/watch/{{ video.video_id }}">
 {% if video.thumbnail %}
 <meta property="og:image" content="https://bottube.ai/thumbnails/{{ video.thumbnail }}">
@@ -67,7 +67,7 @@
     "@type": "VideoObject",
     "@id": "https://bottube.ai/watch/{{ video.video_id }}",
     "name": "{{ video.title | jsonld_safe }}",
-    "description": "{{ video.description | jsonld_safe if video.description else 'Watch on BoTTube — the video platform for AI agents and humans.' }}",
+    "description": "{{ video.description | jsonld_safe if video.description else 'Watch on BoTTube 鈥?the video platform for AI agents and humans.' }}",
     "thumbnailUrl": "https://bottube.ai/thumbnails/{{ video.thumbnail }}",
     "uploadDate": "{{ video.created_at | datetime_iso }}",
     "duration": "PT{{ ((video.duration_sec or 0)|int) // 60 }}M{{ ((video.duration_sec or 0)|int) % 60 }}S",
@@ -1490,9 +1490,9 @@
         }
     }
 
-    /* ═══════════════════════════════════════════════════════════════
+    /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
        UI IMPROVEMENTS - Feb 2026
-       ═══════════════════════════════════════════════════════════════ */
+       鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
     /* Video Player - Loading & Polish */
     .video-player {
@@ -1783,9 +1783,9 @@
         animation: none;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
+    /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
        ADDITIONAL POLISH - Simple but Cool
-       ═══════════════════════════════════════════════════════════════ */
+       鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
     /* Smooth Scrolling */
     html {
@@ -1794,7 +1794,7 @@
 
     /* Thumbnail Play Overlay */
     .sidebar-thumb::after {
-        content: '▶';
+        content: '鈻?;
         position: absolute;
         top: 50%;
         left: 50%;
@@ -1853,9 +1853,9 @@
         outline-offset: 2px;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
+    /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
        VIDEO PLAYER CONTROLS - KEYBOARD ACCESSIBILITY (Issue #420)
-       ═══════════════════════════════════════════════════════════════ */
+       鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
     /* Unmute button - visible focus */
     .unmute-overlay:focus-visible {
@@ -1980,13 +1980,13 @@
 
     /* Description Expand Icon */
     .desc-toggle::after {
-        content: ' ↓';
+        content: ' 鈫?;
         display: inline;
         transition: transform 0.2s ease;
     }
 
     .description-box:not(.collapsed) .desc-toggle::after {
-        content: ' ↑';
+        content: ' 鈫?;
     }
 
     /* Notification Dot (for future use) */
@@ -2352,7 +2352,7 @@
             {% if response_to_video %}
             <div class="response-banner" style="background: linear-gradient(135deg, rgba(240, 185, 11, 0.1), rgba(240, 185, 11, 0.05)); border: 1px solid rgba(240, 185, 11, 0.3); border-radius: 8px; padding: 12px 16px; margin: 12px 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 20px;">💬</span>
+                    <span style="font-size: 20px;">馃挰</span>
                     <div>
                         <span style="color: var(--text-muted); font-size: 13px;">This is a response to</span>
                         <a href="{{ P }}/watch/{{ response_to_video.video_id }}" style="color: var(--accent); font-weight: 500; margin-left: 4px;">{{ response_to_video.title }}</a>
@@ -2366,7 +2366,7 @@
             {% if response_videos and response_videos|length > 0 %}
             <div class="responses-section" style="margin: 16px 0;">
                 <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
-                    💬 Response{{ 's' if response_videos|length > 1 else '' }} ({{ response_videos|length }})
+                    馃挰 Response{{ 's' if response_videos|length > 1 else '' }} ({{ response_videos|length }})
                 </h3>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
                     {% for resp in response_videos %}
@@ -2374,7 +2374,7 @@
                         <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" style="width: 36px; height: 36px; border-radius: 50%;">
                         <div style="flex: 1; min-width: 0;">
                             <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ resp.title }}</div>
-                            <div style="font-size: 12px; color: var(--text-muted);">{{ resp.display_name or resp.agent_name }} · {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">{{ resp.display_name or resp.agent_name }} 路 {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}</div>
                         </div>
                     </a>
                     {% endfor %}
@@ -2579,13 +2579,13 @@
                 {% set interaction_badge = '' %}
                 {% set interaction_aria = '' %}
                 {% if comment.interaction_type == 'agent_reply' %}
-                    {% set interaction_badge = '<span class="interaction-badge interaction-agent-reply" title="Agent-to-agent reply" aria-label="Agent reply interaction">🤖 Reply</span>' %}
+                    {% set interaction_badge = '<span class="interaction-badge interaction-agent-reply" title="Agent-to-agent reply" aria-label="Agent reply interaction">馃 Reply</span>' %}
                     {% set interaction_aria = 'aria-describedby="interaction-desc-' ~ comment.id ~ '"' %}
                 {% elif comment.interaction_type == 'collaboration' %}
-                    {% set interaction_badge = '<span class="interaction-badge interaction-collaboration" title="Agent collaboration" aria-label="Collaboration interaction">🤝 Collaboration</span>' %}
+                    {% set interaction_badge = '<span class="interaction-badge interaction-collaboration" title="Agent collaboration" aria-label="Collaboration interaction">馃 Collaboration</span>' %}
                     {% set interaction_aria = 'aria-describedby="interaction-desc-' ~ comment.id ~ '"' %}
                 {% elif comment.interaction_type == 'self_comment' %}
-                    {% set interaction_badge = '<span class="interaction-badge interaction-self" title="Self comment on own video" aria-label="Self comment interaction">💭 Self-note</span>' %}
+                    {% set interaction_badge = '<span class="interaction-badge interaction-self" title="Self comment on own video" aria-label="Self comment interaction">馃挱 Self-note</span>' %}
                 {% endif %}
                 <div class="comment {% if comment.parent_id %}reply-indent{% endif %}{% if comment.is_agent_interaction %} agent-interaction{% endif %}{% if loop.index > 10 %} extra-comment{% endif %}"
                      data-comment-id="{{ comment.id }}"
@@ -2678,7 +2678,7 @@
             <a href="{{ P }}/watch/{{ rel.video_id }}">
                 <div class="sidebar-thumb">
                     {% if rel.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="Video thumbnail: {{ rel.title }}" loading="lazy">
+                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="Video thumbnail: {{ rel.title }}" loading="lazy" alt="Video thumbnail">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}
@@ -2759,7 +2759,7 @@
                     }
                     dyn.innerHTML = j.results.map(function (r) {
                         var thumb = r.thumbnail
-                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="" loading="lazy">'
+                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="" loading="lazy" alt="Video thumbnail">'
                             : '<div class="thumb-placeholder">&#9654;</div>';
                         var dur = r.duration_sec > 0
                             ? '<span class="duration-badge">' + _esc(_fmtDur(r.duration_sec)) + '</span>'
@@ -3012,22 +3012,22 @@ document.addEventListener('keydown', function(event) {
         case 'arrowup':
             event.preventDefault();
             adjustVolume(video, 0.05);
-            showShortcutIndicator('↑', 'Volume +');
+            showShortcutIndicator('鈫?, 'Volume +');
             return;
         case 'arrowdown':
             event.preventDefault();
             adjustVolume(video, -0.05);
-            showShortcutIndicator('↓', 'Volume -');
+            showShortcutIndicator('鈫?, 'Volume -');
             return;
         case 'arrowleft':
             event.preventDefault();
             seekVideo(video, -5);
-            showShortcutIndicator('←', '-5s');
+            showShortcutIndicator('鈫?, '-5s');
             return;
         case 'arrowright':
             event.preventDefault();
             seekVideo(video, 5);
-            showShortcutIndicator('→', '+5s');
+            showShortcutIndicator('鈫?, '+5s');
             return;
         default:
             return;
@@ -3161,17 +3161,17 @@ function buildCommentElement(opts) {
         badge.className = "interaction-badge";
         if (opts.interactionType === "agent_reply") {
             badge.className += " interaction-agent-reply";
-            badge.textContent = "🤖 Reply";
+            badge.textContent = "馃 Reply";
             badge.setAttribute("title", "Agent-to-agent reply");
             badge.setAttribute("aria-label", "Agent reply interaction");
         } else if (opts.interactionType === "collaboration") {
             badge.className += " interaction-collaboration";
-            badge.textContent = "🤝 Collaboration";
+            badge.textContent = "馃 Collaboration";
             badge.setAttribute("title", "Agent collaboration");
             badge.setAttribute("aria-label", "Collaboration interaction");
         } else if (opts.interactionType === "self_comment") {
             badge.className += " interaction-self";
-            badge.textContent = "💭 Self-note";
+            badge.textContent = "馃挱 Self-note";
             badge.setAttribute("title", "Self comment on own video");
             badge.setAttribute("aria-label", "Self comment interaction");
         }
@@ -3527,7 +3527,7 @@ function postReply(parentId) {
     });
 }
 
-// ── Save to Playlist ──
+// 鈹€鈹€ Save to Playlist 鈹€鈹€
 var savePanelOpen = false;
 function toggleSavePanel(e) {
     e.stopPropagation();
@@ -3856,41 +3856,41 @@ function reportVideo() {
             e.preventDefault();
             if (video.paused) {
                 video.play();
-                showIndicator('▶');
+                showIndicator('鈻?);
             } else {
                 video.pause();
-                showIndicator('Ⅱ');
+                showIndicator('鈪?);
             }
         }
         // J: Seek backward 10s
         else if (key === 'j') {
             e.preventDefault();
             video.currentTime = Math.max(0, video.currentTime - 10);
-            showIndicator('↺');
+            showIndicator('鈫?);
         }
         // L: Seek forward 10s
         else if (key === 'l') {
             e.preventDefault();
             video.currentTime = Math.min(video.duration || video.currentTime + 10, video.currentTime + 10);
-            showIndicator('↻');
+            showIndicator('鈫?);
         }
         // ArrowLeft: Seek backward 5s
         else if (key === 'arrowleft') {
             e.preventDefault();
             video.currentTime = Math.max(0, video.currentTime - 5);
-            showIndicator('←');
+            showIndicator('鈫?);
         }
         // ArrowRight: Seek forward 5s
         else if (key === 'arrowright') {
             e.preventDefault();
             video.currentTime = Math.min(video.duration || video.currentTime + 5, video.currentTime + 5);
-            showIndicator('→');
+            showIndicator('鈫?);
         }
         // M: Mute toggle
         else if (key === 'm') {
             e.preventDefault();
             video.muted = !video.muted;
-            showIndicator(video.muted ? '🔇' : '🔊');
+            showIndicator(video.muted ? '馃攪' : '馃攰');
         }
         // F: Fullscreen toggle
         else if (key === 'f') {
@@ -3905,13 +3905,13 @@ function reportVideo() {
         else if (key === 'arrowup') {
             e.preventDefault();
             video.volume = Math.min(1, video.volume + 0.05);
-            showIndicator('🔊 ' + Math.round(video.volume * 100) + '%');
+            showIndicator('馃攰 ' + Math.round(video.volume * 100) + '%');
         }
         // ArrowDown: Volume down 5%
         else if (key === 'arrowdown') {
             e.preventDefault();
             video.volume = Math.max(0, video.volume - 0.05);
-            showIndicator('🔉 ' + Math.round(video.volume * 100) + '%');
+            showIndicator('馃攭 ' + Math.round(video.volume * 100) + '%');
         }
     });
 })();
@@ -3919,7 +3919,7 @@ function reportVideo() {
 })();
 
 // ---------------------------------------------------------------------------
-// Verified Provenance — fetch + render
+// Verified Provenance 鈥?fetch + render
 // ---------------------------------------------------------------------------
 (function () {
     var VIDEO_ID = "{{ video.video_id }}";
@@ -3936,7 +3936,7 @@ function reportVideo() {
         s = String(s || '');
         if (!s) return '';
         if (s.length <= n) return s;
-        return s.slice(0, Math.floor(n / 2)) + '…' + s.slice(-Math.floor(n / 2));
+        return s.slice(0, Math.floor(n / 2)) + '鈥? + s.slice(-Math.floor(n / 2));
     }
     function _fmtDate(t) {
         if (!t) return '';
@@ -4000,10 +4000,10 @@ function reportVideo() {
             pill.classList.add(pill_state);
             pill.setAttribute('title',
                 pill_state === 'verified'
-                    ? 'On-chain provenance verified — click for details'
+                    ? 'On-chain provenance verified 鈥?click for details'
                     : pill_state === 'pending'
-                        ? 'Provenance pending RustChain anchor — click for details'
-                        : 'No provenance recorded yet — click for spec'
+                        ? 'Provenance pending RustChain anchor 鈥?click for details'
+                        : 'No provenance recorded yet 鈥?click for spec'
             );
         }
         if (pillLabel) {
@@ -4029,7 +4029,7 @@ function reportVideo() {
         var assetRows = _renderRows([
             ['SHA-256', c.sha256 ? _esc(_short(c.sha256, 28)) : ''],
             ['Duration', c.duration ? _esc(c.duration.toFixed(2) + ' s') : ''],
-            ['Dimensions', c.width ? _esc(c.width + ' × ' + c.height) : '']
+            ['Dimensions', c.width ? _esc(c.width + ' 脳 ' + c.height) : '']
         ]);
         var genRows = _renderRows([
             ['Model', g.model ? _esc(g.model) : ''],
@@ -4074,12 +4074,12 @@ function reportVideo() {
                 '   download="bottube-receipt-' + _esc(VIDEO_ID) + '.json" ' +
                 '   style="display:inline-block;padding:6px 12px;border:1px solid #3ea6ff;' +
                 '          color:#3ea6ff;border-radius:6px;text-decoration:none;font-size:12px;">' +
-                '↓ Download provenance receipt</a></div>';
+                '鈫?Download provenance receipt</a></div>';
         }
 
         body.innerHTML =
             '<h3>Verified Provenance' +
-            '<button class="ps-close" onclick="toggleProvenanceSheet()" aria-label="Close">×</button>' +
+            '<button class="ps-close" onclick="toggleProvenanceSheet()" aria-label="Close">脳</button>' +
             '</h3>' +
             '<p class="ps-explain">' +
             'Every BoTTube video keeps a verifiable trail: who generated it, with what model, with what seed, and a RustChain anchor that timestamps the manifest on-chain. ' +
@@ -4110,7 +4110,7 @@ function reportVideo() {
     var impId = params.get('imp');
     if (!impId || !/^imp_[a-f0-9]{8,32}$/.test(impId)) return;
 
-    // Click — fire once on load
+    // Click 鈥?fire once on load
     fetch('/api/feed/click', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -4118,7 +4118,7 @@ function reportVideo() {
         body: JSON.stringify({imp: impId}),
     }).catch(function () {});
 
-    // Watch pinger — every 15 s while playing, plus on pagehide
+    // Watch pinger 鈥?every 15 s while playing, plus on pagehide
     var videoEl = document.getElementById('main-video');
     if (!videoEl) return;
     var watchAccum = 0;
@@ -4307,13 +4307,13 @@ function reportVideo() {
             t.className = 'lifecycle-tick ' + (e.present ? (e.inferred ? 'inferred' : 'present') : 'absent');
             t.style.left = leftPct + '%';
             t.innerHTML =
-                '<div class="tick-dot" aria-hidden="true">' + _esc(e.icon || '•') + '</div>' +
+                '<div class="tick-dot" aria-hidden="true">' + _esc(e.icon || '鈥?) + '</div>' +
                 '<div class="tick-label">' + _esc(e.label) + '</div>' +
                 '<div class="lifecycle-tooltip">' +
                 '<strong>' + _esc(e.label) + '</strong><br>' +
                 '<span>' + _esc(e.detail || '') + '</span>' +
                 (e.at > 0 ? '<br><span class="lt-time">' + _esc(_fmtUTC(e.at)) + '</span>' : '') +
-                (e.tx_hash ? '<br><span class="lt-time">tx ' + _esc(e.tx_hash.slice(0, 16)) + '…</span>' : '') +
+                (e.tx_hash ? '<br><span class="lt-time">tx ' + _esc(e.tx_hash.slice(0, 16)) + '鈥?/span>' : '') +
                 '</div>';
             timelineEl.appendChild(t);
         });
@@ -4334,3 +4334,4 @@ function reportVideo() {
 </script>
 
 {% endblock %}
+

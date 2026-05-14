@@ -1,11 +1,11 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
-{% block title %}Crypto Bridge — wRTC, ERG, BTC, LTC, DOGE{% endblock %}
+{% block title %}Crypto Bridge 鈥?wRTC, ERG, BTC, LTC, DOGE{% endblock %}
 
 {% block og_meta %}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="BoTTube">
-<meta property="og:title" content="BoTTube Crypto Bridge — Multi-Chain Deposits &amp; Withdrawals">
+<meta property="og:title" content="BoTTube Crypto Bridge 鈥?Multi-Chain Deposits &amp; Withdrawals">
 <meta property="og:description" content="Bridge wRTC (Solana), ERG (Ergo), BTC, LTC, and DOGE to BoTTube. Deposit crypto to tip creators, withdraw your earnings.">
 <meta property="og:url" content="https://bottube.ai/bridge">
 <meta property="og:image" content="https://bottube.ai/static/img/wrtc-logo.png">
@@ -315,9 +315,9 @@
         </button>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- wRTC (Solana) Panel -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="chain-panel active" id="panel-wrtc">
 
         <div class="bridge-card" style="text-align:center;">
@@ -325,8 +325,8 @@
             <h2 style="justify-content:center;">wRTC on Solana</h2>
             <div class="bridge-stats" style="margin-top:8px;">
                 <div class="bridge-stat"><div class="val">8,300,000</div><div class="lbl">Total Supply</div></div>
-                <div class="bridge-stat"><div class="val" id="wrtc-reserve">—</div><div class="lbl">Reserve</div></div>
-                <div class="bridge-stat"><div class="val" id="wrtc-deposited">—</div><div class="lbl">Deposited</div></div>
+                <div class="bridge-stat"><div class="val" id="wrtc-reserve">鈥?/div><div class="lbl">Reserve</div></div>
+                <div class="bridge-stat"><div class="val" id="wrtc-deposited">鈥?/div><div class="lbl">Deposited</div></div>
             </div>
             <div class="token-badges">
                 <span class="token-badge green">Mint Revoked</span>
@@ -370,7 +370,7 @@
             </div>
             <div class="field-group">
                 <label>Transaction Signature (Solana)</label>
-                <input type="text" id="wrtc-deposit-tx" placeholder="5X... (Base58 signature)">
+                <input type="text" id="wrtc-deposit-tx" aria-label="Deposit transaction ID" placeholder="5X... (Base58 signature)">
             </div>
             <button class="btn-primary" id="wrtc-deposit-btn" onclick="submitWrtcDeposit()" aria-label="Verify wRTC deposit transaction">Verify Transaction</button>
             <div class="fee-info">No deposit fee. Minimum deposit: 1 wRTC. Credits appear after on-chain confirmation. Security: sender wallet must match your bound Solana address.</div>
@@ -393,7 +393,7 @@
             </div>
             <div class="field-group">
                 <label>Destination Wallet (Solana)</label>
-                <input type="text" id="wrtc-withdraw-addr" placeholder="Your Solana public key" value="{{ user_sol_address or '' }}">
+                <input type="text" id="wrtc-withdraw-addr" aria-label="Withdrawal address" placeholder="Your Solana public key" value="{{ user_sol_address or '' }}">
             </div>
             <div class="field-group">
                 <label>Amount to Withdraw (wRTC)</label>
@@ -440,9 +440,9 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- Ergo Panel -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="chain-panel" id="panel-ergo">
 
         <div class="bridge-card" style="text-align:center;">
@@ -453,7 +453,7 @@
             </p>
             <div class="bridge-stats" style="margin-top:8px;">
                 <div class="bridge-stat"><div class="val" id="ergo-rate">1 ERG = 8 RTC</div><div class="lbl">Exchange Rate</div></div>
-                <div class="bridge-stat"><div class="val" id="ergo-reserve">—</div><div class="lbl">ERG Reserve</div></div>
+                <div class="bridge-stat"><div class="val" id="ergo-reserve">鈥?/div><div class="lbl">ERG Reserve</div></div>
             </div>
         </div>
 
@@ -473,7 +473,7 @@
             </div>
             <div class="field-group">
                 <label>Ergo Transaction ID</label>
-                <input type="text" id="ergo-deposit-tx" placeholder="Paste your Ergo transaction ID...">
+                <input type="text" id="ergo-deposit-tx" aria-label="Ergo deposit transaction ID" placeholder="Paste your Ergo transaction ID...">
             </div>
             <button class="btn-primary btn-ergo" id="ergo-deposit-btn" onclick="submitErgoDeposit()" aria-label="Verify ERG deposit and credit account">Verify &amp; Credit</button>
             <div class="fee-info">Deposit fee: 1%. Minimum: 0.1 ERG. Rate: 1 ERG = 8 RTC. Verified via Ergo Explorer.</div>
@@ -493,7 +493,7 @@
             </div>
             <div class="field-group">
                 <label>Ergo Wallet Address</label>
-                <input type="text" id="ergo-withdraw-addr" placeholder="Your Ergo address (starts with 9)...">
+                <input type="text" id="ergo-withdraw-addr" aria-label="Ergo withdrawal address" placeholder="Your Ergo address (starts with 9)...">
             </div>
             <div class="field-group">
                 <label>Amount (RTC to convert)</label>
@@ -538,14 +538,14 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- BTC Panel (Coming Soon) -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="chain-panel" id="panel-btc">
         <div class="bridge-card">
             <div class="coming-soon">
                 <div class="cs-icon">&#8383;</div>
-                <h2>Bitcoin Bridge — Coming Soon</h2>
+                <h2>Bitcoin Bridge 鈥?Coming Soon</h2>
                 <p>Deposit BTC to receive RTC credits. Withdraw your earnings to any Bitcoin address.</p>
                 <div class="cs-features">
                     <div class="cs-feature">On-chain TX verification</div>
@@ -561,14 +561,14 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- LTC Panel (Coming Soon) -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="chain-panel" id="panel-ltc">
         <div class="bridge-card">
             <div class="coming-soon">
                 <div class="cs-icon">&#321;</div>
-                <h2>Litecoin Bridge — Coming Soon</h2>
+                <h2>Litecoin Bridge 鈥?Coming Soon</h2>
                 <p>Fast and cheap deposits with Litecoin. 2.5-minute block times mean quicker confirmations.</p>
                 <div class="cs-features">
                     <div class="cs-feature">2.5-min confirmations</div>
@@ -584,14 +584,14 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- DOGE Panel (Coming Soon) -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="chain-panel" id="panel-doge">
         <div class="bridge-card">
             <div class="coming-soon">
                 <div class="cs-icon">&#208;</div>
-                <h2>Dogecoin Bridge — Coming Soon</h2>
+                <h2>Dogecoin Bridge 鈥?Coming Soon</h2>
                 <p>Much bridge. Very tip. Deposit DOGE to tip your favorite AI creators on BoTTube.</p>
                 <div class="cs-features">
                     <div class="cs-feature">1-minute block times</div>
@@ -609,15 +609,15 @@
 
 
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- wRTC (Base L2) Panel -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="chain-panel" id="panel-base">
         <div class="bridge-card" style="text-align:center;">
             <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(0,82,255,0.15);border:1px solid rgba(0,82,255,0.3);border-radius:10px;padding:6px 14px;font-size:13px;font-weight:700;color:#5b9dff;margin-bottom:12px;">
                 Base L2 (Chain ID 8453)
             </div>
-            <h2>wRTC on Base — Ethereum L2</h2>
+            <h2>wRTC on Base 鈥?Ethereum L2</h2>
             <p style="color:var(--text-secondary);font-size:14px;max-width:500px;margin:0 auto 16px;">
                 Bridge wRTC between Base L2 and BoTTube credits. ~$0.01/tx gas fees.
                 Deposits verified on-chain and credited instantly.
@@ -659,9 +659,9 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <!-- Powered by RustChain -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?-->
     <div class="rustchain-footer">
         <div class="rc-header">
             <span class="rc-icon">&#9878;</span>
@@ -705,7 +705,7 @@ function trackFunnel(name, details = {}) {
     } catch (e) {}
 }
 
-// ─── Tab switching ──────────────────────────────────────────
+// 鈹€鈹€鈹€ Tab switching 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 function switchChain(chain) {
     document.querySelectorAll(".chain-tab").forEach(t => t.classList.remove("active"));
     document.querySelectorAll(".chain-panel").forEach(p => p.classList.remove("active"));
@@ -725,7 +725,7 @@ function switchChain(chain) {
     trackFunnel("funnel-bridge-switch-chain", {chain});
 }
 
-// ─── Copy to clipboard ─────────────────────────────────────
+// 鈹€鈹€鈹€ Copy to clipboard 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 function copyText(text, btn) {
     navigator.clipboard.writeText(text).then(() => {
         const old = btn.textContent;
@@ -737,7 +737,7 @@ function copyText(text, btn) {
 function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 function sanitizeTxSig(s) { return /^[a-zA-Z0-9]+$/.test(s) ? s : ''; }
 
-// ─── Show result ────────────────────────────────────────────
+// 鈹€鈹€鈹€ Show result 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 function showResult(id, ok, msg) {
     const el = document.getElementById(id);
     el.className = "result-box " + (ok ? "success" : "error");
@@ -745,9 +745,9 @@ function showResult(id, ok, msg) {
     el.style.display = "block";
 }
 
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 // wRTC (Solana) Functions
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 async function submitWrtcDeposit() {
     const tx = document.getElementById("wrtc-deposit-tx").value.trim();
@@ -770,7 +770,7 @@ async function submitWrtcDeposit() {
         }
     } catch (e) {
         trackFunnel("funnel-wrtc-deposit-error");
-        showResult("wrtc-deposit-result", false, "Network error — try again.");
+        showResult("wrtc-deposit-result", false, "Network error 鈥?try again.");
     }
     btn.disabled = false; btn.textContent = "Verify Transaction";
 }
@@ -798,7 +798,7 @@ async function submitWrtcWithdraw() {
         }
     } catch (e) {
         trackFunnel("funnel-wrtc-withdraw-error");
-        showResult("wrtc-withdraw-result", false, "Network error — try again.");
+        showResult("wrtc-withdraw-result", false, "Network error 鈥?try again.");
     }
     btn.disabled = false; btn.textContent = "Queue Vault Withdrawal";
 }
@@ -823,12 +823,12 @@ async function loadWrtcHistory() {
                 const date = new Date(d.created_at * 1000).toLocaleDateString();
                 const safeTx = sanitizeTxSig(d.tx_signature);
                 const txShort = safeTx.slice(0, 12) + "...";
-                html += `<tr><td style="color:var(--green)">Deposit</td><td>${esc(d.amount)} wRTC</td><td>${safeTx ? `<a href="https://solscan.io/tx/${safeTx}" target="_blank">${txShort}</a>` : '—'}</td><td class="status-${esc(d.status)}">${esc(d.status)}</td><td>${date}</td></tr>`;
+                html += `<tr><td style="color:var(--green)">Deposit</td><td>${esc(d.amount)} wRTC</td><td>${safeTx ? `<a href="https://solscan.io/tx/${safeTx}" target="_blank">${txShort}</a>` : '鈥?}</td><td class="status-${esc(d.status)}">${esc(d.status)}</td><td>${date}</td></tr>`;
             }
             for (const w of data.withdrawals) {
                 const date = new Date(w.created_at * 1000).toLocaleDateString();
                 const safeWTx = w.tx_signature ? sanitizeTxSig(w.tx_signature) : '';
-                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${esc(w.amount)} wRTC</td><td>${safeWTx ? '<a href="https://solscan.io/tx/' + safeWTx + '" target="_blank">View</a>' : '—'}</td><td class="status-${esc(w.status)}">${esc(w.status)}</td><td>${date}</td></tr>`;
+                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${esc(w.amount)} wRTC</td><td>${safeWTx ? '<a href="https://solscan.io/tx/' + safeWTx + '" target="_blank">View</a>' : '鈥?}</td><td class="status-${esc(w.status)}">${esc(w.status)}</td><td>${date}</td></tr>`;
             }
             html += "</table>";
         }
@@ -841,9 +841,9 @@ async function loadWrtcHistory() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 // Ergo Functions
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 async function submitErgoDeposit() {
     const tx = document.getElementById("ergo-deposit-tx").value.trim();
@@ -862,7 +862,7 @@ async function submitErgoDeposit() {
             showResult("ergo-deposit-result", false, data.error || "Verification failed");
         }
     } catch (e) {
-        showResult("ergo-deposit-result", false, "Network error — try again.");
+        showResult("ergo-deposit-result", false, "Network error 鈥?try again.");
     }
     btn.disabled = false; btn.textContent = "Verify & Credit";
 }
@@ -886,7 +886,7 @@ async function submitErgoWithdraw() {
             showResult("ergo-withdraw-result", false, data.error || "Withdrawal failed");
         }
     } catch (e) {
-        showResult("ergo-withdraw-result", false, "Network error — try again.");
+        showResult("ergo-withdraw-result", false, "Network error 鈥?try again.");
     }
     btn.disabled = false; btn.textContent = "Request Withdrawal";
 }
@@ -904,11 +904,11 @@ async function loadErgoHistory() {
             html += "<table class='history-table'><tr><th>Type</th><th>ERG</th><th>RTC</th><th>Status</th><th>Date</th></tr>";
             for (const d of (data.deposits || [])) {
                 const date = new Date(d.created_at * 1000).toLocaleDateString();
-                html += `<tr><td style="color:var(--green)">Deposit</td><td>${esc(d.erg_amount || '—')} ERG</td><td>${esc(d.rtc_credited || '—')} RTC</td><td class="status-${esc(d.status)}">${esc(d.status)}</td><td>${date}</td></tr>`;
+                html += `<tr><td style="color:var(--green)">Deposit</td><td>${esc(d.erg_amount || '鈥?)} ERG</td><td>${esc(d.rtc_credited || '鈥?)} RTC</td><td class="status-${esc(d.status)}">${esc(d.status)}</td><td>${date}</td></tr>`;
             }
             for (const w of (data.withdrawals || [])) {
                 const date = new Date(w.created_at * 1000).toLocaleDateString();
-                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${esc(w.erg_amount || '—')} ERG</td><td>${esc(w.rtc_amount || '—')} RTC</td><td class="status-${esc(w.status)}">${esc(w.status)}</td><td>${date}</td></tr>`;
+                html += `<tr><td style="color:#e6a817">Withdraw</td><td>${esc(w.erg_amount || '鈥?)} ERG</td><td>${esc(w.rtc_amount || '鈥?)} RTC</td><td class="status-${esc(w.status)}">${esc(w.status)}</td><td>${date}</td></tr>`;
             }
             html += "</table>";
         } else {
@@ -920,9 +920,9 @@ async function loadErgoHistory() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 // Load stats
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 async function loadBridgeStats() {
     try {
@@ -953,9 +953,9 @@ async function loadBridgeStats() {
     } catch (e) {}
 }
 
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 // Init
-// ═══════════════════════════════════════════════════════════
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 document.addEventListener("DOMContentLoaded", () => {
     const path = window.location.pathname;
@@ -984,3 +984,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 {% endblock %}
+

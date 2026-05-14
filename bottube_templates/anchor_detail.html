@@ -1,8 +1,8 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
-{% block title %}Anchor {{ batch.tx_hash[:8] }} — BoTTube{% endblock %}
+{% block title %}Anchor {{ batch.tx_hash[:8] }} 鈥?BoTTube{% endblock %}
 
-{% block meta_description %}On-chain anchor batch detail for {{ batch.tx_hash[:16] }}…{{ batch.tx_hash[-8:] }} — {{ batch.member_count }} videos, Merkle root {{ batch.manifest_hash[:16] }}…, committed to RustChain.{% endblock %}
+{% block meta_description %}On-chain anchor batch detail for {{ batch.tx_hash[:16] }}鈥{ batch.tx_hash[-8:] }} 鈥?{{ batch.member_count }} videos, Merkle root {{ batch.manifest_hash[:16] }}鈥? committed to RustChain.{% endblock %}
 
 {% block content %}
 <style>
@@ -59,7 +59,7 @@
 </style>
 
 <div class="ad-shell">
-  <a class="ad-back" href="{{ P }}/anchors">← all anchors</a>
+  <a class="ad-back" href="{{ P }}/anchors">鈫?all anchors</a>
   <h1 style="margin-top:8px;">Anchor batch {{ batch.tx_hash[:16] }}&hellip;{{ batch.tx_hash[-8:] }}</h1>
 
   <div class="ad-meta">
@@ -94,16 +94,16 @@
   <div class="ad-meta" id="chain-panel" style="background:rgba(74,210,122,0.06);border-color:rgba(74,210,122,0.4);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <strong style="color:#4ad27a;">On-chain data (live)</strong>
-      <span id="chain-status" style="font-size:11px;color:var(--text-secondary);">fetching…</span>
+      <span id="chain-status" style="font-size:11px;color:var(--text-secondary);">fetching鈥?/span>
     </div>
     <div id="chain-rows" style="display:none;">
-      <div class="row"><span class="key">R4 (raw)</span><span class="val" id="chain-r4-raw">—</span></div>
-      <div class="row"><span class="key">R4 → Merkle root</span><span class="val" id="chain-r4-merkle">—</span></div>
-      <div class="row"><span class="key">Bottube ↔ chain</span><span class="val normal" id="chain-match">—</span></div>
-      <div class="row"><span class="key">Confirmations</span><span class="val normal" id="chain-confs">—</span></div>
-      <div class="row"><span class="key">Inclusion height</span><span class="val normal" id="chain-incl">—</span></div>
-      <div class="row"><span class="key">Anchor box value</span><span class="val normal" id="chain-value">—</span></div>
-      <div class="row"><span class="key">ergoTree (prefix)</span><span class="val" id="chain-tree">—</span></div>
+      <div class="row"><span class="key">R4 (raw)</span><span class="val" id="chain-r4-raw">鈥?/span></div>
+      <div class="row"><span class="key">R4 鈫?Merkle root</span><span class="val" id="chain-r4-merkle">鈥?/span></div>
+      <div class="row"><span class="key">Bottube 鈫?chain</span><span class="val normal" id="chain-match">鈥?/span></div>
+      <div class="row"><span class="key">Confirmations</span><span class="val normal" id="chain-confs">鈥?/span></div>
+      <div class="row"><span class="key">Inclusion height</span><span class="val normal" id="chain-incl">鈥?/span></div>
+      <div class="row"><span class="key">Anchor box value</span><span class="val normal" id="chain-value">鈥?/span></div>
+      <div class="row"><span class="key">ergoTree (prefix)</span><span class="val" id="chain-tree">鈥?/span></div>
     </div>
   </div>
 
@@ -122,18 +122,18 @@
             return;
           }
           var match = j.r4_merkle_root && j.r4_merkle_root === claimedRoot;
-          status.textContent = match ? "✓ root matches bottube's claim" : "✗ MISMATCH";
+          status.textContent = match ? "鉁?root matches bottube's claim" : "鉁?MISMATCH";
           status.style.color = match ? "#4ad27a" : "#e26060";
           rows.style.display = "block";
-          document.getElementById("chain-r4-raw").textContent = j.r4_raw || "—";
-          document.getElementById("chain-r4-merkle").textContent = j.r4_merkle_root || "—";
+          document.getElementById("chain-r4-raw").textContent = j.r4_raw || "鈥?;
+          document.getElementById("chain-r4-merkle").textContent = j.r4_merkle_root || "鈥?;
           var matchEl = document.getElementById("chain-match");
-          matchEl.textContent = match ? "matches byte-for-byte ✓" : "DIFFERS — investigate ✗";
+          matchEl.textContent = match ? "matches byte-for-byte 鉁? : "DIFFERS 鈥?investigate 鉁?;
           matchEl.style.color = match ? "#4ad27a" : "#e26060";
           document.getElementById("chain-confs").textContent = j.num_confirmations;
           document.getElementById("chain-incl").textContent = j.inclusion_height || "pending";
           document.getElementById("chain-value").textContent = (j.anchor_value_nanoerg / 1e9).toFixed(6) + " ERG";
-          document.getElementById("chain-tree").textContent = (j.ergo_tree_short || "—") + "…";
+          document.getElementById("chain-tree").textContent = (j.ergo_tree_short || "鈥?) + "鈥?;
         })
         .catch(function (e) {
           var status = document.getElementById("chain-status");
@@ -162,7 +162,7 @@ python3 bottube_verify_provenance.py &lt;video_id&gt; \
     <div class="ad-member">
       <div class="thumb">
         {% if m.thumbnail %}
-        <img src="{{ P }}/thumbnails/{{ m.thumbnail }}" alt="" loading="lazy">
+        <img src="{{ P }}/thumbnails/{{ m.thumbnail }}" alt="" loading="lazy" alt="Video thumbnail">
         {% endif %}
       </div>
       <div class="info">
@@ -175,3 +175,4 @@ python3 bottube_verify_provenance.py &lt;video_id&gt; \
   </div>
 </div>
 {% endblock %}
+

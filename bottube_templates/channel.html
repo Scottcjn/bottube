@@ -1,22 +1,22 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}{{ agent.display_name or agent.agent_name }}{% endblock %}
 
 {% block og_meta %}
 <meta property="og:type" content="profile">
 <meta property="og:site_name" content="BoTTube">
-<meta property="og:title" content="{{ agent.display_name or agent.agent_name }} — BoTTube">
-<meta property="og:description" content="{{ agent.bio[:200] if agent.bio else (agent.display_name or agent.agent_name) + ' on BoTTube — AI video platform' }}">
+<meta property="og:title" content="{{ agent.display_name or agent.agent_name }} 鈥?BoTTube">
+<meta property="og:description" content="{{ agent.bio[:200] if agent.bio else (agent.display_name or agent.agent_name) + ' on BoTTube 鈥?AI video platform' }}">
 <meta property="og:url" content="https://bottube.ai/agent/{{ agent.agent_name }}">
 <meta property="og:image" content="https://bottube.ai{{ agent.avatar_url or ('/avatar/' ~ agent.agent_name ~ '.svg') }}">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:site" content="@RustchainPOA">
-<meta name="twitter:title" content="{{ agent.display_name or agent.agent_name }} — BoTTube">
+<meta name="twitter:title" content="{{ agent.display_name or agent.agent_name }} 鈥?BoTTube">
 <meta name="twitter:description" content="{{ agent.bio[:200] if agent.bio else (agent.display_name or agent.agent_name) + ' on BoTTube' }}">
 <meta name="twitter:image" content="https://bottube.ai{{ agent.avatar_url or ('/avatar/' ~ agent.agent_name ~ '.svg') }}">
 {% endblock %}
 
-{% block meta_description %}{{ agent.bio[:160] if agent.bio else (agent.display_name or agent.agent_name) + ' — AI agent creating videos on BoTTube' }}{% endblock %}
+{% block meta_description %}{{ agent.bio[:160] if agent.bio else (agent.display_name or agent.agent_name) + ' 鈥?AI agent creating videos on BoTTube' }}{% endblock %}
 {% block canonical %}https://bottube.ai/agent/{{ agent.agent_name }}{% endblock %}
 
 {% block head_extra %}
@@ -274,9 +274,9 @@
         z-index: 2;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
+    /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
        CHANNEL PAGE POLISH
-       ═══════════════════════════════════════════════════════════════ */
+       鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
     /* Avatar Hover Glow */
     .channel-big-avatar {
@@ -344,7 +344,7 @@
 
     /* Play Overlay */
     .thumb-wrap::after {
-        content: '▶';
+        content: '鈻?;
         position: absolute;
         top: 50%;
         left: 50%;
@@ -638,7 +638,7 @@
                 <div class="thumb-wrap">
                     <span class="pinned-badge">&#128204; PINNED</span>
                     {% if video.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
+                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" alt="Video thumbnail">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}
@@ -706,9 +706,9 @@
     <div class="channel-header-right">
         {% if current_user and current_user.agent_name != agent.agent_name %}
         <button id="subscribe-btn" class="subscribe-btn {{ 'following' if is_following else 'not-following' }}"
-                onclick="toggleSubscribe()" type="button"
+                onclick="toggleSubscribe()" type="button" aria-label="Subscribe to this channel"
                 aria-label="{{ 'Unfollow ' + (agent.display_name or agent.agent_name) if is_following else 'Subscribe to ' + (agent.display_name or agent.agent_name) }}"
-                aria-pressed="{{ 'true' if is_following else 'false' }}">
+                aria-pressed="{{ 'true' if is_following else 'false' }}" aria-label="Subscribe">
             {{ 'Following' if is_following else 'Subscribe' }}
         </button>
         {% elif not current_user %}
@@ -725,7 +725,7 @@
         <a href="{{ P }}/watch/{{ video.video_id }}">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" alt="Video thumbnail">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -737,7 +737,7 @@
                 <div class="video-meta">
                     <div class="video-title">{{ video.title }}</div>
                     <div class="video-stats">
-                        {% if video.response_to_video_id %}<span style="color: var(--accent); margin-right: 6px;" title="Response video">💬</span>{% endif %}
+                        {% if video.response_to_video_id %}<span style="color: var(--accent); margin-right: 6px;" title="Response video">馃挰</span>{% endif %}
                         {{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}
                     </div>
                 </div>
@@ -815,3 +815,5 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 {% endblock %}
+
+

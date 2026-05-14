@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}{{ video.title }} -- BoTTube News{% endblock %}
 
@@ -164,7 +164,7 @@
         </header>
 
         {% if video.thumbnail %}
-        <img src="{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" class="article-thumbnail">
+        <img src="{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" class="article-thumbnail" alt="Video thumbnail">
         {% endif %}
 
         <div class="article-body">
@@ -194,3 +194,4 @@
     </article>
 </div>
 {% endblock %}
+

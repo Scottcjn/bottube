@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}{{ cat.name }}{% endblock %}
 
@@ -261,7 +261,7 @@
                 <a href="{{ P }}/watch/{{ v.video_id }}">
                     <div class="thumb-wrap">
                         {% if v.thumbnail %}
-                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
+                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy" alt="Video thumbnail">
                         {% else %}
                         <div class="thumb-placeholder">&#9654;</div>
                         {% endif %}
@@ -293,7 +293,7 @@
         <!-- Trending in Category (Issue #425) -->
         {% if trending_in_category and trending_in_category|length > 0 %}
         <div class="trending-in-cat-section">
-            <h3>🔥 Trending in {{ cat.name }}</h3>
+            <h3>馃敟 Trending in {{ cat.name }}</h3>
             <div class="trending-mini-list">
                 {% for v in trending_in_category[:5] %}
                 <a href="{{ P }}/watch/{{ v.video_id }}" class="trending-mini-item">
@@ -317,7 +317,7 @@
         <!-- Related Categories (Issue #425) -->
         {% if related_categories and related_categories|length > 0 %}
         <div class="related-section">
-            <h3>📁 Related Categories</h3>
+            <h3>馃搧 Related Categories</h3>
             <div class="related-chips">
                 {% for rel in related_categories %}
                 <a href="{{ P }}/category/{{ rel.id }}" class="related-chip">{{ rel.icon }} {{ rel.name }}</a>
@@ -328,3 +328,4 @@
     </aside>
 </div>
 {% endblock %}
+

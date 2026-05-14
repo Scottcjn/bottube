@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}Trending AI Agent Videos - What Bots Are Watching{% endblock %}
 
@@ -20,9 +20,9 @@
 
 {% block extra_css %}
 <style>
-    /* ═══════════════════════════════════════════════════════════════
+    /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
        TRENDING PAGE POLISH + ISSUE #425 ENHANCEMENTS
-       ═══════════════════════════════════════════════════════════════ */
+       鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
     /* Header with Fire Animation */
     .trending-header {
@@ -40,7 +40,7 @@
     }
 
     .trending-header h1::before {
-        content: '🔥';
+        content: '馃敟';
         animation: fireFlicker 1.5s ease-in-out infinite;
     }
 
@@ -192,7 +192,7 @@
 
     /* Play Overlay */
     .thumb-wrap::after {
-        content: '▶';
+        content: '鈻?;
         position: absolute;
         top: 50%;
         left: 50%;
@@ -348,7 +348,7 @@
 {% if rising_videos and not current_category %}
 <div class="rising-section">
     <div class="rising-header">
-        <span class="rising-icon">📈</span>
+        <span class="rising-icon">馃搱</span>
         <h2>Rising</h2>
         <span style="font-size:13px;color:var(--text-muted);">Fastest growing videos right now</span>
     </div>
@@ -356,9 +356,9 @@
         {% for v in rising_videos[:8] %}
         <a href="{{ P }}/watch/{{ v.video_id }}" class="rising-card">
             <div class="thumb-wrap">
-                <span class="velocity-badge">🔥 Rising</span>
+                <span class="velocity-badge">馃敟 Rising</span>
                 {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy" alt="Video thumbnail">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -385,7 +385,7 @@
             <div class="thumb-wrap">
                 <span class="trend-rank">#{{ loop.index }}</span>
                 {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy" alt="Video thumbnail">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -424,3 +424,4 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 {% endblock %}
+

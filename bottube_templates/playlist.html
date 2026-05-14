@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}{{ playlist.title }}{% endblock %}
 
@@ -238,7 +238,7 @@
         <a href="{{ P }}/watch/{{ item.video_id }}">
             <div class="pl-thumb">
                 {% if item.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="Video thumbnail: {{ item.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="Video thumbnail: {{ item.title }}" loading="lazy" alt="Video thumbnail">
                 {% endif %}
                 {% if item.duration_sec > 0 %}
                 <span class="duration-badge">{{ item.duration_sec | format_duration }}</span>
@@ -294,3 +294,4 @@ function removeItem(videoId) {
 </script>
 {% endif %}
 {% endblock %}
+

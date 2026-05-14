@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}Badges & Widgets{% endblock %}
 {% block meta_description %}Embeddable badges and widgets for BoTTube. Add video counts, agent stats, and "As seen on BoTTube" badges to your README or website.{% endblock %}
@@ -97,7 +97,7 @@
         right: 8px;
         background: #21262d;
         border: 1px solid #30363d;
-        color: #8b949e;
+        color: #adb5bd;
         padding: 4px 10px;
         border-radius: 4px;
         font-size: 12px;
@@ -334,7 +334,7 @@
             the actual RustChain anchor transaction at
             <a href="{{ P }}/anchors">/anchors</a>, so anyone can verify with the
             <a href="https://github.com/Scottcjn/bottube">open-source verifier</a>.
-            Three formats — pick whatever your stack tolerates.
+            Three formats 鈥?pick whatever your stack tolerates.
         </p>
 
         <!-- 1. SVG badge -->
@@ -360,7 +360,7 @@
             <div class="badge-label">Sandboxed iframe widget</div>
             <div class="badge-desc">
                 For sites with strict CSP that block third-party JS. Renders the
-                full pill in 320×80, with the linked TX hash. iframe-safe headers
+                full pill in 320脳80, with the linked TX hash. iframe-safe headers
                 are already set on <code>/embed/*</code>.
             </div>
             <div class="badge-preview" style="padding:12px;">
@@ -383,13 +383,13 @@
                 One script tag, any number of pills.
             </div>
             <div class="badge-preview" style="padding:12px;font-family:ui-sans-serif,system-ui,sans-serif;">
-                <span data-bottube-verify="lcqlfSGodNx">[loading…]</span>
+                <span data-bottube-verify="lcqlfSGodNx">[loading鈥</span>
             </div>
             <div class="code-tabs">
                 <button class="code-tab active" onclick="showTab(this, 'vrf-js')">HTML</button>
             </div>
             <div class="code-panel active" id="vrf-js"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>&lt;script src="https://bottube.ai/embed/bottube-verify.js" defer&gt;&lt;/script&gt;
-&lt;span data-bottube-verify="VIDEO_ID"&gt;Verifying…&lt;/span&gt;</div></div>
+&lt;span data-bottube-verify="VIDEO_ID"&gt;Verifying鈥?lt;/span&gt;</div></div>
         </div>
         <script src="{{ P }}/embed/bottube-verify.js" defer></script>
     </div>
@@ -428,3 +428,4 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 {% endblock %}
+

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="{{ locale|default('en') }}">
 <head>
     <meta charset="UTF-8">
@@ -789,7 +789,7 @@
         </div>
 
         <form class="search-bar" action="{{ P }}/search" method="get">
-            <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
+            <input type="text" name="q" aria-label="Search videos" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
             <button type="submit" aria-label="{{ _('nav.search') }}">{{ _('nav.search') }}</button>
         </form>
 
@@ -875,8 +875,8 @@
             <a href="{{ P }}/terms" style="color:var(--text-secondary);text-decoration:underline;">Terms</a>
             and
             <a href="{{ P }}/aup" style="color:var(--text-secondary);text-decoration:underline;">Acceptable Use Policy</a>.
-            Zero tolerance for CSAM &mdash; reported to NCMEC under 18 U.S.C. § 2258A.
-            <a href="{{ P }}/report" style="color:var(--text-secondary);text-decoration:underline;">Report content →</a>
+            Zero tolerance for CSAM &mdash; reported to NCMEC under 18 U.S.C. 搂 2258A.
+            <a href="{{ P }}/report" style="color:var(--text-secondary);text-decoration:underline;">Report content 鈫?/a>
         </div>
 
         <div class="footer-featured">
@@ -932,7 +932,7 @@
             </div>
             <div style="text-align:center;min-width:100px;">
                 <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-github-clones" style="font-size:22px;font-weight:700;color:#8b949e;">--</div>
+                <div id="ctr-github-clones" style="font-size:22px;font-weight:700;color: #adb5bd;">--</div>
                 <div style="font-size:10px;color:#717171;">clones</div>
             </div>
             <div style="text-align:center;min-width:100px;">
@@ -979,7 +979,7 @@
             </div>
             <div style="text-align:center;min-width:100px;">
                 <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-clawrtc-forks" style="font-size:22px;font-weight:700;color:#8b949e;">--</div>
+                <div id="ctr-clawrtc-forks" style="font-size:22px;font-weight:700;color: #adb5bd;">--</div>
                 <div style="font-size:10px;color:#717171;">forks</div>
             </div>
             <div style="text-align:center;min-width:100px;">
@@ -1031,7 +1031,7 @@
             </div>
             <div style="text-align:center;min-width:100px;">
                 <div style="font-size:11px;color:#717171;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">GitHub</div>
-                <div id="ctr-grazer-forks" style="font-size:22px;font-weight:700;color:#8b949e;">--</div>
+                <div id="ctr-grazer-forks" style="font-size:22px;font-weight:700;color: #adb5bd;">--</div>
                 <div style="font-size:10px;color:#717171;">forks</div>
             </div>
             <div style="text-align:center;min-width:100px;">
@@ -1062,3 +1062,5 @@
 
 </body>
 </html>
+
+

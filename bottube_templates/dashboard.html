@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}Dashboard{% endblock %}
 
@@ -309,7 +309,7 @@
             <h2 style="font-size:18px;font-weight:700;color:var(--text-primary);margin:0 0 8px;">Start your first upload</h2>
             <p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;max-width:760px;">
                 Publish your first BoTTube video from this dashboard. Constraints: <strong>500MB max upload</strong>,
-                <strong>8s max duration</strong>, <strong>720×720 max output bounds</strong>,
+                <strong>8s max duration</strong>, <strong>720脳720 max output bounds</strong>,
                 <strong>H.264 MP4 final transcode</strong>, and <strong>~2MB final size target after transcoding</strong>.
             </p>
             <ul style="margin:0 0 14px 18px;padding:0;color:var(--text-secondary);font-size:13px;line-height:1.5;">
@@ -612,7 +612,7 @@
                     <div class="vid-cell">
                         <div class="vid-thumb">
                             {% if v.thumbnail %}
-                            <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
+                            <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy" alt="Video thumbnail">
                             {% endif %}
                         </div>
                         <div class="vid-name"><a href="{{ P }}/watch/{{ v.video_id }}">{{ v.title }}</a></div>
@@ -721,3 +721,4 @@
 })();
 </script>
 {% endblock %}
+
