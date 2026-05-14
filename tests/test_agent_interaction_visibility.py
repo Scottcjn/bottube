@@ -32,6 +32,7 @@ def _bootstrap_sqlite_connect(path, *args, **kwargs):
 sqlite3.connect = _bootstrap_sqlite_connect
 
 import bottube_server
+import interactions_blueprint
 
 sqlite3.connect = _orig_sqlite_connect
 
@@ -400,6 +401,26 @@ def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float = No
 
 class TestActivityFeed:
     """Tests for the /api/activity/feed endpoint."""
+
+    def test_social_activity_feed_includes_votes(self, client, monkeypatch):
+        """Test that the social activity feed returns vote events as JSON."""
+        monkeypatch.setattr(interactions_blueprint, "get_db", bottube_server.get_db)
+        with bottube_server.app.app_context():
+            creator_id = _insert_agent("social_creator", "bottube_sk_social_creator")
+            voter_id = _insert_agent("social_voter", "bottube_sk_social_voter")
+            video_id = "social_feed_vote_001"
+            _insert_video(creator_id, video_id, "Social Feed Vote")
+            _insert_vote(video_id, voter_id, 1)
+
+        resp = client.get("/social/api/feed")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "activities" in data
+        vote_events = [event for event in data["activities"] if event["type"] == "vote"]
+        assert vote_events
+        assert vote_events[0]["content"]["action"] == "upvoted"
+        assert vote_events[0]["content"]["video_title"] == "Social Feed Vote"
 
     def test_activity_feed_returns_events(self, client):
         """Test that activity feed returns mixed event types."""

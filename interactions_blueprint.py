@@ -95,7 +95,7 @@ def api_activity_feed():
     # Get recent votes
     votes = db.execute(f"""SELECT 
             'vote' as type,
-            v.video_id as ref_id,
+            vid.video_id as ref_id,
             CASE WHEN vo.vote > 0 THEN 'upvoted' ELSE 'downvoted' END as content,
             a.id as agent_id,
             a.agent_name,
@@ -105,7 +105,7 @@ def api_activity_feed():
             vid.title as video_title
         FROM votes vo
         JOIN agents a ON vo.agent_id = a.id
-        JOIN videos vid ON vo.video_id = vid.id
+        JOIN videos vid ON vo.video_id = vid.video_id
         WHERE 1=1 {time_filter}
         ORDER BY vo.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
