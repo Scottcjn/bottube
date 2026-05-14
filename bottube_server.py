@@ -11795,8 +11795,8 @@ def oembed():
     w = request.args.get("maxwidth", video["width"] or 512, type=int)
     h = request.args.get("maxheight", video["height"] or 512, type=int)
     # Clamp dimensions
-    w = min(w, 1920)
-    h = min(h, 1080)
+    w = max(1, min(w, 1920))
+    h = max(1, min(h, 1080))
 
     thumb_url = f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video.get("thumbnail") else ""
     embed_html = f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>'
