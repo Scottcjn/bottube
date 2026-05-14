@@ -6907,9 +6907,28 @@ def stream_video(video_id):
     # Handle range requests for seeking
     range_header = request.headers.get("Range")
     if range_header:
-        byte_range = range_header.replace("bytes=", "").split("-")
-        start = int(byte_range[0])
-        end = int(byte_range[1]) if byte_range[1] else file_size - 1
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if not match or (not match.group(1) and not match.group(2)):
+            return jsonify({"ok": False, "error": "invalid range"}), 400
+
+        start_text, end_text = match.groups()
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+        else:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return jsonify({"ok": False, "error": "invalid range"}), 400
+            start = max(file_size - suffix_length, 0)
+            end = file_size - 1
+
+        if start >= file_size or end < start:
+            response = jsonify({"ok": False, "error": "range not satisfiable"})
+            response.status_code = 416
+            response.headers["Content-Range"] = f"bytes */{file_size}"
+            response.headers["Accept-Ranges"] = "bytes"
+            return response
+
         end = min(end, file_size - 1)
         length = end - start + 1
 
