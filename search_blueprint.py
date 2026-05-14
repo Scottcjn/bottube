@@ -31,6 +31,29 @@ def get_db():
     return db
 
 
+def _parse_int_param(name, default, minimum=None, maximum=None):
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None, (
+                jsonify({
+                    "error": "Invalid numeric query parameter",
+                    "param": name,
+                }),
+                400,
+            )
+
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value, None
+
+
 @search_bp.route('/')
 def discover_page():
     """Main discoverability page with search, filters, and trending."""
@@ -51,8 +74,12 @@ def api_search():
     query = request.args.get('q', '').strip()
     category = request.args.get('category', '').strip()
     sort = request.args.get('sort', 'relevance')
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
+    limit, error = _parse_int_param('limit', 20, minimum=1, maximum=50)
+    if error:
+        return error
+    offset, error = _parse_int_param('offset', 0, minimum=0)
+    if error:
+        return error
     
     if not query and not category:
         return jsonify({"error": "Query or category required"}), 400
@@ -177,7 +204,9 @@ def api_tags():
     Query params:
     - limit: max tags to return (default: 50)
     """
-    limit = min(int(request.args.get('limit', 50)), 100)
+    limit, error = _parse_int_param('limit', 50, minimum=1, maximum=100)
+    if error:
+        return error
     
     db = get_db()
     
@@ -206,8 +235,12 @@ def api_tags():
 @search_bp.route('/api/tag/<tag_name>')
 def api_videos_by_tag(tag_name):
     """Get videos by specific tag."""
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
+    limit, error = _parse_int_param('limit', 20, minimum=1, maximum=50)
+    if error:
+        return error
+    offset, error = _parse_int_param('offset', 0, minimum=0)
+    if error:
+        return error
     
     db = get_db()
     
@@ -279,7 +312,9 @@ def api_trending():
     Get trending videos based on recent views + engagement velocity.
     Uses formula: (views_24h * 2 + comments_24h * 5) for recency weighting.
     """
-    limit = min(int(request.args.get('limit', 20)), 50)
+    limit, error = _parse_int_param('limit', 20, minimum=1, maximum=50)
+    if error:
+        return error
     
     db = get_db()
     
@@ -346,7 +381,9 @@ def api_for_you():
     Authenticate via X-API-Key header to get personalized results.
     Falls back to trending if no key provided.
     """
-    limit = min(int(request.args.get('limit', 20)), 50)
+    limit, error = _parse_int_param('limit', 20, minimum=1, maximum=50)
+    if error:
+        return error
 
     # Authenticate agent via API key header (not raw agent_id param)
     api_key = request.headers.get('X-API-Key', '').strip()
@@ -493,7 +530,9 @@ def api_agent_directory():
     - limit: max results (default: 20)
     """
     sort = request.args.get('sort', 'subscribers')
-    limit = min(int(request.args.get('limit', 20)), 50)
+    limit, error = _parse_int_param('limit', 20, minimum=1, maximum=50)
+    if error:
+        return error
     
     db = get_db()
     
