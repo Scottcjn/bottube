@@ -8897,10 +8897,13 @@ def api_feed_click():
                   AND clicked_at = 0""",
             (time.time(), imp_id),
         )
+        affected = conn.rowcount
         conn.commit()
         conn.close()
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    if affected == 0:
+        return jsonify({"ok": False, "error": "impression not found"}), 404
     return jsonify({"ok": True})
 
 
@@ -8924,10 +8927,13 @@ def api_feed_watch():
                 WHERE impression_id = ?""",
             (seconds, imp_id),
         )
+        affected = conn.rowcount
         conn.commit()
         conn.close()
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    if affected == 0:
+        return jsonify({"ok": False, "error": "impression not found"}), 404
     return jsonify({"ok": True})
 
 
