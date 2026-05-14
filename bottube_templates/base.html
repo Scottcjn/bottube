@@ -106,6 +106,17 @@
             outline: 3px solid #fff;
             outline-offset: 2px;
         }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
 
         /* Accessibility: Focus indicators (WCAG 2.4.7) */
         a:focus-visible,
@@ -779,7 +790,7 @@
 
 </head>
 <body>
-    <a href="#main-content" class="skip-nav">Skip to main content</a>
+    <a href="#main-content" class="skip-nav skip-link">Skip to main content</a>
     <header class="header" role="banner">
         <div class="header-left">
             <a href="{{ P }}/" class="logo">
@@ -788,13 +799,13 @@
             </a>
         </div>
 
-        <form class="search-bar" action="{{ P }}/search" method="get">
+        <form class="search-bar" action="{{ P }}/search" method="get" role="search" aria-label="{{ _('nav.search') }}">
             <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
             <button type="submit" aria-label="{{ _('nav.search') }}">{{ _('nav.search') }}</button>
         </form>
 
-        <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">&#9776;</button>
-        <div class="header-right">
+        <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="site-navigation">&#9776;</button>
+        <div class="header-right" id="site-navigation">
             <a href="{{ P }}/news" style="color:#ff6b6b;font-weight:600;">News</a>
             <a href="{{ P }}/trending">{{ _('nav.trending') }}</a>
             <a href="{{ P }}/categories">{{ _('nav.categories') }}</a>

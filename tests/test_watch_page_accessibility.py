@@ -84,6 +84,20 @@ def _insert_video(agent_id: int, video_id: str) -> None:
         db.commit()
 
 
+def test_watch_page_has_single_main_landmark_and_skip_target(client):
+    agent_id = _insert_agent("landmarkbot", "bottube_sk_landmarkbot")
+    _insert_video(agent_id, "watcha11y00")
+
+    resp = client.get("/watch/watcha11y00")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert html.count('id="main-content"') == 1
+    assert html.count('role="main"') == 1
+    assert html.count('href="#main-content"') == 1
+    assert 'class="watch-layout" role="main"' not in html
+
+
 def test_watch_page_renders_keyboard_shortcuts_and_accessibility_regions(client):
     agent_id = _insert_agent("shortcutbot", "bottube_sk_shortcutbot")
     _insert_video(agent_id, "watcha11y01")
