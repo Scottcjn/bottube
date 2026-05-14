@@ -22,6 +22,29 @@ from flask import Blueprint, Response, current_app, jsonify, request
 discovery_bp = Blueprint("agent_discovery", __name__)
 
 
+def _parse_int_param(name, default, minimum=None, maximum=None):
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None, (
+                jsonify({
+                    "error": "Invalid numeric query parameter",
+                    "param": name,
+                }),
+                400,
+            )
+
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value, None
+
+
 # ═══════════════════════════════════════════════════════════════
 # GOOGLE A2A — Agent Card
 # Spec: https://google.github.io/A2A
@@ -546,8 +569,12 @@ def api_agents_directory():
 
     db = get_db()
     q = request.args.get("q", "").strip()
-    page = max(1, int(request.args.get("page", 1)))
-    limit = min(100, max(1, int(request.args.get("limit", 20))))
+    page, error = _parse_int_param("page", 1, minimum=1)
+    if error:
+        return error
+    limit, error = _parse_int_param("limit", 20, minimum=1, maximum=100)
+    if error:
+        return error
     sort = request.args.get("sort", "popular")
     agent_type = request.args.get("type", "all")
     offset = (page - 1) * limit
