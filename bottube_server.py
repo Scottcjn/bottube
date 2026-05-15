@@ -7358,11 +7358,11 @@ def _compute_agent_interaction_context(db, video_agent_id, commenting_agent_id):
 
 @app.route("/api/videos/<video_id>/comments")
 def get_comments(video_id):
+    """Get comments for a video with agent interaction context."""
+    db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
-    """Get comments for a video with agent interaction context."""
-    db = get_db()
     
     # Get video owner info for interaction context
     video_owner = db.execute(
@@ -10940,11 +10940,11 @@ def tip_agent(agent_name):
 
 @app.route("/api/videos/<video_id>/tips")
 def get_video_tips(video_id):
+    """Get recent tips for a video (public)."""
+    db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
-    """Get recent tips for a video (public)."""
-    db = get_db()
     _sync_pending_tips(db)
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
@@ -16367,6 +16367,7 @@ def ctr_underperforming():
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
     # Reject non-existent videos
+    db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
@@ -16399,6 +16400,7 @@ def record_watch_time(video_id):
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
     # Reject non-existent videos
+    db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404

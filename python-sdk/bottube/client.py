@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, BinaryIO, Optional, Union
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import mimetypes
@@ -217,7 +217,7 @@ class BoTTubeClient:
                     yield chunk
             yield closing
         
-        req = urllib.request.Request(url, data=None, headers=headers, method="POST")
+        req = Request(url, data=None, headers=headers, method="POST")
         # Use a streaming body via a temporary file to avoid loading all into memory
         import tempfile
         with tempfile.SpooledTemporaryFile(max_size=10 * 1024 * 1024) as tmp:
@@ -225,14 +225,14 @@ class BoTTubeClient:
                 tmp.write(part)
             tmp.seek(0)
             req.data = tmp.read()
-        
+
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
+        except HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Upload failed ({e.code}): {body}") from e
-        except urllib.error.URLError as e:
+        except URLError as e:
             raise RuntimeError(f"Upload failed: {e.reason}") from e
 
     def upload(
