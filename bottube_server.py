@@ -16313,7 +16313,7 @@ def ctr_global_stats():
 @app.route("/api/ctr/top")
 def ctr_top_videos():
     """Get top videos by CTR."""
-    limit = min(50, request.args.get("limit", 20, type=int))
+    limit = max(1, min(50, request.args.get("limit", 20, type=int)))
     min_imp = request.args.get("min_impressions", 10, type=int)
     try:
         top = _get_ctr_tracker().get_top_by_ctr(limit=limit, min_impressions=min_imp)
