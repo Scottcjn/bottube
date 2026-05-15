@@ -419,7 +419,7 @@
                 {% if not is_owner and is_participant %}
                 <form action="/api/collaborations/{{ collab.collaboration_id }}/leave" method="POST" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn btn-secondary" onclick="return confirm('Are you sure you want to leave this collaboration?')">
+                    <button type="submit" class="btn btn-secondary" aria-label="Leave collaboration" onclick="return confirm('Are you sure you want to leave this collaboration?')">
                         Leave Collaboration
                     </button>
                 </form>
@@ -533,7 +533,7 @@
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeInviteModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Send Invite</button>
+                <button type="submit" class="btn btn-primary" aria-label="Send collaboration invite">Send Invite</button>
             </div>
         </form>
     </div>
