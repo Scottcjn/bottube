@@ -16334,7 +16334,11 @@ def ctr_underperforming():
 
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
-    """Get CTR stats for a specific video."""
+    # Reject non-existent videos
+    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
         stats = _get_ctr_tracker().get_stats(video_id)
         if not stats:
@@ -16362,7 +16366,11 @@ def record_watch_time(video_id):
 
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
-    """Get A/B test variant stats for a video."""
+    # Reject non-existent videos
+    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
         stats = _get_ab_manager().get_variant_stats(video_id)
         winner = _get_ab_manager().get_winner(video_id)
