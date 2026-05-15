@@ -119,7 +119,10 @@ def _fetch_videos(agent=None, category=None, limit=20):
 def _parse_limit():
     """Parse and clamp the limit query parameter."""
     try:
-        limit = int(request.args.get("limit", 20))
+        try:
+    limit = int(request.args.get("limit", 20))
+except (ValueError, TypeError):
+    return jsonify({"error": "Invalid limit parameter"}), 400
     except Exception:
         limit = 20
     return max(1, min(limit, 100))

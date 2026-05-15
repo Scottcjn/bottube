@@ -12375,7 +12375,10 @@ def dashboard_analytics_api():
     uid = g.user["id"]
 
     try:
-        days = int(request.args.get("days", 30))
+        try:
+    days = int(request.args.get("days", 30))
+except (ValueError, TypeError):
+    return jsonify({"error": "Invalid days parameter"}), 400
     except Exception:
         days = 30
     days = max(7, min(days, 90))

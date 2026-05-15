@@ -369,8 +369,14 @@ def list_runs():
         runs (list): List of run summaries
     """
     try:
-        limit = int(request.args.get("limit", 50))
-        days = int(request.args.get("days", 7))
+        try:
+    limit = int(request.args.get("limit", 50))
+except (ValueError, TypeError):
+    return jsonify({"error": "Invalid limit parameter"}), 400
+        try:
+    days = int(request.args.get("days", 7))
+except (ValueError, TypeError):
+    return jsonify({"error": "Invalid days parameter"}), 400
         
         tracker = get_tracker()
         runs = tracker.get_recent_runs(limit=limit, days=days)
@@ -516,7 +522,10 @@ def outbound_report():
         report (dict): Outbound network report (scoped to agent by default)
     """
     try:
-        days = int(request.args.get("days", 30))
+        try:
+    days = int(request.args.get("days", 30))
+except (ValueError, TypeError):
+    return jsonify({"error": "Invalid days parameter"}), 400
         scope = request.args.get("scope", "agent")
         
         # Network-wide scope requires admin

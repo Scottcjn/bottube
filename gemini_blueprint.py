@@ -488,7 +488,10 @@ def list_jobs():
     else:
         agent_id = user_id
 
-    limit = min(int(request.args.get("limit", 20)), 50)
+    try:
+    limit = int(request.args.get("limit", 20))
+except (ValueError, TypeError):
+    return jsonify({"error": "Invalid limit parameter"}), 400, 50)
     jobs = db.execute(
         "SELECT job_id, job_type, model, status, prompt, created_at, completed_at "
         "FROM gemini_jobs WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?",
