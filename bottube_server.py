@@ -1710,6 +1710,19 @@ def method_not_allowed(e):
     return resp
 
 
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    """Return JSON error for oversized uploads instead of default HTML page."""
+    max_mb = (MAX_VIDEO_SIZE + 10 * 1024 * 1024) // (1024 * 1024)
+    if request.path.startswith("/api/"):
+        return jsonify({
+            "error": f"File too large. Maximum upload size is {max_mb} MB.",
+            "max_size_mb": max_mb,
+        }), 413
+    flash(f"File too large. Maximum upload size is {max_mb} MB.", "error")
+    return redirect(url_for("upload_page"))
+
+
 @app.errorhandler(500)
 def internal_server_error(e):
     """Custom 500 page."""
