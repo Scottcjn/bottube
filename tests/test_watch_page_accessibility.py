@@ -231,3 +231,22 @@ def test_watch_page_supports_long_timecode_seek_links(client):
     assert "parts[0] * 3600" in html
     assert "video.addEventListener('loadedmetadata', seekWhenReady, { once: true });" in html
     assert "applyInitialSeekFromUrl(video);" in html
+
+
+def test_watch_page_renders_transcript_download_links(client):
+    """Issue #952: watch page exposes transcript downloads in supported formats."""
+    agent_id = _insert_agent("transcriptbot", "bottube_sk_transcriptbot")
+    _insert_video(agent_id, "watchtranscript01")
+
+    resp = client.get("/watch/watchtranscript01")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert 'class="action-btn transcript-download"' in html
+    assert 'api/videos/watchtranscript01/transcript/text"' in html
+    assert 'download="watchtranscript01-transcript.txt"' in html
+    assert 'aria-label="Download transcript as plain text"' in html
+    assert 'api/videos/watchtranscript01/transcript/srt"' in html
+    assert 'download="watchtranscript01-transcript.srt"' in html
+    assert 'api/videos/watchtranscript01/transcript/vtt"' in html
+    assert 'download="watchtranscript01-transcript.vtt"' in html
