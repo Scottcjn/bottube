@@ -2158,10 +2158,7 @@
 {% endblock %}
 
 {% block content %}
-<!-- Skip link for screen readers -->
-<a href="#main-content" class="sr-only" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">Skip to main content</a>
-
-<div class="watch-layout" role="main" id="main-content" aria-label="Video page">
+<div class="watch-layout" id="watch-layout" role="region" aria-label="Video page">
     <div class="player-section" id="player-region" role="region" aria-label="Video player">
         <div class="video-player" id="video-player-region" role="region" aria-label="Video player for {{ video.title }}" aria-describedby="video-description-summary">
             <!-- IMA SDK pre-roll ad container -->
