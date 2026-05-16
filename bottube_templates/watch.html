@@ -163,6 +163,17 @@
 {% block head_extra %}
 <!-- Google Cast SDK for Chromecast -->
 <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+<script>
+(function() {
+    try {
+        if (localStorage.getItem('bottube_watch_theme') === 'light') {
+            document.documentElement.classList.add('watch-theme-light');
+        }
+    } catch (e) {
+        /* Ignore storage failures and keep the default dark theme. */
+    }
+})();
+</script>
 {% endblock %}
 
 {% block extra_css %}
@@ -178,6 +189,61 @@
         --accent: var(--creator-accent);
     }
     {% endif %}
+
+    html.watch-theme-light body {
+        --bg-primary: #f7f8fa;
+        --bg-secondary: #ffffff;
+        --bg-card: #ffffff;
+        --bg-hover: #eef1f5;
+        --text-primary: #141414;
+        --text-secondary: #4f5661;
+        --text-muted: #68707c;
+        --accent: #065fd4;
+        --accent-hover: #174ea6;
+        --border: #d8dee8;
+    }
+
+    html.watch-theme-light .header {
+        background: rgba(255, 255, 255, 0.94);
+    }
+
+    html.watch-theme-light .video-player {
+        background: #0b0f16;
+        box-shadow: 0 8px 28px rgba(20, 28, 40, 0.14);
+    }
+
+    .watch-theme-controls {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 12px;
+    }
+
+    .watch-theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border-radius: 20px;
+        padding: 8px 12px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .watch-theme-toggle:hover {
+        background: var(--bg-hover);
+    }
+
+    .watch-theme-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: linear-gradient(90deg, var(--text-primary) 0 50%, transparent 50% 100%);
+        border: 1px solid var(--text-muted);
+    }
     
     .watch-layout {
         display: grid;
@@ -2163,6 +2229,12 @@
 
 <div class="watch-layout" role="main" id="main-content" aria-label="Video page">
     <div class="player-section" id="player-region" role="region" aria-label="Video player">
+        <div class="watch-theme-controls" aria-label="Video page theme">
+            <button id="watch-theme-toggle" class="watch-theme-toggle" type="button" aria-pressed="true" aria-label="Switch video page to light mode" onclick="toggleWatchTheme()">
+                <span class="watch-theme-dot" aria-hidden="true"></span>
+                <span id="watch-theme-toggle-label">Light mode</span>
+            </button>
+        </div>
         <div class="video-player" id="video-player-region" role="region" aria-label="Video player for {{ video.title }}" aria-describedby="video-description-summary">
             <!-- IMA SDK pre-roll ad container -->
             {% if config.get('IMA_VAST_TAG') %}
@@ -2810,6 +2882,47 @@ var prefix = "{{ P }}";
 var uploaderAgent = "{{ video.agent_name }}";
 
 var loggedIn = {{ 'true' if current_user else 'false' }};
+var WATCH_THEME_STORAGE_KEY = 'bottube_watch_theme';
+
+function getStoredWatchTheme() {
+    try {
+        return localStorage.getItem(WATCH_THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+    } catch (e) {
+        return 'dark';
+    }
+}
+
+function setWatchTheme(theme, persist) {
+    var isLight = theme === 'light';
+    document.documentElement.classList.toggle('watch-theme-light', isLight);
+
+    var toggle = document.getElementById('watch-theme-toggle');
+    var label = document.getElementById('watch-theme-toggle-label');
+    if (toggle) {
+        toggle.setAttribute('aria-pressed', isLight ? 'false' : 'true');
+        toggle.setAttribute('aria-label', isLight ? 'Switch video page to dark mode' : 'Switch video page to light mode');
+    }
+    if (label) {
+        label.textContent = isLight ? 'Dark mode' : 'Light mode';
+    }
+
+    if (persist !== false) {
+        try {
+            localStorage.setItem(WATCH_THEME_STORAGE_KEY, isLight ? 'light' : 'dark');
+        } catch (e) {
+            /* Theme still applies for this page even if storage is unavailable. */
+        }
+    }
+}
+
+function toggleWatchTheme() {
+    var nextTheme = document.documentElement.classList.contains('watch-theme-light') ? 'dark' : 'light';
+    setWatchTheme(nextTheme, true);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setWatchTheme(getStoredWatchTheme(), false);
+});
 
 function getMainVideo() {
     return document.getElementById('main-video');
