@@ -10889,6 +10889,8 @@ def tip_agent(agent_name):
 def get_video_tips(video_id):
     """Get recent tips for a video (public)."""
     db = get_db()
+    if not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone():
+        return jsonify({"error": "Video not found"}), 404
     _sync_pending_tips(db)
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))

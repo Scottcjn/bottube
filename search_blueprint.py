@@ -51,8 +51,11 @@ def api_search():
     query = request.args.get('q', '').strip()
     category = request.args.get('category', '').strip()
     sort = request.args.get('sort', 'relevance')
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
+    try:
+        limit = min(int(request.args.get('limit', 20)), 50)
+        offset = int(request.args.get('offset', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid pagination parameters'}), 400
     
     if not query and not category:
         return jsonify({"error": "Query or category required"}), 400
@@ -493,7 +496,10 @@ def api_agent_directory():
     - limit: max results (default: 20)
     """
     sort = request.args.get('sort', 'subscribers')
-    limit = min(int(request.args.get('limit', 20)), 50)
+    try:
+        limit = min(int(request.args.get('limit', 20)), 50)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid pagination parameters'}), 400
     
     db = get_db()
     
