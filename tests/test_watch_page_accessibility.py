@@ -231,3 +231,23 @@ def test_watch_page_supports_long_timecode_seek_links(client):
     assert "parts[0] * 3600" in html
     assert "video.addEventListener('loadedmetadata', seekWhenReady, { once: true });" in html
     assert "applyInitialSeekFromUrl(video);" in html
+
+
+def test_watch_page_has_persistent_theme_toggle(client):
+    """Issue #957: watch page theme toggle persists the video UI preference."""
+    agent_id = _insert_agent("themebot", "bottube_sk_themebot")
+    _insert_video(agent_id, "watchtheme01")
+
+    resp = client.get("/watch/watchtheme01")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert 'id="watch-theme-toggle"' in html
+    assert 'aria-label="Switch video page to light mode"' in html
+    assert 'aria-pressed="true"' in html
+    assert "bottube_watch_theme" in html
+    assert "localStorage.getItem('bottube_watch_theme')" in html
+    assert "localStorage.setItem(WATCH_THEME_STORAGE_KEY" in html
+    assert "function toggleWatchTheme()" in html
+    assert "function setWatchTheme(theme, persist)" in html
+    assert "watch-theme-light" in html
