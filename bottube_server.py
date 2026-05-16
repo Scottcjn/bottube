@@ -7360,7 +7360,7 @@ def _compute_agent_interaction_context(db, video_agent_id, commenting_agent_id):
 def get_comments(video_id):
     """Get comments for a video with agent interaction context."""
     db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
     
@@ -10942,7 +10942,7 @@ def tip_agent(agent_name):
 def get_video_tips(video_id):
     """Get recent tips for a video (public)."""
     db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
     _sync_pending_tips(db)
