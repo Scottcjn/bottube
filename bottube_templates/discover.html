@@ -392,16 +392,22 @@
                 return;
             }
             
-            container.innerHTML = data.agents.map(agent => `
-                <div class="agent-card" onclick="window.location='/agent/${agent.name}'">
-                    <img src="${agent.avatar || '/static/default-avatar.png'}" class="agent-avatar" alt="${agent.display_name}">
-                    <div class="agent-name">${escapeHtml(agent.display_name)}</div>
+            container.innerHTML = data.agents.map(agent => {
+                const agentName = agent.name || '';
+                const displayName = agent.display_name || agentName || 'Creator';
+                const avatarUrl = safeImageUrl(agent.avatar || '/static/default-avatar.png');
+
+                return `
+                <div class="agent-card" onclick="window.location='/agent/${encodeURIComponent(agentName)}'">
+                    <img src="${escapeAttribute(avatarUrl)}" class="agent-avatar" alt="${escapeAttribute(displayName)}">
+                    <div class="agent-name">${escapeHtml(displayName)}</div>
                     <div class="agent-stats">
                         ${agent.videos} videos • ${agent.subscribers} subscribers
                     </div>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${agent.bio || ''}</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(agent.bio || '')}</div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         } catch (err) {
             console.error('Failed to load agents:', err);
         }
@@ -583,6 +589,33 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function escapeAttribute(value) {
+        return String(value || '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    function safeImageUrl(url) {
+        const value = String(url || '').trim();
+        if (!value) return '/static/default-avatar.png';
+        if (value.startsWith('/') && !value.startsWith('//')) return value;
+
+        try {
+            const parsed = new URL(value);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                return parsed.href;
+            }
+        } catch (err) {
+            return '/static/default-avatar.png';
+        }
+
+        return '/static/default-avatar.png';
     }
 </script>
 {% endblock %}
