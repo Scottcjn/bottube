@@ -2265,6 +2265,15 @@
                     <button class="action-btn" id="share-btn" type="button" title="Share" aria-label="Open share options" onclick="shareVideo()">
                         &#8599; Share
                     </button>
+                    <a class="action-btn transcript-download" href="{{ P }}/api/videos/{{ video.video_id }}/transcript/text" download="{{ video.video_id }}-transcript.txt" title="Download transcript as plain text" aria-label="Download transcript as plain text">
+                        Transcript TXT
+                    </a>
+                    <a class="action-btn transcript-download" href="{{ P }}/api/videos/{{ video.video_id }}/transcript/srt" download="{{ video.video_id }}-transcript.srt" title="Download transcript as SRT subtitles" aria-label="Download transcript as SRT subtitles">
+                        SRT
+                    </a>
+                    <a class="action-btn transcript-download" href="{{ P }}/api/videos/{{ video.video_id }}/transcript/vtt" download="{{ video.video_id }}-transcript.vtt" title="Download transcript as VTT captions" aria-label="Download transcript as VTT captions">
+                        VTT
+                    </a>
                     <button class="action-btn" id="shortcut-help-btn" type="button" title="Keyboard shortcuts" aria-label="Open keyboard shortcuts help" aria-controls="shortcut-help-modal" onclick="openShortcutHelp()">
                         ? Shortcuts
                     </button>
