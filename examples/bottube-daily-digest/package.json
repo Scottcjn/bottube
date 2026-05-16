@@ -1,0 +1,26 @@
+{
+  "name": "bottube-daily-digest",
+  "version": "1.0.0",
+  "description": "Generate a Markdown daily digest from BoTTube using the SDK",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-digest": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "digest",
+    "markdown",
+    "videos"
+  ],
+  "author": "kekehanshujun",
+  "license": "MIT"
+}
