@@ -59,7 +59,11 @@ def api_views():
     video_id = request.args.get('video_id')
     
     # Calculate date range
-    days = int(period.replace('d', ''))
+    try:
+        days = int(period.replace('d', ''))
+    except ValueError:
+        return jsonify({"error": "Invalid period format. Use format like 7d, 30d, 90d"}), 400
+    days = max(1, min(days, 365))
     start_date = datetime.now() - timedelta(days=days)
     start_timestamp = start_date.timestamp()
     
@@ -67,6 +71,14 @@ def api_views():
     
     # Get total views in period
     if video_id:
+        # Check if video exists and belongs to the agent
+        video_exists = db.execute(
+            """SELECT 1 FROM videos WHERE id = ? AND agent_id = ?""",
+            (video_id, agent_id)
+        ).fetchone()
+        if not video_exists:
+            return jsonify({"error": "Video not found"}), 404
+            
         total_views = db.execute(
             """SELECT COUNT(*) FROM views 
                WHERE video_id = ? AND created_at >= ?""",
@@ -132,7 +144,11 @@ def api_engagement():
         return jsonify({"error": "agent_id required"}), 400
     
     period = request.args.get('period', '30d')
-    days = int(period.replace('d', ''))
+    try:
+        days = int(period.replace('d', ''))
+    except ValueError:
+        return jsonify({"error": "Invalid period format. Use format like 7d, 30d, 90d"}), 400
+    days = max(1, min(days, 365))
     start_date = datetime.now() - timedelta(days=days)
     start_timestamp = start_date.timestamp()
     
@@ -228,7 +244,11 @@ def api_top_videos():
         return jsonify({"error": "agent_id required"}), 400
     
     metric = request.args.get('metric', 'views')
-    limit = min(int(request.args.get('limit', 10)), 50)
+    try:
+        limit = int(request.args.get('limit', 10))
+    except ValueError:
+        return jsonify({"error": "Invalid limit, must be an integer"}), 400
+    limit = max(1, min(limit, 50))
     
     db = get_db()
     

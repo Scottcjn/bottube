@@ -396,8 +396,11 @@ def ban_transactions(agent_name):
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
-    limit = min(int(request.args.get("limit", 50)), 100)
-    offset = int(request.args.get("offset", 0))
+    try:
+        limit = min(int(request.args.get("limit", 50)), 100)
+        offset = int(request.args.get("offset", 0))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid pagination parameters"}), 400
 
     txs = db.execute(
         "SELECT * FROM ban_transactions WHERE agent_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",

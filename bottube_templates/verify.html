@@ -79,7 +79,7 @@
 
   <form id="vrf-form" class="vrf-form" onsubmit="event.preventDefault(); runVerify();">
     <input type="text" id="vrf-vid" placeholder="video_id (e.g. lcqlfSGodNx)" autocomplete="off" autofocus>
-    <button type="submit" id="vrf-btn">Verify</button>
+    <button type="submit" id="vrf-btn" aria-label="Verify video provenance">Verify</button>
     <button type="button" id="vrf-asset-btn" style="background:#999;color:#000" title="Stream the canonical asset bytes and re-hash" onclick="runVerify(true)">+ check asset bytes</button>
   </form>
 

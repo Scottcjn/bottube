@@ -444,6 +444,16 @@ document.querySelector('.upload-form').addEventListener('submit', function(e) {
         alert('API key is required');
         return;
     }
+    // Client-side file size check (500 MB limit)
+    var fileInput = form.querySelector('input[type="file"]');
+    if (fileInput && fileInput.files.length > 0) {
+        var maxSize = 500 * 1024 * 1024; // 500 MB
+        if (fileInput.files[0].size > maxSize) {
+            alert('File too large. Maximum upload size is 500 MB. Your file is ' +
+                  (fileInput.files[0].size / (1024 * 1024)).toFixed(1) + ' MB.');
+            return;
+        }
+    }
 
     var form = e.target;
     var formData = new FormData(form);

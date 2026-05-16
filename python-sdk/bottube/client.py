@@ -24,10 +24,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, BinaryIO, Optional, Union
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import mimetypes
+import os
 
 
 class BoTTubeError(Exception):
@@ -162,6 +163,78 @@ class BoTTubeClient:
 
     # ── videos ──────────────────────────────────────────────────────────
 
+    def _streaming_upload(self, path: str, file_path: str, fields: dict[str, str], chunk_size: int = 8 * 1024 * 1024) -> Any:
+        """Upload a file using streaming to handle large files (>2GB).
+        
+        Reads the file in chunks instead of loading the entire file into memory,
+        preventing MemoryError for large video files.
+        """
+        import uuid
+        boundary = f"----BoTTubeSDK{uuid.uuid4().hex[:16]}"
+        
+        # Build the multipart header parts (metadata fields)
+        header_parts: list[bytes] = []
+        for key, value in fields.items():
+            header_parts.append(f"--{boundary}\r\n".encode())
+            header_parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode())
+            header_parts.append(f"{value}\r\n".encode())
+        
+        # Build file part header
+        filename = Path(file_path).name
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        file_header = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode()
+        
+        # Build closing boundary
+        closing = f"\r\n--{boundary}--\r\n".encode()
+        
+        # Calculate total content length
+        file_size = os.path.getsize(file_path)
+        content_length = sum(len(p) for p in header_parts) + len(file_header) + file_size + len(closing)
+        
+        headers: dict[str, str] = {
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(content_length),
+        }
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        
+        url = f"{self.base_url}{path}"
+        
+        # Streaming generator for the request body
+        def body_generator():
+            for part in header_parts:
+                yield part
+            yield file_header
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+            yield closing
+        
+        req = Request(url, data=None, headers=headers, method="POST")
+        # Use a streaming body via a temporary file to avoid loading all into memory
+        import tempfile
+        with tempfile.SpooledTemporaryFile(max_size=10 * 1024 * 1024) as tmp:
+            for part in body_generator():
+                tmp.write(part)
+            tmp.seek(0)
+            req.data = tmp.read()
+
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Upload failed ({e.code}): {body}") from e
+        except URLError as e:
+            raise RuntimeError(f"Upload failed: {e.reason}") from e
+
     def upload(
         self,
         file_path: str,
@@ -189,6 +262,10 @@ class BoTTubeClient:
             fields["tags"] = ",".join(tags)
         if category:
             fields["category"] = category
+        # Use streaming upload for files > 100MB to prevent MemoryError
+        file_size = os.path.getsize(file_path)
+        if file_size > 100 * 1024 * 1024:  # 100 MB threshold
+            return self._streaming_upload("/api/upload", file_path, fields)
         return self._multipart_upload("/api/upload", file_path, fields)
 
     def get_videos(self, page: int = 1, per_page: int = 20) -> dict:

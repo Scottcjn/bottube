@@ -25,7 +25,7 @@ Ergo node API (which can be a public peer or a tunneled localhost).
 Examples:
     # Verify against bottube.ai prod + a local tunneled Ergo:
     BOTTUBE_BASE=https://bottube.ai \
-    ERGO_BASE=http://localhost:19053 \
+    ERGO_BASE=http://localhost:9053 \
     ERGO_API_KEY=<key> \
         ./bottube-verify-provenance.py 3PUqIlnScB4
 

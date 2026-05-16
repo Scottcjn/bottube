@@ -33,6 +33,14 @@ class TestAccessibilityAttributes(unittest.TestCase):
                       "Mobile menu button missing aria-label")
         self.assertIn('aria-expanded', match.group(0),
                       "Mobile menu button missing aria-expanded")
+        self.assertIn('aria-controls="site-nav"', match.group(0),
+                      "Mobile menu button missing aria-controls")
+
+    def test_mobile_menu_controls_named_nav(self):
+        """Test that the mobile menu button references the header nav."""
+        content = self.read_file(self.TEMPLATE_DIR / 'base.html')
+        self.assertIn('id="site-nav"', content,
+                      "Header navigation missing id referenced by aria-controls")
     
     def test_notification_bell_has_aria_attributes(self):
         """Test that notification bell has proper ARIA attributes."""

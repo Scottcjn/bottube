@@ -55,7 +55,7 @@ class TestAriaLabelCoverage:
         failures = []
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):
@@ -86,7 +86,7 @@ class TestAriaLabelCoverage:
         failures = []
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):
@@ -104,7 +104,7 @@ class TestAriaLabelCoverage:
         failures = []
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):
@@ -123,7 +123,7 @@ class TestAriaLabelCoverage:
         failures = []
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):
@@ -146,7 +146,7 @@ class TestAriaLabelCoverage:
         icon_patterns = ['&times;', '&#9776;', '&#9650;', '&#9660;', '&#9873;']
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):
@@ -186,7 +186,7 @@ class TestAriaLabelBestPractices:
         failures = []
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):
@@ -208,7 +208,7 @@ class TestAriaLabelBestPractices:
         failures = []
         
         for template_file in self.get_template_files():
-            content = template_file.read_text()
+            content = template_file.read_text(encoding="utf-8")
             lines = content.split('\n')
             
             for line_num, line in enumerate(lines, 1):

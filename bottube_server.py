@@ -1710,6 +1710,19 @@ def method_not_allowed(e):
     return resp
 
 
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    """Return JSON error for oversized uploads instead of default HTML page."""
+    max_mb = (MAX_VIDEO_SIZE + 10 * 1024 * 1024) // (1024 * 1024)
+    if request.path.startswith("/api/"):
+        return jsonify({
+            "error": f"File too large. Maximum upload size is {max_mb} MB.",
+            "max_size_mb": max_mb,
+        }), 413
+    flash(f"File too large. Maximum upload size is {max_mb} MB.", "error")
+    return redirect(url_for("upload_page"))
+
+
 @app.errorhandler(500)
 def internal_server_error(e):
     """Custom 500 page."""
@@ -4477,6 +4490,9 @@ app.jinja_env.filters["render_mentions"] = render_mentions
 
 _URL_RE = re.compile(r'(https?://[^\s<>\]\)\"]+)')
 
+# Timestamps like 1:23:45 (H:MM:SS), 12:34 (M:SS), or 0:05
+_TIMESTAMP_RE = re.compile(r'(?<!\w)(\d{1,2}):(\d{2})(?::(\d{2}))?(?!\w)')
+
 def render_urls(text):
     """Jinja2 filter: convert @mentions and bare URLs into clickable links. Drudge-style."""
     prefix = app.config.get("APPLICATION_ROOT", "").rstrip("/")
@@ -4491,6 +4507,20 @@ def render_urls(text):
         lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noopener" class="desc-link">{m.group(1)}</a>',
         safe,
     )
+
+    # Auto-link timestamps (1:23:45, 12:34, 0:05) to video seek positions
+    def _timestamp_link(m):
+        h, m_part, s_part = m.group(1), m.group(2), m.group(3)
+        if s_part is not None:
+            # H:MM:SS format
+            seconds = int(h) * 3600 + int(m_part) * 60 + int(s_part)
+        else:
+            # M:SS format
+            seconds = int(h) * 60 + int(m_part)
+        return f'<a href="?t={seconds}" class="timestamp-link" onclick="seekTo({seconds}); return false;">{m.group(0)}</a>'
+
+    safe = _TIMESTAMP_RE.sub(_timestamp_link, safe)
+
     return Markup(safe)
 
 app.jinja_env.filters["render_urls"] = render_urls
@@ -6907,9 +6937,27 @@ def stream_video(video_id):
     # Handle range requests for seeking
     range_header = request.headers.get("Range")
     if range_header:
-        byte_range = range_header.replace("bytes=", "").split("-")
-        start = int(byte_range[0])
-        end = int(byte_range[1]) if byte_range[1] else file_size - 1
+        try:
+            range_val = range_header.replace("bytes=", "")
+            parts = range_val.split("-", 1)
+            start = int(parts[0]) if parts[0] and parts[0].strip().lstrip("-").isdigit() else None
+            end = int(parts[1]) if len(parts) > 1 and parts[1] and parts[1].strip().lstrip("-").isdigit() else None
+        except (ValueError, IndexError):
+            return jsonify({"error": "Invalid Range header"}), 400
+        
+        if start is None and end is None:
+            return jsonify({"error": "Invalid Range header"}), 400
+        
+        if start is None:
+            # Range: bytes=-500 (last 500 bytes)
+            start = max(0, file_size - end)
+            end = file_size - 1
+        else:
+            start = max(0, min(start, file_size - 1))
+            end = min(end, file_size - 1) if end is not None else file_size - 1
+        
+        if start > end:
+            return jsonify({"error": "Range not satisfiable"}), 416
         end = min(end, file_size - 1)
         length = end - start + 1
 
@@ -7312,13 +7360,18 @@ def _compute_agent_interaction_context(db, video_agent_id, commenting_agent_id):
 def get_comments(video_id):
     """Get comments for a video with agent interaction context."""
     db = get_db()
+    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
     
     # Get video owner info for interaction context
     video_owner = db.execute(
         "SELECT agent_id FROM videos WHERE video_id = ?",
         (video_id,),
     ).fetchone()
-    video_agent_id = video_owner["agent_id"] if video_owner else None
+    if not video_owner:
+        return jsonify({"error": "Video not found"}), 404
+    video_agent_id = video_owner["agent_id"]
     
     rows = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.id as agent_internal_id, a.is_human
@@ -11796,9 +11849,9 @@ def oembed():
 
     w = request.args.get("maxwidth", video["width"] or 512, type=int)
     h = request.args.get("maxheight", video["height"] or 512, type=int)
-    # Clamp dimensions
-    w = min(w, 1920)
-    h = min(h, 1080)
+    # Clamp dimensions to 1..1920 width and 1..1080 height
+    w = max(1, min(w, 1920))
+    h = max(1, min(h, 1080))
 
     thumb_url = f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video.get("thumbnail") else ""
     embed_html = f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>'
@@ -16291,7 +16344,7 @@ def ctr_global_stats():
 @app.route("/api/ctr/top")
 def ctr_top_videos():
     """Get top videos by CTR."""
-    limit = min(50, request.args.get("limit", 20, type=int))
+    limit = max(1, min(50, request.args.get("limit", 20, type=int)))
     min_imp = request.args.get("min_impressions", 10, type=int)
     try:
         top = _get_ctr_tracker().get_top_by_ctr(limit=limit, min_impressions=min_imp)
@@ -16312,7 +16365,12 @@ def ctr_underperforming():
 
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
-    """Get CTR stats for a specific video."""
+    # Reject non-existent videos
+    db = get_db()
+    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
         stats = _get_ctr_tracker().get_stats(video_id)
         if not stats:
@@ -16340,7 +16398,12 @@ def record_watch_time(video_id):
 
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
-    """Get A/B test variant stats for a video."""
+    # Reject non-existent videos
+    db = get_db()
+    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
         stats = _get_ab_manager().get_variant_stats(video_id)
         winner = _get_ab_manager().get_winner(video_id)
@@ -20778,7 +20841,7 @@ def admin_provenance_reap_confirmations():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     _provenance_ensure_anchor_columns()
 
-    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:9053")
     ergo_key = os.environ.get("ERGO_API_KEY", "")
     if not ergo_key:
         return jsonify({"ok": False, "error": "ERGO_API_KEY not set"}), 503
@@ -20942,7 +21005,7 @@ def admin_reconcile_anchors():
     if strategy not in ("random", "recent", "oldest"):
         strategy = "random"
 
-    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:9053")
     ergo_key = os.environ.get("ERGO_API_KEY", "")
     if not ergo_key:
         return jsonify({"ok": False, "error": "ERGO_API_KEY not set"}), 503
@@ -21625,7 +21688,7 @@ def anchor_chain_proxy(tx_hash):
     """
     if not re.fullmatch(r"[0-9a-fA-F]{32,128}", tx_hash):
         return jsonify({"ok": False, "error": "invalid tx_hash"}), 400
-    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:19053")
+    ergo_base = os.environ.get("ERGO_BASE", "http://localhost:9053")
     ergo_key = os.environ.get("ERGO_API_KEY", "")
     try:
         req = urllib.request.Request(

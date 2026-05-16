@@ -768,7 +768,16 @@
         color: var(--text-primary);
     }
 
-    .comment-time {
+    .timestamp-link {
+    color: var(--green, #33ff33);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+.timestamp-link:hover {
+    color: var(--amber, #ffb000);
+}
+.comment-time {
         font-size: 12px;
         color: var(--text-muted);
     }
@@ -2872,6 +2881,56 @@ function seekVideo(video, deltaSeconds) {
     announcePlayerState('Seeked ' + seconds + ' seconds ' + direction);
 }
 
+function parseSeekSeconds(value) {
+    if (value === null || value === undefined) return null;
+    var raw = String(value).trim().toLowerCase();
+    if (!raw) return null;
+
+    if (/^\d+(?:\.\d+)?$/.test(raw)) {
+        return Math.max(0, Math.floor(Number(raw)));
+    }
+
+    if (/^\d{1,2}:\d{1,2}(?::\d{1,2})?$/.test(raw)) {
+        var parts = raw.split(':').map(function(part) { return Number(part); });
+        if (parts.some(function(part) { return !Number.isFinite(part); })) return null;
+        if (parts.length === 2) {
+            return Math.max(0, (parts[0] * 60) + parts[1]);
+        }
+        return Math.max(0, (parts[0] * 3600) + (parts[1] * 60) + parts[2]);
+    }
+
+    var match = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/);
+    if (match && (match[1] || match[2] || match[3])) {
+        return ((Number(match[1]) || 0) * 3600) +
+               ((Number(match[2]) || 0) * 60) +
+               (Number(match[3]) || 0);
+    }
+
+    return null;
+}
+
+function applyInitialSeekFromUrl(video) {
+    if (!video || !window.URLSearchParams) return;
+    var params = new URLSearchParams(window.location.search || '');
+    var seconds = parseSeekSeconds(params.get('t') || params.get('start'));
+    if (seconds === null) return;
+
+    function seekWhenReady() {
+        var target = seconds;
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+            target = Math.min(seconds, Math.max(0, video.duration - 0.25));
+        }
+        video.currentTime = target;
+        announcePlayerState('Seeked to ' + Math.floor(target) + ' seconds');
+    }
+
+    if (video.readyState >= 1) {
+        seekWhenReady();
+    } else {
+        video.addEventListener('loadedmetadata', seekWhenReady, { once: true });
+    }
+}
+
 function adjustVolume(video, delta) {
     if (!video) return;
     var nextVolume = Math.min(1, Math.max(0, (video.volume || 0) + delta));
@@ -3050,6 +3109,7 @@ document.addEventListener('keydown', function(event) {
         video.addEventListener('playing', function() {
             player.classList.remove('loading');
         });
+        applyInitialSeekFromUrl(video);
 
         // Try autoplay with sound first
         var playPromise = video.play();
@@ -3714,6 +3774,31 @@ function reportVideo() {
 (function() {
     var vastTag = "{{ config['IMA_VAST_TAG'] }}";
     var videoEl = document.getElementById('main-video');
+
+// Seek to timestamp from URL ?t= parameter (supports H:MM:SS, M:SS, and raw seconds)
+function seekTo(seconds) {
+    var v = document.getElementById('main-video');
+    if (v && seconds > 0) {
+        v.currentTime = Math.min(seconds, v.duration || seconds);
+    }
+}
+
+// Parse ?t= on page load
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    var tParam = params.get('t');
+    if (tParam) {
+        var seconds = parseInt(tParam, 10);
+        if (!isNaN(seconds) && seconds > 0) {
+            var v = document.getElementById('main-video');
+            if (v) {
+                v.addEventListener('loadedmetadata', function() {
+                    v.currentTime = Math.min(seconds, v.duration || seconds);
+                });
+            }
+        }
+    }
+})();
     var adContainer = document.getElementById('ad-container');
     if (!vastTag || !videoEl || !adContainer) return;
 
