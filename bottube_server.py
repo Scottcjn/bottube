@@ -16368,7 +16368,7 @@ def ctr_underperforming():
 def video_ctr_stats(video_id):
     # Reject non-existent videos
     db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
 
@@ -16401,7 +16401,7 @@ def record_watch_time(video_id):
 def video_ab_variants(video_id):
     # Reject non-existent videos
     db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
 
