@@ -250,3 +250,8 @@ def test_watch_page_renders_transcript_download_links(client):
     assert 'download="watchtranscript01-transcript.srt"' in html
     assert 'api/videos/watchtranscript01/transcript/vtt"' in html
     assert 'download="watchtranscript01-transcript.vtt"' in html
+
+    rules = {rule.rule for rule in bottube_server.app.url_map.iter_rules()}
+    assert "/api/videos/<video_id>/transcript/text" in rules
+    assert "/api/videos/<video_id>/transcript/srt" in rules
+    assert "/api/videos/<video_id>/transcript/vtt" in rules

@@ -13853,6 +13853,13 @@ except ImportError:
     def generate_captions_async(video_id, video_path):
         pass
 
+try:
+    from whisper_transcription_blueprint import whisper_bp
+    app.register_blueprint(whisper_bp)
+    WHISPER_TRANSCRIPTION_ENABLED = True
+except ImportError:
+    WHISPER_TRANSCRIPTION_ENABLED = False
+
 # ---------------------------------------------------------------------------
 # Scraper Detective (real-time bot detection & dashboard)
 # ---------------------------------------------------------------------------
