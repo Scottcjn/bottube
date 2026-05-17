@@ -1,0 +1,29 @@
+{
+  "name": "bottube-slack-digest",
+  "version": "1.0.0",
+  "description": "Post BoTTube trending or topic digests to Slack",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-slack-digest": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "slack",
+    "digest",
+    "webhook"
+  ],
+  "author": "iamdinhthuan",
+  "license": "MIT",
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
