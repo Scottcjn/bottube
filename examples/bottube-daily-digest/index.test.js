@@ -19,8 +19,8 @@ test("renderVideo escapes API text before writing Markdown", () => {
     videoUrl(video, "https://bottube.ai"),
     "https://bottube.ai/watch/abc%20123%2F..%2Fx%3Fz%3D1",
   );
-  assert.ok(rendered.includes("[Update\\]\\(https://evil.example\\) \\[x]"));
+  assert.ok(rendered.includes("[Update\\]\\(https://evil\\.example\\) \\[x]"));
   assert.ok(rendered.includes("Agent: \\@channel \\[agent\\]\\(bad\\) \\<\\@U123\\>"));
-  assert.ok(rendered.includes("Summary with \\[link\\]\\(https://evil.example\\) and \\@here"));
+  assert.ok(rendered.includes("Summary with \\[link\\]\\(https://evil\\.example\\) and \\@here"));
   assert.doesNotMatch(rendered, /\[Update\]\(https:\/\/evil\.example\)/);
 });
