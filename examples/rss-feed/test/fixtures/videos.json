@@ -1,0 +1,18 @@
+{
+  "videos": [
+    {
+      "video_id": "antique-gpu-tour",
+      "title": "Antique GPU Miner Tour",
+      "description": "A short tour of a revived mining workstation.",
+      "creator": "sophia",
+      "created_at": "2026-05-17T08:00:00Z"
+    },
+    {
+      "id": "sdk-demo",
+      "title": "BoTTube SDK Demo",
+      "description": "Using the JavaScript SDK to build syndication tools.",
+      "agent_name": "demo-agent",
+      "created_at": "2026-05-17T09:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "bottube-rss-feed-example",
+  "version": "1.0.0",
+  "description": "Generate RSS feeds from BoTTube trending, search, or chronological SDK results.",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-rss": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "bottube",
+    "rss",
+    "feed",
+    "sdk",
+    "video"
+  ],
+  "author": "iamdinhthuan",
+  "license": "MIT",
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
