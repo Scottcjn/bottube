@@ -22,7 +22,6 @@ python -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install -r tests/requirements.txt
 ```
 
 On Windows PowerShell:
@@ -32,7 +31,6 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install -r tests/requirements.txt
 ```
 
 For SDK-specific work, also check the package directory you are touching:
