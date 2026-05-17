@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { pathToFileURL } from "node:url";
+
 import { BoTTubeClient } from "@bottube/sdk";
 
 const DEFAULT_LIMIT = 5;
@@ -49,17 +51,21 @@ function normalizeVideos(response) {
   return response?.videos || response?.results || response?.items || [];
 }
 
+function escapeMarkdownText(value) {
+  return String(value ?? "").replace(/[\\`*_{}\[\]()#+\-.!|<>@]/g, "\\$&");
+}
+
 function videoUrl(video, baseUrl) {
   const id = video.video_id || video.id || video.slug;
   if (!id) {
     return baseUrl;
   }
-  return `${baseUrl.replace(/\/$/, "")}/watch/${id}`;
+  return `${baseUrl.replace(/\/$/, "")}/watch/${encodeURIComponent(String(id))}`;
 }
 
 function renderVideo(video, index, baseUrl) {
-  const title = video.title || "Untitled video";
-  const agent = video.agent_name || video.agent || "unknown-agent";
+  const title = escapeMarkdownText(video.title || "Untitled video");
+  const agent = escapeMarkdownText(video.agent_name || video.agent || "unknown-agent");
   const views = video.view_count ?? video.views ?? 0;
   const likes = video.like_count ?? video.likes ?? video.vote_count ?? 0;
   const summary = video.description || video.scene_description || "";
@@ -70,7 +76,7 @@ function renderVideo(video, index, baseUrl) {
     `   - Views: ${views} | Likes: ${likes}`,
   ];
   if (summary) {
-    lines.push(`   - Summary: ${summary.slice(0, 180)}`);
+    lines.push(`   - Summary: ${escapeMarkdownText(summary.slice(0, 180))}`);
   }
   return lines.join("\n");
 }
@@ -80,13 +86,13 @@ function renderDigest({ trending, searchResults, options }) {
   const sections = [
     `# BoTTube Daily Digest - ${date}`,
     "",
-    `Generated with the BoTTube JavaScript SDK from ${options.baseUrl}.`,
+    `Generated with the BoTTube JavaScript SDK from ${escapeMarkdownText(options.baseUrl)}.`,
     "",
-    `## Trending (${options.timeframe})`,
+    `## Trending (${escapeMarkdownText(options.timeframe)})`,
     "",
     ...trending.map((video, index) => renderVideo(video, index, options.baseUrl)),
     "",
-    `## Search: ${options.query}`,
+    `## Search: ${escapeMarkdownText(options.query)}`,
     "",
     ...searchResults.map((video, index) =>
       renderVideo(video, index, options.baseUrl),
@@ -136,7 +142,18 @@ async function main() {
   console.log(renderDigest(digest));
 }
 
-main().catch((error) => {
-  console.error(`Failed to build BoTTube digest: ${error.message}`);
-  process.exit(1);
-});
+export {
+  buildDigest,
+  escapeMarkdownText,
+  normalizeVideos,
+  renderDigest,
+  renderVideo,
+  videoUrl,
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`Failed to build BoTTube digest: ${error.message}`);
+    process.exit(1);
+  });
+}

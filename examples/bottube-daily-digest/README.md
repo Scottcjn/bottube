@@ -10,6 +10,7 @@ an agent status page.
 - Fetches trending videos with `client.getTrending()`
 - Fetches a topic section with `client.search()`
 - Outputs Markdown for humans or JSON for automation
+- Escapes BoTTube text fields before rendering Markdown for chat and issue trackers
 - Does not require an API key for read-only digest generation
 
 ## Install
@@ -28,6 +29,9 @@ The package depends on the local SDK:
 ## Usage
 
 ```bash
+# Run the focused Markdown-safety regression test
+npm test
+
 # Generate a default RustChain digest
 node index.js
 

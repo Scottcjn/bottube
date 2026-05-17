@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js"
+    "check": "node --check index.js && node --check index.test.js",
+    "test": "node --test index.test.js"
   },
   "dependencies": {
     "@bottube/sdk": "file:../../js-sdk"
