@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   normalizeVideos,
   renderWidgetHtml,
 } from '../src/widget.js';
+
+const exampleRoot = dirname(fileURLToPath(new URL('../index.js', import.meta.url)));
 
 test('normalizes SDK video shapes into public watch cards', () => {
   const videos = normalizeVideos([
@@ -84,4 +89,20 @@ test('renders escaped standalone widget HTML', () => {
   assert.match(html, /1\.2K views/);
   assert.match(html, /#&lt;tag&gt;/);
   assert.doesNotMatch(html, /<script>alert/);
+});
+
+test('CLI rejects malformed limit values instead of parsing numeric prefixes', () => {
+  const result = spawnSync(process.execPath, [
+    join(exampleRoot, 'index.js'),
+    '--fixture',
+    join(exampleRoot, 'test/fixtures/videos.json'),
+    '--limit',
+    '2abc',
+  ], {
+    encoding: 'utf8',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--limit must be an integer from 1 to 24/);
+  assert.doesNotMatch(result.stderr, /at clampInteger|Node\.js/);
 });

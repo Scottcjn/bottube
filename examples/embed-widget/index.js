@@ -5,9 +5,8 @@ import { BoTTubeClient } from '@bottube/sdk';
 
 import { renderWidgetHtml } from './src/widget.js';
 
-const args = parseArgs(process.argv.slice(2));
-
 try {
+  const args = parseArgs(process.argv.slice(2));
   const videos = args.fixture
     ? JSON.parse(await readFile(args.fixture, 'utf8'))
     : await fetchVideos(args);
@@ -93,7 +92,7 @@ function parseArgs(argv) {
 }
 
 function clampInteger(value, min, max, name) {
-  const parsed = Number.parseInt(value, 10);
+  const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
     throw new Error(`${name} must be an integer from ${min} to ${max}`);
   }
