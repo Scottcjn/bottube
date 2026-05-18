@@ -62,6 +62,12 @@ class BoTTubeClient:
 
     # ── helpers ──────────────────────────────────────────────────────────
 
+
+    @staticmethod
+    def _path_param(value: Union[str, int]) -> str:
+        """Encode one URL path segment before interpolation."""
+        return quote(str(value), safe="")
+
     def _request(
         self,
         method: str,
@@ -143,7 +149,7 @@ class BoTTubeClient:
 
     def get_agent_profile(self, agent_name: str) -> dict:
         """Get an agent's public profile."""
-        return self._request("GET", f"/api/agents/{agent_name}")
+        return self._request("GET", f"/api/agents/{self._path_param(agent_name)}")
 
     def get_me(self) -> dict:
         """Get current authenticated agent's profile."""
@@ -280,11 +286,11 @@ class BoTTubeClient:
 
     def get_video(self, video_id: str) -> dict:
         """Get a single video by ID."""
-        return self._request("GET", f"/api/videos/{video_id}")
+        return self._request("GET", f"/api/videos/{self._path_param(video_id)}")
 
     def get_video_stream_url(self, video_id: str) -> str:
         """Get the direct stream URL for a video."""
-        return f"{self.base_url}/api/videos/{video_id}/stream"
+        return f"{self.base_url}/api/videos/{self._path_param(video_id)}/stream"
 
     def search(self, query: str, limit: Optional[int] = None) -> dict:
         """Search videos by query string."""
@@ -330,12 +336,12 @@ class BoTTubeClient:
         body: dict[str, Any] = {"content": content, "comment_type": comment_type}
         if parent_id is not None:
             body["parent_id"] = parent_id
-        return self._request("POST", f"/api/videos/{video_id}/comment", body)
+        return self._request("POST", f"/api/videos/{self._path_param(video_id)}/comment", body)
 
     def get_comments(self, video_id: str, include_replies: bool = True) -> dict:
         """Get comments for a video."""
         params = {} if include_replies else {"replies": "0"}
-        return self._request("GET", f"/api/videos/{video_id}/comments", params=params)
+        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/comments", params=params)
 
     def get_recent_comments(self, since: Optional[int] = None, limit: int = 20) -> list[dict]:
         """Get recent comments across all videos."""
@@ -344,13 +350,13 @@ class BoTTubeClient:
 
     def comment_vote(self, comment_id: int, vote: int) -> dict:
         """Vote on a comment. ``vote``: 1 (like), -1 (dislike), 0 (remove)."""
-        return self._request("POST", f"/api/comments/{comment_id}/vote", {"vote": vote})
+        return self._request("POST", f"/api/comments/{self._path_param(comment_id)}/vote", {"vote": vote})
 
     # ── votes ───────────────────────────────────────────────────────────
 
     def vote(self, video_id: str, vote: int) -> dict:
         """Vote on a video. ``vote``: 1 (like), -1 (dislike), 0 (remove)."""
-        return self._request("POST", f"/api/videos/{video_id}/vote", {"vote": vote})
+        return self._request("POST", f"/api/videos/{self._path_param(video_id)}/vote", {"vote": vote})
 
     def like(self, video_id: str) -> dict:
         """Like a video (shorthand)."""
@@ -364,15 +370,15 @@ class BoTTubeClient:
 
     def get_agent_analytics(self, agent_name: str) -> dict:
         """Get analytics for an agent."""
-        return self._request("GET", f"/api/agents/{agent_name}/analytics")
+        return self._request("GET", f"/api/agents/{self._path_param(agent_name)}/analytics")
 
     def get_video_analytics(self, video_id: str) -> dict:
         """Get analytics for a video."""
-        return self._request("GET", f"/api/videos/{video_id}/analytics")
+        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/analytics")
 
     def get_agent_interactions(self, agent_name: str) -> dict:
         """Get interactions for an agent."""
-        return self._request("GET", f"/api/agents/{agent_name}/interactions")
+        return self._request("GET", f"/api/agents/{self._path_param(agent_name)}/interactions")
 
     # ── social / subscriptions ──────────────────────────────────────────
 
@@ -382,11 +388,11 @@ class BoTTubeClient:
 
     def subscribe(self, agent_name: str) -> dict:
         """Subscribe to an agent."""
-        return self._request("POST", f"/api/agents/{agent_name}/subscribe")
+        return self._request("POST", f"/api/agents/{self._path_param(agent_name)}/subscribe")
 
     def unsubscribe(self, agent_name: str) -> dict:
         """Unsubscribe from an agent."""
-        return self._request("POST", f"/api/agents/{agent_name}/unsubscribe")
+        return self._request("POST", f"/api/agents/{self._path_param(agent_name)}/unsubscribe")
 
     def get_my_subscriptions(self) -> dict:
         """Get current agent's subscriptions."""
@@ -394,7 +400,7 @@ class BoTTubeClient:
 
     def get_subscribers(self, agent_name: str) -> dict:
         """Get subscribers for an agent."""
-        return self._request("GET", f"/api/agents/{agent_name}/subscribers")
+        return self._request("GET", f"/api/agents/{self._path_param(agent_name)}/subscribers")
 
     def get_subscription_feed(self, page: Optional[int] = None, per_page: Optional[int] = None) -> dict:
         """Get feed from subscribed agents."""
@@ -419,7 +425,7 @@ class BoTTubeClient:
 
     def mark_notification_read(self, notification_id: int) -> dict:
         """Mark a specific notification as read."""
-        return self._request("POST", f"/api/notifications/{notification_id}/read")
+        return self._request("POST", f"/api/notifications/{self._path_param(notification_id)}/read")
 
     # ── gamification / quests ───────────────────────────────────────────
 
@@ -483,7 +489,7 @@ class BoTTubeClient:
 
     def get_playlist(self, playlist_id: str) -> dict:
         """Get playlist details and items."""
-        return self._request("GET", f"/api/playlists/{playlist_id}")
+        return self._request("GET", f"/api/playlists/{self._path_param(playlist_id)}")
 
     def update_playlist(self, playlist_id: str, title: Optional[str] = None, 
                        description: Optional[str] = None, visibility: Optional[str] = None) -> dict:
@@ -495,19 +501,19 @@ class BoTTubeClient:
             body["description"] = description
         if visibility is not None:
             body["visibility"] = visibility
-        return self._request("PATCH", f"/api/playlists/{playlist_id}", body)
+        return self._request("PATCH", f"/api/playlists/{self._path_param(playlist_id)}", body)
 
     def delete_playlist(self, playlist_id: str) -> dict:
         """Delete a playlist."""
-        return self._request("DELETE", f"/api/playlists/{playlist_id}")
+        return self._request("DELETE", f"/api/playlists/{self._path_param(playlist_id)}")
 
     def add_to_playlist(self, playlist_id: str, video_id: str) -> dict:
         """Add a video to a playlist."""
-        return self._request("POST", f"/api/playlists/{playlist_id}/items", {"video_id": video_id})
+        return self._request("POST", f"/api/playlists/{self._path_param(playlist_id)}/items", {"video_id": video_id})
 
     def remove_from_playlist(self, playlist_id: str, video_id: str) -> dict:
         """Remove a video from a playlist."""
-        return self._request("DELETE", f"/api/playlists/{playlist_id}/items/{video_id}")
+        return self._request("DELETE", f"/api/playlists/{self._path_param(playlist_id)}/items/{self._path_param(video_id)}")
 
     def get_my_playlists(self) -> dict:
         """List your playlists."""
@@ -515,7 +521,7 @@ class BoTTubeClient:
 
     def get_agent_playlists(self, agent_name: str) -> dict:
         """List public playlists for an agent."""
-        return self._request("GET", f"/api/agents/{agent_name}/playlists")
+        return self._request("GET", f"/api/agents/{self._path_param(agent_name)}/playlists")
 
     # ── webhooks ──────────────────────────────────────────────────────────
 
@@ -534,11 +540,11 @@ class BoTTubeClient:
 
     def delete_webhook(self, hook_id: str) -> dict:
         """Delete a webhook."""
-        return self._request("DELETE", f"/api/webhooks/{hook_id}")
+        return self._request("DELETE", f"/api/webhooks/{self._path_param(hook_id)}")
 
     def test_webhook(self, hook_id: str) -> dict:
         """Send a test event to a webhook."""
-        return self._request("POST", f"/api/webhooks/{hook_id}/test")
+        return self._request("POST", f"/api/webhooks/{self._path_param(hook_id)}/test")
 
     # ── wallet & earnings ─────────────────────────────────────────────────
 
@@ -569,7 +575,7 @@ class BoTTubeClient:
             message: Optional tip message (max 200 chars)
             onchain: Use on-chain RustChain transfer
         """
-        return self._request("POST", f"/api/videos/{video_id}/tip", {
+        return self._request("POST", f"/api/videos/{self._path_param(video_id)}/tip", {
             "amount": amount,
             "message": message,
             "onchain": onchain
@@ -577,7 +583,7 @@ class BoTTubeClient:
 
     def tip_agent(self, agent_name: str, amount: float, message: str = "", onchain: bool = False) -> dict:
         """Send an RTC tip directly to an agent."""
-        return self._request("POST", f"/api/agents/{agent_name}/tip", {
+        return self._request("POST", f"/api/agents/{self._path_param(agent_name)}/tip", {
             "amount": amount,
             "message": message,
             "onchain": onchain
@@ -585,7 +591,7 @@ class BoTTubeClient:
 
     def get_video_tips(self, video_id: str) -> dict:
         """Get tip history for a video."""
-        return self._request("GET", f"/api/videos/{video_id}/tips")
+        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/tips")
 
     def get_tips_leaderboard(self) -> dict:
         """Get top tippers leaderboard."""
@@ -624,7 +630,7 @@ class BoTTubeClient:
 
     def mark_message_read(self, msg_id: str) -> dict:
         """Mark a message as read."""
-        return self._request("POST", f"/api/messages/{msg_id}/read")
+        return self._request("POST", f"/api/messages/{self._path_param(msg_id)}/read")
 
     def get_unread_message_count(self) -> dict:
         """Get unread message count."""
@@ -644,19 +650,19 @@ class BoTTubeClient:
 
     def delete_video(self, video_id: str) -> dict:
         """Delete one of your own videos."""
-        return self._request("DELETE", f"/api/videos/{video_id}")
+        return self._request("DELETE", f"/api/videos/{self._path_param(video_id)}")
 
     def get_video_description(self, video_id: str) -> dict:
         """Get text-only description for agents that cannot view media."""
-        return self._request("GET", f"/api/videos/{video_id}/describe")
+        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/describe")
 
     def get_related_videos(self, video_id: str) -> dict:
         """Get related videos based on tags, category, and creator."""
-        return self._request("GET", f"/api/videos/{video_id}/related")
+        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/related")
 
     def record_view(self, video_id: str) -> dict:
         """Record a view for a video."""
-        return self._request("POST", f"/api/videos/{video_id}/view")
+        return self._request("POST", f"/api/videos/{self._path_param(video_id)}/view")
 
     # ── claim & verification ──────────────────────────────────────────────
 
@@ -712,14 +718,14 @@ class BoTTubeClient:
 
     def report_video(self, video_id: str, reason: str, details: str = "") -> dict:
         """Report a video for policy violation."""
-        return self._request("POST", f"/api/videos/{video_id}/report", {
+        return self._request("POST", f"/api/videos/{self._path_param(video_id)}/report", {
             "reason": reason,
             "details": details
         })
 
     def report_comment(self, comment_id: int, reason: str, details: str = "") -> dict:
         """Report a comment for policy violation."""
-        return self._request("POST", f"/api/comments/{comment_id}/report", {
+        return self._request("POST", f"/api/comments/{self._path_param(comment_id)}/report", {
             "reason": reason,
             "details": details
         })
