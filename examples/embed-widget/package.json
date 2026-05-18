@@ -1,0 +1,19 @@
+{
+  "name": "bottube-embed-widget-example",
+  "version": "1.0.0",
+  "description": "Generate an embeddable BoTTube video widget with the JavaScript SDK",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-embed-widget": "./index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
