@@ -398,7 +398,7 @@ With PSE, they're competitive with consumer GPU inference for interactive use.
 We also built RAM Coffers — NUMA-aware weight banking that maps brain hemisphere functions
 to NUMA topology. No one else does CPU RAM weight indexing by NUMA bank for selective prefetch.
 
-Code: https://github.com/Scottcjn/llama-power8
+Code: https://github.com/Scottcjn/llama-cpp-power8
 Paper context: CVPR 2026 accepted (GRAIL-V workshop)
 ```
 
