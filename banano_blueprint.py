@@ -11,6 +11,7 @@ Custodial model: platform seed derives per-user accounts by index.
 from flask import Blueprint, request, jsonify, g, session
 import json
 import logging
+import math
 import os
 import sqlite3
 import time
@@ -69,6 +70,26 @@ def get_db():
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db
+
+
+def _request_json_object():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _parse_positive_ban_amount(data):
+    raw_amount = data.get("amount", 0)
+    if isinstance(raw_amount, bool):
+        return None, (jsonify({"error": "amount must be a finite positive number"}), 400)
+    try:
+        amount = float(raw_amount)
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": "amount must be a finite positive number"}), 400)
+    if not math.isfinite(amount) or amount <= 0:
+        return None, (jsonify({"error": "amount must be a finite positive number"}), 400)
+    return amount, None
 
 
 def init_ban_tables(db=None):
@@ -431,13 +452,17 @@ def ban_tip():
     if not user_id:
         return jsonify({"error": "Authentication required"}), 401
 
-    data = request.get_json() or {}
-    to_agent = data.get("to_agent", "").strip()
-    amount = float(data.get("amount", 0))
-    video_id = data.get("video_id", "")
-
-    if not to_agent or amount <= 0:
+    data, error = _request_json_object()
+    if error:
+        return error
+    to_agent_raw = data.get("to_agent", "")
+    to_agent = to_agent_raw.strip() if isinstance(to_agent_raw, str) else ""
+    if not to_agent:
         return jsonify({"error": "to_agent and positive amount required"}), 400
+    amount, error = _parse_positive_ban_amount(data)
+    if error:
+        return error
+    video_id = data.get("video_id", "")
 
     if amount > 1000:
         return jsonify({"error": "Maximum tip is 1000 BAN"}), 400
@@ -487,12 +512,16 @@ def ban_withdraw():
     if not user_id:
         return jsonify({"error": "Authentication required"}), 401
 
-    data = request.get_json() or {}
-    to_address = data.get("address", "").strip()
-    amount = float(data.get("amount", 0))
-
-    if not to_address or amount <= 0:
+    data, error = _request_json_object()
+    if error:
+        return error
+    to_address_raw = data.get("address", "")
+    to_address = to_address_raw.strip() if isinstance(to_address_raw, str) else ""
+    if not to_address:
         return jsonify({"error": "address and positive amount required"}), 400
+    amount, error = _parse_positive_ban_amount(data)
+    if error:
+        return error
 
     if not to_address.startswith("ban_") or len(to_address) != 64:
         return jsonify({"error": "Invalid Banano address format"}), 400
