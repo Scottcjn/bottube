@@ -3,11 +3,24 @@ import { execFile } from 'node:child_process';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { extractVideos, generateRss } from '../src/rss.js';
 
 const execFileAsync = promisify(execFile);
-const root = new URL('..', import.meta.url).pathname;
+
+function exampleRootFromMetaUrl(metaUrl) {
+  return fileURLToPath(new URL('..', metaUrl));
+}
+
+const root = exampleRootFromMetaUrl(import.meta.url);
+
+test('exampleRootFromMetaUrl decodes file URLs for child process cwd', () => {
+  const decodedRoot = exampleRootFromMetaUrl('file:///tmp/bottube%20rss/examples/rss-feed/test/rss.test.js');
+
+  assert.equal(decodedRoot.includes('%20'), false);
+  assert.match(decodedRoot, /bottube rss/);
+});
 
 test('generateRss escapes XML and emits watch links', () => {
   const xml = generateRss({
@@ -70,7 +83,7 @@ test('CLI renders fixture data and writes an RSS file', async () => {
   const outFile = join(root, 'test', 'tmp-feed.xml');
   await rm(outFile, { force: true });
 
-  const { stdout } = await execFileAsync('node', [
+  const { stdout } = await execFileAsync(process.execPath, [
     'index.js',
     '--fixture',
     'test/fixtures/videos.json',
