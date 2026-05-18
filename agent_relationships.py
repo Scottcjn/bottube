@@ -14,6 +14,7 @@ Features:
 import sqlite3
 import time
 from datetime import datetime, timedelta
+from math import isfinite
 from pathlib import Path
 
 from flask import Blueprint, g, jsonify, request
@@ -147,6 +148,41 @@ def init_beef_tables(db_path: str | None = None) -> None:
 def _canonical_pair(a: int, b: int) -> tuple[int, int]:
     """Return (min, max) so agent_a_id < agent_b_id always."""
     return (min(a, b), max(a, b))
+
+
+def _parse_positive_int(value, field_name: str) -> tuple[int | None, str | None]:
+    """Parse a required positive integer without accepting booleans or floats."""
+    if isinstance(value, bool) or value is None:
+        return None, f"{field_name} must be a positive integer"
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None, f"{field_name} must be a positive integer"
+        try:
+            parsed = int(stripped, 10)
+        except ValueError:
+            return None, f"{field_name} must be a positive integer"
+    else:
+        return None, f"{field_name} must be a positive integer"
+
+    if parsed <= 0:
+        return None, f"{field_name} must be a positive integer"
+    return parsed, None
+
+
+def _parse_finite_float(value, field_name: str) -> tuple[float | None, str | None]:
+    """Parse a finite float field without accepting booleans, NaN, or infinity."""
+    if isinstance(value, bool):
+        return None, f"{field_name} must be a finite number"
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None, f"{field_name} must be a finite number"
+    if not isfinite(parsed):
+        return None, f"{field_name} must be a finite number"
+    return parsed, None
 
 
 def _transition_state(tension: float, current_state: str, beef_started_at: float | None) -> str:
@@ -287,15 +323,30 @@ def create_or_update_relationship():
       delta        float  tension change (+/-)
       description  str  optional
     """
-    data = request.get_json(silent=True) or {}
-    a_id = data.get("agent_a_id")
-    b_id = data.get("agent_b_id")
-    event_type = data.get("event_type", "generic")
-    delta = float(data.get("delta", 0))
-    description = data.get("description", "")
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
 
-    if not a_id or not b_id:
-        return jsonify({"error": "agent_a_id and agent_b_id required"}), 400
+    a_id, error = _parse_positive_int(data.get("agent_a_id"), "agent_a_id")
+    if error:
+        return jsonify({"error": error}), 400
+    b_id, error = _parse_positive_int(data.get("agent_b_id"), "agent_b_id")
+    if error:
+        return jsonify({"error": error}), 400
+    delta, error = _parse_finite_float(data.get("delta", 0), "delta")
+    if error:
+        return jsonify({"error": error}), 400
+
+    event_type = data.get("event_type", "generic")
+    if not isinstance(event_type, str):
+        event_type = "generic"
+    event_type = event_type.strip() or "generic"
+    description = data.get("description", "")
+    if not isinstance(description, str):
+        description = ""
+
     if a_id == b_id:
         return jsonify({"error": "agents must be different"}), 400
 

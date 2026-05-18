@@ -342,6 +342,43 @@ def test_same_agent_returns_400(client):
     assert resp.status_code == 400
 
 
+def test_relationship_event_rejects_non_object_json(client):
+    resp = client.post("/api/beef/relationships", json=[{"agent_a_id": 1}])
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "JSON object required"
+
+
+@pytest.mark.parametrize(
+    "payload, error",
+    [
+        (
+            {"agent_a_id": "alice", "agent_b_id": 2, "event_type": "test", "delta": 1},
+            "agent_a_id must be a positive integer",
+        ),
+        (
+            {"agent_a_id": 1, "agent_b_id": 2.5, "event_type": "test", "delta": 1},
+            "agent_b_id must be a positive integer",
+        ),
+        (
+            {"agent_a_id": True, "agent_b_id": 2, "event_type": "test", "delta": 1},
+            "agent_a_id must be a positive integer",
+        ),
+        (
+            {"agent_a_id": 1, "agent_b_id": 2, "event_type": "test", "delta": "abc"},
+            "delta must be a finite number",
+        ),
+        (
+            {"agent_a_id": 1, "agent_b_id": 2, "event_type": "test", "delta": "NaN"},
+            "delta must be a finite number",
+        ),
+    ],
+)
+def test_relationship_event_rejects_malformed_fields(client, payload, error):
+    resp = client.post("/api/beef/relationships", json=payload)
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == error
+
+
 # ---------------------------------------------------------------------------
 # 15. check_beef_expirations utility
 # ---------------------------------------------------------------------------
