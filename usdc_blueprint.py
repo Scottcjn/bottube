@@ -4,6 +4,7 @@ Flask Blueprint for USDC deposits, tips, and premium API access.
 """
 
 from flask import Blueprint, request, jsonify, g
+import math
 import sqlite3
 import time
 import hashlib
@@ -47,6 +48,28 @@ def get_db():
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db
+
+
+def _request_json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _parse_finite_usdc_amount(data):
+    raw_amount = data.get("amount_usdc", 0)
+    if isinstance(raw_amount, bool):
+        return None, (jsonify({"error": "amount_usdc must be a finite number"}), 400)
+    try:
+        amount = float(raw_amount)
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": "amount_usdc must be a finite number"}), 400)
+    if not math.isfinite(amount):
+        return None, (jsonify({"error": "amount_usdc must be a finite number"}), 400)
+    return amount, None
 
 
 def init_usdc_tables(db):
@@ -316,13 +339,18 @@ def usdc_tip():
     if not agent_name:
         return jsonify({"error": "Authentication required"}), 401
 
-    data = request.get_json() or {}
+    data, error = _request_json_object()
+    if error:
+        return error
     video_id = data.get("video_id")
     to_agent = data.get("to_agent")
-    amount = float(data.get("amount_usdc", 0))
 
     if not video_id and not to_agent:
         return jsonify({"error": "video_id or to_agent required"}), 400
+
+    amount, error = _parse_finite_usdc_amount(data)
+    if error:
+        return error
     if amount <= 0:
         return jsonify({"error": "amount_usdc must be positive"}), 400
     if amount < 0.01:
@@ -464,9 +492,14 @@ def usdc_payout():
     if not agent_name:
         return jsonify({"error": "Authentication required"}), 401
 
-    data = request.get_json() or {}
-    amount = float(data.get("amount_usdc", 0))
-    to_address = data.get("to_address", "").strip()
+    data, error = _request_json_object()
+    if error:
+        return error
+    amount, error = _parse_finite_usdc_amount(data)
+    if error:
+        return error
+    to_address_raw = data.get("to_address", "")
+    to_address = to_address_raw.strip() if isinstance(to_address_raw, str) else ""
 
     if amount < 1.0:
         return jsonify({"error": "Minimum payout is 1.00 USDC"}), 400
