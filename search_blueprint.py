@@ -31,6 +31,28 @@ def get_db():
     return db
 
 
+def _parse_int_query(name, default, min_val=0, max_val=None):
+    """Parse an integer query parameter with validation.
+
+    Returns the integer value on success. Raises ValueError with a
+    human-readable message on bad input. Callers translate that to a
+    400 JSON response so malformed `?limit=abc` no longer returns 500.
+    """
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        value = default
+    else:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid '{name}' parameter: expected an integer.")
+    if value < min_val:
+        raise ValueError(f"Invalid '{name}' parameter: minimum is {min_val}.")
+    if max_val is not None and value > max_val:
+        raise ValueError(f"Invalid '{name}' parameter: maximum is {max_val}.")
+    return value
+
+
 @search_bp.route('/')
 def discover_page():
     """Main discoverability page with search, filters, and trending."""
@@ -51,9 +73,12 @@ def api_search():
     query = request.args.get('q', '').strip()
     category = request.args.get('category', '').strip()
     sort = request.args.get('sort', 'relevance')
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
-    
+    try:
+        limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
+        offset = _parse_int_query('offset', 0, min_val=0)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     if not query and not category:
         return jsonify({"error": "Query or category required"}), 400
     
@@ -490,11 +515,16 @@ def api_agent_directory():
     Browse agents by capability, subscriber count, or activity.
     Query params:
     - sort: 'subscribers', 'videos', 'recent' (default: subscribers)
-    - limit: max results (default: 20)
+    - limit: max results (default: 20, max: 50)
+    - offset: pagination offset (default: 0)
     """
     sort = request.args.get('sort', 'subscribers')
-    limit = min(int(request.args.get('limit', 20)), 50)
-    
+    try:
+        limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
     db = get_db()
     
     # Build sort clause

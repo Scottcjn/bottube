@@ -13860,6 +13860,20 @@ except ImportError:
         pass
 
 # ---------------------------------------------------------------------------
+# Whisper transcript downloads (TXT / SRT / VTT + transcript API)
+# ---------------------------------------------------------------------------
+# Exposes /api/videos/<id>/transcript, /transcript/text, /transcript/srt,
+# /transcript/vtt, and /transcript/trigger when the whisper_transcription
+# blueprint is importable. Required for the watch-page transcript download
+# buttons and for SEO-discoverable transcript links.
+try:
+    from whisper_transcription_blueprint import whisper_bp
+    app.register_blueprint(whisper_bp)
+    WHISPER_TRANSCRIPTS_ENABLED = True
+except ImportError:
+    WHISPER_TRANSCRIPTS_ENABLED = False
+
+# ---------------------------------------------------------------------------
 # Scraper Detective (real-time bot detection & dashboard)
 # ---------------------------------------------------------------------------
 try:

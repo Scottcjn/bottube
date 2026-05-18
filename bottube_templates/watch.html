@@ -611,6 +611,53 @@
         background: var(--bg-hover);
     }
 
+    /* Transcript download actions */
+    .transcript-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 0;
+        margin-top: 8px;
+        border-top: 1px solid var(--border);
+    }
+
+    .transcript-label {
+        width: 100%;
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+
+    .transcript-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 18px;
+        color: #fff;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: transform 0.15s, opacity 0.15s;
+    }
+
+    .transcript-btn:hover { transform: scale(1.05); opacity: 0.92; }
+    .transcript-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .transcript-txt  { background: #4b5563; }
+    .transcript-srt  { background: #2563eb; }
+    .transcript-vtt  { background: #0f9d58; }
+    .transcript-copy { background: #7c3aed; }
+
+    @media (max-width: 640px) {
+        .transcript-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
+    }
+
     .action-btn.active-like {
         background: rgba(46, 204, 113, 0.2);
         color: #2ecc71;
@@ -2354,6 +2401,15 @@
                     {% endif %}
                 </div>
 
+                <!-- Transcript download actions (TXT / SRT / VTT + Copy) -->
+                <div class="transcript-actions" role="group" aria-label="Transcript downloads">
+                    <div class="transcript-label">Download transcript</div>
+                    <a href="/api/videos/{{ video.video_id }}/transcript/text" class="transcript-btn transcript-txt" aria-label="Download transcript as plain text"><span aria-hidden="true">&#128196;</span> TXT</a>
+                    <a href="/api/videos/{{ video.video_id }}/transcript/srt" class="transcript-btn transcript-srt" aria-label="Download transcript as SRT captions"><span aria-hidden="true">CC</span> SRT</a>
+                    <a href="/api/videos/{{ video.video_id }}/transcript/vtt" class="transcript-btn transcript-vtt" aria-label="Download transcript as WebVTT captions"><span aria-hidden="true">CC</span> VTT</a>
+                    <button type="button" class="transcript-btn transcript-copy" aria-label="Copy transcript to clipboard" onclick="copyTranscript()"><span aria-hidden="true">&#128203;</span> Copy</button>
+                </div>
+
                 <!-- Share panel (hidden by default) -->
                 <div class="share-panel" id="share-panel" style="display:none;">
                     <div class="share-links">
@@ -3469,6 +3525,43 @@ function postComment() {
         btn.disabled = false;
         btn.textContent = "Comment";
     });
+}
+
+function copyTranscript() {
+    fetch("/api/videos/" + videoId + "/transcript", {credentials: "same-origin"})
+    .then(function(r) {
+        if (!r.ok) {
+            if (r.status === 404) { alert("Transcript not ready yet"); }
+            else { alert("Could not fetch transcript (status " + r.status + ")"); }
+            return null;
+        }
+        return r.json();
+    })
+    .then(function(data) {
+        if (!data) return;
+        var text = data.plain_text || data.text || "";
+        if (!text) { alert("Transcript is empty"); return; }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(
+                function() { alert("Transcript copied to clipboard"); },
+                function() { fallbackCopy(text); }
+            );
+        } else {
+            fallbackCopy(text);
+        }
+    });
+}
+
+function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); alert("Transcript copied to clipboard"); }
+    catch (e) { alert("Copy failed — please select manually"); }
+    document.body.removeChild(ta);
 }
 
 function vote(val) {
