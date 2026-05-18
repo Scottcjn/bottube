@@ -18,6 +18,7 @@ import re
 import secrets
 import sqlite3
 import time
+from math import isfinite
 
 import requests as http_requests
 from flask import Blueprint, g, jsonify, render_template, request
@@ -120,6 +121,39 @@ def init_base_wrtc_tables(db):
         """
     )
     db.commit()
+
+
+def _json_object_body():
+    """Return request JSON when it is an object, or a 400 response tuple."""
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _string_field(data, field_name):
+    """Return a stripped string field, rejecting arrays/objects before .strip()."""
+    value = data.get(field_name)
+    if value is None:
+        return "", None
+    if not isinstance(value, str):
+        return None, f"{field_name} must be a string"
+    return value.strip(), None
+
+
+def _finite_amount(value):
+    """Parse a positive finite bridge amount without accepting booleans/NaN/inf."""
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(amount):
+        return None
+    return amount
 
 
 # ─── On-Chain Verification ────────────────────────────────────
@@ -276,8 +310,13 @@ def base_bridge_deposit():
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
 
-    data = request.get_json(silent=True) or {}
-    tx_hash = (data.get("tx_hash") or "").strip().lower()
+    data, error_response = _json_object_body()
+    if error_response:
+        return error_response
+    tx_hash, field_error = _string_field(data, "tx_hash")
+    if field_error:
+        return jsonify({"error": field_error}), 400
+    tx_hash = tx_hash.lower()
     if not _ETH_TX_RE.match(tx_hash):
         return jsonify({"error": "tx_hash required (0x-prefixed, 66 chars)"}), 400
 
@@ -379,12 +418,15 @@ def base_bridge_withdraw():
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
 
-    data = request.get_json(silent=True) or {}
-    to_address = (data.get("to_address") or "").strip()
-    try:
-        amount = float(data.get("amount", 0))
-    except (TypeError, ValueError):
-        amount = 0.0
+    data, error_response = _json_object_body()
+    if error_response:
+        return error_response
+    to_address, field_error = _string_field(data, "to_address")
+    if field_error:
+        return jsonify({"error": field_error}), 400
+    amount = _finite_amount(data.get("amount", 0))
+    if amount is None:
+        return jsonify({"error": "amount must be a finite number"}), 400
 
     if not _ETH_ADDR_RE.match(to_address):
         return jsonify({"error": "Valid Base/Ethereum destination address required (0x + 40 hex)"}), 400
