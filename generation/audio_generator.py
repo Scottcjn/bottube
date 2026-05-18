@@ -34,8 +34,24 @@ def merge_audio_with_ffmpeg(audio_tracks: List[Path], output_file: Path, beat_fi
     """Merge verse audio tracks with background beats using FFmpeg."""
     from subprocess import run
 
-    input_files = " ".join([str(track) for track in audio_tracks])
-    command = (
-        f"ffmpeg -i {beat_file} -i {input_files} -filter_complex '[0][1]concat=a=2:v=0[out]' -map '[out]' {output_file}"
-    )
-    run(command, shell=True, check=True)
+    resolved_beat_file = beat_file.resolve()
+    resolved_output_file = output_file.resolve()
+    resolved_audio_tracks = [track.resolve() for track in audio_tracks]
+
+    input_args = ["-i", str(resolved_beat_file)]
+    for track in resolved_audio_tracks:
+        input_args.extend(["-i", str(track)])
+
+    input_labels = "".join([f"[{i}]" for i in range(len(resolved_audio_tracks) + 1)])
+    filter_complex = f"{input_labels}concat=n={len(resolved_audio_tracks) + 1}:a=1:v=0[out]"
+
+    command = [
+        "ffmpeg",
+        *input_args,
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[out]",
+        str(resolved_output_file),
+    ]
+    run(command, check=True)
