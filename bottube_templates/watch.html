@@ -2224,10 +2224,7 @@
 {% endblock %}
 
 {% block content %}
-<!-- Skip link for screen readers -->
-<a href="#main-content" class="sr-only" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">Skip to main content</a>
-
-<div class="watch-layout" role="main" id="main-content" aria-label="Video page">
+<div class="watch-layout" id="watch-layout" role="region" aria-label="Video page">
     <div class="player-section" id="player-region" role="region" aria-label="Video player">
         <div class="watch-theme-controls" aria-label="Video page theme">
             <button id="watch-theme-toggle" class="watch-theme-toggle" type="button" aria-pressed="true" aria-label="Switch video page to light mode" onclick="toggleWatchTheme()">
