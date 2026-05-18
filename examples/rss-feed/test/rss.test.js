@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { extractVideos, generateRss } from '../src/rss.js';
 
@@ -16,7 +17,10 @@ function exampleRootFromMetaUrl(metaUrl) {
 const root = exampleRootFromMetaUrl(import.meta.url);
 
 test('exampleRootFromMetaUrl decodes file URLs for child process cwd', () => {
-  const decodedRoot = exampleRootFromMetaUrl('file:///tmp/bottube%20rss/examples/rss-feed/test/rss.test.js');
+  const encodedMetaUrl = pathToFileURL(
+    join(tmpdir(), 'bottube rss', 'examples', 'rss-feed', 'test', 'rss.test.js')
+  ).href;
+  const decodedRoot = exampleRootFromMetaUrl(encodedMetaUrl);
 
   assert.equal(decodedRoot.includes('%20'), false);
   assert.match(decodedRoot, /bottube rss/);
