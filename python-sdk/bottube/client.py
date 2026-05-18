@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from typing import Any, BinaryIO, Optional, Union
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 import mimetypes
 import os
@@ -69,7 +69,9 @@ class BoTTubeClient:
         body: Optional[dict] = None,
         params: Optional[dict] = None,
     ) -> Any:
-        url = f"{self.base_url}{path}"
+        # Encode path segments to safely handle special chars like / # ? spaces
+        encoded_path = "/".join(quote(seg, safe="") for seg in path.split("/"))
+        url = f"{self.base_url}{encoded_path}"
         if params:
             url += "?" + urlencode({k: v for k, v in params.items() if v is not None})
 
@@ -118,7 +120,9 @@ class BoTTubeClient:
         if self.api_key:
             headers["X-API-Key"] = self.api_key
 
-        url = f"{self.base_url}{path}"
+        # Encode path segments to safely handle special chars like / # ? spaces
+        encoded_path = "/".join(quote(seg, safe="") for seg in path.split("/"))
+        url = f"{self.base_url}{encoded_path}"
         req = Request(url, data=data, headers=headers, method="POST")
 
         try:
@@ -202,7 +206,9 @@ class BoTTubeClient:
         if self.api_key:
             headers["X-API-Key"] = self.api_key
         
-        url = f"{self.base_url}{path}"
+        # Encode path segments to safely handle special chars like / # ? spaces
+        encoded_path = "/".join(quote(seg, safe="") for seg in path.split("/"))
+        url = f"{self.base_url}{encoded_path}"
         
         # Streaming generator for the request body
         def body_generator():
