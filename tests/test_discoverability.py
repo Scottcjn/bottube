@@ -15,7 +15,35 @@ import json
 import time
 import pytest
 
-from bottube_server import VIDEO_CATEGORIES
+
+def _insert_video_for_trending(client, registered_agent, video_id, title, category, *, views=0, likes=0):
+    import bottube_server
+
+    with client.application.app_context():
+        db = bottube_server.get_db()
+        agent = db.execute(
+            "SELECT id FROM agents WHERE agent_name = ?",
+            (registered_agent["agent_name"],),
+        ).fetchone()
+        assert agent is not None
+        db.execute(
+            """INSERT INTO videos
+               (video_id, agent_id, title, description, filename, category,
+                views, likes, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                video_id,
+                agent["id"],
+                title,
+                f"{title} description",
+                f"{video_id}.mp4",
+                category,
+                views,
+                likes,
+                time.time(),
+            ),
+        )
+        db.commit()
 
 
 class TestSearchEnhancements:
@@ -120,26 +148,20 @@ class TestTrendingEnhancements:
 
     def test_trending_category_filter(self, client, registered_agent):
         """Test trending with category filter."""
-        # Upload videos in different categories
-        client.post("/api/upload", json={
-            "title": "Music Video",
-            "description": "A music video",
-            "tags": "music",
-            "category": "music",
-        }, headers={"X-API-Key": registered_agent["api_key"]})
-
-        client.post("/api/upload", json={
-            "title": "Tech Demo",
-            "description": "Technology demonstration",
-            "tags": "tech",
-            "category": "science-tech",
-        }, headers={"X-API-Key": registered_agent["api_key"]})
+        _insert_video_for_trending(
+            client, registered_agent, "music-trending", "Music Video", "music", views=3, likes=2,
+        )
+        _insert_video_for_trending(
+            client, registered_agent, "tech-trending", "Tech Demo", "science-tech", views=50, likes=20,
+        )
 
         # Get trending for music category
         resp = client.get("/api/trending?category=music")
         assert resp.status_code == 200
         data = resp.get_json()
         assert "videos" in data
+        assert data["category"] == "music"
+        assert [video["title"] for video in data["videos"]] == ["Music Video"]
         # All videos should be in music category
         for video in data["videos"]:
             assert video["category"] == "music"
@@ -273,13 +295,23 @@ class TestSearchPageUI:
 class TestTrendingPageUI:
     """Test trending page UI enhancements (issue #425)."""
 
-    def test_trending_page_category_filter(self, client):
+    def test_trending_page_category_filter(self, client, registered_agent):
         """Test trending page has category filter."""
-        resp = client.get("/trending")
+        _insert_video_for_trending(
+            client, registered_agent, "music-page-trending", "Music Page Video", "music", views=3, likes=2,
+        )
+        _insert_video_for_trending(
+            client, registered_agent, "tech-page-trending", "Tech Page Video", "science-tech", views=50, likes=20,
+        )
+
+        resp = client.get("/trending?category=music")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
         # Check for category filter elements
         assert "category-filter" in html or "category" in html
+        assert "Music Page Video" in html
+        assert "Tech Page Video" not in html
+        assert 'category=music" class="category-filter-chip active"' in html
 
     def test_trending_page_rising_section(self, client, registered_agent):
         """Test trending page has rising section."""

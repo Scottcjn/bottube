@@ -8389,7 +8389,12 @@ def social_graph():
 # Trending / Feed
 # ---------------------------------------------------------------------------
 
-def _get_trending_videos(db, limit=20):
+def _normalize_category_filter(category):
+    category = (category or "").strip().lower()
+    return category if category in CATEGORY_MAP else None
+
+
+def _get_trending_videos(db, limit=20, category=None):
     """Compute trending videos with improved scoring.
 
     Score = (recent_views_24h * 2) + (likes * 3) + (recent_comments_24h * 4)
@@ -8401,9 +8406,27 @@ def _get_trending_videos(db, limit=20):
     cutoff_24h = now - 86400
     cutoff_6h = now - 21600
     query_limit = max(limit * 3, limit)
+    category = _normalize_category_filter(category)
+    category_clause = "AND v.category = ?" if category else ""
+    params = [
+        cutoff_6h,
+        cutoff_24h,
+        cutoff_24h,
+        cutoff_24h,
+    ]
+    if category:
+        params.append(category)
+    params.extend([
+        cutoff_6h,
+        cutoff_24h,
+        NOVELTY_WEIGHT,
+        TRENDING_PENALTY_HIGH_SIMILARITY,
+        TRENDING_PENALTY_LOW_INFO,
+        query_limit,
+    ])
 
     rows = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
                   COALESCE(rv.recent_views, 0) AS recent_views,
                   COALESCE(rc.recent_comments, 0) AS recent_comments,
                   CASE
@@ -8424,6 +8447,7 @@ def _get_trending_videos(db, limit=20):
                GROUP BY video_id
            ) rc ON rc.video_id = v.video_id
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+             {category_clause}
            ORDER BY (
                COALESCE(rv.recent_views, 0) * 2
                + v.likes * 3
@@ -8444,18 +8468,7 @@ def _get_trending_videos(db, limit=20):
                END
            ) DESC, v.created_at DESC
            LIMIT ?""",
-        (
-            cutoff_6h,
-            cutoff_24h,
-            cutoff_24h,
-            cutoff_24h,
-            cutoff_6h,
-            cutoff_24h,
-            NOVELTY_WEIGHT,
-            TRENDING_PENALTY_HIGH_SIMILARITY,
-            TRENDING_PENALTY_LOW_INFO,
-            query_limit,
-        ),
+        params,
     ).fetchall()
     if TRENDING_AGENT_CAP <= 0:
         return rows[:limit]
@@ -8477,7 +8490,8 @@ def _get_trending_videos(db, limit=20):
 def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
     db = get_db()
-    rows = _get_trending_videos(db, limit=20)
+    category = _normalize_category_filter(request.args.get("category"))
+    rows = _get_trending_videos(db, limit=20, category=category)
 
     videos = []
     for row in rows:
@@ -8489,7 +8503,7 @@ def trending():
         d["recent_comments"] = row["recent_comments"]
         videos.append(d)
 
-    return jsonify({"videos": videos})
+    return jsonify({"videos": videos, "category": category})
 
 
 # --- Phase 7: bucketed feed (latest / heuristic / hybrid-v1) -------------
@@ -12638,8 +12652,14 @@ def search_page():
 def trending_page():
     """Dedicated trending page with top 50 videos."""
     db = get_db()
-    rows = _get_trending_videos(db, limit=50)
-    return render_template("trending.html", videos=rows)
+    category = _normalize_category_filter(request.args.get("category"))
+    rows = _get_trending_videos(db, limit=50, category=category)
+    return render_template(
+        "trending.html",
+        videos=rows,
+        categories=VIDEO_CATEGORIES,
+        current_category=category,
+    )
 
 
 @app.route("/categories")
@@ -13780,7 +13800,8 @@ app.register_blueprint(wrtc_bp)
 # wRTC Bridge Integration (Base L2 / Ethereum)
 from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
 import sqlite3 as _base_wrtc_sqlite3
-_base_wrtc_db = _base_wrtc_sqlite3.connect('/root/bottube/bottube.db')
+_base_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_base_wrtc_db = _base_wrtc_sqlite3.connect(_base_wrtc_db_path)
 init_base_wrtc_tables(_base_wrtc_db)
 _base_wrtc_db.close()
 app.register_blueprint(base_wrtc_bp)
