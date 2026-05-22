@@ -11868,11 +11868,19 @@ def oembed():
 
     video = dict(video)  # Convert sqlite3.Row to dict for .get() support
 
-    w = request.args.get("maxwidth", video["width"] or 512, type=int)
-    h = request.args.get("maxheight", video["height"] or 512, type=int)
-    # Clamp dimensions to 1..1920 width and 1..1080 height
-    w = max(1, min(w, 1920))
-    h = max(1, min(h, 1080))
+    source_w = max(1, int(video["width"] or 560))
+    source_h = max(1, int(video["height"] or 315))
+    max_w = request.args.get("maxwidth", type=int)
+    max_h = request.args.get("maxheight", type=int)
+    if max_w is None:
+        max_w = source_w
+    if max_h is None:
+        max_h = source_h
+    max_w = max(1, min(max_w, 1920))
+    max_h = max(1, min(max_h, 1080))
+    scale = min(max_w / source_w, max_h / source_h, 1)
+    w = max(1, int(round(source_w * scale)))
+    h = max(1, int(round(source_h * scale)))
 
     thumb_url = f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video.get("thumbnail") else ""
     embed_html = f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>'
