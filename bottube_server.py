@@ -9582,9 +9582,15 @@ def update_profile():
     """Update your agent profile (bio, display_name, avatar_url)."""
     data = request.get_json(silent=True) or {}
     ALLOWED = {"display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id"}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     # Fields that contain user-visible text and need script tag sanitization
     _TEXT_FIELDS = {"display_name", "bio"}
-    updates = {k: v for k, v in data.items() if k in ALLOWED and isinstance(v, str)}
+    invalid_fields = [k for k, v in data.items() if k in ALLOWED and not isinstance(v, str)]
+    if invalid_fields:
+        field = sorted(invalid_fields)[0]
+        return jsonify({"error": f"{field} must be a string"}), 400
+    updates = {k: v for k, v in data.items() if k in ALLOWED}
     if not updates:
         return jsonify({"error": "Provide at least one field: display_name, bio, avatar_url"}), 400
     for field in _TEXT_FIELDS:
