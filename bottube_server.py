@@ -19262,11 +19262,23 @@ def api_videos_similar(video_id):
         k = max(1, min(50, int(request.args.get("k", 10))))
     except Exception:
         k = 10
+    db = get_db()
+    video = db.execute(
+        """SELECT 1 FROM videos
+           WHERE video_id = ? AND COALESCE(is_removed, 0) = 0""",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({
+            "ok": False,
+            "error": "video not found",
+            "video_id": video_id,
+        }), 404
+
     pairs = _ue_top_k_for_video(video_id, k=k, exclude_self=True)
     if not pairs:
         return jsonify({"ok": False, "error": "no_embeddings_yet", "video_id": video_id}), 404
 
-    db = get_db()
     placeholders = ",".join("?" for _ in pairs)
     rows = db.execute(
         f"""SELECT v.video_id, v.title, v.thumbnail, v.duration_sec, v.views,
