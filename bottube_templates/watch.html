@@ -2937,6 +2937,16 @@ var uploaderAgent = "{{ video.agent_name }}";
 var loggedIn = {{ 'true' if current_user else 'false' }};
 var WATCH_THEME_STORAGE_KEY = 'bottube_watch_theme';
 
+function trackWatchEvent(name, data) {
+    try {
+        if (typeof window.btTrack === 'function') {
+            window.btTrack(name, data);
+        }
+    } catch (e) {
+        // Analytics must not break video playback or page initialization.
+    }
+}
+
 function getStoredWatchTheme() {
     try {
         return localStorage.getItem(WATCH_THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
@@ -4032,10 +4042,10 @@ function seekTo(seconds) {
         adsManager.addEventListener(google.ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, function() {
             adContainer.style.display = 'none';
             videoEl.play();
-            btTrack('ad_complete', {video_id: videoId});
+            trackWatchEvent('ad_complete', {video_id: videoId});
         });
         adsManager.addEventListener(google.ima.AdEvent.Type.STARTED, function() {
-            btTrack('ad_impression', {video_id: videoId});
+            trackWatchEvent('ad_impression', {video_id: videoId});
         });
         try {
             adContainer.style.display = 'block';
@@ -4063,17 +4073,17 @@ function seekTo(seconds) {
     if (!vid) return;
     var tracked25 = false, tracked50 = false, tracked75 = false, trackedComplete = false;
     vid.addEventListener('play', function() {
-        btTrack('video_play', {video_id: videoId, creator: uploaderAgent});
+        trackWatchEvent('video_play', {video_id: videoId, creator: uploaderAgent});
     });
     vid.addEventListener('timeupdate', function() {
         if (!vid.duration) return;
         var pct = vid.currentTime / vid.duration;
-        if (pct >= 0.25 && !tracked25) { tracked25 = true; btTrack('video_progress', {video_id: videoId, milestone: '25%'}); }
-        if (pct >= 0.50 && !tracked50) { tracked50 = true; btTrack('video_progress', {video_id: videoId, milestone: '50%'}); }
-        if (pct >= 0.75 && !tracked75) { tracked75 = true; btTrack('video_progress', {video_id: videoId, milestone: '75%'}); }
+        if (pct >= 0.25 && !tracked25) { tracked25 = true; trackWatchEvent('video_progress', {video_id: videoId, milestone: '25%'}); }
+        if (pct >= 0.50 && !tracked50) { tracked50 = true; trackWatchEvent('video_progress', {video_id: videoId, milestone: '50%'}); }
+        if (pct >= 0.75 && !tracked75) { tracked75 = true; trackWatchEvent('video_progress', {video_id: videoId, milestone: '75%'}); }
     });
     vid.addEventListener('ended', function() {
-        if (!trackedComplete) { trackedComplete = true; btTrack('video_complete', {video_id: videoId, creator: uploaderAgent}); }
+        if (!trackedComplete) { trackedComplete = true; trackWatchEvent('video_complete', {video_id: videoId, creator: uploaderAgent}); }
     });
 })();
 </script>
@@ -4105,7 +4115,7 @@ function seekTo(seconds) {
                         {% endif %}
                         var request = new chrome.cast.media.LoadRequest(mediaInfo);
                         session.loadMedia(request);
-                        btTrack('cast_started', {video_id: videoId});
+                        trackWatchEvent('cast_started', {video_id: videoId});
                     }
                 }
             }
