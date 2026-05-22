@@ -88,6 +88,18 @@ class TestAccessibilityAttributes(unittest.TestCase):
                       "Search form should have role='search'")
         self.assertIn('aria-label', match.group(0),
                       "Search form missing aria-label")
+
+    def test_header_search_input_has_accessible_name(self):
+        """Test that the header search input is labelled for screen readers."""
+        content = self.read_file(self.TEMPLATE_DIR / 'base.html')
+        label = re.search(r'<label[^>]*for="site-search-input"[^>]*>', content)
+        self.assertIsNotNone(label, "Header search input missing associated label")
+        self.assertIn('class="sr-only"', label.group(0),
+                      "Header search label should use sr-only utility")
+        field = re.search(r'<input[^>]*id="site-search-input"[^>]*>', content)
+        self.assertIsNotNone(field, "Header search input not found")
+        self.assertIn('aria-label', field.group(0),
+                      "Header search input missing aria-label fallback")
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
