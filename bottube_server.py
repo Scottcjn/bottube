@@ -9912,7 +9912,7 @@ def api_get_playlist(playlist_id):
     pl = db.execute(
         """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
            FROM playlists p JOIN agents a ON p.agent_id = a.id
-           WHERE p.playlist_id = ?""",
+           WHERE p.playlist_id = ? AND COALESCE(a.is_banned, 0) = 0""",
         (playlist_id,),
     ).fetchone()
     if not pl:
@@ -9933,6 +9933,8 @@ def api_get_playlist(playlist_id):
            JOIN videos v ON pi.video_id = v.video_id
            JOIN agents a ON v.agent_id = a.id
            WHERE pi.playlist_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY pi.position ASC""",
         (pl["id"],),
     ).fetchall()
@@ -10029,7 +10031,15 @@ def api_add_playlist_item(playlist_id):
 
     data = request.get_json(silent=True) or {}
     vid = data.get("video_id", "")
-    if not vid or not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (vid,)).fetchone():
+    visible_video = db.execute(
+        """SELECT 1
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
+        (vid,),
+    ).fetchone()
+    if not vid or not visible_video:
         return jsonify({"error": "Invalid video_id"}), 400
 
     # Check duplicate
@@ -10106,7 +10116,10 @@ def api_my_playlists():
 def api_agent_playlists(agent_name):
     """List an agent's public playlists."""
     db = get_db()
-    agent = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    agent = db.execute(
+        "SELECT id FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
+    ).fetchone()
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
@@ -10119,7 +10132,13 @@ def api_agent_playlists(agent_name):
 
     playlists = db.execute(
         f"""SELECT p.playlist_id, p.title, p.description, p.visibility, p.created_at, p.updated_at,
-                   (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) as item_count
+                   (SELECT COUNT(*)
+                      FROM playlist_items pi
+                      JOIN videos v ON pi.video_id = v.video_id
+                      JOIN agents va ON v.agent_id = va.id
+                     WHERE pi.playlist_id = p.id
+                       AND COALESCE(v.is_removed, 0) = 0
+                       AND COALESCE(va.is_banned, 0) = 0) as item_count
             FROM playlists p
             WHERE p.agent_id = ? {vis_filter}
             ORDER BY p.updated_at DESC""",
@@ -10151,7 +10170,7 @@ def playlist_page(playlist_id):
     pl = db.execute(
         """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
            FROM playlists p JOIN agents a ON p.agent_id = a.id
-           WHERE p.playlist_id = ?""",
+           WHERE p.playlist_id = ? AND COALESCE(a.is_banned, 0) = 0""",
         (playlist_id,),
     ).fetchone()
     if not pl:
@@ -10170,6 +10189,8 @@ def playlist_page(playlist_id):
            JOIN videos v ON pi.video_id = v.video_id
            JOIN agents a ON v.agent_id = a.id
            WHERE pi.playlist_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY pi.position ASC""",
         (pl["id"],),
     ).fetchall()
@@ -10224,7 +10245,15 @@ def web_add_to_playlist(playlist_id):
 
     data = request.get_json(silent=True) or {}
     vid = data.get("video_id", "")
-    if not vid or not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (vid,)).fetchone():
+    visible_video = db.execute(
+        """SELECT 1
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
+        (vid,),
+    ).fetchone()
+    if not vid or not visible_video:
         return jsonify({"error": "Invalid video"}), 400
 
     if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
