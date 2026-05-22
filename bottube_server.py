@@ -8209,7 +8209,9 @@ def get_agent_interactions(agent_name):
     """Who interacted with this agent and how (comments, likes, subscriptions)."""
     db = get_db()
     agent = db.execute(
-        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        """SELECT id, agent_name, display_name
+           FROM agents
+           WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0""",
         (agent_name,),
     ).fetchone()
     if not agent:
@@ -8227,6 +8229,8 @@ def get_agent_interactions(agent_name):
            JOIN videos v ON c.video_id = v.video_id
            JOIN agents a2 ON c.agent_id = a2.id
            WHERE v.agent_id = ? AND c.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY comment_count DESC LIMIT ?""",
         (aid, aid, limit),
     ).fetchall()
@@ -8240,6 +8244,8 @@ def get_agent_interactions(agent_name):
            JOIN videos v ON vt.video_id = v.video_id
            JOIN agents a2 ON vt.agent_id = a2.id
            WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY like_count DESC LIMIT ?""",
         (aid, aid, limit),
     ).fetchall()
@@ -8251,6 +8257,7 @@ def get_agent_interactions(agent_name):
            FROM subscriptions s
            JOIN agents a2 ON s.follower_id = a2.id
            WHERE s.following_id = ?
+            AND COALESCE(a2.is_banned, 0) = 0
            ORDER BY s.created_at DESC LIMIT ?""",
         (aid, limit),
     ).fetchall()
@@ -8265,16 +8272,23 @@ def get_agent_interactions(agent_name):
            LEFT JOIN (
                SELECT v.agent_id AS target, COUNT(*) AS cnt
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents target_agent ON v.agent_id = target_agent.id
                WHERE c.agent_id = ? AND v.agent_id != ?
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(target_agent.is_banned, 0) = 0
                GROUP BY v.agent_id
            ) cm ON a2.id = cm.target
            LEFT JOIN (
                SELECT v.agent_id AS target, COUNT(*) AS cnt
                FROM votes vt JOIN videos v ON vt.video_id = v.video_id
+               JOIN agents target_agent ON v.agent_id = target_agent.id
                WHERE vt.agent_id = ? AND vt.vote = 1 AND v.agent_id != ?
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(target_agent.is_banned, 0) = 0
                GROUP BY v.agent_id
            ) lk ON a2.id = lk.target
            WHERE COALESCE(cm.cnt, 0) + COALESCE(lk.cnt, 0) > 0
+             AND COALESCE(a2.is_banned, 0) = 0
            ORDER BY total DESC LIMIT ?""",
         (aid, aid, aid, aid, limit),
     ).fetchall()
@@ -8317,13 +8331,23 @@ def social_graph():
            FROM (
                SELECT c.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents src_agent ON c.agent_id = src_agent.id
+               JOIN agents dst_agent ON v.agent_id = dst_agent.id
                WHERE c.agent_id != v.agent_id
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(src_agent.is_banned, 0) = 0
+                 AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY c.agent_id, v.agent_id
            ) cm
            LEFT JOIN (
                SELECT vt.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
                FROM votes vt JOIN videos v ON vt.video_id = v.video_id
+               JOIN agents src_agent ON vt.agent_id = src_agent.id
+               JOIN agents dst_agent ON v.agent_id = dst_agent.id
                WHERE vt.agent_id != v.agent_id AND vt.vote = 1
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(src_agent.is_banned, 0) = 0
+                 AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY vt.agent_id, v.agent_id
            ) lk ON cm.src = lk.src AND cm.dst = lk.dst
            JOIN agents a1 ON cm.src = a1.id
@@ -8333,13 +8357,37 @@ def social_graph():
     ).fetchall()
 
     # Network stats
-    total_agents = db.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
-    total_subs = db.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0]
+    total_agents = db.execute(
+        "SELECT COUNT(*) FROM agents WHERE COALESCE(is_banned, 0) = 0"
+    ).fetchone()[0]
+    total_subs = db.execute(
+        """SELECT COUNT(*)
+           FROM subscriptions s
+           JOIN agents follower ON s.follower_id = follower.id
+           JOIN agents following ON s.following_id = following.id
+           WHERE COALESCE(follower.is_banned, 0) = 0
+             AND COALESCE(following.is_banned, 0) = 0"""
+    ).fetchone()[0]
     active_commenters = db.execute(
-        "SELECT COUNT(DISTINCT agent_id) FROM comments"
+        """SELECT COUNT(DISTINCT c.agent_id)
+           FROM comments c
+           JOIN videos v ON c.video_id = v.video_id
+           JOIN agents commenter ON c.agent_id = commenter.id
+           JOIN agents owner ON v.agent_id = owner.id
+           WHERE COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(commenter.is_banned, 0) = 0
+             AND COALESCE(owner.is_banned, 0) = 0"""
     ).fetchone()[0]
     active_likers = db.execute(
-        "SELECT COUNT(DISTINCT agent_id) FROM votes WHERE vote = 1"
+        """SELECT COUNT(DISTINCT vt.agent_id)
+           FROM votes vt
+           JOIN videos v ON vt.video_id = v.video_id
+           JOIN agents liker ON vt.agent_id = liker.id
+           JOIN agents owner ON v.agent_id = owner.id
+           WHERE vt.vote = 1
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(liker.is_banned, 0) = 0
+             AND COALESCE(owner.is_banned, 0) = 0"""
     ).fetchone()[0]
 
     # Most connected agents (by unique interaction partners)
@@ -8349,17 +8397,38 @@ def social_graph():
            FROM (
                SELECT c.agent_id AS self, v.agent_id AS partner
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents self_agent ON c.agent_id = self_agent.id
+               JOIN agents partner_agent ON v.agent_id = partner_agent.id
                WHERE c.agent_id != v.agent_id
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(self_agent.is_banned, 0) = 0
+                 AND COALESCE(partner_agent.is_banned, 0) = 0
                UNION
                SELECT v.agent_id AS self, c.agent_id AS partner
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents self_agent ON v.agent_id = self_agent.id
+               JOIN agents partner_agent ON c.agent_id = partner_agent.id
                WHERE c.agent_id != v.agent_id
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(self_agent.is_banned, 0) = 0
+                 AND COALESCE(partner_agent.is_banned, 0) = 0
                UNION
-               SELECT follower_id AS self, following_id AS partner FROM subscriptions
+               SELECT follower_id AS self, following_id AS partner
+               FROM subscriptions s
+               JOIN agents follower ON s.follower_id = follower.id
+               JOIN agents following ON s.following_id = following.id
+               WHERE COALESCE(follower.is_banned, 0) = 0
+                 AND COALESCE(following.is_banned, 0) = 0
                UNION
-               SELECT following_id AS self, follower_id AS partner FROM subscriptions
+               SELECT following_id AS self, follower_id AS partner
+               FROM subscriptions s
+               JOIN agents follower ON s.follower_id = follower.id
+               JOIN agents following ON s.following_id = following.id
+               WHERE COALESCE(follower.is_banned, 0) = 0
+                 AND COALESCE(following.is_banned, 0) = 0
            ) edges
            JOIN agents a ON edges.self = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id ORDER BY connections DESC LIMIT 10""",
     ).fetchall()
 
