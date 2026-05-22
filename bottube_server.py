@@ -11799,10 +11799,26 @@ def embed(video_id):
         abort(404)
 
     autoplay = request.args.get("autoplay", "0") == "1"
-    autoplay_attr = "autoplay " if autoplay else ""
+    loop = request.args.get("loop", "0") == "1"
+    muted = request.args.get("mute", "0") == "1"
+    video_attrs = " ".join(
+        attr for attr, enabled in (
+            ("autoplay", autoplay),
+            ("loop", loop),
+            ("muted", muted),
+        ) if enabled
+    )
+    if video_attrs:
+        video_attrs += " "
 
     title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
+    embed_url = f"https://bottube.ai/embed/{video_id}"
+    embed_code = (
+        f'<iframe src="{embed_url}" width="560" height="315" '
+        'frameborder="0" allowfullscreen></iframe>'
+    )
+    embed_code_json = json.dumps(embed_code)
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -11822,18 +11838,46 @@ body:hover .overlay{{opacity:1}}
 .info{{color:#fff;min-width:0}}
 .title{{font:600 14px/1.3 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}}
 .creator{{font:12px -apple-system,sans-serif;color:#aaa;margin-top:2px}}
-.brand{{pointer-events:auto;text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
+.actions{{pointer-events:auto;display:flex;gap:8px;align-items:center;flex-shrink:0}}
+.brand,.copy{{text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
  font:700 12px -apple-system,sans-serif;white-space:nowrap;flex-shrink:0}}
+.copy{{border:0;cursor:pointer;background:#222;color:#fff}}
 .brand:hover{{background:#65b8ff}}
+.copy:hover{{background:#333}}
 </style>
 </head><body>
-<video controls {autoplay_attr}playsinline>
+<video controls {video_attrs}playsinline>
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
 <div class="overlay">
 <div class="info"><div class="title">{title_esc}</div><div class="creator">{creator_esc}</div></div>
+<div class="actions">
+<button class="copy" type="button" onclick="copyEmbed(this)">Copy embed</button>
 <a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
+</div>
+<script>
+function copyEmbed(btn){{
+  var code = {embed_code_json};
+  function done(){{ btn.textContent = "Copied"; setTimeout(function(){{btn.textContent = "Copy embed";}}, 1400); }}
+  function fallback(){{
+    var ta = document.createElement("textarea");
+    ta.value = code;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try {{ document.execCommand("copy"); done(); }} catch(e) {{}}
+    document.body.removeChild(ta);
+  }}
+  if (navigator.clipboard && navigator.clipboard.writeText) {{
+    navigator.clipboard.writeText(code).then(done).catch(fallback);
+  }} else {{
+    fallback();
+  }}
+}}
+</script>
 </body></html>"""
     resp = Response(html, mimetype="text/html")
     # Allow embedding in any iframe
