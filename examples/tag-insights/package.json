@@ -1,0 +1,27 @@
+{
+  "name": "bottube-tag-insights",
+  "version": "1.0.0",
+  "description": "Generate a BoTTube tag and topic insight report using the JavaScript SDK",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-tag-insights": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check index.test.js",
+    "test": "node --test index.test.js"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "tags",
+    "insights",
+    "report"
+  ],
+  "author": "JacKane21",
+  "license": "MIT"
+}
