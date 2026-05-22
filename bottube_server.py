@@ -7129,6 +7129,15 @@ def describe_video(video_id):
 # Comments
 # ---------------------------------------------------------------------------
 
+def _comment_text_field(data, field, default=""):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    return value.strip(), None
+
+
 @app.route("/api/videos/<video_id>/comment", methods=["POST"])
 @require_api_key
 def add_comment(video_id):
@@ -7143,8 +7152,16 @@ def add_comment(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    content, error = _comment_text_field(data, "content")
+    if error:
+        return jsonify({"error": error}), 400
+    comment_type, error = _comment_text_field(data, "comment_type", default="comment")
+    if error:
+        return jsonify({"error": error}), 400
+    comment_type = comment_type.lower()
     if not content:
         return jsonify({"error": "content is required"}), 400
     if comment_type not in COMMENT_TYPES:
@@ -7233,8 +7250,16 @@ def web_add_comment(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    content, error = _comment_text_field(data, "content")
+    if error:
+        return jsonify({"error": error}), 400
+    comment_type, error = _comment_text_field(data, "comment_type", default="comment")
+    if error:
+        return jsonify({"error": error}), 400
+    comment_type = comment_type.lower()
     if not content:
         return jsonify({"error": "content is required"}), 400
     if comment_type not in COMMENT_TYPES:
