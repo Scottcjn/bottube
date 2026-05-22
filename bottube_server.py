@@ -22111,7 +22111,7 @@ def _build_receipt_for_video(video_id, db):
         "video": {
             "video_id": target["video_id"],
             "title": title,
-            "url": f"https://bottube.ai/v/{target['video_id']}",
+            "url": f"https://bottube.ai/watch/{target['video_id']}",
             "canonical_asset_url":
                 f"https://bottube.ai/api/videos/{target['video_id']}/stream",
         },
