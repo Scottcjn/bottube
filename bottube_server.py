@@ -7969,7 +7969,8 @@ def get_agent(agent_name):
     """Get agent profile and their videos."""
     db = get_db()
     agent = db.execute(
-        "SELECT * FROM agents WHERE agent_name = ?", (agent_name,)
+        "SELECT * FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
     ).fetchone()
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
@@ -7977,7 +7978,7 @@ def get_agent(agent_name):
     videos = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id = ?
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
            ORDER BY v.created_at DESC""",
         (agent["id"],),
     ).fetchall()
@@ -8002,6 +8003,8 @@ def get_agent(agent_name):
            FROM comments c JOIN videos v ON c.video_id = v.video_id
            JOIN agents a2 ON c.agent_id = a2.id
            WHERE v.agent_id = ? AND c.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_likers = db.execute(
@@ -8009,20 +8012,22 @@ def get_agent(agent_name):
            FROM votes vt JOIN videos v ON vt.video_id = v.video_id
            JOIN agents a2 ON vt.agent_id = a2.id
            WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_outgoing = db.execute(
         """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) AS comments_given,
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS comments_given,
                (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) AS likes_given
+                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS likes_given
            FROM agents a2
-           WHERE a2.id != ? AND (
+           WHERE a2.id != ? AND COALESCE(a2.is_banned, 0) = 0 AND (
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) > 0
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0
                OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) > 0)
+                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0)
            ORDER BY comments_given + likes_given DESC LIMIT 8""",
         (aid, aid, aid, aid, aid)).fetchall()
     return jsonify({
@@ -11912,7 +11917,10 @@ def agents_page():
     agents = db.execute(
         """SELECT a.*, COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
-           FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
+           FROM agents a
+           LEFT JOIN videos v
+             ON a.id = v.agent_id AND COALESCE(v.is_removed, 0) = 0
+           WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id
            ORDER BY total_views DESC""",
     ).fetchall()
@@ -11933,7 +11941,8 @@ def channel(agent_name):
     """Agent channel page."""
     db = get_db()
     agent = db.execute(
-        "SELECT * FROM agents WHERE agent_name = ?", (agent_name,)
+        "SELECT * FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
     ).fetchone()
     if not agent:
         abort(404)
@@ -11941,13 +11950,14 @@ def channel(agent_name):
     videos = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id = ?
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
            ORDER BY v.created_at DESC""",
         (agent["id"],),
     ).fetchall()
 
     total_views = db.execute(
-        "SELECT COALESCE(SUM(views), 0) FROM videos WHERE agent_id = ?",
+        """SELECT COALESCE(SUM(views), 0) FROM videos
+           WHERE agent_id = ? AND COALESCE(is_removed, 0) = 0""",
         (agent["id"],),
     ).fetchone()[0]
 
@@ -12006,6 +12016,8 @@ def channel(agent_name):
            FROM comments c JOIN videos v ON c.video_id = v.video_id
            JOIN agents a2 ON c.agent_id = a2.id
            WHERE v.agent_id = ? AND c.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_likers = db.execute(
@@ -12013,20 +12025,22 @@ def channel(agent_name):
            FROM votes vt JOIN videos v ON vt.video_id = v.video_id
            JOIN agents a2 ON vt.agent_id = a2.id
            WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_outgoing = db.execute(
         """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) AS comments_given,
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS comments_given,
                (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) AS likes_given
+                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS likes_given
            FROM agents a2
-           WHERE a2.id != ? AND (
+           WHERE a2.id != ? AND COALESCE(a2.is_banned, 0) = 0 AND (
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) > 0
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0
                OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) > 0)
+                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0)
            ORDER BY comments_given + likes_given DESC LIMIT 8""",
         (aid, aid, aid, aid, aid)).fetchall()
 
@@ -13617,13 +13631,18 @@ def _cdata_safe(s: str) -> str:
 def agent_rss(agent_name):
     """RSS 2.0 feed for a channel's videos."""
     db = get_db()
-    agent = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    agent = db.execute(
+        "SELECT * FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
+    ).fetchone()
     if not agent:
         abort(404)
 
     videos = db.execute(
         """SELECT video_id, title, description, created_at, duration_sec, thumbnail, views
-           FROM videos WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50""",
+           FROM videos
+           WHERE agent_id = ? AND COALESCE(is_removed, 0) = 0
+           ORDER BY created_at DESC LIMIT 50""",
         (agent["id"],),
     ).fetchall()
 
@@ -13678,6 +13697,8 @@ def global_rss():
         """SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail,
                   a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY v.created_at DESC LIMIT 50""",
     ).fetchall()
 
