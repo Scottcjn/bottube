@@ -229,6 +229,84 @@ def test_badge_assignment_renders_on_public_surfaces_and_can_be_removed(client):
     assert after_resp.get_json()["agent"]["badges"] == []
 
 
+def test_admin_badge_mutations_reject_malformed_json_inputs(client):
+    creator_id = _insert_agent("badgeshape", "bottube_sk_badgeshape", is_human=True)
+
+    non_object_resp = client.post(
+        "/api/admin/badges/assign",
+        headers={"X-Admin-Key": "test-admin"},
+        json=["not", "an", "object"],
+    )
+    assert non_object_resp.status_code == 400
+    assert non_object_resp.get_json()["error"] == "JSON object required"
+
+    non_string_badge = client.post(
+        "/api/admin/badges/assign",
+        headers={"X-Admin-Key": "test-admin"},
+        json={"agent_id": creator_id, "badge_key": ["early_human_bottube"]},
+    )
+    assert non_string_badge.status_code == 400
+    assert non_string_badge.get_json()["error"] == "badge_key must be a string"
+
+    non_string_notes = client.post(
+        "/api/admin/badges/assign",
+        headers={"X-Admin-Key": "test-admin"},
+        json={
+            "agent_id": creator_id,
+            "badge_key": "early_human_bottube",
+            "notes": {"text": "manual founding grant"},
+        },
+    )
+    assert non_string_notes.status_code == 400
+    assert non_string_notes.get_json()["error"] == "notes must be a string"
+
+    falsey_string_fields = [
+        ("agent_name", False, "agent_name must be a string", {}),
+        ("source_campaign", False, "source_campaign must be a string",
+         {"agent_id": creator_id}),
+        ("notes", False, "notes must be a string", {"agent_id": creator_id}),
+        ("awarded_by", False, "awarded_by must be a string",
+         {"agent_id": creator_id}),
+    ]
+    for field, value, expected_error, target_fields in falsey_string_fields:
+        payload = {
+            "badge_key": "early_human_bottube",
+            **target_fields,
+            field: value,
+        }
+        resp = client.post(
+            "/api/admin/badges/assign",
+            headers={"X-Admin-Key": "test-admin"},
+            json=payload,
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == expected_error
+
+    assign_resp = client.post(
+        "/api/admin/badges/assign",
+        headers={"X-Admin-Key": "test-admin"},
+        json={"agent_id": creator_id, "badge_key": "early_human_bottube"},
+    )
+    assert assign_resp.status_code == 200
+    badge_id = assign_resp.get_json()["badge"]["id"]
+
+    bad_remove = client.post(
+        f"/api/admin/badges/{badge_id}/remove",
+        headers={"X-Admin-Key": "test-admin"},
+        json={"removed_by": {"name": "reviewer"}},
+    )
+    assert bad_remove.status_code == 400
+    assert bad_remove.get_json()["error"] == "removed_by must be a string"
+
+    falsey_remove = client.post(
+        f"/api/admin/badges/{badge_id}/remove",
+        headers={"X-Admin-Key": "test-admin"},
+        json={"removed_by": False},
+    )
+    assert falsey_remove.status_code == 400
+    assert falsey_remove.get_json()["error"] == "removed_by must be a string"
+
+
 def test_badge_candidates_follow_referral_activation_and_scout_thresholds(client):
     referrer_id = _insert_agent("captainleet", "bottube_sk_captainleet", is_human=True)
     code = _create_referral_code(client, referrer_id)

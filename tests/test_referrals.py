@@ -224,6 +224,30 @@ def test_referral_admin_review_and_export(client):
     assert row["milestones"]["first_public_video"]["evidence_ref"] == "/watch/reviewvideo01"
     assert row["milestones"]["first_rtc_native_action"]["evidence_ref"] == "/settings/wallet"
 
+    non_object_review = client.post(
+        f"/api/admin/referrals/{row['id']}/review",
+        headers={"X-Admin-Key": "test-admin"},
+        json=["not", "an", "object"],
+    )
+    assert non_object_review.status_code == 400
+    assert non_object_review.get_json()["error"] == "JSON object required"
+
+    non_string_action = client.post(
+        f"/api/admin/referrals/{row['id']}/review",
+        headers={"X-Admin-Key": "test-admin"},
+        json={"action": ["approve"]},
+    )
+    assert non_string_action.status_code == 400
+    assert non_string_action.get_json()["error"] == "action must be a string"
+
+    non_string_note = client.post(
+        f"/api/admin/referrals/{row['id']}/review",
+        headers={"X-Admin-Key": "test-admin"},
+        json={"action": "approve", "note": {"text": "clean referral"}},
+    )
+    assert non_string_note.status_code == 400
+    assert non_string_note.get_json()["error"] == "note must be a string"
+
     review_resp = client.post(
         f"/api/admin/referrals/{row['id']}/review",
         headers={"X-Admin-Key": "test-admin"},

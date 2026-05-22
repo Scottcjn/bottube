@@ -5562,8 +5562,16 @@ def admin_review_referral(invite_id):
     if not invite:
         return jsonify({"error": "Referral invite not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    action = (data.get("action", "pending") or "pending").strip().lower()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+
+    action_raw = data.get("action", "pending") or "pending"
+    if not isinstance(action_raw, str):
+        return jsonify({"error": "action must be a string"}), 400
+    action = action_raw.strip().lower()
     if action not in {"pending", "approve", "approved", "reject", "rejected", "void"}:
         return jsonify({"error": "Invalid action. Use pending, approve, reject, or void."}), 400
 
@@ -5575,7 +5583,10 @@ def admin_review_referral(invite_id):
         "void": "void",
         "pending": "pending",
     }[action]
-    reviewer_note = (data.get("note", "") or "").strip()[:2000]
+    reviewer_note_raw = data.get("note", "") or ""
+    if not isinstance(reviewer_note_raw, str):
+        return jsonify({"error": "note must be a string"}), 400
+    reviewer_note = reviewer_note_raw.strip()[:2000]
     now = time.time()
     db.execute(
         """
@@ -5667,7 +5678,12 @@ def admin_export_referrals():
 
 def _resolve_badge_target_agent(db: sqlite3.Connection, data: dict):
     agent_id = data.get("agent_id")
-    agent_name = (data.get("agent_name", "") or "").strip()
+    agent_name_raw = data.get("agent_name", "")
+    if agent_name_raw is None:
+        agent_name_raw = ""
+    if not isinstance(agent_name_raw, str):
+        return None
+    agent_name = agent_name_raw.strip()
     if agent_id not in (None, ""):
         try:
             agent_id = int(agent_id)
@@ -5777,10 +5793,26 @@ def admin_assign_badge():
         return err
 
     db = get_db()
-    data = request.get_json(silent=True) or {}
-    badge_key = (data.get("badge_key", "") or "").strip()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+
+    badge_key_raw = data.get("badge_key", "")
+    if badge_key_raw is None:
+        badge_key_raw = ""
+    if not isinstance(badge_key_raw, str):
+        return jsonify({"error": "badge_key must be a string"}), 400
+    badge_key = badge_key_raw.strip()
     if badge_key not in BADGE_CATALOG:
         return jsonify({"error": "Unknown badge_key"}), 400
+
+    agent_name_raw = data.get("agent_name", "")
+    if agent_name_raw is None:
+        agent_name_raw = ""
+    if not isinstance(agent_name_raw, str):
+        return jsonify({"error": "agent_name must be a string"}), 400
 
     agent = _resolve_badge_target_agent(db, data)
     if not agent:
@@ -5791,7 +5823,9 @@ def admin_assign_badge():
     except Exception:
         return jsonify({"error": "cohort_number must be an integer"}), 400
 
-    metadata = data.get("metadata", {}) or {}
+    metadata = data.get("metadata", {})
+    if metadata is None:
+        metadata = {}
     if not isinstance(metadata, dict):
         return jsonify({"error": "metadata must be a JSON object"}), 400
 
@@ -5803,12 +5837,28 @@ def admin_assign_badge():
     if awarded_at <= 0:
         awarded_at = time.time()
 
+    source_campaign_raw = data.get("source_campaign", "")
+    if source_campaign_raw is None:
+        source_campaign_raw = ""
+    if not isinstance(source_campaign_raw, str):
+        return jsonify({"error": "source_campaign must be a string"}), 400
+    notes_raw = data.get("notes", "")
+    if notes_raw is None:
+        notes_raw = ""
+    if not isinstance(notes_raw, str):
+        return jsonify({"error": "notes must be a string"}), 400
+    awarded_by_raw = data.get("awarded_by", "admin")
+    if awarded_by_raw is None:
+        awarded_by_raw = "admin"
+    if not isinstance(awarded_by_raw, str):
+        return jsonify({"error": "awarded_by must be a string"}), 400
+
     source_campaign = (
-        (data.get("source_campaign", "") or "").strip()[:120]
+        source_campaign_raw.strip()[:120]
         or _default_badge_source_campaign(badge_key)
     )
-    notes = (data.get("notes", "") or "").strip()[:2000]
-    awarded_by = (data.get("awarded_by", "") or "admin").strip()[:120]
+    notes = notes_raw.strip()[:2000]
+    awarded_by = awarded_by_raw.strip()[:120] or "admin"
     metadata_json = json.dumps(metadata, sort_keys=True)
     now = time.time()
 
@@ -5896,8 +5946,17 @@ def admin_remove_badge(badge_id):
     if not row:
         return jsonify({"error": "Badge assignment not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    removed_by = (data.get("removed_by", "") or "admin").strip()[:120]
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    removed_by_raw = data.get("removed_by", "admin")
+    if removed_by_raw is None:
+        removed_by_raw = "admin"
+    if not isinstance(removed_by_raw, str):
+        return jsonify({"error": "removed_by must be a string"}), 400
+    removed_by = removed_by_raw.strip()[:120] or "admin"
     now = time.time()
     db.execute(
         """
