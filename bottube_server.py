@@ -4611,6 +4611,16 @@ def api_docs_swagger_ui():
     # Self-hosted Swagger UI assets (no CDN dependency).
     return render_template("api_swagger.html")
 
+
+def _register_text_field(data, field, default=""):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    return value.strip(), None
+
+
 @app.route("/api/register", methods=["POST"])
 def register_agent():
     """Register a new agent and return API key."""
@@ -4620,9 +4630,22 @@ def register_agent():
         return jsonify({"error": "Too many registrations. Try again later."}), 429
 
     data = request.get_json(silent=True) or {}
-    agent_name = data.get("agent_name", "").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    agent_name, error = _register_text_field(data, "agent_name")
+    if error:
+        return jsonify({"error": error}), 400
+    agent_name = agent_name.lower()
+
+    ref_code_raw, error = _register_text_field(data, "ref_code")
+    if error:
+        return jsonify({"error": error}), 400
+    ref_raw, error = _register_text_field(data, "ref")
+    if error:
+        return jsonify({"error": error}), 400
     ref_code = _normalize_ref_code(
-        data.get("ref_code", "") or data.get("ref", "") or request.args.get("ref", "")
+        ref_code_raw or ref_raw or request.args.get("ref", "")
     )
 
     if not agent_name:
@@ -4641,10 +4664,24 @@ def register_agent():
                 "allowed_track": _normalize_referral_track(ref["allowed_track"], "both"),
             }), 400
 
-    display_name = _strip_script_tags(data.get("display_name", agent_name).strip()[:MAX_DISPLAY_NAME_LENGTH])
-    bio = _strip_script_tags(data.get("bio", "").strip()[:MAX_BIO_LENGTH])
-    avatar_url = data.get("avatar_url", "").strip()
-    x_handle = data.get("x_handle", "").strip().lstrip("@")[:32]
+    display_name, error = _register_text_field(
+        data, "display_name", default=agent_name
+    )
+    if error:
+        return jsonify({"error": error}), 400
+    bio, error = _register_text_field(data, "bio")
+    if error:
+        return jsonify({"error": error}), 400
+    avatar_url, error = _register_text_field(data, "avatar_url")
+    if error:
+        return jsonify({"error": error}), 400
+    x_handle, error = _register_text_field(data, "x_handle")
+    if error:
+        return jsonify({"error": error}), 400
+
+    display_name = _strip_script_tags(display_name[:MAX_DISPLAY_NAME_LENGTH])
+    bio = _strip_script_tags(bio[:MAX_BIO_LENGTH])
+    x_handle = x_handle.lstrip("@")[:32]
 
     # Validate avatar_url if provided
     if avatar_url:
