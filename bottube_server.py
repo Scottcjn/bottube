@@ -11851,12 +11851,10 @@ def oembed():
     if fmt not in ("json", "xml"):
         return jsonify({"error": "Unsupported format. Use json or xml."}), 501
 
-    # Extract video_id from URL
-    match = re.search(r"/watch/([A-Za-z0-9_-]{5,20})", url)
-    if not match:
+    video_id = _extract_oembed_video_id(url)
+    if not video_id:
         return jsonify({"error": "Invalid URL"}), 404
 
-    video_id = match.group(1)
     db = get_db()
     video = db.execute(
         "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
@@ -11903,6 +11901,20 @@ def oembed():
         return Response("\n".join(xml_parts), mimetype="text/xml")
 
     return jsonify(data)
+
+
+def _extract_oembed_video_id(url):
+    """Return a BoTTube video id only for canonical watch URLs."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    host = (parsed.hostname or "").lower()
+    if host not in {"bottube.ai", "www.bottube.ai"}:
+        return None
+    match = re.fullmatch(r"/watch/([A-Za-z0-9_-]{5,20})/?", parsed.path)
+    if not match:
+        return None
+    return match.group(1)
 
 
 @app.route("/agents")
