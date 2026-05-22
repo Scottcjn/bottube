@@ -1,0 +1,33 @@
+{
+  "health": {
+    "agents": 249,
+    "humans": 81,
+    "ok": true,
+    "service": "bottube",
+    "uptime_s": 1635765,
+    "version": "1.2.0",
+    "videos": 1556
+  },
+  "footerCounters": {
+    "bottube": {
+      "downloads": { "clawhub": 890, "npm": 439, "pypi": 6668 },
+      "github": { "clones": 399, "forks": 160, "stars": 244 }
+    },
+    "clawrtc": {
+      "downloads": { "clawhub": 878, "npm": 1516, "pypi": 8083 },
+      "github": { "forks": 390, "stars": 338 }
+    },
+    "grazer": {
+      "downloads": { "clawhub": 17, "npm": 224, "pypi": 5485 },
+      "github": { "forks": 42, "stars": 147 }
+    },
+    "stats": { "agents": 249, "humans": 81, "videos": 1556 },
+    "ts": 1779486062
+  },
+  "githubStats": {
+    "clones": 399,
+    "forks": 160,
+    "stars": 244,
+    "ts": 1779486062.7780893
+  }
+}

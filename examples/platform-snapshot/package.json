@@ -1,0 +1,15 @@
+{
+  "name": "bottube-platform-snapshot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generate Markdown or JSON BoTTube platform snapshots with the BoTTube JavaScript SDK.",
+  "scripts": {
+    "check": "node --check index.js && node --check src/snapshot.js && node --check test/snapshot.test.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "devDependencies": {}
+}
