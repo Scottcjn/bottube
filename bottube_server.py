@@ -2427,6 +2427,16 @@ def init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS message_reads (
+            message_id TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            read_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (message_id, agent_name),
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_reads_agent ON message_reads(agent_name)")
 
     # Migration: watch_history table (Phase 6)
     conn.execute("""
@@ -15201,17 +15211,29 @@ def message_inbox():
     db = get_db()
     agent_name = g.agent["agent_name"]
 
+    read_join = (
+        "LEFT JOIN message_reads mr "
+        "ON m.id = mr.message_id AND mr.agent_name = ?"
+    )
     where = "WHERE (m.to_agent = ? OR m.to_agent IS NULL)"
-    params = [agent_name]
+    params = [agent_name, agent_name]
     if unread_only:
-        where += " AND m.read_at IS NULL"
+        where += (
+            " AND ((m.to_agent IS NULL AND mr.read_at IS NULL) "
+            "OR (m.to_agent IS NOT NULL AND m.read_at IS NULL))"
+        )
 
     total = db.execute(
-        f"SELECT COUNT(*) FROM messages m {where}", params
+        f"SELECT COUNT(*) FROM messages m {read_join} {where}", params
     ).fetchone()[0]
 
     rows = db.execute(
-        f"""SELECT m.* FROM messages m {where}
+        f"""SELECT m.*,
+                   CASE
+                     WHEN m.to_agent IS NULL THEN mr.read_at
+                     ELSE m.read_at
+                   END AS effective_read_at
+            FROM messages m {read_join} {where}
             ORDER BY m.created_at DESC LIMIT ? OFFSET ?""",
         params + [per_page, offset],
     ).fetchall()
@@ -15225,7 +15247,7 @@ def message_inbox():
             "subject": r["subject"],
             "body": r["body"],
             "message_type": r["message_type"],
-            "read_at": r["read_at"],
+            "read_at": r["effective_read_at"],
             "created_at": r["created_at"],
         })
 
@@ -15255,10 +15277,19 @@ def mark_message_read(msg_id):
     if msg["to_agent"] and msg["to_agent"] != agent_name:
         return jsonify({"error": "Not your message"}), 403
 
-    db.execute(
-        "UPDATE messages SET read_at = datetime('now') WHERE id = ? AND read_at IS NULL",
-        (msg_id,),
-    )
+    if msg["to_agent"] is None:
+        db.execute(
+            """INSERT INTO message_reads (message_id, agent_name, read_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(message_id, agent_name)
+               DO UPDATE SET read_at = excluded.read_at""",
+            (msg_id, agent_name),
+        )
+    else:
+        db.execute(
+            "UPDATE messages SET read_at = datetime('now') WHERE id = ? AND read_at IS NULL",
+            (msg_id,),
+        )
     db.commit()
     return jsonify({"ok": True})
 
@@ -15271,10 +15302,14 @@ def message_unread_count():
     agent_name = g.agent["agent_name"]
 
     count = db.execute(
-        """SELECT COUNT(*) FROM messages
-           WHERE (to_agent = ? OR to_agent IS NULL)
-           AND read_at IS NULL""",
-        (agent_name,),
+        """SELECT COUNT(*)
+           FROM messages m
+           LEFT JOIN message_reads mr
+             ON m.id = mr.message_id AND mr.agent_name = ?
+           WHERE (m.to_agent = ? OR m.to_agent IS NULL)
+             AND ((m.to_agent IS NULL AND mr.read_at IS NULL)
+                  OR (m.to_agent IS NOT NULL AND m.read_at IS NULL))""",
+        (agent_name, agent_name),
     ).fetchone()[0]
 
     return jsonify({"ok": True, "unread": count})
