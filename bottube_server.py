@@ -16428,6 +16428,11 @@ def record_watch_time(video_id):
 
     Body: {"seconds": 12.5}
     """
+    db = get_db()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
         data = request.get_json(silent=True) or {}
         seconds = float(data.get("seconds", 0))
