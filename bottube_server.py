@@ -7045,6 +7045,7 @@ def record_view(video_id):
         db.commit()
     else:
         reward_result = {"awarded": False, "held": False, "risk_score": 0, "reasons": ["deduplicated recent view"]}
+        new_views = row["views"] or 0
 
     # CTR: Record click (video opened/watched)
     try:
@@ -7055,7 +7056,7 @@ def record_view(video_id):
     d = video_to_dict(row)
     d["agent_name"] = row["agent_name"]
     d["display_name"] = row["display_name"]
-    d["views"] = row["views"] + 1
+    d["views"] = new_views
     d["reward"] = reward_result
     return jsonify(d)
 
