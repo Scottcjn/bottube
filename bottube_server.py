@@ -15129,6 +15129,18 @@ def _gen_message_id():
     return f"msg_{secrets.token_hex(12)}"
 
 
+def _message_text_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
+
 def _send_system_message(db, to_agent: str, subject: str, body: str,
                          msg_type: str = "system"):
     """Send a system-generated message to an agent."""
@@ -15154,10 +15166,25 @@ def send_message():
     }
     """
     data = request.get_json(silent=True) or {}
-    to_agent = data.get("to", "").strip() or None
-    subject = data.get("subject", "").strip()[:200]
-    body = data.get("body", "").strip()[:5000]
-    msg_type = data.get("message_type", "general").strip()
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    to_agent, error = _message_text_field(data, "to")
+    if error:
+        return jsonify({"error": error}), 400
+    to_agent = to_agent or None
+
+    subject, error = _message_text_field(data, "subject", max_length=200)
+    if error:
+        return jsonify({"error": error}), 400
+
+    body, error = _message_text_field(data, "body", max_length=5000)
+    if error:
+        return jsonify({"error": error}), 400
+
+    msg_type, error = _message_text_field(data, "message_type", default="general")
+    if error:
+        return jsonify({"error": error}), 400
 
     if not body:
         return jsonify({"error": "body is required"}), 400
