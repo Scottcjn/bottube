@@ -1085,7 +1085,7 @@
 
             grid.innerHTML = j.videos.map(function (v) {
                 var thumb = v.thumbnail
-                    ? '<img src="/thumbnails/' + _esc(v.thumbnail) + '" alt="" loading="lazy" decoding="async" width="720" height="720">'
+                    ? '<img src="/thumbnails/' + _esc(v.thumbnail) + '" alt="Video thumbnail" loading="lazy" decoding="async" width="720" height="720">'
                     : '<div class="thumb-placeholder">&#9654;</div>';
                 var dur = (v.duration_sec && v.duration_sec > 0)
                     ? '<span class="duration-badge">' + Math.floor(v.duration_sec) + 's</span>' : '';
