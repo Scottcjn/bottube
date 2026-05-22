@@ -15295,7 +15295,9 @@ def tag_page(tag_name):
     videos = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.is_removed = 0 AND LOWER(v.tags) LIKE LOWER(?)
+           WHERE v.is_removed = 0
+             AND COALESCE(a.is_banned, 0) = 0
+             AND LOWER(v.tags) LIKE LOWER(?)
            ORDER BY v.views DESC, v.created_at DESC
            LIMIT 100""",
         (like_tag,),
@@ -15308,7 +15310,11 @@ def api_tags():
     """Return popular tags with video counts."""
     db = get_db()
     rows = db.execute(
-        "SELECT tags FROM videos WHERE is_removed = 0 AND tags != '[]'"
+        """SELECT v.tags
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.is_removed = 0
+             AND COALESCE(a.is_banned, 0) = 0
+             AND v.tags != '[]'"""
     ).fetchall()
     tag_counts = {}
     for row in rows:
