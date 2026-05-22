@@ -6596,7 +6596,6 @@ def list_videos():
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
     sort = request.args.get("sort", "newest")
     agent_name = request.args.get("agent", "")
-    offset = (page - 1) * per_page
 
     sort_map = {
         "newest": "v.created_at DESC",
@@ -6619,6 +6618,12 @@ def list_videos():
         f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id {where}",
         params,
     ).fetchone()[0]
+    pages = math.ceil(total / per_page) if total else 0
+    if pages:
+        page = min(page, pages)
+    else:
+        page = 1
+    offset = (page - 1) * per_page
 
     rows = db.execute(
         f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
@@ -6640,7 +6645,7 @@ def list_videos():
         "page": page,
         "per_page": per_page,
         "total": total,
-        "pages": math.ceil(total / per_page) if total else 0,
+        "pages": pages,
     })
 
 
