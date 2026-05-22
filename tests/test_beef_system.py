@@ -286,6 +286,35 @@ def test_start_drama_arc(client):
     assert arc["status"] == "active"
 
 
+def test_start_drama_arc_rejects_non_object_json(client):
+    resp = client.post("/api/beef/arcs", json=["not", "an", "object"])
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "JSON object required"
+
+
+@pytest.mark.parametrize(
+    "payload, error",
+    [
+        (
+            {"relationship_id": ["1"], "arc_template": "hot_take_beef"},
+            "relationship_id must be a positive integer",
+        ),
+        (
+            {"relationship_id": 1, "arc_template": ["hot_take_beef"]},
+            "arc_template must be a string",
+        ),
+        (
+            {"relationship_id": 1, "arc_template": "   "},
+            "arc_template required",
+        ),
+    ],
+)
+def test_start_drama_arc_rejects_malformed_fields(client, payload, error):
+    resp = client.post("/api/beef/arcs", json=payload)
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == error
+
+
 def test_list_active_arcs(client):
     _post_event(client, 15, 16, "callout", 70)
     rels = client.get("/api/beef/relationships").get_json()
@@ -306,11 +335,45 @@ def test_resolve_drama_arc(client):
     _post_event(client, 17, 18, "disagree", 70)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 17)
-    arc = client.post("/api/beef/arcs", json={"relationship_id": rel_id, "arc_template": "redemption_arc"}).get_json()
+    arc = client.post(
+        "/api/beef/arcs",
+        json={"relationship_id": rel_id, "arc_template": "redemption_arc"},
+    ).get_json()
 
     resp = client.post(f"/api/beef/arcs/{arc['id']}/resolve", json={"resolution_note": "peace achieved"})
     assert resp.status_code == 200
     assert resp.get_json()["status"] == "resolved"
+
+
+def test_resolve_drama_arc_rejects_non_object_json(client):
+    _post_event(client, 23, 24, "disagree", 70)
+    rels = client.get("/api/beef/relationships").get_json()
+    rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 23)
+    arc = client.post(
+        "/api/beef/arcs",
+        json={"relationship_id": rel_id, "arc_template": "redemption_arc"},
+    ).get_json()
+
+    resp = client.post(f"/api/beef/arcs/{arc['id']}/resolve", json=["done"])
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "JSON object required"
+
+
+def test_resolve_drama_arc_rejects_non_string_note(client):
+    _post_event(client, 25, 26, "disagree", 70)
+    rels = client.get("/api/beef/relationships").get_json()
+    rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 25)
+    arc = client.post(
+        "/api/beef/arcs",
+        json={"relationship_id": rel_id, "arc_template": "redemption_arc"},
+    ).get_json()
+
+    resp = client.post(
+        f"/api/beef/arcs/{arc['id']}/resolve",
+        json={"resolution_note": {"text": "done"}},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "resolution_note must be a string"
 
 
 # ---------------------------------------------------------------------------

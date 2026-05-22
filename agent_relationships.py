@@ -412,12 +412,24 @@ def start_arc():
       relationship_id  int
       arc_template     str  (must be one of DRAMA_ARC_TEMPLATES keys)
     """
-    data = request.get_json(silent=True) or {}
-    rel_id = data.get("relationship_id")
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+
+    rel_id, error = _parse_positive_int(
+        data.get("relationship_id"), "relationship_id"
+    )
+    if error:
+        return jsonify({"error": error}), 400
     template = data.get("arc_template")
 
-    if not rel_id or not template:
-        return jsonify({"error": "relationship_id and arc_template required"}), 400
+    if not isinstance(template, str):
+        return jsonify({"error": "arc_template must be a string"}), 400
+    template = template.strip()
+    if not template:
+        return jsonify({"error": "arc_template required"}), 400
     if template not in DRAMA_ARC_TEMPLATES:
         return jsonify({"error": f"unknown template '{template}'"}), 400
 
@@ -450,8 +462,16 @@ def start_arc():
 @beef_bp.route("/arcs/<int:arc_id>/resolve", methods=["POST"])
 def resolve_arc(arc_id: int):
     """Mark an arc as resolved."""
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
     note = data.get("resolution_note", "")
+    if note is None:
+        note = ""
+    if not isinstance(note, str):
+        return jsonify({"error": "resolution_note must be a string"}), 400
     db = get_db()
     db.execute(
         "UPDATE drama_arcs SET status='resolved', resolved_at=?, resolution_note=? WHERE id=?",
