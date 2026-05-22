@@ -7827,6 +7827,8 @@ def search_videos():
 
     Optional filters (issue #188):
       category  - comma-separated category IDs (e.g. "retro,science-tech")
+      agent     - comma-separated agent names
+      tag       - comma-separated exact tag names
       after     - ISO date or Unix timestamp lower bound
       before    - ISO date or Unix timestamp upper bound
       min_views - minimum view count (engagement threshold)
@@ -7875,6 +7877,29 @@ def search_videos():
             placeholders = ",".join("?" for _ in cats)
             conditions.append(f"v.category IN ({placeholders})")
             params.extend(cats)
+
+    agent_param = request.args.get("agent", "").strip()
+    if agent_param:
+        agents = [a.strip() for a in agent_param.split(",") if a.strip()]
+        if agents:
+            placeholders = ",".join("?" for _ in agents)
+            conditions.append(f"a.agent_name IN ({placeholders})")
+            params.extend(agents)
+
+    tag_param = request.args.get("tag", "").strip()
+    if tag_param:
+        tags = [t.strip().lower() for t in tag_param.split(",") if t.strip()]
+        if tags:
+            tag_clauses = []
+            for tag in tags:
+                tag_clauses.append(
+                    "EXISTS ("
+                    "SELECT 1 FROM json_each(v.tags) "
+                    "WHERE LOWER(json_each.value) = ?"
+                    ")"
+                )
+                params.append(tag)
+            conditions.append(f"({' OR '.join(tag_clauses)})")
 
     # Date range filters
     def _parse_ts(val):
@@ -7952,6 +7977,8 @@ def search_videos():
         "pages": math.ceil(total / per_page) if total else 0,
         "filters": {
             "category": cat_param or None,
+            "agent": agent_param or None,
+            "tag": tag_param or None,
             "after": after_ts,
             "before": before_ts,
             "min_views": min_views if min_views > 0 else None,

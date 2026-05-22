@@ -46,6 +46,39 @@ def _insert_video_for_trending(client, registered_agent, video_id, title, catego
         db.commit()
 
 
+def _insert_search_video(
+    client, agent_name, video_id, title, *, tags, category="other",
+):
+    import bottube_server
+
+    with client.application.app_context():
+        db = bottube_server.get_db()
+        agent = db.execute(
+            "SELECT id FROM agents WHERE agent_name = ?",
+            (agent_name,),
+        ).fetchone()
+        assert agent is not None
+        db.execute(
+            """INSERT INTO videos
+               (video_id, agent_id, title, description, filename, category,
+                tags, views, likes, created_at, is_removed)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                video_id,
+                agent["id"],
+                title,
+                f"{title} description",
+                f"{video_id}.mp4",
+                category,
+                json.dumps(tags),
+                0,
+                0,
+                time.time(),
+            ),
+        )
+        db.commit()
+
+
 class TestSearchEnhancements:
     """Test search API enhancements (issue #425)."""
 
@@ -84,35 +117,95 @@ class TestSearchEnhancements:
 
     def test_search_agent_filter(self, client, registered_agent):
         """Test search with agent filter."""
-        # Upload video
-        client.post("/api/upload", json={
-            "title": "Test Video",
-            "description": "Description",
-            "tags": "test",
-            "category": "other",
-        }, headers={"X-API-Key": registered_agent["api_key"]})
+        other = client.post("/api/register", json={
+            "agent_name": "other_search_bot",
+            "display_name": "Other Search Bot",
+            "bio": "Another bot for testing search filters",
+        }).get_json()
+
+        _insert_search_video(
+            client, registered_agent["agent_name"], "shared-filter-primary",
+            "Shared Filter Topic", tags=["test"],
+        )
+        _insert_search_video(
+            client, other["agent_name"], "shared-filter-other",
+            "Shared Filter Topic", tags=["test"],
+        )
 
         # Search with agent filter
-        resp = client.get(f"/api/search?q=Test&agent={registered_agent['agent_name']}")
+        resp = client.get(
+            f"/api/search?q=Shared&agent={registered_agent['agent_name']}"
+        )
         assert resp.status_code == 200
         data = resp.get_json()
-        assert len(data["videos"]) >= 1
-        assert data["videos"][0]["agent_name"] == registered_agent["agent_name"]
+        assert data["filters"]["agent"] == registered_agent["agent_name"]
+        assert len(data["videos"]) == 1
+        assert {video["agent_name"] for video in data["videos"]} == {
+            registered_agent["agent_name"],
+        }
+
+        resp = client.get("/api/search?q=Shared&agent=missing_search_bot")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["filters"]["agent"] == "missing_search_bot"
+        assert data["videos"] == []
 
     def test_search_tag_filter(self, client, registered_agent):
         """Test search with tag filter."""
-        client.post("/api/upload", json={
-            "title": "AI Art Video",
-            "description": "Generated art",
-            "tags": "ai,art,creative",
-            "category": "ai-art",
-        }, headers={"X-API-Key": registered_agent["api_key"]})
+        _insert_search_video(
+            client, registered_agent["agent_name"], "filtered-art-ai",
+            "Filtered Art Video",
+            tags=["ai", "art", "creative"],
+            category="ai-art",
+        )
+        _insert_search_video(
+            client, registered_agent["agent_name"], "filtered-art-nonai",
+            "Filtered Art Video", tags=["art", "nonai"], category="ai-art",
+        )
 
         # Search with tag filter
-        resp = client.get("/api/search?q=art&tag=ai")
+        resp = client.get("/api/search?q=Filtered&tag=ai")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert len(data["videos"]) >= 1
+        assert data["filters"]["tag"] == "ai"
+        assert len(data["videos"]) == 1
+        assert all("ai" in video["tags"] for video in data["videos"])
+
+        resp = client.get("/api/search?q=Filtered&tag=missing-tag")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["filters"]["tag"] == "missing-tag"
+        assert data["videos"] == []
+
+    def test_search_tag_filter_treats_like_wildcards_as_literals(
+            self, client, registered_agent):
+        """Test tag filters treat SQL LIKE wildcard characters literally."""
+        _insert_search_video(
+            client, registered_agent["agent_name"], "wildcard-percent",
+            "Wildcard Tag Video", tags=["a%b"], category="ai-art",
+        )
+        _insert_search_video(
+            client, registered_agent["agent_name"], "wildcard-underscore",
+            "Wildcard Tag Video", tags=["a_b"], category="ai-art",
+        )
+        _insert_search_video(
+            client, registered_agent["agent_name"], "wildcard-ordinary",
+            "Wildcard Tag Video", tags=["axb"], category="ai-art",
+        )
+
+        resp = client.get("/api/search?q=Wildcard&tag=a%25b")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert [video["video_id"] for video in data["videos"]] == [
+            "wildcard-percent"
+        ]
+
+        resp = client.get("/api/search?q=Wildcard&tag=a_b")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert [video["video_id"] for video in data["videos"]] == [
+            "wildcard-underscore"
+        ]
 
     def test_search_suggestions(self, client, registered_agent):
         """Test search suggestions API."""
