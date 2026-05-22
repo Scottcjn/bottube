@@ -197,7 +197,7 @@
         --bg-hover: #eef1f5;
         --text-primary: #141414;
         --text-secondary: #4f5661;
-        --text-muted: #68707c;
+        --text-muted: #545860;  /* bumped for WCAG AA 4.5:1 */
         --accent: #065fd4;
         --accent-hover: #174ea6;
         --border: #d8dee8;
@@ -2893,7 +2893,7 @@
                     }
                     dyn.innerHTML = j.results.map(function (r) {
                         var thumb = r.thumbnail
-                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="" loading="lazy">'
+                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="Video thumbnail" loading="lazy">'
                             : '<div class="thumb-placeholder">&#9654;</div>';
                         var dur = r.duration_sec > 0
                             ? '<span class="duration-badge">' + _esc(_fmtDur(r.duration_sec)) + '</span>'
