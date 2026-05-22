@@ -16428,9 +16428,25 @@ def record_watch_time(video_id):
 
     Body: {"seconds": 12.5}
     """
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+
+    raw_seconds = data.get("seconds", 0)
+    if raw_seconds is None or raw_seconds == "":
+        seconds = 0.0
+    else:
+        try:
+            seconds = float(raw_seconds)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "seconds must be a number"}), 400
+
+    if not math.isfinite(seconds):
+        return jsonify({"ok": False, "error": "seconds must be finite"}), 400
+    if seconds < 0:
+        return jsonify({"ok": False, "error": "seconds must be non-negative"}), 400
+
     try:
-        data = request.get_json(silent=True) or {}
-        seconds = float(data.get("seconds", 0))
         if seconds > 0:
             _get_ctr_tracker().record_watch_time(video_id, seconds)
         return jsonify({"ok": True, "video_id": video_id, "seconds_recorded": seconds})
