@@ -4186,6 +4186,11 @@ def video_to_dict(row):
     return d
 
 
+def _public_video_filter_sql() -> str:
+    """SQL predicate for public video surfaces."""
+    return "COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0"
+
+
 def agent_to_dict(row, include_private=False, *, badges=None):
     """Convert agent row to public-safe dict (allowlist only).
 
@@ -6649,9 +6654,9 @@ def get_video(video_id):
     """Get video metadata."""
     db = get_db()
     row = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -6664,9 +6669,9 @@ def get_video(video_id):
     d["avatar_url"] = row["avatar_url"]
     if "revision_of" in row.keys() and row["revision_of"]:
         original = db.execute(
-            """SELECT v.video_id, v.title, a.agent_name, a.display_name
+            f"""SELECT v.video_id, v.title, a.agent_name, a.display_name
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (row["revision_of"],),
         ).fetchone()
         if original:
@@ -6677,9 +6682,9 @@ def get_video(video_id):
                 "display_name": original["display_name"],
             }
     revisions = db.execute(
-        """SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
+        f"""SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.revision_of = ?
+           WHERE v.revision_of = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 10""",
         (video_id,),
     ).fetchall()
@@ -6696,9 +6701,9 @@ def get_video(video_id):
     # Response video handling (Issue #2282 - Agent Collab System)
     if "response_to_video_id" in row.keys() and row["response_to_video_id"]:
         original_video = db.execute(
-            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+            f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (row["response_to_video_id"],),
         ).fetchone()
         if original_video:
@@ -6713,9 +6718,9 @@ def get_video(video_id):
             }
     # Get response videos to this video
     response_videos = db.execute(
-        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           WHERE v.response_to_video_id = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 10""",
         (video_id,),
     ).fetchall()
@@ -6923,7 +6928,12 @@ def get_mood_history(agent_name):
 def stream_video(video_id):
     """Stream video file with range request support."""
     db = get_db()
-    row = db.execute("SELECT filename FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    row = db.execute(
+        f"""SELECT v.filename
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not row:
         abort(404)
 
@@ -6994,9 +7004,9 @@ def record_view(video_id):
     """Record a view and return video metadata."""
     db = get_db()
     row = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -7071,9 +7081,9 @@ def describe_video(video_id):
     agent needs to understand and engage with the content."""
     db = get_db()
     row = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name
+        f"""SELECT v.*, a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -7360,13 +7370,20 @@ def _compute_agent_interaction_context(db, video_agent_id, commenting_agent_id):
 def get_comments(video_id):
     """Get comments for a video with agent interaction context."""
     db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    v = db.execute(
+        f"""SELECT 1
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
     
     # Get video owner info for interaction context
     video_owner = db.execute(
-        "SELECT agent_id FROM videos WHERE video_id = ?",
+        f"""SELECT v.agent_id
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
     if not video_owner:
@@ -11491,11 +11508,11 @@ def watch(video_id):
     """Video player page."""
     db = get_db()
     video = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
                   a.rtc_address, a.rtc_wallet, a.btc_address, a.eth_address,
                   a.sol_address, a.ltc_address, a.erg_address, a.paypal_email
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -11566,16 +11583,16 @@ def watch(video_id):
     revision_of = None
     if "revision_of" in video.keys() and video["revision_of"]:
         revision_of = db.execute(
-            """SELECT v.video_id, v.title, a.agent_name, a.display_name
+            f"""SELECT v.video_id, v.title, a.agent_name, a.display_name
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (video["revision_of"],),
         ).fetchone()
 
     revisions = db.execute(
-        """SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
+        f"""SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.revision_of = ?
+           WHERE v.revision_of = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 8""",
         (video_id,),
     ).fetchall()
@@ -11585,17 +11602,17 @@ def watch(video_id):
     response_to_video = None
     if "response_to_video_id" in video.keys() and video["response_to_video_id"]:
         response_to_video = db.execute(
-            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+            f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (video["response_to_video_id"],),
         ).fetchone()
 
     # Get all response videos to this video
     response_videos = db.execute(
-        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           WHERE v.response_to_video_id = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 10""",
         (video_id,),
     ).fetchall()
@@ -11625,9 +11642,9 @@ def watch(video_id):
     _cur_cat = video["category"] or "other"
 
     _candidates = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id != ? AND v.is_removed = 0
+           WHERE v.video_id != ? AND {_public_video_filter_sql()}
            ORDER BY v.views DESC
            LIMIT 100""",
         (video_id,),
@@ -11792,7 +11809,9 @@ def embed(video_id):
     """Branded embed player for iframes and Twitter player cards."""
     db = get_db()
     video = db.execute(
-        "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        f"""SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
     if not video:
@@ -11859,7 +11878,9 @@ def oembed():
     video_id = match.group(1)
     db = get_db()
     video = db.execute(
-        "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        f"""SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -15392,7 +15413,10 @@ def api_related_videos(video_id):
     """Get related videos for a given video ID."""
     db = get_db()
     video = db.execute(
-        "SELECT * FROM videos WHERE video_id = ?", (video_id,)
+        f"""SELECT v.*
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
     ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
@@ -15405,9 +15429,9 @@ def api_related_videos(video_id):
     cur_cat = video["category"] or "other"
 
     candidates = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id != ? AND v.is_removed = 0
+           WHERE v.video_id != ? AND {_public_video_filter_sql()}
            ORDER BY v.views DESC
            LIMIT 100""",
         (video_id,),
