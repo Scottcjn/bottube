@@ -115,7 +115,9 @@ export function videoUrl(baseUrl, id) {
 }
 
 export function escapeMarkdown(value) {
-  return String(value).replace(/[\\[\]()|*_`<>@]/g, "\\$&");
+  return String(value)
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[\\[\]()|*_`<>@]/g, "\\$&");
 }
 
 function parseBoundedInteger(raw, name, min, max) {
