@@ -7152,7 +7152,9 @@ def add_comment(video_id):
     if len(content) > 5000:
         return jsonify({"error": "Comment too long (max 5000 chars)"}), 400
 
-    parent_id = data.get("parent_id")
+    parent_id, parent_error = _parse_optional_comment_parent_id(data.get("parent_id"))
+    if parent_error:
+        return jsonify({"error": parent_error}), 400
     if parent_id is not None:
         parent = db.execute(
             "SELECT id FROM comments WHERE id = ? AND video_id = ?",
@@ -7217,6 +7219,24 @@ def add_comment(video_id):
     }), 201
 
 
+def _parse_optional_comment_parent_id(raw_parent_id):
+    if raw_parent_id is None:
+        return None, None
+    if isinstance(raw_parent_id, str):
+        raw_parent_id = raw_parent_id.strip()
+        if not raw_parent_id:
+            return None, None
+    if isinstance(raw_parent_id, bool):
+        return None, "parent_id must be an integer"
+    try:
+        parent_id = int(raw_parent_id)
+    except (TypeError, ValueError):
+        return None, "parent_id must be an integer"
+    if parent_id < 1:
+        return None, "parent_id must be a positive integer"
+    return parent_id, None
+
+
 @app.route("/api/videos/<video_id>/web-comment", methods=["POST"])
 def web_add_comment(video_id):
     """Add a comment from the web UI (requires login session)."""
@@ -7250,9 +7270,10 @@ def web_add_comment(video_id):
     if existing:
         return jsonify({"error": "Duplicate comment"}), 409
 
-    parent_id = data.get("parent_id")
+    parent_id, parent_error = _parse_optional_comment_parent_id(data.get("parent_id"))
+    if parent_error:
+        return jsonify({"error": parent_error}), 400
     if parent_id is not None:
-        parent_id = int(parent_id)
         parent = db.execute(
             "SELECT id FROM comments WHERE id = ? AND video_id = ?", (parent_id, video_id)
         ).fetchone()

@@ -302,6 +302,38 @@ def test_suspicious_comment_reward_is_held_for_review(client):
     assert comment_earnings == 0
 
 
+def test_web_comment_rejects_malformed_parent_id(client):
+    commenter_id = _insert_agent("replyalice", "bottube_sk_replyalice")
+    owner_id = _insert_agent("replybob", "bottube_sk_replybob")
+    _insert_video(owner_id, "replyvideo01A")
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = commenter_id
+        sess["csrf_token"] = "test-csrf"
+
+    resp = client.post(
+        "/api/videos/replyvideo01A/web-comment",
+        headers={"X-CSRF-Token": "test-csrf"},
+        json={
+            "content": "This should stay a validation error",
+            "parent_id": "not-an-id",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "parent_id must be an integer"
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        comment_count = conn.execute(
+            "SELECT COUNT(*) FROM comments WHERE video_id = 'replyvideo01A'",
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert comment_count == 0
+
+
 def test_admin_ban_defaults_to_coaching_hold_instead_of_ban(client):
     agent_id = _insert_agent("coachme", "bottube_sk_coachme")
 
