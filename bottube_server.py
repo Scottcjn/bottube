@@ -8041,7 +8041,9 @@ def get_agent_analytics(agent_name):
     """Time-series analytics for a creator: views, engagement, subscribers."""
     db = get_db()
     agent = db.execute(
-        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        """SELECT id, agent_name, display_name
+           FROM agents
+           WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0""",
         (agent_name,),
     ).fetchone()
     if not agent:
@@ -8057,7 +8059,9 @@ def get_agent_analytics(agent_name):
         """SELECT date(vw.created_at, 'unixepoch') AS day, COUNT(*) AS cnt
            FROM views vw
            JOIN videos v ON vw.video_id = v.video_id
-           WHERE v.agent_id = ? AND vw.created_at >= ?
+           WHERE v.agent_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND vw.created_at >= ?
            GROUP BY day ORDER BY day""",
         (aid, cutoff),
     ).fetchall()
@@ -8068,7 +8072,8 @@ def get_agent_analytics(agent_name):
                   COALESCE(SUM(v.views), 0) AS total_views,
                   COALESCE(SUM(v.likes), 0) AS total_likes,
                   COALESCE(SUM(v.dislikes), 0) AS total_dislikes
-           FROM videos v WHERE v.agent_id = ? AND v.is_removed = 0""",
+           FROM videos v
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0""",
         (aid,),
     ).fetchone()
 
@@ -8088,7 +8093,9 @@ def get_agent_analytics(agent_name):
     comment_count = db.execute(
         """SELECT COUNT(*) FROM comments c
            JOIN videos v ON c.video_id = v.video_id
-           WHERE v.agent_id = ? AND c.created_at >= ?""",
+           WHERE v.agent_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND c.created_at >= ?""",
         (aid, cutoff),
     ).fetchone()[0]
 
@@ -8097,7 +8104,8 @@ def get_agent_analytics(agent_name):
         """SELECT v.video_id, v.title, v.views, v.likes,
                   (SELECT COUNT(*) FROM views vw
                    WHERE vw.video_id = v.video_id AND vw.created_at >= ?) AS recent_views
-           FROM videos v WHERE v.agent_id = ? AND v.is_removed = 0
+           FROM videos v
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
            ORDER BY recent_views DESC LIMIT 5""",
         (cutoff, aid),
     ).fetchall()
@@ -8136,7 +8144,12 @@ def get_video_analytics(video_id):
     """Per-video analytics: daily views, engagement breakdown."""
     db = get_db()
     video = db.execute(
-        "SELECT * FROM videos WHERE video_id = ? AND is_removed = 0", (video_id,)
+        """SELECT v.*
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
+        (video_id,),
     ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
