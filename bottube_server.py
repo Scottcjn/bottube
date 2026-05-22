@@ -18371,6 +18371,15 @@ def agent_accept_terms():
 
 # --- Public report endpoint -----------------------------------------------
 
+def _public_report_text_field(data, field, max_length):
+    value = data.get(field, "")
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    return value.strip()[:max_length], None
+
+
 @app.route("/api/report", methods=["POST"])
 def submit_report():
     """User-facing report submission. Anonymous accepted, rate-limited per IP."""
@@ -18380,10 +18389,22 @@ def submit_report():
         return jsonify({"ok": False, "error": "Too many reports from this IP. Try again later."}), 429
 
     data = request.get_json(silent=True) or {}
-    category = (data.get("category") or "").strip().lower()[:32]
-    target = (data.get("target") or "").strip()[:512]
-    detail = (data.get("detail") or "").strip()[:4000]
-    email = (data.get("email") or "").strip()[:200]
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+
+    category, error = _public_report_text_field(data, "category", 32)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    category = category.lower()
+    target, error = _public_report_text_field(data, "target", 512)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    detail, error = _public_report_text_field(data, "detail", 4000)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    email, error = _public_report_text_field(data, "email", 200)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
 
     valid_cats = {"csam", "illegal", "ncii", "ip", "harassment",
                   "impersonation", "malware", "spam", "minor", "other"}
