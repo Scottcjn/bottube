@@ -1,0 +1,30 @@
+{
+  "name": "bottube-community-pulse-example",
+  "version": "1.0.0",
+  "description": "Generate BoTTube community activity reports from recent comments and feed videos using the SDK.",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-community-pulse": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.js && node --check src/pulse.js && node --check test/pulse.test.js"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "comments",
+    "community",
+    "report"
+  ],
+  "author": "JacKane21",
+  "license": "MIT",
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
