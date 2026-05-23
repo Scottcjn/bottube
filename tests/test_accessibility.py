@@ -88,6 +88,30 @@ class TestAccessibilityAttributes(unittest.TestCase):
                       "Search form should have role='search'")
         self.assertIn('aria-label', match.group(0),
                       "Search form missing aria-label")
+
+    def test_bridge_inputs_have_associated_labels(self):
+        """Test that bridge wallet and transaction inputs have labels."""
+        content = self.read_file(self.TEMPLATE_DIR / 'bridge.html')
+        for input_id in (
+            'wrtc-deposit-tx',
+            'wrtc-withdraw-addr',
+            'wrtc-withdraw-amount',
+            'ergo-deposit-tx',
+            'ergo-withdraw-addr',
+            'ergo-withdraw-amount',
+        ):
+            self.assertIn(f'for="{input_id}"', content,
+                          f"Bridge input #{input_id} missing associated label")
+
+    def test_verify_video_id_input_has_accessible_name(self):
+        """Test that the provenance verifier video ID input is named."""
+        content = self.read_file(self.TEMPLATE_DIR / 'verify.html')
+        self.assertIn('for="vrf-vid"', content,
+                      "Verifier video ID input missing associated label")
+        match = re.search(r'<input[^>]*id="vrf-vid"[^>]*>', content)
+        self.assertIsNotNone(match, "Verifier video ID input not found")
+        self.assertIn('aria-label="Video ID to verify"', match.group(0),
+                      "Verifier video ID input missing aria-label fallback")
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
