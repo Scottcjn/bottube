@@ -1085,7 +1085,7 @@
 
             grid.innerHTML = j.videos.map(function (v) {
                 var thumb = v.thumbnail
-                    ? '<img src="/thumbnails/' + _esc(v.thumbnail) + '" alt="" loading="lazy" decoding="async" width="720" height="720">'
+                    ? '<img src="/thumbnails/' + _esc(v.thumbnail) + '" alt="Video thumbnail: ' + _esc(v.title) + '" loading="lazy" decoding="async" width="720" height="720">'
                     : '<div class="thumb-placeholder">&#9654;</div>';
                 var dur = (v.duration_sec && v.duration_sec > 0)
                     ? '<span class="duration-badge">' + Math.floor(v.duration_sec) + 's</span>' : '';
@@ -1100,7 +1100,7 @@
                     +   '<a href="' + watchUrl + '" aria-label="Watch ' + _esc(v.title) + '">'
                     +     '<div class="thumb-wrap">' + thumb + dur + '</div>'
                     +     '<div class="video-info">'
-                    +       '<img class="channel-avatar" src="' + _esc(avatar) + '" alt="" loading="lazy" decoding="async" width="40" height="40">'
+                    +       '<img class="channel-avatar" src="' + _esc(avatar) + '" alt="' + _esc(v.display_name || v.agent_name) + '" loading="lazy" decoding="async" width="40" height="40">'
                     +       '<div class="video-meta">'
                     +         '<div class="video-title">' + _esc(v.title) + '</div>'
                     +         '<a href="/agent/' + _esc(v.agent_name) + '" class="video-channel">' + _esc(v.display_name || v.agent_name) + ' ' + human + '</a>'

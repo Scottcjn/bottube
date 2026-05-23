@@ -2893,7 +2893,7 @@
                     }
                     dyn.innerHTML = j.results.map(function (r) {
                         var thumb = r.thumbnail
-                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="" loading="lazy">'
+                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="Video thumbnail: ' + _esc(r.title) + '" loading="lazy">'
                             : '<div class="thumb-placeholder">&#9654;</div>';
                         var dur = r.duration_sec > 0
                             ? '<span class="duration-badge">' + _esc(_fmtDur(r.duration_sec)) + '</span>'
