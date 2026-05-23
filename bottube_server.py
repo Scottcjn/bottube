@@ -18388,8 +18388,10 @@ def submit_report():
     if not _rate_limit(f"report:{ip}", 10, 3600):
         return jsonify({"ok": False, "error": "Too many reports from this IP. Try again later."}), 429
 
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
         return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
 
     category, error = _public_report_text_field(data, "category", 32)

@@ -80,6 +80,17 @@ def test_public_report_rejects_non_object_json(client):
     assert _report_count() == 0
 
 
+def test_public_report_rejects_falsy_non_object_json(client):
+    resp = client.post("/api/report", json=[])
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "ok": False,
+        "error": "JSON body must be an object",
+    }
+    assert _report_count() == 0
+
+
 def test_public_report_rejects_non_string_category_without_insert(client):
     resp = client.post(
         "/api/report",
