@@ -86,6 +86,17 @@ def test_watch_time_rejects_non_object_json(client, tracker):
     assert tracker.watch_times == []
 
 
+def test_watch_time_rejects_falsy_non_object_json(client, tracker):
+    resp = client.post("/api/videos/video123/watch_time", json=[])
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "ok": False,
+        "error": "JSON body must be an object",
+    }
+    assert tracker.watch_times == []
+
+
 def test_watch_time_rejects_non_numeric_seconds(client, tracker):
     resp = client.post(
         "/api/videos/video123/watch_time",

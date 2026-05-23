@@ -16428,8 +16428,10 @@ def record_watch_time(video_id):
 
     Body: {"seconds": 12.5}
     """
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
         return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
 
     raw_seconds = data.get("seconds", 0)
