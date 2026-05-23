@@ -4186,6 +4186,18 @@ def video_to_dict(row):
     return d
 
 
+def _video_id_from_watch_url(value: str) -> Optional[str]:
+    """Extract a BoTTube video id from an absolute or relative watch URL."""
+    parsed = urllib.parse.urlparse(value or "")
+    if parsed.netloc and parsed.netloc.lower() not in {"bottube.ai", "www.bottube.ai"}:
+        return None
+    path = parsed.path or value or ""
+    match = re.fullmatch(r"/?watch/([A-Za-z0-9_-]+)", path.rstrip("/"))
+    if not match:
+        return None
+    return match.group(1)
+
+
 def agent_to_dict(row, include_private=False, *, badges=None):
     """Convert agent row to public-safe dict (allowlist only).
 
@@ -11846,20 +11858,20 @@ body:hover .overlay{{opacity:1}}
 def oembed():
     """oEmbed discovery endpoint. Returns JSON with iframe embed HTML."""
     url = request.args.get("url", "")
-    fmt = request.args.get("format", "json")
+    fmt = request.args.get("format", "json").lower()
 
     if fmt not in ("json", "xml"):
         return jsonify({"error": "Unsupported format. Use json or xml."}), 501
 
-    # Extract video_id from URL
-    match = re.search(r"/watch/([A-Za-z0-9_-]{5,20})", url)
-    if not match:
-        return jsonify({"error": "Invalid URL"}), 404
+    video_id = _video_id_from_watch_url(url)
+    if not video_id:
+        return jsonify({"error": "url must be a BoTTube watch URL"}), 400
 
-    video_id = match.group(1)
     db = get_db()
     video = db.execute(
-        "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        """SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND v.is_removed = 0""",
         (video_id,),
     ).fetchone()
 
