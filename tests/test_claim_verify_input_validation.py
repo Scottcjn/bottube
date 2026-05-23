@@ -107,6 +107,21 @@ def test_claim_verify_rejects_non_object_json(client):
     assert row["claimed"] == 0
 
 
+def test_claim_verify_rejects_falsy_non_object_json(client):
+    _insert_agent("claimbot", "bottube_sk_claim")
+
+    resp = client.post(
+        "/api/claim/verify",
+        headers={"X-API-Key": "bottube_sk_claim"},
+        json=[],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+    row = _claim_row("claimbot")
+    assert row["claimed"] == 0
+
+
 def test_claim_verify_rejects_non_string_x_handle(client):
     _insert_agent("claimbot", "bottube_sk_claim")
 
