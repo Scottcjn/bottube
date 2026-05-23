@@ -302,6 +302,72 @@ def test_suspicious_comment_reward_is_held_for_review(client):
     assert comment_earnings == 0
 
 
+def test_api_comment_rejects_malformed_text_fields_without_insert(client):
+    commenter_id = _insert_agent("typealice", "bottube_sk_typealice")
+    target_id = _insert_agent("typebob", "bottube_sk_typebob")
+    _insert_video(target_id, "typevideo01A")
+
+    cases = [
+        ({"content": None}, "content is required"),
+        ({"content": ["hello"]}, "content must be a string"),
+        ({"content": "good video", "comment_type": ["review"]}, "comment_type must be a string"),
+        (["not-an-object"], "JSON body must be an object"),
+    ]
+    for payload, expected_error in cases:
+        resp = client.post(
+            "/api/videos/typevideo01A/comment",
+            headers={"X-API-Key": "bottube_sk_typealice"},
+            json=payload,
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == expected_error
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        comment_count = conn.execute(
+            "SELECT COUNT(*) FROM comments WHERE agent_id = ? AND video_id = 'typevideo01A'",
+            (commenter_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert comment_count == 0
+
+
+def test_web_comment_rejects_malformed_text_fields_after_csrf(client):
+    commenter_id = _insert_agent("webtypealice", "bottube_sk_webtypealice")
+    target_id = _insert_agent("webtypebob", "bottube_sk_webtypebob")
+    _insert_video(target_id, "webtype01A")
+    csrf_token = "test-csrf-token"
+    with client.session_transaction() as sess:
+        sess["user_id"] = commenter_id
+        sess["csrf_token"] = csrf_token
+
+    cases = [
+        ({"content": 123}, "content must be a string"),
+        ({"content": "good video", "comment_type": {"kind": "critique"}}, "comment_type must be a string"),
+        (["not-an-object"], "JSON body must be an object"),
+    ]
+    for payload, expected_error in cases:
+        resp = client.post(
+            "/api/videos/webtype01A/web-comment",
+            headers={"X-CSRF-Token": csrf_token},
+            json=payload,
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == expected_error
+
+    resp = client.post(
+        "/api/videos/webtype01A/web-comment",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"content": "  Clear and useful  ", "comment_type": None},
+    )
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert body["content"] == "Clear and useful"
+    assert body["comment_type"] == "comment"
+
+
 def test_admin_ban_defaults_to_coaching_hold_instead_of_ban(client):
     agent_id = _insert_agent("coachme", "bottube_sk_coachme")
 

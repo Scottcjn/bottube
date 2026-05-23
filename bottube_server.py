@@ -1521,7 +1521,7 @@ def _verify_csrf():
     )
     if not token:
         data = request.get_json(silent=True) or {}
-        token = data.get("csrf_token", "")
+        token = data.get("csrf_token", "") if isinstance(data, dict) else ""
     expected = session.get("csrf_token", "")
     if not expected or not token or not secrets.compare_digest(token, expected):
         # Return JSON for AJAX/API requests so JS can handle the error
@@ -7129,6 +7129,41 @@ def describe_video(video_id):
 # Comments
 # ---------------------------------------------------------------------------
 
+def _normalized_comment_payload():
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, "", "", (jsonify({"error": "JSON body must be an object"}), 400)
+
+    raw_content = data.get("content", "")
+    if raw_content is None:
+        content = ""
+    elif not isinstance(raw_content, str):
+        return None, "", "", (jsonify({"error": "content must be a string"}), 400)
+    else:
+        content = raw_content.strip()
+
+    raw_comment_type = data.get("comment_type")
+    if raw_comment_type is None:
+        comment_type = "comment"
+    elif not isinstance(raw_comment_type, str):
+        return None, "", "", (jsonify({"error": "comment_type must be a string"}), 400)
+    else:
+        comment_type = raw_comment_type.strip().lower()
+
+    if not content:
+        return None, "", "", (jsonify({"error": "content is required"}), 400)
+    if comment_type not in COMMENT_TYPES:
+        return None, "", "", (
+            jsonify({"error": f"comment_type must be one of {sorted(COMMENT_TYPES)}"}),
+            400,
+        )
+    if len(content) > 5000:
+        return None, "", "", (jsonify({"error": "Comment too long (max 5000 chars)"}), 400)
+    return data, content, comment_type, None
+
+
 @app.route("/api/videos/<video_id>/comment", methods=["POST"])
 @require_api_key
 def add_comment(video_id):
@@ -7142,15 +7177,9 @@ def add_comment(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
-    if not content:
-        return jsonify({"error": "content is required"}), 400
-    if comment_type not in COMMENT_TYPES:
-        return jsonify({"error": f"comment_type must be one of {sorted(COMMENT_TYPES)}"}), 400
-    if len(content) > 5000:
-        return jsonify({"error": "Comment too long (max 5000 chars)"}), 400
+    data, content, comment_type, error_response = _normalized_comment_payload()
+    if error_response:
+        return error_response
 
     parent_id = data.get("parent_id")
     if parent_id is not None:
@@ -7232,15 +7261,9 @@ def web_add_comment(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
-    if not content:
-        return jsonify({"error": "content is required"}), 400
-    if comment_type not in COMMENT_TYPES:
-        return jsonify({"error": f"comment_type must be one of {sorted(COMMENT_TYPES)}"}), 400
-    if len(content) > 5000:
-        return jsonify({"error": "Comment too long (max 5000 chars)"}), 400
+    data, content, comment_type, error_response = _normalized_comment_payload()
+    if error_response:
+        return error_response
 
     # Duplicate check: reject if same user posted identical content on this video
     existing = db.execute(
