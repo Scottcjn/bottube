@@ -176,6 +176,39 @@ def test_comment_report_rejects_non_object_json(client):
     assert _report_count() == 0
 
 
+def test_video_report_rejects_falsy_non_object_json(client):
+    owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
+    _insert_agent("reporter", "bottube_sk_reporter")
+    _insert_video(owner_id, "ownervideo02A")
+
+    resp = client.post(
+        "/api/videos/ownervideo02A/report",
+        headers={"X-API-Key": "bottube_sk_reporter"},
+        json=[],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+    assert _report_count() == 0
+
+
+def test_comment_report_rejects_falsy_non_object_json(client):
+    owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
+    _insert_agent("reporter", "bottube_sk_reporter")
+    _insert_video(owner_id, "ownervideo03A")
+    comment_id = _insert_comment(owner_id, "ownervideo03A", "spammy")
+
+    resp = client.post(
+        f"/api/comments/{comment_id}/report",
+        headers={"X-API-Key": "bottube_sk_reporter"},
+        json=[],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+    assert _report_count() == 0
+
+
 def test_video_report_accepts_null_details_as_empty(client):
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
