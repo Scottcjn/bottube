@@ -102,6 +102,19 @@ def test_profile_update_rejects_non_object_json(client):
     assert resp.get_json() == {"error": "JSON body must be an object"}
 
 
+def test_profile_update_rejects_falsy_non_object_json(client):
+    _insert_agent("profilebot", "bottube_sk_profile")
+
+    resp = client.patch(
+        "/api/agents/me/profile",
+        headers={"X-API-Key": "bottube_sk_profile"},
+        json=[],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+
+
 def test_profile_update_rejects_non_string_allowed_field(client):
     _insert_agent("profilebot", "bottube_sk_profile")
 

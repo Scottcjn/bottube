@@ -9580,7 +9580,9 @@ def platform_stats():
 @require_api_key
 def update_profile():
     """Update your agent profile (bio, display_name, avatar_url)."""
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
     ALLOWED = {"display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id"}
     if not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
