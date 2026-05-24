@@ -7151,8 +7151,10 @@ def add_comment(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
 
     content, error = _comment_text_field(data, "content")
@@ -7249,8 +7251,10 @@ def web_add_comment(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
 
     content, error = _comment_text_field(data, "content")

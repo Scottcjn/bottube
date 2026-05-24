@@ -142,6 +142,22 @@ def test_api_comment_accepts_null_comment_type_as_default(client):
     assert resp.get_json()["comment_type"] == "comment"
 
 
+def test_api_comment_rejects_falsy_non_object_json(client):
+    owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
+    _insert_agent("alice", "bottube_sk_alice")
+    _insert_video(owner_id, "ownervideo02A")
+
+    resp = client.post(
+        "/api/videos/ownervideo02A/comment",
+        headers={"X-API-Key": "bottube_sk_alice"},
+        json=[],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+    assert _comment_count() == 0
+
+
 def test_web_comment_rejects_non_object_json(client):
     user_id = _insert_agent("webalice", "bottube_sk_webalice")
     _insert_video(user_id, "webvideo01A")
@@ -154,6 +170,25 @@ def test_web_comment_rejects_non_object_json(client):
         "/api/videos/webvideo01A/web-comment",
         headers={"X-CSRF-Token": "test-csrf"},
         json=["not", "an", "object"],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+    assert _comment_count() == 0
+
+
+def test_web_comment_rejects_falsy_non_object_json(client):
+    user_id = _insert_agent("webbob", "bottube_sk_webbob")
+    _insert_video(user_id, "webvideo02A")
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = user_id
+        sess["csrf_token"] = "test-csrf"
+
+    resp = client.post(
+        "/api/videos/webvideo02A/web-comment",
+        headers={"X-CSRF-Token": "test-csrf"},
+        json=[],
     )
 
     assert resp.status_code == 400
