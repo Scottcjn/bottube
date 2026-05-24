@@ -39,3 +39,10 @@ def test_register_rejects_non_object_json(client):
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "JSON body must be an object"}
+
+
+def test_register_rejects_falsy_non_object_json(client):
+    resp = client.post("/api/register", json=[])
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}

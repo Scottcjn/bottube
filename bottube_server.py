@@ -4629,8 +4629,10 @@ def register_agent():
     if not _rate_limit(f"register:{ip}", 5, 3600):
         return jsonify({"error": "Too many registrations. Try again later."}), 429
 
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
 
     agent_name, error = _register_text_field(data, "agent_name")
