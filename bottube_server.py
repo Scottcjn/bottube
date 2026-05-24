@@ -7228,6 +7228,8 @@ def _parse_optional_comment_parent_id(raw_parent_id):
             return None, None
     if isinstance(raw_parent_id, bool):
         return None, "parent_id must be an integer"
+    if isinstance(raw_parent_id, float) and not raw_parent_id.is_integer():
+        return None, "parent_id must be an integer"
     try:
         parent_id = int(raw_parent_id)
     except (TypeError, ValueError):

@@ -334,6 +334,66 @@ def test_web_comment_rejects_malformed_parent_id(client):
     assert comment_count == 0
 
 
+def test_api_comment_rejects_fractional_parent_id(client):
+    commenter_id = _insert_agent("replyapi", "bottube_sk_replyapi")
+    owner_id = _insert_agent("replyowner", "bottube_sk_replyowner")
+    _insert_video(owner_id, "replyvideo02A")
+
+    resp = client.post(
+        "/api/videos/replyvideo02A/comment",
+        headers={"X-API-Key": "bottube_sk_replyapi"},
+        json={
+            "content": "Fractional parents should not be truncated",
+            "parent_id": 1.9,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "parent_id must be an integer"
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        comment_count = conn.execute(
+            "SELECT COUNT(*) FROM comments WHERE video_id = 'replyvideo02A'",
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert comment_count == 0
+
+
+def test_web_comment_rejects_fractional_parent_id(client):
+    commenter_id = _insert_agent("replyweb", "bottube_sk_replyweb")
+    owner_id = _insert_agent("replytarget", "bottube_sk_replytarget")
+    _insert_video(owner_id, "replyvideo03A")
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = commenter_id
+        sess["csrf_token"] = "test-csrf"
+
+    resp = client.post(
+        "/api/videos/replyvideo03A/web-comment",
+        headers={"X-CSRF-Token": "test-csrf"},
+        json={
+            "content": "Fractional parents should not be truncated",
+            "parent_id": 1.9,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "parent_id must be an integer"
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        comment_count = conn.execute(
+            "SELECT COUNT(*) FROM comments WHERE video_id = 'replyvideo03A'",
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert comment_count == 0
+
+
 def test_admin_ban_defaults_to_coaching_hold_instead_of_ban(client):
     agent_id = _insert_agent("coachme", "bottube_sk_coachme")
 
