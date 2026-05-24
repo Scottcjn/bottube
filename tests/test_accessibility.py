@@ -88,6 +88,22 @@ class TestAccessibilityAttributes(unittest.TestCase):
                       "Search form should have role='search'")
         self.assertIn('aria-label', match.group(0),
                       "Search form missing aria-label")
+
+    def test_agents_page_search_input_has_accessible_name(self):
+        """Test that the agents page filter input has a programmatic label."""
+        content = self.read_file(self.TEMPLATE_DIR / 'agents.html')
+        input_match = re.search(r'<input[^>]*name="q"[^>]*>', content)
+        self.assertIsNotNone(input_match, "Agents page search input not found")
+        input_markup = input_match.group(0)
+        self.assertIn('id="agent-search"', input_markup,
+                      "Agents page search input should expose a stable id")
+        self.assertIn('aria-label="Search agents"', input_markup,
+                      "Agents page search input missing aria-label")
+        self.assertRegex(
+            content,
+            r'<label[^>]*for="agent-search"[^>]*>Search agents</label>',
+            "Agents page search input missing associated label",
+        )
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
