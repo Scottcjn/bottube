@@ -246,8 +246,11 @@ def usdc_deposit():
     if not agent_name:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
 
-    data = request.get_json() or {}
-    tx_hash = data.get("tx_hash", "").strip()
+    data, error = _request_json_object()
+    if error:
+        return error
+    tx_hash_raw = data.get("tx_hash", "")
+    tx_hash = tx_hash_raw.strip() if isinstance(tx_hash_raw, str) else ""
     if not tx_hash or not tx_hash.startswith("0x"):
         return jsonify({"error": "tx_hash required (0x-prefixed Base chain transaction hash)"}), 400
 
@@ -430,8 +433,12 @@ def usdc_premium():
     if not agent_name:
         return jsonify({"error": "Authentication required"}), 401
 
-    data = request.get_json() or {}
+    data, error = _request_json_object()
+    if error:
+        return error
     tier = data.get("tier", "basic")
+    if not isinstance(tier, str):
+        return jsonify({"error": "tier must be a string"}), 400
 
     if tier not in PREMIUM_TIERS:
         return jsonify({
@@ -603,8 +610,11 @@ def usdc_stats():
 @usdc_bp.route('/api/usdc/verify-payment', methods=['POST'])
 def verify_payment():
     """Verify any USDC payment on Base chain. Returns transfer details."""
-    data = request.get_json() or {}
-    tx_hash = data.get("tx_hash", "").strip()
+    data, error = _request_json_object()
+    if error:
+        return error
+    tx_hash_raw = data.get("tx_hash", "")
+    tx_hash = tx_hash_raw.strip() if isinstance(tx_hash_raw, str) else ""
 
     if not tx_hash or not tx_hash.startswith("0x"):
         return jsonify({"error": "tx_hash required"}), 400

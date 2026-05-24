@@ -114,6 +114,115 @@ def test_usdc_tip_rejects_non_object_json_body(usdc_client):
     assert _table_count(usdc_client.db_path, "usdc_tips") == before_tips
 
 
+def test_usdc_deposit_rejects_non_object_json_before_verification(
+    usdc_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        usdc_blueprint,
+        "verify_usdc_transfer_onchain",
+        lambda _tx_hash: pytest.fail("verification should not run"),
+    )
+
+    response = usdc_client.post(
+        "/api/usdc/deposit",
+        json="not-object",
+        headers=usdc_client.auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "JSON object required"
+    assert _table_count(usdc_client.db_path, "usdc_deposits") == 0
+
+
+def test_usdc_deposit_rejects_non_string_tx_hash_before_verification(
+    usdc_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        usdc_blueprint,
+        "verify_usdc_transfer_onchain",
+        lambda _tx_hash: pytest.fail("verification should not run"),
+    )
+
+    response = usdc_client.post(
+        "/api/usdc/deposit",
+        json={"tx_hash": ["0xabc"]},
+        headers=usdc_client.auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"].startswith("tx_hash required")
+    assert _table_count(usdc_client.db_path, "usdc_deposits") == 0
+
+
+def test_usdc_premium_rejects_non_object_json_without_writes(usdc_client):
+    before_premium = _table_count(usdc_client.db_path, "usdc_premium")
+    before_alice = _balance(usdc_client.db_path, "alice")
+
+    response = usdc_client.post(
+        "/api/usdc/premium",
+        json="not-object",
+        headers=usdc_client.auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "JSON object required"
+    assert _table_count(usdc_client.db_path, "usdc_premium") == before_premium
+    assert _balance(usdc_client.db_path, "alice") == before_alice
+
+
+def test_usdc_premium_rejects_non_string_tier_without_writes(usdc_client):
+    before_premium = _table_count(usdc_client.db_path, "usdc_premium")
+    before_alice = _balance(usdc_client.db_path, "alice")
+
+    response = usdc_client.post(
+        "/api/usdc/premium",
+        json={"tier": ["basic"]},
+        headers=usdc_client.auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "tier must be a string"
+    assert _table_count(usdc_client.db_path, "usdc_premium") == before_premium
+    assert _balance(usdc_client.db_path, "alice") == before_alice
+
+
+def test_usdc_verify_payment_rejects_non_object_json_before_verification(
+    usdc_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        usdc_blueprint,
+        "verify_usdc_transfer_onchain",
+        lambda _tx_hash: pytest.fail("verification should not run"),
+    )
+
+    response = usdc_client.post("/api/usdc/verify-payment", json=["bad"])
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "JSON object required"
+
+
+def test_usdc_verify_payment_rejects_non_string_tx_hash_before_verification(
+    usdc_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        usdc_blueprint,
+        "verify_usdc_transfer_onchain",
+        lambda _tx_hash: pytest.fail("verification should not run"),
+    )
+
+    response = usdc_client.post(
+        "/api/usdc/verify-payment",
+        json={"tx_hash": ["0xabc"]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "tx_hash required"
+
+
 def test_valid_usdc_tip_still_debits_sender_and_credits_creator(usdc_client):
     response = usdc_client.post(
         "/api/usdc/tip",
