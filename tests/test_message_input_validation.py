@@ -123,3 +123,17 @@ def test_send_message_rejects_non_string_to_without_insert(client):
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "to must be a string"}
     assert _message_count() == 0
+
+
+def test_send_message_rejects_falsy_non_object_json(client):
+    _insert_agent("alice", "bottube_sk_alice")
+
+    resp = client.post(
+        "/api/messages",
+        headers={"X-API-Key": "bottube_sk_alice"},
+        json=[],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+    assert _message_count() == 0

@@ -15165,8 +15165,10 @@ def send_message():
         "message_type": "general"  (general, system, moderation, alert)
     }
     """
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
 
     to_agent, error = _message_text_field(data, "to")
