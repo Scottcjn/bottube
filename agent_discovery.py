@@ -22,6 +22,15 @@ from flask import Blueprint, Response, current_app, jsonify, request
 discovery_bp = Blueprint("agent_discovery", __name__)
 
 
+def _json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
 # ═══════════════════════════════════════════════════════════════
 # GOOGLE A2A — Agent Card
 # Spec: https://google.github.io/A2A
@@ -822,7 +831,9 @@ def beacon_verify():
     POST {"agent_name": "...", "beacon_id": "bcn_..."}
     Returns whether the claimed beacon matches.
     """
-    data = request.get_json(silent=True) or {}
+    data, error_response = _json_object_body()
+    if error_response:
+        return error_response
     agent_name = data.get("agent_name", "")
     claimed_id = data.get("beacon_id", "")
 

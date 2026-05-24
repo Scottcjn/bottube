@@ -160,6 +160,14 @@ def init_app(app, db_path):
     # Wallet Endpoints
     # ------------------------------------------------------------------
 
+    def _json_object_body():
+        data = request.get_json(silent=True)
+        if data is None:
+            return {}, None
+        if not isinstance(data, dict):
+            return None, (_jsonify({"error": "JSON object required"}), 400)
+        return data, None
+
     @app.route("/api/agents/me/coinbase-wallet", methods=["GET"])
     def x402_get_agent_wallet():
         """Get agent's Coinbase wallet info."""
@@ -193,7 +201,10 @@ def init_app(app, db_path):
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
 
-        data = request.get_json(silent=True) or {}
+        data, error_response = _json_object_body()
+        if error_response:
+            return error_response
+        has_manual_address = "coinbase_address" in data
         manual_address = data.get("coinbase_address")
 
         db = _get_db()
@@ -205,8 +216,12 @@ def init_app(app, db_path):
             if not agent:
                 return _jsonify({"error": "Invalid API key"}), 401
 
-            if manual_address:
+            if has_manual_address and manual_address is not None:
                 # Basic validation: 0x + 40 hex chars
+                if not isinstance(manual_address, str):
+                    return _jsonify({"error": "coinbase_address must be a string"}), 400
+                if not manual_address:
+                    return _jsonify({"error": "Invalid Ethereum address format"}), 400
                 if not (manual_address.startswith("0x") and len(manual_address) == 42):
                     return _jsonify({"error": "Invalid Ethereum address format"}), 400
                 db.execute(
