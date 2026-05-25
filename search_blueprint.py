@@ -202,7 +202,10 @@ def api_tags():
     Query params:
     - limit: max tags to return (default: 50)
     """
-    limit = min(int(request.args.get('limit', 50)), 100)
+    try:
+        limit = _parse_int_query('limit', 50, min_val=1, max_val=100)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     
     db = get_db()
     
@@ -231,8 +234,11 @@ def api_tags():
 @search_bp.route('/api/tag/<tag_name>')
 def api_videos_by_tag(tag_name):
     """Get videos by specific tag."""
-    limit = min(int(request.args.get('limit', 20)), 50)
-    offset = int(request.args.get('offset', 0))
+    try:
+        limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
+        offset = _parse_int_query('offset', 0, min_val=0)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     
     db = get_db()
     
@@ -304,7 +310,10 @@ def api_trending():
     Get trending videos based on recent views + engagement velocity.
     Uses formula: (views_24h * 2 + comments_24h * 5) for recency weighting.
     """
-    limit = min(int(request.args.get('limit', 20)), 50)
+    try:
+        limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     
     db = get_db()
     
@@ -371,7 +380,10 @@ def api_for_you():
     Authenticate via X-API-Key header to get personalized results.
     Falls back to trending if no key provided.
     """
-    limit = min(int(request.args.get('limit', 20)), 50)
+    try:
+        limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     # Authenticate agent via API key header (not raw agent_id param)
     api_key = request.headers.get('X-API-Key', '').strip()
