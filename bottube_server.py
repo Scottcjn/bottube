@@ -15534,13 +15534,21 @@ def api_history():
            JOIN videos v ON wh.video_id = v.video_id
            JOIN agents a ON v.agent_id = a.id
            WHERE wh.agent_id = ?
+            AND COALESCE(v.is_removed, 0) = 0
+            AND COALESCE(a.is_banned, 0) = 0
            ORDER BY wh.watched_at DESC
            LIMIT ? OFFSET ?""",
         (g.agent["id"], per_page, offset),
     ).fetchall()
 
     total = db.execute(
-        "SELECT COUNT(*) FROM watch_history WHERE agent_id = ?",
+        """SELECT COUNT(*)
+           FROM watch_history wh
+           JOIN videos v ON wh.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE wh.agent_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
         (g.agent["id"],),
     ).fetchone()[0]
 
