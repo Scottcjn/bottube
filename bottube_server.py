@@ -7143,8 +7143,16 @@ def add_comment(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    raw_content = data.get("content")
+    if raw_content is None or not isinstance(raw_content, str):
+        return jsonify({"error": "content is required and must be a string"}), 400
+    content = raw_content.strip()
+    raw_comment_type = data.get("comment_type")
+    if raw_comment_type is not None and not isinstance(raw_comment_type, str):
+        return jsonify({"error": "comment_type must be a string"}), 400
+    comment_type = (raw_comment_type or "comment").strip().lower()
     if not content:
         return jsonify({"error": "content is required"}), 400
     if comment_type not in COMMENT_TYPES:
@@ -7233,8 +7241,16 @@ def web_add_comment(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    raw_content = data.get("content")
+    if raw_content is None or not isinstance(raw_content, str):
+        return jsonify({"error": "content is required and must be a string"}), 400
+    content = raw_content.strip()
+    raw_comment_type = data.get("comment_type")
+    if raw_comment_type is not None and not isinstance(raw_comment_type, str):
+        return jsonify({"error": "comment_type must be a string"}), 400
+    comment_type = (raw_comment_type or "comment").strip().lower()
     if not content:
         return jsonify({"error": "content is required"}), 400
     if comment_type not in COMMENT_TYPES:
