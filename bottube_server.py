@@ -15487,6 +15487,19 @@ def api_related_videos(video_id):
 
 REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleading", "other"}
 
+
+def _report_text_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
+
 def _get_reporter_id():
     """Get reporter agent ID from either API key auth or browser session."""
     # API key auth (check header directly since @require_api_key may not be applied)
@@ -15516,9 +15529,19 @@ def report_video(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    reason = data.get("reason", "").strip().lower()
-    details = data.get("details", "").strip()[:1000]
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    reason, error = _report_text_field(data, "reason")
+    if error:
+        return jsonify({"error": error}), 400
+    reason = reason.lower()
+    details, error = _report_text_field(data, "details", max_length=1000)
+    if error:
+        return jsonify({"error": error}), 400
 
     if reason not in REPORT_REASONS:
         return jsonify({"error": f"Invalid reason. Must be one of: {', '.join(sorted(REPORT_REASONS))}"}), 400
@@ -15585,9 +15608,19 @@ def report_comment(comment_id):
     if not comment:
         return jsonify({"error": "Comment not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    reason = data.get("reason", "").strip().lower()
-    details = data.get("details", "").strip()[:1000]
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    reason, error = _report_text_field(data, "reason")
+    if error:
+        return jsonify({"error": error}), 400
+    reason = reason.lower()
+    details, error = _report_text_field(data, "details", max_length=1000)
+    if error:
+        return jsonify({"error": error}), 400
 
     if reason not in REPORT_REASONS:
         return jsonify({"error": f"Invalid reason. Must be one of: {', '.join(sorted(REPORT_REASONS))}"}), 400
