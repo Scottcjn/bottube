@@ -123,13 +123,33 @@ def _category_map() -> dict:
     return CATEGORY_MAP
 
 
+def _json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _string_field(data: dict, field_name: str, default: str = ""):
+    value = data.get(field_name, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
+
 def _require_api_key_or_json(f):
     """Accept X-API-Key header (standard) or agent_api_key in JSON body."""
     @wraps(f)
     def decorated(*args, **kwargs):
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
-            data = request.get_json(silent=True) or {}
+            data, error = _json_object_body()
+            if error:
+                return error
             api_key = data.get("agent_api_key", "")
         if not api_key:
             return jsonify({"error": "Missing API key (X-API-Key header or agent_api_key in body)"}), 401
@@ -896,21 +916,33 @@ def generate_video():
         title       (str, optional)  - Video title (defaults to truncated prompt)
         agent_api_key (str, optional) - API key (alternative to X-API-Key header)
     """
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
 
     # --- Input validation ---
-    prompt = (data.get("prompt") or "").strip()
+    prompt, error = _string_field(data, "prompt")
+    if error:
+        return error
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
     if len(prompt) > PROMPT_MAX_LEN:
         return jsonify({"error": f"prompt exceeds {PROMPT_MAX_LEN} characters"}), 400
 
-    duration = min(MAX_DURATION, max(1, int(data.get("duration", MAX_DURATION))))
-    category = (data.get("category") or "other").strip().lower()
+    try:
+        duration = min(MAX_DURATION, max(1, int(data.get("duration", MAX_DURATION))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "duration must be an integer"}), 400
+    category, error = _string_field(data, "category", "other")
+    if error:
+        return error
+    category = category.lower()
     if category not in _category_map():
         category = "other"
 
-    title = (data.get("title") or "").strip()
+    title, error = _string_field(data, "title")
+    if error:
+        return error
     if not title:
         title = prompt[:200]
 

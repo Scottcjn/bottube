@@ -42,13 +42,34 @@ def init_routes(router: GenerationRouter, publish_fn=None):
     _publish_fn = publish_fn
 
 
+def _json_object_body():
+    """Return the JSON object body or a Flask error response tuple."""
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _string_field(data: dict, field_name: str, default: str = ""):
+    value = data.get(field_name, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
+
 def _require_api_key(f):
     """Accept X-API-Key header or agent_api_key in JSON body."""
     @wraps(f)
     def decorated(*args, **kwargs):
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
-            data = request.get_json(silent=True) or {}
+            data, error = _json_object_body()
+            if error:
+                return error
             api_key = data.get("agent_api_key", "")
         if not api_key:
             return jsonify({"error": "Missing API key"}), 401
@@ -102,8 +123,12 @@ def _record_rate(api_key: str):
 @_require_api_key
 def create_generation_job():
     """Create a new video generation job."""
-    data = request.get_json(silent=True) or {}
-    prompt = (data.get("prompt") or "").strip()
+    data, error = _json_object_body()
+    if error:
+        return error
+    prompt, error = _string_field(data, "prompt")
+    if error:
+        return error
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
     if len(prompt) > 500:
