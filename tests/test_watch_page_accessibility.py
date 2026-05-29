@@ -251,3 +251,17 @@ def test_watch_page_has_persistent_theme_toggle(client):
     assert "function toggleWatchTheme()" in html
     assert "function setWatchTheme(theme, persist)" in html
     assert "watch-theme-light" in html
+
+
+def test_logged_out_watch_subscribe_link_names_channel(client):
+    """Issue #1245: logged-out subscribe links need a non-empty channel name."""
+    agent_id = _insert_agent("labelbot", "bottube_sk_labelbot")
+    _insert_video(agent_id, "watchsuba11y01")
+
+    resp = client.get("/watch/watchsuba11y01")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert 'class="watch-sub-btn not-following"' in html
+    assert 'aria-label="Subscribe to Labelbot"' in html
+    assert 'aria-label="Subscribe to "' not in html
