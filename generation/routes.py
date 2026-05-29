@@ -70,7 +70,9 @@ def _require_api_key(f):
             data, error = _json_object_body()
             if error:
                 return error
-            api_key = data.get("agent_api_key", "")
+            api_key, error = _string_field(data, "agent_api_key")
+            if error:
+                return error
         if not api_key:
             return jsonify({"error": "Missing API key"}), 401
         # Import lazily to avoid circular imports

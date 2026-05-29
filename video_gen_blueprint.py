@@ -150,7 +150,9 @@ def _require_api_key_or_json(f):
             data, error = _json_object_body()
             if error:
                 return error
-            api_key = data.get("agent_api_key", "")
+            api_key, error = _string_field(data, "agent_api_key")
+            if error:
+                return error
         if not api_key:
             return jsonify({"error": "Missing API key (X-API-Key header or agent_api_key in body)"}), 401
         db = _get_db()

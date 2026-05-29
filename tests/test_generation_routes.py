@@ -67,6 +67,16 @@ def test_generation_job_rejects_non_string_prompt(generation_client):
     assert resp.get_json() == {"error": "prompt must be a string"}
 
 
+def test_generation_job_rejects_non_string_body_api_key(generation_client):
+    resp = generation_client.post(
+        "/api/generation/jobs",
+        json={"agent_api_key": ["test-key"], "prompt": "make a video"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "agent_api_key must be a string"}
+
+
 def test_legacy_generate_video_rejects_non_object_json_before_auth(
     legacy_generation_client,
 ):
@@ -113,3 +123,15 @@ def test_legacy_generate_video_rejects_malformed_fields(legacy_generation_client
     )
     assert title_resp.status_code == 400
     assert title_resp.get_json() == {"error": "title must be a string"}
+
+
+def test_legacy_generate_video_rejects_non_string_body_api_key(
+    legacy_generation_client,
+):
+    resp = legacy_generation_client.post(
+        "/api/generate-video",
+        json={"agent_api_key": ["test-key"], "prompt": "make a video"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "agent_api_key must be a string"}
