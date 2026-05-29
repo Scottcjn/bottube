@@ -38,6 +38,35 @@ WRTC_MAX_WITHDRAW = float(os.environ.get("BOTTUBE_WRTC_MAX_WITHDRAW", "100000"))
 _SOLANA_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
+def _request_json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _string_field(data: dict, field_name: str):
+    value = data.get(field_name, "")
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
+
+def _finite_amount(data: dict, field_name: str = "amount"):
+    value = data.get(field_name, 0)
+    if isinstance(value, bool):
+        return None, (jsonify({"error": f"{field_name} must be a finite number"}), 400)
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": f"{field_name} must be a finite number"}), 400)
+    if amount != amount or amount in (float("inf"), float("-inf")):
+        return None, (jsonify({"error": f"{field_name} must be a finite number"}), 400)
+    return amount, None
+
+
 def get_db():
     """Get database connection from Flask g."""
     if "db" in g:
@@ -264,8 +293,12 @@ def wrtc_bridge_deposit():
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
 
-    data = request.get_json(silent=True) or {}
-    tx_signature = (data.get("tx_signature") or "").strip()
+    data, error = _request_json_object()
+    if error:
+        return error
+    tx_signature, error = _string_field(data, "tx_signature")
+    if error:
+        return error
     if len(tx_signature) < 32:
         return jsonify({"error": "tx_signature is required"}), 400
 
@@ -361,12 +394,15 @@ def wrtc_bridge_withdraw():
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
 
-    data = request.get_json(silent=True) or {}
-    to_address = (data.get("to_address") or "").strip()
-    try:
-        amount = float(data.get("amount", 0))
-    except (TypeError, ValueError):
-        amount = 0.0
+    data, error = _request_json_object()
+    if error:
+        return error
+    to_address, error = _string_field(data, "to_address")
+    if error:
+        return error
+    amount, error = _finite_amount(data)
+    if error:
+        return error
 
     if not _SOLANA_ADDR_RE.match(to_address):
         return jsonify({"error": "Valid Solana destination address is required"}), 400
