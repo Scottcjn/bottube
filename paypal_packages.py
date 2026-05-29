@@ -279,6 +279,24 @@ def generate_order_id() -> str:
     return f"ord_{secrets.token_hex(12)}"
 
 
+def _request_json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _optional_string_field(data: dict, field_name: str):
+    value = data.get(field_name)
+    if value is None:
+        return "", None
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
+
 def _to_usd(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -573,10 +591,16 @@ def create_checkout():
 
     Returns PayPal approval URL to redirect user to.
     """
-    data = request.get_json() or {}
-    package_id = data.get("package_id")
+    data, error = _request_json_object()
+    if error:
+        return error
+    package_id, error = _optional_string_field(data, "package_id")
+    if error:
+        return error
     agent_id = data.get("agent_id")
-    email = data.get("email")
+    email, error = _optional_string_field(data, "email")
+    if error:
+        return error
 
     if not package_id:
         return jsonify({"error": "package_id required"}), 400
@@ -808,7 +832,9 @@ def paypal_webhook():
 
     Handles events like PAYMENT.CAPTURE.COMPLETED, PAYMENT.CAPTURE.REFUNDED
     """
-    event = request.get_json(silent=True) or {}
+    event, error = _request_json_object()
+    if error:
+        return error
     verified, reason = verify_paypal_webhook_signature(request.headers, event)
     if not verified:
         return jsonify({"error": "invalid_webhook", "reason": reason}), 401
