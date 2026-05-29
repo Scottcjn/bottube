@@ -72,6 +72,15 @@ def _parse_finite_usdc_amount(data):
     return amount, None
 
 
+def _optional_string_field(data, field_name):
+    value = data.get(field_name)
+    if value is None:
+        return "", None
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
+
 def init_usdc_tables(db):
     """Create USDC-related tables if they don't exist."""
     db.executescript("""
@@ -345,8 +354,12 @@ def usdc_tip():
     data, error = _request_json_object()
     if error:
         return error
-    video_id = data.get("video_id")
-    to_agent = data.get("to_agent")
+    video_id, error = _optional_string_field(data, "video_id")
+    if error:
+        return error
+    to_agent, error = _optional_string_field(data, "to_agent")
+    if error:
+        return error
 
     if not video_id and not to_agent:
         return jsonify({"error": "video_id or to_agent required"}), 400

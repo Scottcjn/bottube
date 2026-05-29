@@ -114,6 +114,33 @@ def test_usdc_tip_rejects_non_object_json_body(usdc_client):
     assert _table_count(usdc_client.db_path, "usdc_tips") == before_tips
 
 
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"to_agent": ["bob"], "amount_usdc": "1.00"}, "to_agent must be a string"),
+        ({"video_id": ["video-1"], "amount_usdc": "1.00"}, "video_id must be a string"),
+    ],
+)
+def test_usdc_tip_rejects_malformed_recipient_fields_without_writes(
+    usdc_client,
+    payload,
+    error,
+):
+    before_tips = _table_count(usdc_client.db_path, "usdc_tips")
+    before_alice = _balance(usdc_client.db_path, "alice")
+
+    response = usdc_client.post(
+        "/api/usdc/tip",
+        json=payload,
+        headers=usdc_client.auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == error
+    assert _table_count(usdc_client.db_path, "usdc_tips") == before_tips
+    assert _balance(usdc_client.db_path, "alice") == before_alice
+
+
 def test_usdc_deposit_rejects_non_object_json_before_verification(
     usdc_client,
     monkeypatch,
