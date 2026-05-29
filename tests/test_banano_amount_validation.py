@@ -31,11 +31,18 @@ def ban_client(tmp_path):
         db.execute(
             "CREATE TABLE agents (id INTEGER PRIMARY KEY, agent_name TEXT UNIQUE NOT NULL)"
         )
+        db.execute(
+            "CREATE TABLE videos (video_id TEXT PRIMARY KEY, agent_id INTEGER NOT NULL)"
+        )
         banano_blueprint.init_ban_tables(db)
         now = time.time()
         db.executemany(
             "INSERT INTO agents (id, agent_name) VALUES (?, ?)",
             [(1, "alice"), (2, "bob")],
+        )
+        db.execute(
+            "INSERT INTO videos (video_id, agent_id) VALUES (?, ?)",
+            ("video-1", 1),
         )
         db.execute(
             """
@@ -113,4 +120,61 @@ def test_valid_ban_tip_still_records_sender_and_recipient_rows(ban_client):
         (1, "reward", 10.0, "credited"),
         (1, "tip_sent", 1.25, "credited"),
         (2, "tip_received", 1.25, "credited"),
+    ]
+
+
+def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
+    before = _ban_transaction_count(ban_client.db_path)
+
+    response = ban_client.post("/ban/reward-video-gen", json=["not", "an", "object"])
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "JSON object required"
+    assert _ban_transaction_count(ban_client.db_path) == before
+
+
+@pytest.mark.parametrize("field", ["agent_name", "video_id", "gen_method"])
+def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field):
+    before = _ban_transaction_count(ban_client.db_path)
+    payload = {
+        "agent_name": "alice",
+        "video_id": "video-1",
+        "gen_method": "text",
+    }
+    payload[field] = ["not", "a", "string"]
+
+    response = ban_client.post("/ban/reward-video-gen", json=payload)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == f"{field} must be a string"
+    assert _ban_transaction_count(ban_client.db_path) == before
+
+
+def test_valid_ban_video_generation_reward_still_records_reward(ban_client):
+    response = ban_client.post(
+        "/ban/reward-video-gen",
+        json={"agent_name": "alice", "video_id": "video-1", "gen_method": "text"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "ok": True,
+        "amount_ban": 2.0,
+        "gen_method": "text",
+        "reason": "AI video generation (text)",
+        "video_id": "video-1",
+    }
+
+    with sqlite3.connect(ban_client.db_path) as db:
+        rows = db.execute(
+            """
+            SELECT agent_id, tx_type, amount_ban, reason, video_id, status
+            FROM ban_transactions
+            ORDER BY id
+            """
+        ).fetchall()
+
+    assert rows == [
+        (1, "reward", 10.0, "seed_balance", "", "credited"),
+        (1, "reward", 2.0, "video_gen_text", "video-1", "credited"),
     ]

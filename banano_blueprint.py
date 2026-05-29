@@ -92,6 +92,15 @@ def _parse_positive_ban_amount(data):
     return amount, None
 
 
+def _json_text_field(data, name, default=""):
+    value = data.get(name, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{name} must be a string"}), 400)
+    return value.strip(), None
+
+
 def init_ban_tables(db=None):
     """Create Banano-related tables if they don't exist."""
     if db is None:
@@ -585,10 +594,19 @@ def ban_reward_video_gen():
     if not user_id and not is_admin:
         return jsonify({"error": "Authentication required"}), 401
 
-    data = request.get_json() or {}
-    agent_name = data.get("agent_name", "").strip()
-    video_id = data.get("video_id", "").strip()
-    gen_method = data.get("gen_method", "text").strip().lower()
+    data, error = _request_json_object()
+    if error:
+        return error
+    agent_name, error = _json_text_field(data, "agent_name")
+    if error:
+        return error
+    video_id, error = _json_text_field(data, "video_id")
+    if error:
+        return error
+    gen_method, error = _json_text_field(data, "gen_method", "text")
+    if error:
+        return error
+    gen_method = gen_method.lower()
 
     if not video_id:
         return jsonify({"error": "video_id required"}), 400
