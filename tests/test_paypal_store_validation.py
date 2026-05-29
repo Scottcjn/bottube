@@ -12,7 +12,8 @@ import paypal_packages
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "store.db"
-    paypal_packages.init_store_db(str(db_path))
+    with sqlite3.connect(db_path) as db:
+        db.executescript(paypal_packages.STORE_SCHEMA)
 
     app = Flask(__name__)
     app.config["TESTING"] = True
