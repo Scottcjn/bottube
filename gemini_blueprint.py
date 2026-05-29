@@ -117,6 +117,27 @@ def init_gemini_tables(db=None):
 
 _rate_buckets = {}
 
+def _json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _text_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field} must be a string"}), 400)
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
+
 def _check_rate(agent_id, job_type, max_per_hour):
     """Simple in-memory rate limiter."""
     key = f"{job_type}:{agent_id}"
@@ -320,14 +341,20 @@ def generate_video():
     else:
         agent_id = user_id
 
-    data = request.get_json() or {}
-    prompt = data.get("prompt", "").strip()
+    data, error = _json_object_body()
+    if error:
+        return error
+    prompt, error = _text_field(data, "prompt")
+    if error:
+        return error
     if not prompt:
         return jsonify({"error": "prompt required"}), 400
     if len(prompt) > 2000:
         return jsonify({"error": "prompt too long (max 2000 chars)"}), 400
 
-    negative_prompt = data.get("negative_prompt", "").strip()[:500]
+    negative_prompt, error = _text_field(data, "negative_prompt", max_length=500)
+    if error:
+        return error
     aspect_ratio = data.get("aspect_ratio", "16:9")
     if aspect_ratio not in ("16:9", "9:16", "1:1"):
         aspect_ratio = "16:9"
@@ -401,8 +428,12 @@ def generate_image():
     else:
         agent_id = user_id
 
-    data = request.get_json() or {}
-    prompt = data.get("prompt", "").strip()
+    data, error = _json_object_body()
+    if error:
+        return error
+    prompt, error = _text_field(data, "prompt")
+    if error:
+        return error
     if not prompt:
         return jsonify({"error": "prompt required"}), 400
 
@@ -694,27 +725,33 @@ def free_generate_video():
     if not _HAS_GENAI or not GEMINI_API_KEY:
         return jsonify({"error": "Gemini API not configured"}), 503
 
-    client_ip = _get_client_ip()
-    if not _check_ip_rate(client_ip, "video", FREE_VIDEO_PER_DAY):
-        return jsonify({
-            "error": f"Free tier limit: {FREE_VIDEO_PER_DAY} videos per day. "
-                     "Create a BoTTube account for higher limits."
-        }), 429
-
-    data = request.get_json() or {}
-    prompt = data.get("prompt", "").strip()
+    data, error = _json_object_body()
+    if error:
+        return error
+    prompt, error = _text_field(data, "prompt")
+    if error:
+        return error
     if not prompt:
         return jsonify({"error": "prompt required"}), 400
     if len(prompt) > 2000:
         return jsonify({"error": "prompt too long (max 2000 chars)"}), 400
 
-    negative_prompt = data.get("negative_prompt", "").strip()[:500]
+    negative_prompt, error = _text_field(data, "negative_prompt", max_length=500)
+    if error:
+        return error
     aspect_ratio = data.get("aspect_ratio", "16:9")
     if aspect_ratio not in ("16:9", "9:16", "1:1"):
         aspect_ratio = "16:9"
     resolution = data.get("resolution", "720p")
     if resolution not in ("720p", "1080p"):
         resolution = "720p"
+
+    client_ip = _get_client_ip()
+    if not _check_ip_rate(client_ip, "video", FREE_VIDEO_PER_DAY):
+        return jsonify({
+            "error": f"Free tier limit: {FREE_VIDEO_PER_DAY} videos per day. "
+                     "Create a BoTTube account for higher limits."
+        }), 429
 
     # Use session user if logged in, otherwise guest
     agent_id = session.get("user_id", GUEST_AGENT_ID)
@@ -763,19 +800,23 @@ def free_generate_image():
     if not _HAS_GENAI or not GEMINI_API_KEY:
         return jsonify({"error": "Gemini API not configured"}), 503
 
+    data, error = _json_object_body()
+    if error:
+        return error
+    prompt, error = _text_field(data, "prompt")
+    if error:
+        return error
+    if not prompt:
+        return jsonify({"error": "prompt required"}), 400
+    if len(prompt) > 2000:
+        return jsonify({"error": "prompt too long (max 2000 chars)"}), 400
+
     client_ip = _get_client_ip()
     if not _check_ip_rate(client_ip, "image", FREE_IMAGE_PER_DAY):
         return jsonify({
             "error": f"Free tier limit: {FREE_IMAGE_PER_DAY} images per day. "
                      "Create a BoTTube account for higher limits."
         }), 429
-
-    data = request.get_json() or {}
-    prompt = data.get("prompt", "").strip()
-    if not prompt:
-        return jsonify({"error": "prompt required"}), 400
-    if len(prompt) > 2000:
-        return jsonify({"error": "prompt too long (max 2000 chars)"}), 400
 
     agent_id = session.get("user_id", GUEST_AGENT_ID)
 
