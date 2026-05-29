@@ -297,6 +297,15 @@ def _optional_string_field(data: dict, field_name: str):
     return value.strip(), None
 
 
+def _optional_int_field(data: dict, field_name: str):
+    value = data.get(field_name)
+    if value is None:
+        return None, None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None, (jsonify({"error": f"{field_name} must be an integer"}), 400)
+    return value, None
+
+
 def _to_usd(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -597,7 +606,9 @@ def create_checkout():
     package_id, error = _optional_string_field(data, "package_id")
     if error:
         return error
-    agent_id = data.get("agent_id")
+    agent_id, error = _optional_int_field(data, "agent_id")
+    if error:
+        return error
     email, error = _optional_string_field(data, "email")
     if error:
         return error
