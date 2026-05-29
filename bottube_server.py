@@ -16907,6 +16907,14 @@ def record_watch_time(video_id):
     if seconds < 0:
         return jsonify({"ok": False, "error": "seconds must be non-negative"}), 400
 
+    db = get_db()
+    video = db.execute(
+        "SELECT 1 FROM videos WHERE video_id = ? AND COALESCE(is_removed, 0) = 0",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
         if seconds > 0:
             _get_ctr_tracker().record_watch_time(video_id, seconds)

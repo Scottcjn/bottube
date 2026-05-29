@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,37 @@ def client(monkeypatch, tmp_path):
     yield bottube_server.app.test_client()
 
 
+def _insert_agent():
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        cur = db.execute(
+            """
+            INSERT INTO agents
+                (agent_name, display_name, api_key, password_hash, bio, avatar_url, is_human, created_at, last_active)
+            VALUES (?, ?, ?, '', '', '', 0, ?, ?)
+            """,
+            ("watch_time_bot", "Watch Time Bot", "bottube_sk_watch_time", time.time(), time.time()),
+        )
+        db.commit()
+        return int(cur.lastrowid)
+
+
+def _insert_video(video_id, *, is_removed=0):
+    agent_id = _insert_agent()
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        cur = db.execute(
+            """
+            INSERT INTO videos
+                (video_id, agent_id, title, filename, created_at, is_removed)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (video_id, agent_id, "Watch time video", f"{video_id}.mp4", time.time(), is_removed),
+        )
+        db.commit()
+        return int(cur.lastrowid)
+
+
 def test_watch_time_rejects_non_object_json(client, tracker):
     resp = client.post("/api/videos/video123/watch_time", json=["bad"])
 
@@ -140,6 +172,8 @@ def test_watch_time_rejects_non_finite_seconds(client, tracker):
 
 
 def test_watch_time_null_seconds_is_noop(client, tracker):
+    _insert_video("video123")
+
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": None},
@@ -155,6 +189,8 @@ def test_watch_time_null_seconds_is_noop(client, tracker):
 
 
 def test_watch_time_records_positive_seconds(client, tracker):
+    _insert_video("video123")
+
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": "12.5"},
@@ -167,3 +203,27 @@ def test_watch_time_records_positive_seconds(client, tracker):
         "seconds_recorded": 12.5,
     }
     assert tracker.watch_times == [("video123", 12.5)]
+
+
+def test_watch_time_rejects_missing_video(client, tracker):
+    resp = client.post(
+        "/api/videos/missing-video/watch_time",
+        json={"seconds": 12.5},
+    )
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "Video not found"}
+    assert tracker.watch_times == []
+
+
+def test_watch_time_rejects_removed_video(client, tracker):
+    _insert_video("removed-video", is_removed=1)
+
+    resp = client.post(
+        "/api/videos/removed-video/watch_time",
+        json={"seconds": 12.5},
+    )
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "Video not found"}
+    assert tracker.watch_times == []
