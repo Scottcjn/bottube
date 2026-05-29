@@ -26,6 +26,7 @@ import urllib.parse
 import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, parsedate_to_datetime
 from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -37,6 +38,7 @@ from flask import (
     flash,
     g,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -6653,6 +6655,60 @@ def update_video(video_id):
 # Video listing / detail
 # ---------------------------------------------------------------------------
 
+def _video_list_etag(
+    *,
+    page: int,
+    per_page: int,
+    sort: str,
+    agent_name: str,
+    total: int,
+    latest_ts: float,
+    engagement_revision: int,
+) -> str:
+    cache_key = json.dumps(
+        {
+            "agent": agent_name,
+            "latest_ts": latest_ts,
+            "page": page,
+            "per_page": per_page,
+            "engagement_revision": engagement_revision,
+            "sort": sort,
+            "total": total,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24]
+    return f'W/"videos-{digest}"'
+
+
+def _client_has_video_list_etag(etag: str) -> bool:
+    raw_header = request.headers.get("If-None-Match", "")
+    if not raw_header:
+        return False
+    candidates = {part.strip() for part in raw_header.split(",")}
+    return "*" in candidates or etag in candidates
+
+
+def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
+    raw_header = request.headers.get("If-Modified-Since", "")
+    if not raw_header:
+        return False
+    try:
+        modified_since = parsedate_to_datetime(raw_header)
+    except (TypeError, ValueError):
+        return False
+    if modified_since is None:
+        return False
+    return int(latest_ts or 0) <= int(modified_since.timestamp())
+
+
+def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: float) -> Response:
+    response.headers["ETag"] = etag
+    response.headers["Last-Modified"] = formatdate(int(latest_ts or 0), usegmt=True)
+    response.headers["Cache-Control"] = "public, max-age=30"
+    return response
+
 @app.route("/api/videos")
 def list_videos():
     """List videos with pagination and sorting."""
@@ -6678,16 +6734,45 @@ def list_videos():
         params.append(agent_name)
     where = "WHERE " + " AND ".join(where_clauses)
 
-    total = db.execute(
-        f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id {where}",
+    stats = db.execute(
+        f"""SELECT
+                COUNT(*) AS total,
+                COALESCE(MAX(v.created_at), 0) AS latest_ts,
+                COALESCE(MAX(
+                    MAX(
+                        COALESCE((SELECT MAX(vw.created_at) FROM views vw WHERE vw.video_id = v.video_id), 0),
+                        COALESCE((SELECT MAX(vt.created_at) FROM votes vt WHERE vt.video_id = v.video_id), 0)
+                    )
+                ), 0) AS latest_engagement_ts,
+                COALESCE(SUM(v.views + v.likes + v.dislikes), 0) AS engagement_revision
+            FROM videos v JOIN agents a ON v.agent_id = a.id {where}""",
         params,
-    ).fetchone()[0]
+    ).fetchone()
+    total = int(stats["total"] or 0)
+    latest_ts = max(float(stats["latest_ts"] or 0), float(stats["latest_engagement_ts"] or 0))
+    engagement_revision = int(stats["engagement_revision"] or 0)
     pages = math.ceil(total / per_page) if total else 0
     if pages:
         page = min(page, pages)
     else:
         page = 1
     offset = (page - 1) * per_page
+    etag = _video_list_etag(
+        page=page,
+        per_page=per_page,
+        sort=sort,
+        agent_name=agent_name,
+        total=total,
+        latest_ts=latest_ts,
+        engagement_revision=engagement_revision,
+    )
+
+    if request.headers.get("If-None-Match"):
+        is_fresh = _client_has_video_list_etag(etag)
+    else:
+        is_fresh = _client_has_fresh_video_list_date(latest_ts)
+    if is_fresh:
+        return _add_video_list_cache_headers(make_response("", 304), etag=etag, latest_ts=latest_ts)
 
     rows = db.execute(
         f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
@@ -6704,13 +6789,14 @@ def list_videos():
         d["avatar_url"] = row["avatar_url"]
         videos.append(d)
 
-    return jsonify({
+    response = jsonify({
         "videos": videos,
         "page": page,
         "per_page": per_page,
         "total": total,
         "pages": pages,
     })
+    return _add_video_list_cache_headers(response, etag=etag, latest_ts=latest_ts)
 
 
 @app.route("/api/videos/<video_id>")
