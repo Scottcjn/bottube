@@ -14,6 +14,7 @@ Exchange rate: market-based or fixed by admin.
 
 from flask import Blueprint, request, jsonify, g, session
 import hashlib
+import math
 import json
 import logging
 import os
@@ -233,6 +234,34 @@ def _debit_rtc(db, agent_id, amount):
 # API Routes
 # ---------------------------------------------------------------------------
 
+def _request_json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _string_field(data, field_name):
+    value = data.get(field_name, "")
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
+
+def _positive_finite_amount(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(amount) or amount <= 0:
+        return None
+    return amount
+
+
 @ergo_bp.route("/api/ergo/info")
 def ergo_info():
     """Public info about the ERG ↔ RTC bridge."""
@@ -286,8 +315,12 @@ def ergo_deposit():
     else:
         agent_id = user_id
 
-    data = request.get_json() or {}
-    tx_id = data.get("tx_id", "").strip()
+    data, error = _request_json_object()
+    if error:
+        return error
+    tx_id, error = _string_field(data, "tx_id")
+    if error:
+        return error
     if not tx_id:
         return jsonify({"error": "tx_id required"}), 400
 
@@ -377,9 +410,15 @@ def ergo_withdraw():
     else:
         agent_id = user_id
 
-    data = request.get_json() or {}
-    amount_rtc = float(data.get("amount_rtc", 0))
-    to_address = data.get("address", "").strip()
+    data, error = _request_json_object()
+    if error:
+        return error
+    amount_rtc = _positive_finite_amount(data.get("amount_rtc", 0))
+    if amount_rtc is None:
+        return jsonify({"error": "amount_rtc must be a finite positive number"}), 400
+    to_address, error = _string_field(data, "address")
+    if error:
+        return error
 
     if amount_rtc < MIN_WITHDRAW_RTC:
         return jsonify({
