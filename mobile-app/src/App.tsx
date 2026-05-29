@@ -184,7 +184,7 @@ export default function App() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+        <StatusBar barStyle="light-content" />
         <Text style={styles.loadingText}>Loading BoTTube...</Text>
       </View>
     );
@@ -193,7 +193,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+        <StatusBar barStyle="light-content" />
         <View style={styles.screenContainer}>
           {renderScreen()}
         </View>
