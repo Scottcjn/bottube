@@ -5629,6 +5629,13 @@ def admin_review_referral(invite_id):
         return jsonify({"error": "Referral invite not found"}), 404
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    if not isinstance(data.get("action", "pending"), str):
+        return jsonify({"error": "action must be a string"}), 400
+    if data.get("note") is not None and not isinstance(data["note"], str):
+        return jsonify({"error": "note must be a string"}), 400
+
     action = (data.get("action", "pending") or "pending").strip().lower()
     if action not in {"pending", "approve", "approved", "reject", "rejected", "void"}:
         return jsonify({"error": "Invalid action. Use pending, approve, reject, or void."}), 400
@@ -5844,6 +5851,11 @@ def admin_assign_badge():
 
     db = get_db()
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    if not isinstance(data.get("badge_key", ""), str):
+        return jsonify({"error": "badge_key must be a string"}), 400
+
     badge_key = (data.get("badge_key", "") or "").strip()
     if badge_key not in BADGE_CATALOG:
         return jsonify({"error": "Unknown badge_key"}), 400
@@ -5963,6 +5975,11 @@ def admin_remove_badge(badge_id):
         return jsonify({"error": "Badge assignment not found"}), 404
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    if data.get("removed_by") is not None and not isinstance(data["removed_by"], str):
+        return jsonify({"error": "removed_by must be a string"}), 400
+
     removed_by = (data.get("removed_by", "") or "admin").strip()[:120]
     now = time.time()
     db.execute(
