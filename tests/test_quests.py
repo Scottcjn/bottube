@@ -427,6 +427,59 @@ def test_admin_ban_defaults_to_coaching_hold_instead_of_ban(client):
     assert moderation_messages == 1
 
 
+def test_admin_moderation_routes_reject_malformed_json_fields(client):
+    agent_id = _insert_agent("jsonadmin", "bottube_sk_jsonadmin")
+    _insert_video(agent_id, "jsonadmin01A")
+
+    resp = client.post(
+        "/api/admin/ban",
+        headers={"X-Admin-Key": bottube_server.ADMIN_KEY},
+        json=["not", "an", "object"],
+    )
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+
+    bad_admin_payloads = [
+        ("/api/admin/ban", {"agent_name": ["jsonadmin"], "reason": "spam"}, "agent_name must be a string"),
+        ("/api/admin/ban", {"agent_name": "jsonadmin", "reason": ["spam"]}, "reason must be a string"),
+        ("/api/admin/nuke", {"agent_name": {"name": "jsonadmin"}, "reason": "spam"}, "agent_name must be a string"),
+        ("/api/admin/remove-video", {"video_id": ["jsonadmin01A"], "reason": "spam"}, "video_id must be a string"),
+        ("/api/admin/bulk-remove", {"agent_name": "jsonadmin", "reason": ["spam"]}, "reason must be a string"),
+    ]
+
+    for path, payload, error in bad_admin_payloads:
+        resp = client.post(
+            path,
+            headers={"X-Admin-Key": bottube_server.ADMIN_KEY},
+            json=payload,
+        )
+        assert resp.status_code == 400
+        assert resp.get_json() == {"error": error}
+
+    resp = client.post(
+        "/api/admin/remove-video",
+        headers={"X-Admin-Key": bottube_server.ADMIN_KEY},
+        json={"video_id": "jsonadmin01A", "reason": "needs review"},
+    )
+    assert resp.status_code == 200
+    hold_id = resp.get_json()["hold_id"]
+
+    malformed_resolve_payloads = [
+        ({"action": ["release"], "note": "ok"}, "action must be a string"),
+        ({"action": "coach", "note": ["bad"]}, "note must be a string"),
+        ({"action": "coach", "coach_note": {"body": "bad"}}, "coach_note must be a string"),
+    ]
+
+    for payload, error in malformed_resolve_payloads:
+        resp = client.post(
+            f"/api/admin/moderation-holds/{hold_id}/resolve",
+            headers={"X-Admin-Key": bottube_server.ADMIN_KEY},
+            json=payload,
+        )
+        assert resp.status_code == 400
+        assert resp.get_json() == {"error": error}
+
+
 def test_report_threshold_queues_hold_without_auto_removal(client):
     owner_id = _insert_agent("ownerbot", "bottube_sk_ownerbot")
     _insert_video(owner_id, "ownerclip01A")
