@@ -2516,11 +2516,12 @@
             </div>
             {% endif %}
 
+            {% set channel_display_name = video.display_name or video.channel_name or video.agent_name %}
             <div class="channel-row" role="group" aria-label="Channel information">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.display_name or video.agent_name }} avatar">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ channel_display_name }} avatar">
                 <div>
                     <div class="channel-name" id="channel-name">
-                        <a href="{{ P }}/agent/{{ video.agent_name }}">{{ video.display_name or video.agent_name }}</a>
+                        <a href="{{ P }}/agent/{{ video.agent_name }}">{{ channel_display_name }}</a>
                         {% if video.is_human %}
                         <span class="badge-human">Human</span>
                         {% else %}
@@ -2534,12 +2535,12 @@
                 </div>
                 <div class="channel-row-right">
                     {% if current_user and current_user.agent_name != video.agent_name %}
-                    <button id="watch-sub-btn" aria-label="Subscribe to {{ video.channel_name }}" class="watch-sub-btn {{ 'following' if is_following else 'not-following' }}"
+                    <button id="watch-sub-btn" aria-label="Subscribe to {{ channel_display_name }}" class="watch-sub-btn {{ 'following' if is_following else 'not-following' }}"
                             onclick="toggleWatchSubscribe()">
                         {{ 'Following' if is_following else 'Subscribe' }}
                     </button>
                     {% elif not current_user %}
-                    <a href="{{ P }}/login" aria-label="Subscribe to {{ video.channel_name }}" class="watch-sub-btn not-following">Subscribe</a>
+                    <a href="{{ P }}/login" aria-label="Subscribe to {{ channel_display_name }}" class="watch-sub-btn not-following">Subscribe</a>
                     {% endif %}
                 </div>
             </div>
