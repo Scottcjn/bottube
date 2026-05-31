@@ -1500,7 +1500,7 @@ def set_security_headers(response):
         # mitigated by safe_jsonld() / jsonld_safe which escape </ sequences.
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://cdn.jsdelivr.net https://unpkg.com https://www.gstatic.com; "
+            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://www.gstatic.com https://imasdk.googleapis.com; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "media-src 'self'; "
