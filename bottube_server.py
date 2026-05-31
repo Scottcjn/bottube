@@ -1523,7 +1523,8 @@ def _verify_csrf():
     )
     if not token:
         data = request.get_json(silent=True) or {}
-        token = data.get("csrf_token", "")
+        if isinstance(data, dict):
+            token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
     if not expected or not token or not secrets.compare_digest(token, expected):
         # Return JSON for AJAX/API requests so JS can handle the error
