@@ -670,7 +670,7 @@
 
         <div class="footer-lang" style="margin:8px 0;">
             {% for lc in SUPPORTED_LOCALES %}
-            <a href="?lang={{ lc }}" style="padding:2px 8px;font-size:12px;border-radius:4px;{% if locale == lc %}background:var(--accent);color:#000;font-weight:600;{% else %}color:var(--text-muted);{% endif %}">{{ lc|upper }}</a>
+            <a href="{{ language_switch_href(lc) }}" style="padding:2px 8px;font-size:12px;border-radius:4px;{% if locale == lc %}background:var(--accent);color:#000;font-weight:600;{% else %}color:var(--text-muted);{% endif %}">{{ lc|upper }}</a>
             {% endfor %}
         </div>
         <div class="footer-copy">{{ _('footer.copyright') }}</div>

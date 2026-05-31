@@ -1341,6 +1341,13 @@ def _translate(key, **kwargs):
     return text
 
 
+def _language_switch_href(locale_code: str) -> str:
+    """Return a query-only language link while preserving current filters."""
+    args = request.args.to_dict(flat=True)
+    args["lang"] = locale_code
+    return "?" + urllib.parse.urlencode(args)
+
+
 _load_translations()
 
 # ---------------------------------------------------------------------------
@@ -1386,6 +1393,7 @@ app.jinja_env.globals["P"] = IP_PREFIX  # default fallback
 app.jinja_env.globals["MAX_DURATION"] = MAX_VIDEO_DURATION
 app.jinja_env.globals["_"] = _translate
 app.jinja_env.globals["SUPPORTED_LOCALES"] = SUPPORTED_LOCALES
+app.jinja_env.globals["language_switch_href"] = _language_switch_href
 
 
 def _build_recovery_notice(db=None):
@@ -1505,7 +1513,7 @@ def set_security_headers(response):
             "img-src 'self' data: https:; "
             "media-src 'self'; "
             "font-src 'self'; "
-            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com; "
+            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com https://www.google.com; "
             "object-src 'none'; "
             "base-uri 'self'; "
             "form-action 'self'; "

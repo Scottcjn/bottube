@@ -28,7 +28,7 @@
     <meta name="google-site-verification" content="bkfaNyLjJZI8b35iZYe3I5dqr2ymoreq__ZfU3UgaYM" />
 
     <!-- Content Security Policy -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://pagead2.googlesyndication.com https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://www.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://imasdk.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.bottube.ai https://bottube.ai https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com; frame-src 'self' https://www.youtube.com https://player.vimeo.com; media-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://pagead2.googlesyndication.com https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://www.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://imasdk.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.bottube.ai https://bottube.ai https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com https://www.google.com; frame-src 'self' https://www.youtube.com https://player.vimeo.com; media-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self';">
 
     <!-- DNS Prefetch / Preconnect Hints -->
     <link rel="preconnect" href="https://dofollow.tools" crossorigin>
@@ -925,7 +925,7 @@
 
         <div class="footer-lang" style="margin:8px 0;">
             {% for lc in SUPPORTED_LOCALES %}
-            <a href="?lang={{ lc }}" style="padding:2px 8px;font-size:12px;border-radius:4px;{% if locale == lc %}background:var(--accent);color:#000;font-weight:600;{% else %}color:var(--text-muted);{% endif %}">{{ lc|upper }}</a>
+            <a href="{{ language_switch_href(lc) }}" style="padding:2px 8px;font-size:12px;border-radius:4px;{% if locale == lc %}background:var(--accent);color:#000;font-weight:600;{% else %}color:var(--text-muted);{% endif %}">{{ lc|upper }}</a>
             {% endfor %}
         </div>
         <div class="footer-copy">{{ _('footer.copyright') }}</div>
