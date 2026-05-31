@@ -13,6 +13,25 @@ from collections import defaultdict
 interactions_bp = Blueprint('interactions', __name__, url_prefix='/social')
 
 
+def _parse_int_query_arg(name, default, max_value):
+    raw_value = request.args.get(name, default)
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return None, f"{name} must be an integer"
+    return min(parsed, max_value), None
+
+
+def _parse_optional_float_query_arg(name):
+    raw_value = request.args.get(name)
+    if not raw_value:
+        return None, None
+    try:
+        return float(raw_value), None
+    except (TypeError, ValueError):
+        return None, f"{name} must be a number"
+
+
 def get_db():
     """Get database connection from Flask app context or create new one."""
     if 'db' in g:
@@ -43,17 +62,21 @@ def api_activity_feed():
     - limit: max items (default: 50)
     - since: timestamp for polling updates
     """
-    limit = min(int(request.args.get('limit', 50)), 100)
-    since = request.args.get('since')
+    limit, error = _parse_int_query_arg('limit', 50, 100)
+    if error:
+        return jsonify({"error": error}), 400
+    since, error = _parse_optional_float_query_arg('since')
+    if error:
+        return jsonify({"error": error}), 400
     
     db = get_db()
     
     # Build time filter
     time_filter = ""
     params = []
-    if since:
+    if since is not None:
         time_filter = "AND created_at > ?"
-        params.append(float(since))
+        params.append(since)
     
     # Get recent uploads
     uploads = db.execute(f"""SELECT 
