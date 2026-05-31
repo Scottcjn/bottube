@@ -615,7 +615,11 @@ def _get_client_ip() -> str:
 def bt_proof():
     """Receive JS challenge proof. Proves that JavaScript executed in browser."""
     ip = _get_client_ip()
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        data = {}
 
     detective.record_js_proof(ip)
 
