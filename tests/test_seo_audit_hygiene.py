@@ -38,6 +38,24 @@ def test_template_images_are_lazy_loaded_or_prioritized():
     assert missing == []
 
 
+def test_listing_badge_and_article_images_reserve_dimensions():
+    stable_surface_files = {
+        Path("bottube_templates/badges.html"),
+        Path("bottube_templates/base.html"),
+        Path("bottube_templates/blog_badges_embeds.html"),
+        Path("bottube_templates/index.html"),
+        Path("bottube_templates/news_article.html"),
+    }
+    missing = [
+        f"{path}:{line_no}: {tag}"
+        for path, line_no, tag in _img_tag_locations()
+        if path in stable_surface_files
+        and (" width=" not in tag.lower() or " height=" not in tag.lower())
+    ]
+
+    assert missing == []
+
+
 def test_template_and_beacon_atlas_assets_have_no_console_log():
     paths = _html_files() + [ROOT / "bottube_static" / "beacon_atlas" / "index.html"]
     offenders = []
