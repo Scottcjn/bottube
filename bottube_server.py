@@ -9266,14 +9266,35 @@ def _feed_imp_record(visitor_id, surface, bucket, videos):
     return ids
 
 
+def _feed_event_json_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"ok": False, "error": "JSON body must be an object"}), 400)
+    return data, None
+
+
+def _feed_event_impression_id(data):
+    raw_value = data.get("imp") or data.get("impression_id") or ""
+    if not isinstance(raw_value, str):
+        return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
+    imp_id = raw_value.strip()
+    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
+        return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
+    return imp_id, None
+
+
 @app.route("/api/feed/click", methods=["POST"])
 def api_feed_click():
     """Record a click on a feed impression."""
     _feed_imp_ensure_schema()
-    data = request.get_json(silent=True) or {}
-    imp_id = (data.get("imp") or data.get("impression_id") or "").strip()
-    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
-        return jsonify({"ok": False, "error": "invalid impression_id"}), 400
+    data, error = _feed_event_json_body()
+    if error:
+        return error
+    imp_id, error = _feed_event_impression_id(data)
+    if error:
+        return error
     try:
         conn = sqlite3.connect(str(DB_PATH))
         conn.execute(
@@ -9297,14 +9318,16 @@ def api_feed_click():
 def api_feed_watch():
     """Record a watch-seconds ping for a feed impression. Idempotent in MAX-direction."""
     _feed_imp_ensure_schema()
-    data = request.get_json(silent=True) or {}
-    imp_id = (data.get("imp") or data.get("impression_id") or "").strip()
+    data, error = _feed_event_json_body()
+    if error:
+        return error
+    imp_id, error = _feed_event_impression_id(data)
+    if error:
+        return error
     try:
         seconds = max(0.0, min(86400.0, float(data.get("seconds", 0))))
     except Exception:
         return jsonify({"ok": False, "error": "seconds must be a number"}), 400
-    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
-        return jsonify({"ok": False, "error": "invalid impression_id"}), 400
     try:
         conn = sqlite3.connect(str(DB_PATH))
         conn.execute(
