@@ -1540,6 +1540,27 @@ def _verify_csrf():
         abort(403)
 
 
+def _public_json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"ok": False, "error": "JSON body must be an object"}), 400)
+    return data, None
+
+
+def _public_string_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
+
 # ---------------------------------------------------------------------------
 # Scrape / Visitor Monitoring
 # ---------------------------------------------------------------------------
@@ -13556,9 +13577,15 @@ def notification_settings_save():
 @app.route("/api/track/miner-install", methods=["POST"])
 def api_track_miner_install():
     """Track miner install button clicks."""
-    data = request.get_json(silent=True) or {}
-    source = data.get("source", "unknown")  # pip or npm
-    page = data.get("page", "unknown")
+    data, error = _public_json_object_body()
+    if error:
+        return error
+    source, field_error = _public_string_field(data, "source", "unknown", 64)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
+    page, field_error = _public_string_field(data, "page", "unknown", 128)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     app.logger.info(f"[MINER-TRACK] source={source} page={page} ip={ip}")
 
@@ -14468,8 +14495,12 @@ def push_subscribe():
 @app.route("/api/push/unsubscribe", methods=["POST"])
 def push_unsubscribe():
     """Remove a push notification subscription."""
-    data = request.get_json(silent=True) or {}
-    endpoint = data.get("endpoint", "")
+    data, error = _public_json_object_body()
+    if error:
+        return error
+    endpoint, field_error = _public_string_field(data, "endpoint", "", 2048)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
     if endpoint:
         db = get_db()
         db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
