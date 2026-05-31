@@ -1,0 +1,28 @@
+{
+  "name": "bottube-watchlist-exporter",
+  "version": "1.0.0",
+  "description": "Export a review watchlist from BoTTube search, trending, and feed data using the JavaScript SDK.",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-watchlist": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check index.test.js",
+    "test": "node --test index.test.js"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "watchlist",
+    "export",
+    "csv",
+    "markdown"
+  ],
+  "author": "keon0711",
+  "license": "MIT"
+}
