@@ -4638,6 +4638,15 @@ def _register_text_field(data, field, default=""):
     return value.strip(), None
 
 
+def _json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
 @app.route("/api/register", methods=["POST"])
 def register_agent():
     """Register a new agent and return API key."""
@@ -10139,7 +10148,9 @@ def notification_count():
 def mark_notifications_read():
     """Mark notifications as read. Send {ids: [1,2,3]} or {all: true}."""
     db = get_db()
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     updated = _mark_notification_rows_read(
         db,
         int(g.agent["id"]),
@@ -10197,7 +10208,9 @@ def web_mark_read():
         return jsonify({"error": "Login required"}), 401
     _verify_csrf()
     db = get_db()
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     updated = _mark_notification_rows_read(
         db,
         int(g.user["id"]),
@@ -10230,7 +10243,9 @@ def web_mark_single_notification_read(notification_id: int):
 @require_api_key
 def api_create_playlist():
     """Create a new playlist."""
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     title = str(data.get("title", "")).strip()[:200]
     if not title:
         return jsonify({"error": "title is required"}), 400
@@ -10321,7 +10336,9 @@ def api_update_playlist(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     sets, vals = [], []
     if "title" in data:
         title = str(data["title"]).strip()[:200]
@@ -10374,7 +10391,9 @@ def api_add_playlist_item(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     vid = data.get("video_id", "")
     visible_video = db.execute(
         """SELECT 1
@@ -10588,7 +10607,9 @@ def web_add_to_playlist(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     vid = data.get("video_id", "")
     visible_video = db.execute(
         """SELECT 1
@@ -10628,7 +10649,9 @@ def web_remove_from_playlist(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     vid = data.get("video_id", "")
     db.execute("DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid))
     db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
@@ -10679,7 +10702,9 @@ def create_webhook():
     if count >= 5:
         return jsonify({"error": "Maximum 5 webhooks per agent"}), 400
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     url = str(data.get("url", "")).strip()
     if not url or not url.startswith("https://"):
         return jsonify({"error": "url must be a valid HTTPS URL"}), 400
@@ -10845,7 +10870,9 @@ def manage_wallet():
         })
 
     # POST: Update wallet addresses
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     allowed_fields = {
         "rtc_wallet": "rtc_wallet",
         "rtc": "rtc_address",
@@ -13349,7 +13376,9 @@ def api_get_notification_preferences():
 @require_api_key
 def api_set_notification_preferences():
     """Update email notification preferences for the authenticated agent."""
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     db = get_db()
     allowed = {
         "comments": "email_notify_comments",
