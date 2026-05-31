@@ -206,7 +206,7 @@
         {% if items %}
         {% set first = items[0] %}
         {% if first.thumbnail %}
-        <img src="{{ P }}/thumbnails/{{ first.thumbnail }}" alt="{{ playlist.name }} playlist cover">
+        <img src="{{ P }}/thumbnails/{{ first.thumbnail }}" alt="{{ playlist.name }} playlist cover" loading="lazy" decoding="async">
         {% else %}
         <div class="pl-icon">&#9654;</div>
         {% endif %}
@@ -238,7 +238,7 @@
         <a href="{{ P }}/watch/{{ item.video_id }}">
             <div class="pl-thumb">
                 {% if item.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="Video thumbnail: {{ item.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ item.thumbnail }}" alt="Video thumbnail: {{ item.title }}" loading="lazy" decoding="async">
                 {% endif %}
                 {% if item.duration_sec > 0 %}
                 <span class="duration-badge">{{ item.duration_sec | format_duration }}</span>

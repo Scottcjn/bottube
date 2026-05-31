@@ -117,7 +117,6 @@
           const relayAgents = await rResp.json();
           if (Array.isArray(relayAgents) && relayAgents.length > 0) {
             mergeRelayAgents(relayAgents);
-            console.log(`[boot] Merged ${relayAgents.length} relay agents into Atlas`);
           }
         }
       } catch (e) {
@@ -141,7 +140,6 @@
           }));
           if (shAgents.length > 0) {
             mergeRelayAgents(shAgents);
-            console.log(`[boot] Merged ${shAgents.length} SwarmHub agents`);
           }
         }
       } catch (e) {
@@ -172,7 +170,6 @@
           const contracts = await cResp.json();
           if (Array.isArray(contracts) && contracts.length > 0) {
             replaceContracts(contracts);
-            console.log(`[boot] Loaded ${contracts.length} contracts from backend`);
           }
         }
       } catch (e) {

@@ -2505,7 +2505,7 @@
                 <div style="display: flex; flex-direction: column; gap: 8px;">
                     {% for resp in response_videos %}
                     <a href="{{ P }}/watch/{{ resp.video_id }}" class="response-item" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; transition: background 0.15s ease;">
-                        <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" style="width: 36px; height: 36px; border-radius: 50%;">
+                        <img src="{{ resp.avatar_url or (P ~ '/avatar/' ~ resp.agent_name ~ '.svg') }}" alt="{{ resp.display_name or resp.agent_name }}" loading="lazy" decoding="async" style="width: 36px; height: 36px; border-radius: 50%;">
                         <div style="flex: 1; min-width: 0;">
                             <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ resp.title }}</div>
                             <div style="font-size: 12px; color: var(--text-muted);">{{ resp.display_name or resp.agent_name }} · {{ resp.views or 0 }} view{{ 's' if (resp.views or 0) != 1 else '' }}</div>
@@ -2518,7 +2518,7 @@
 
             {% set channel_display_name = video.display_name or video.channel_name or video.agent_name %}
             <div class="channel-row" role="group" aria-label="Channel information">
-                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ channel_display_name }} avatar">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ channel_display_name }} avatar" loading="lazy" decoding="async">
                 <div>
                     <div class="channel-name" id="channel-name">
                         <a href="{{ P }}/agent/{{ video.agent_name }}">{{ channel_display_name }}</a>
@@ -2730,7 +2730,7 @@
                      aria-label="Comment by {{ comment.display_name or comment.agent_name }}{% if comment.is_agent_interaction %}, agent interaction{% endif %}"
                      {{ interaction_aria|safe }}
                      {% if loop.index > 10 %} style="display:none"{% endif %}>
-                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar">
+                    <img class="channel-avatar" src="{{ comment.avatar_url or (P ~ "/avatar/" ~ comment.agent_name ~ ".svg") }}" alt="{{ comment.display_name or comment.agent_name }} avatar" loading="lazy" decoding="async">
                     <div class="comment-body">
                         <div class="comment-header">
                             <a href="{{ P }}/agent/{{ comment.agent_name }}" class="comment-author">{{ comment.display_name or comment.agent_name }}</a>
@@ -2813,7 +2813,7 @@
             <a href="{{ P }}/watch/{{ rel.video_id }}">
                 <div class="sidebar-thumb">
                     {% if rel.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="Video thumbnail: {{ rel.title }}" loading="lazy">
+                    <img src="{{ P }}/thumbnails/{{ rel.thumbnail }}" alt="Video thumbnail: {{ rel.title }}" loading="lazy" decoding="async">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}
@@ -2894,7 +2894,7 @@
                     }
                     dyn.innerHTML = j.results.map(function (r) {
                         var thumb = r.thumbnail
-                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="Video thumbnail" loading="lazy">'
+                            ? '<img src="/thumbnails/' + _esc(r.thumbnail) + '" alt="Video thumbnail" loading="lazy" decoding="async">'
                             : '<div class="thumb-placeholder">&#9654;</div>';
                         var dur = r.duration_sec > 0
                             ? '<span class="duration-badge">' + _esc(_fmtDur(r.duration_sec)) + '</span>'

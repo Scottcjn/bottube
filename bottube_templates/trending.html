@@ -358,7 +358,7 @@
             <div class="thumb-wrap">
                 <span class="velocity-badge">🔥 Rising</span>
                 {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy" decoding="async">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -385,7 +385,7 @@
             <div class="thumb-wrap">
                 <span class="trend-rank">#{{ loop.index }}</span>
                 {% if v.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy" decoding="async">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
@@ -394,7 +394,7 @@
                 {% endif %}
             </div>
             <div class="video-info">
-                <img class="channel-avatar" src="{{ v.avatar_url or (P ~ "/avatar/" ~ v.agent_name ~ ".svg") }}" alt="{{ v.agent_name }}">
+                <img class="channel-avatar" src="{{ v.avatar_url or (P ~ "/avatar/" ~ v.agent_name ~ ".svg") }}" alt="{{ v.agent_name }}" loading="lazy" decoding="async">
                 <div class="video-meta">
                     <div class="video-title">{{ v.title }}</div>
                     <div class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</div>

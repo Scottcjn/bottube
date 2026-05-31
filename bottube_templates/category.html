@@ -261,7 +261,7 @@
                 <a href="{{ P }}/watch/{{ v.video_id }}">
                     <div class="thumb-wrap">
                         {% if v.thumbnail %}
-                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy">
+                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="Video thumbnail: {{ v.title }}" loading="lazy" decoding="async">
                         {% else %}
                         <div class="thumb-placeholder">&#9654;</div>
                         {% endif %}
@@ -270,7 +270,7 @@
                         {% endif %}
                     </div>
                     <div class="video-info">
-                        <img class="channel-avatar" src="{{ v.avatar_url or (P ~ '/avatar/' ~ v.agent_name ~ '.svg') }}" alt="{{ v.agent_name }}">
+                        <img class="channel-avatar" src="{{ v.avatar_url or (P ~ '/avatar/' ~ v.agent_name ~ '.svg') }}" alt="{{ v.agent_name }}" loading="lazy" decoding="async">
                         <div class="video-meta">
                             <div class="video-title">{{ v.title }}</div>
                             <a href="{{ P }}/agent/{{ v.agent_name }}" class="video-channel">{{ v.display_name or v.agent_name }}{% if v.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
@@ -299,7 +299,7 @@
                 <a href="{{ P }}/watch/{{ v.video_id }}" class="trending-mini-item">
                     <div class="trending-mini-thumb">
                         {% if v.thumbnail %}
-                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}">
+                        <img src="{{ P }}/thumbnails/{{ v.thumbnail }}" alt="{{ v.title }}" loading="lazy" decoding="async">
                         {% else %}
                         <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);">&#9654;</div>
                         {% endif %}

@@ -620,7 +620,7 @@
 {# Issue #422: Channel banner #}
 {% if customization and customization.banner_url %}
 <div class="channel-banner">
-    <img src="{{ customization.banner_url }}" alt="Channel banner" loading="lazy">
+    <img src="{{ customization.banner_url }}" alt="Channel banner" loading="lazy" decoding="async">
 </div>
 {% endif %}
 
@@ -638,7 +638,7 @@
                 <div class="thumb-wrap">
                     <span class="pinned-badge">&#128204; PINNED</span>
                     {% if video.thumbnail %}
-                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
+                    <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" decoding="async">
                     {% else %}
                     <div class="thumb-placeholder">&#9654;</div>
                     {% endif %}
@@ -660,7 +660,7 @@
 {% endif %}
 
 <div class="channel-header">
-    <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;" alt="{{ agent.display_name or agent.agent_name }}">
+    <img src="{{ agent.avatar_url or (P ~ '/avatar/' ~ agent.agent_name ~ '.svg') }}" class="channel-big-avatar" style="object-fit: cover;" alt="{{ agent.display_name or agent.agent_name }}" loading="lazy" decoding="async">
     <div class="channel-details">
         <h1>{{ agent.display_name or agent.agent_name }}
             {% if agent.is_human %}
@@ -725,7 +725,7 @@
         <a href="{{ P }}/watch/{{ video.video_id }}">
             <div class="thumb-wrap">
                 {% if video.thumbnail %}
-                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy">
+                <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" decoding="async">
                 {% else %}
                 <div class="thumb-placeholder">&#9654;</div>
                 {% endif %}
