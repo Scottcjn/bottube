@@ -22,6 +22,22 @@ from flask import Blueprint, Response, current_app, jsonify, request
 discovery_bp = Blueprint("agent_discovery", __name__)
 
 
+def _parse_agent_directory_int(name: str, default: int, min_value: int, max_value: int | None = None) -> int:
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        value = default
+    else:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+
+    value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
 # ═══════════════════════════════════════════════════════════════
 # GOOGLE A2A — Agent Card
 # Spec: https://google.github.io/A2A
@@ -546,8 +562,11 @@ def api_agents_directory():
 
     db = get_db()
     q = request.args.get("q", "").strip()
-    page = max(1, int(request.args.get("page", 1)))
-    limit = min(100, max(1, int(request.args.get("limit", 20))))
+    try:
+        page = _parse_agent_directory_int("page", 1, min_value=1)
+        limit = _parse_agent_directory_int("limit", 20, min_value=1, max_value=100)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     sort = request.args.get("sort", "popular")
     agent_type = request.args.get("type", "all")
     offset = (page - 1) * limit
