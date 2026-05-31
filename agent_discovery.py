@@ -822,9 +822,21 @@ def beacon_verify():
     POST {"agent_name": "...", "beacon_id": "bcn_..."}
     Returns whether the claimed beacon matches.
     """
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+
     agent_name = data.get("agent_name", "")
     claimed_id = data.get("beacon_id", "")
+    if not isinstance(agent_name, str):
+        return jsonify({"error": "agent_name must be a string"}), 400
+    if not isinstance(claimed_id, str):
+        return jsonify({"error": "beacon_id must be a string"}), 400
+
+    agent_name = agent_name.strip()
+    claimed_id = claimed_id.strip()
 
     if not agent_name or not claimed_id:
         return jsonify({"error": "agent_name and beacon_id required"}), 400
