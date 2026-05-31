@@ -18475,9 +18475,20 @@ def mcp_bridge():
     if request.method == "GET":
         return jsonify(_mcp_descriptor())
 
-    data = request.get_json(silent=True) or {}
-    tool_name = (data.get("tool") or data.get("method") or "").strip()
-    args = data.get("args") or data.get("params") or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+
+    raw_tool_name = data.get("tool") or data.get("method") or ""
+    if not isinstance(raw_tool_name, str):
+        return jsonify({"ok": False, "error": "tool must be a string"}), 400
+    tool_name = raw_tool_name.strip()
+
+    args = data["args"] if "args" in data else data.get("params", {})
+    if args is None:
+        args = {}
     if not isinstance(args, dict):
         return jsonify({"ok": False, "error": "args must be an object"}), 400
 
