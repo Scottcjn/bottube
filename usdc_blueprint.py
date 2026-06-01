@@ -24,7 +24,7 @@ USDC_DECIMALS = 6
 TREASURY_ADDRESS = os.environ.get("BOTTUBE_USDC_TREASURY", "0xd10A6AbFED84dDD28F89bB3d836BD20D5da8fEBf")
 
 # Admin key for management endpoints
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026")
+ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 
 # ERC-20 Transfer event signature
 TRANSFER_EVENT_SIG = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
