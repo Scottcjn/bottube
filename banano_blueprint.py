@@ -12,6 +12,7 @@ from flask import Blueprint, request, jsonify, g, session
 import json
 import logging
 import math
+import hmac
 import os
 import sqlite3
 import time
@@ -42,7 +43,14 @@ REWARDS = {
 }
 
 # Admin key for management endpoints
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026")
+ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+
+def _admin_ok(provided):
+    """Constant-time admin check; fails closed when BOTTUBE_ADMIN_KEY is unset."""
+    if not ADMIN_KEY:
+        return False
+    return hmac.compare_digest(provided or "", ADMIN_KEY)
+
 
 # bananopie availability flag
 _HAS_BANANOPIE = False
@@ -589,7 +597,7 @@ def ban_reward_video_gen():
     # Auth: either session or admin key
     user_id = session.get("user_id")
     admin_key = request.headers.get("X-Admin-Key", "")
-    is_admin = admin_key == ADMIN_KEY
+    is_admin = _admin_ok(admin_key)
 
     if not user_id and not is_admin:
         return jsonify({"error": "Authentication required"}), 401
@@ -664,7 +672,7 @@ def ban_reward_video_gen():
 def ban_platform_status():
     """Check platform hot wallet on-chain balance and system stats."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != ADMIN_KEY:
+    if not _admin_ok(admin_key):
         return jsonify({"error": "Admin key required"}), 401
 
     db = get_db()
@@ -708,7 +716,7 @@ def ban_receive_pending():
     Admin-only.
     """
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != ADMIN_KEY:
+    if not _admin_ok(admin_key):
         return jsonify({"error": "Admin key required"}), 401
 
     if not _HAS_BANANOPIE or not BANANO_SEED:

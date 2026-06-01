@@ -13,6 +13,7 @@ Withdrawal processing uses web3.py for signing and sending.
 """
 
 import json
+import hmac
 import os
 import re
 import secrets
@@ -44,7 +45,14 @@ BASE_WITHDRAW_FEE = float(os.environ.get("BASE_WRTC_WITHDRAW_FEE", "0.5"))
 BASE_WITHDRAW_COOLDOWN = int(os.environ.get("BASE_WRTC_WITHDRAW_COOLDOWN", "3600"))
 
 # Admin key (reuse main BoTTube admin key)
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026")
+ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+
+def _admin_ok(provided):
+    """Constant-time admin check; fails closed when BOTTUBE_ADMIN_KEY is unset."""
+    if not ADMIN_KEY:
+        return False
+    return hmac.compare_digest(provided or "", ADMIN_KEY)
+
 
 _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _ETH_TX_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
@@ -560,7 +568,7 @@ def base_bridge_process_withdrawals():
     Requires BOTTUBE_ADMIN_KEY header and BASE_RESERVE_PRIVATE_KEY env.
     """
     admin_key = (request.headers.get("X-Admin-Key") or "").strip()
-    if admin_key != ADMIN_KEY:
+    if not _admin_ok(admin_key):
         return jsonify({"error": "Admin authentication required"}), 401
 
     if not BASE_RESERVE_PRIVATE_KEY:
