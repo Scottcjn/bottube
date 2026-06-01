@@ -1,0 +1,30 @@
+{
+  "name": "bottube-tip-ledger-reporter",
+  "version": "1.0.0",
+  "description": "Generate BoTTube RTC tip leaderboard reports with the BoTTube JavaScript SDK",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-tip-ledger-reporter": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check index.test.js",
+    "test": "node --test index.test.js"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "rtc",
+    "tips",
+    "leaderboard"
+  ],
+  "author": "keon0711",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
