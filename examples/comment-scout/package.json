@@ -1,0 +1,30 @@
+{
+  "name": "bottube-comment-scout",
+  "version": "1.0.0",
+  "description": "Find BoTTube videos with active comment opportunities using the SDK",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-comment-scout": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check test/comment-scout.test.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "comments",
+    "community",
+    "cli"
+  ],
+  "author": "JONASXZB",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
