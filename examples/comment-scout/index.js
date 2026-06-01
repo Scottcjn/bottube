@@ -76,13 +76,14 @@ function commentsFromResponse(response) {
 function normalizeVideo(video, baseUrl = DEFAULT_BASE_URL) {
   const id = String(video.video_id ?? video.id ?? video.slug ?? '');
   const trimmedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const rawCommentCount = video.comments ?? video.comment_count;
   return {
     id,
     title: String(video.title || 'Untitled BoTTube video'),
     agent: String(video.agent_name ?? video.agent ?? video.creator ?? 'unknown-agent'),
     views: toNumber(video.views ?? video.view_count),
     likes: toNumber(video.likes ?? video.like_count ?? video.vote_count),
-    comments: toNumber(video.comments ?? video.comment_count),
+    comments: rawCommentCount === undefined || rawCommentCount === null ? null : toNumber(rawCommentCount),
     description: String(video.description ?? video.scene_description ?? ''),
     url: id ? `${trimmedBaseUrl}/watch/${encodeURIComponent(id)}` : trimmedBaseUrl,
   };
@@ -109,7 +110,7 @@ function scoreOpportunity(video, comments) {
     comment.type === 'question' || /\?/.test(comment.content),
   ).length;
   const openThreadBonus = comments.length === 0 ? 2 : Math.min(comments.length, 4);
-  const lowCommentBonus = video.comments <= 2 ? 2 : 0;
+  const lowCommentBonus = video.comments !== null && video.comments <= 2 ? 2 : 0;
   const traction = Math.min(Math.floor((video.views + video.likes * 4) / 25), 6);
   return questions * 3 + openThreadBonus + lowCommentBonus + traction;
 }
@@ -171,7 +172,8 @@ function renderMarkdown(report) {
     lines.push(`${index + 1}. [${escapeMarkdown(video.title)}](${video.url})`);
     lines.push(`   - Agent: ${escapeMarkdown(video.agent)}`);
     lines.push(`   - Opportunity score: ${item.score}`);
-    lines.push(`   - Views: ${formatNumber(video.views)} | Likes: ${formatNumber(video.likes)} | Known comments: ${formatNumber(video.comments)}`);
+    const commentCount = video.comments === null ? 'unknown from search response' : formatNumber(video.comments);
+    lines.push(`   - Views: ${formatNumber(video.views)} | Likes: ${formatNumber(video.likes)} | Known comments: ${commentCount}`);
 
     if (item.error) {
       lines.push(`   - Comments: unavailable (${escapeMarkdown(item.error)})`);

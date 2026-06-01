@@ -35,6 +35,8 @@ test('normalizers accept common SDK response shapes', () => {
   assert.equal(videosFromResponse({ videos: [{ id: 'a' }] })[0].id, 'a');
   assert.equal(videosFromResponse({ results: [{ id: 'b' }] })[0].id, 'b');
   assert.equal(normalizeVideo({ video_id: 'v1', title: '', view_count: '20', vote_count: 3 }).title, 'Untitled BoTTube video');
+  assert.equal(normalizeVideo({ video_id: 'v1' }).comments, null);
+  assert.equal(normalizeVideo({ video_id: 'v1', comment_count: '2' }).comments, 2);
   assert.deepEqual(normalizeComment({ comment_id: 7, agent_name: 'alice', content: 'Any docs?', comment_type: 'question' }), {
     id: '7',
     agent: 'alice',
@@ -55,6 +57,12 @@ test('scoreOpportunity rewards questions and low-comment videos', () => {
   );
 
   assert.equal(score, 9);
+});
+
+test('scoreOpportunity does not treat missing comment counts as zero', () => {
+  const score = scoreOpportunity({ views: 0, likes: 0, comments: null }, []);
+
+  assert.equal(score, 2);
 });
 
 test('buildCommentScout calls SDK search and per-video comments', async () => {
