@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}{{ video.title }}{% endblock %}
 
@@ -4124,97 +4124,6 @@ function seekTo(seconds) {
     };
 })();
 
-// --- Video Player Keyboard Shortcuts (Bounty #2140) ---
-(function() {
-    const video = document.getElementById('main-video');
-    if (!video) return;
-
-    function showIndicator(icon) {
-        let overlay = document.getElementById('player-shortcut-indicator');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'player-shortcut-indicator';
-            overlay.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);color:white;border-radius:50%;width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:40px;pointer-events:none;z-index:100;opacity:0;transition:opacity 0.2s;';
-            video.parentElement.appendChild(overlay);
-        }
-        overlay.innerHTML = icon;
-        overlay.style.opacity = '1';
-        clearTimeout(overlay._hideTimeout);
-        overlay._hideTimeout = setTimeout(() => { overlay.style.opacity = '0'; }, 500);
-    }
-
-    document.addEventListener('keydown', function(e) {
-        // Disable shortcuts when typing in inputs/textareas
-        const active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
-
-        const key = e.key.toLowerCase();
-
-        // Space or K: Play/Pause
-        if (key === ' ' || key === 'k') {
-            e.preventDefault();
-            if (video.paused) {
-                video.play();
-                showIndicator('▶');
-            } else {
-                video.pause();
-                showIndicator('Ⅱ');
-            }
-        }
-        // J: Seek backward 10s
-        else if (key === 'j') {
-            e.preventDefault();
-            video.currentTime = Math.max(0, video.currentTime - 10);
-            showIndicator('↺');
-        }
-        // L: Seek forward 10s
-        else if (key === 'l') {
-            e.preventDefault();
-            video.currentTime = Math.min(video.duration || video.currentTime + 10, video.currentTime + 10);
-            showIndicator('↻');
-        }
-        // ArrowLeft: Seek backward 5s
-        else if (key === 'arrowleft') {
-            e.preventDefault();
-            video.currentTime = Math.max(0, video.currentTime - 5);
-            showIndicator('←');
-        }
-        // ArrowRight: Seek forward 5s
-        else if (key === 'arrowright') {
-            e.preventDefault();
-            video.currentTime = Math.min(video.duration || video.currentTime + 5, video.currentTime + 5);
-            showIndicator('→');
-        }
-        // M: Mute toggle
-        else if (key === 'm') {
-            e.preventDefault();
-            video.muted = !video.muted;
-            showIndicator(video.muted ? '🔇' : '🔊');
-        }
-        // F: Fullscreen toggle
-        else if (key === 'f') {
-            e.preventDefault();
-            if (!document.fullscreenElement) {
-                video.parentElement.requestFullscreen().catch(err => console.error(err));
-            } else {
-                document.exitFullscreen();
-            }
-        }
-        // ArrowUp: Volume up 5%
-        else if (key === 'arrowup') {
-            e.preventDefault();
-            video.volume = Math.min(1, video.volume + 0.05);
-            showIndicator('🔊 ' + Math.round(video.volume * 100) + '%');
-        }
-        // ArrowDown: Volume down 5%
-        else if (key === 'arrowdown') {
-            e.preventDefault();
-            video.volume = Math.max(0, video.volume - 0.05);
-            showIndicator('🔉 ' + Math.round(video.volume * 100) + '%');
-        }
-    });
-})();
-// --- End Bounty #2140 ---
 })();
 
 // ---------------------------------------------------------------------------
@@ -4633,3 +4542,4 @@ function seekTo(seconds) {
 </script>
 
 {% endblock %}
+
