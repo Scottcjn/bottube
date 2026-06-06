@@ -940,7 +940,7 @@
     <div class="video-grid">
         {% for video in trending[2:] %}
         <div class="video-card">
-            <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
+            <a class="video-thumbnail-link" href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
                     <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
@@ -951,15 +951,17 @@
                     <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
                     {% endif %}
                 </div>
-                <div class="video-info">
-                    <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async" width="40" height="40">
-                    <div class="video-meta">
-                        <div class="video-title">{{ video.title }}</div>
-                        <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
-                        <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
-                    </div>
-                </div>
             </a>
+            <div class="video-info">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async" width="40" height="40">
+                <div class="video-meta">
+                    <a class="video-title-link" href="{{ P }}/watch/{{ video.video_id }}">
+                        <div class="video-title">{{ video.title }}</div>
+                    </a>
+                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
+                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                </div>
+            </div>
         </div>
         {% endfor %}
     </div>
@@ -1097,18 +1099,20 @@
                 var watchUrl = '/watch/' + _esc(v.video_id) + (v._imp ? '?imp=' + _esc(v._imp) : '');
                 return ''
                     + '<div class="video-card">'
-                    +   '<a href="' + watchUrl + '" aria-label="Watch ' + _esc(v.title) + '">'
+                    +   '<a class="video-thumbnail-link" href="' + watchUrl + '" aria-label="Watch ' + _esc(v.title) + '">'
                     +     '<div class="thumb-wrap">' + thumb + dur + '</div>'
-                    +     '<div class="video-info">'
-                    +       '<img class="channel-avatar" src="' + _esc(avatar) + '" alt="Channel avatar" loading="lazy" decoding="async" width="40" height="40">'
-                    +       '<div class="video-meta">'
-                    +         '<div class="video-title">' + _esc(v.title) + '</div>'
-                    +         '<a href="/agent/' + _esc(v.agent_name) + '" class="video-channel">' + _esc(v.display_name || v.agent_name) + ' ' + human + '</a>'
-                    +         '<div class="video-stats">' + _fmtViews(v.views) + ' &middot; ' + _ago(v.created_at) + '</div>'
-                    +         why
-                    +       '</div>'
-                    +     '</div>'
                     +   '</a>'
+                    +   '<div class="video-info">'
+                    +     '<img class="channel-avatar" src="' + _esc(avatar) + '" alt="Channel avatar" loading="lazy" decoding="async" width="40" height="40">'
+                    +     '<div class="video-meta">'
+                    +       '<a class="video-title-link" href="' + watchUrl + '">'
+                    +         '<div class="video-title">' + _esc(v.title) + '</div>'
+                    +       '</a>'
+                    +       '<a href="/agent/' + _esc(v.agent_name) + '" class="video-channel">' + _esc(v.display_name || v.agent_name) + ' ' + human + '</a>'
+                    +       '<div class="video-stats">' + _fmtViews(v.views) + ' &middot; ' + _ago(v.created_at) + '</div>'
+                    +       why
+                    +     '</div>'
+                    +   '</div>'
                     + '</div>';
             }).join('');
         })
@@ -1126,7 +1130,7 @@
     <div class="video-grid">
         {% for video in recent %}
         <div class="video-card">
-            <a href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
+            <a class="video-thumbnail-link" href="{{ P }}/watch/{{ video.video_id }}" aria-label="Watch {{ video.title }}">
                 <div class="thumb-wrap">
                     {% if video.thumbnail %}
                     <img src="{{ P }}/thumbnails/{{ video.thumbnail }}" alt="Video thumbnail: {{ video.title }}" loading="lazy" decoding="async" width="720" height="720">
@@ -1137,15 +1141,17 @@
                     <span class="duration-badge">{{ video.duration_sec | format_duration }}</span>
                     {% endif %}
                 </div>
-                <div class="video-info">
-                    <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async" width="40" height="40">
-                    <div class="video-meta">
-                        <div class="video-title">{{ video.title }}</div>
-                        <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
-                        <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
-                    </div>
-                </div>
             </a>
+            <div class="video-info">
+                <img class="channel-avatar" src="{{ video.avatar_url or (P ~ "/avatar/" ~ video.agent_name ~ ".svg") }}" alt="{{ video.agent_name }}" loading="lazy" decoding="async" width="40" height="40">
+                <div class="video-meta">
+                    <a class="video-title-link" href="{{ P }}/watch/{{ video.video_id }}">
+                        <div class="video-title">{{ video.title }}</div>
+                    </a>
+                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
+                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                </div>
+            </div>
         </div>
         {% endfor %}
     </div>
