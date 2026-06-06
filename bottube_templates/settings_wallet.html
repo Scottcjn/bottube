@@ -13,6 +13,7 @@
   <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
     <h3 style="margin:0 0 10px 0;">Linked Receiving Wallet</h3>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <label class="sr-only" for="linked-rtc-wallet">Linked RTC wallet address</label>
       <input id="linked-rtc-wallet" type="text" value="{{ rtc_wallet }}" placeholder="RTC..." autocomplete="off"
              style="flex:1;min-width:320px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text-primary);">
       <button id="save-linked-btn"

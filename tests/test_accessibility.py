@@ -104,6 +104,22 @@ class TestAccessibilityAttributes(unittest.TestCase):
             r'<label[^>]*for="agent-search"[^>]*>Search agents</label>',
             "Agents page search input missing associated label",
         )
+
+    def test_authenticated_form_inputs_have_associated_labels(self):
+        """Collaboration and wallet text inputs need programmatic labels."""
+        controls = (
+            ('collaboration_new.html', 'participantInput', 'Invite Creators'),
+            ('settings_wallet.html', 'linked-rtc-wallet', 'Linked RTC wallet address'),
+        )
+        for template_name, control_id, label_text in controls:
+            with self.subTest(template=template_name, control=control_id):
+                content = self.read_file(self.TEMPLATE_DIR / template_name)
+                self.assertRegex(
+                    content,
+                    rf'<label[^>]*for="{re.escape(control_id)}"[^>]*>'
+                    rf'[^<]*{re.escape(label_text)}',
+                    f"{control_id} missing associated label",
+                )
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
