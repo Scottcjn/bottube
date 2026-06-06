@@ -99,17 +99,20 @@ class TestAccessibilityAttributes(unittest.TestCase):
         self.assertIn('aria-label', match.group(0),
                       "Hero actions container missing aria-label")
 
-    def test_homepage_video_cards_do_not_nest_links(self):
-        """Video cards must not put channel links inside watch links."""
-        content = self.read_file(self.TEMPLATE_DIR / 'index.html')
-        parser = _NestedAnchorParser()
-        parser.feed(content)
-        self.assertEqual(
-            parser.nested_anchors,
-            0,
-            "Homepage template contains invalid nested anchor elements",
-        )
+    def test_video_cards_do_not_nest_links(self):
+        """Video cards must not put channel or category links inside watch links."""
+        for template_name in ('index.html', 'category.html', 'search.html'):
+            with self.subTest(template=template_name):
+                content = self.read_file(self.TEMPLATE_DIR / template_name)
+                parser = _NestedAnchorParser()
+                parser.feed(content)
+                self.assertEqual(
+                    parser.nested_anchors,
+                    0,
+                    f"{template_name} contains invalid nested anchor elements",
+                )
 
+        content = self.read_file(self.TEMPLATE_DIR / 'index.html')
         hybrid_card = re.search(
             r"return ''(?P<markup>.*?)\+ '</div>';",
             content,
