@@ -200,6 +200,26 @@ class TestARIAPatterns(unittest.TestCase):
         self.assertIn('role="contentinfo"', content,
                       "Footer contentinfo landmark not found")
 
+    def test_bridge_result_panels_are_live_regions(self):
+        """Bridge operation results should be announced by screen readers."""
+        panel_ids = ("infoPanel", "depositPanel", "withdrawPanel", "historyPanel")
+
+        for template_name in ("bridge_wrtc.html", "bridge_base.html"):
+            content = self.read_file(self.TEMPLATE_DIR / template_name)
+            for panel_id in panel_ids:
+                match = re.search(
+                    rf'<div[^>]*id="{panel_id}"[^>]*>',
+                    content,
+                )
+                self.assertIsNotNone(
+                    match,
+                    f"{template_name} is missing #{panel_id}",
+                )
+                panel = match.group(0)
+                self.assertIn('role="status"', panel)
+                self.assertIn('aria-live="polite"', panel)
+                self.assertIn('aria-atomic="true"', panel)
+
 
 class TestAccessibilityDocumentation(unittest.TestCase):
     """Test that accessibility documentation exists."""
