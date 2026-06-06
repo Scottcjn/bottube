@@ -9,7 +9,27 @@ and keyboard navigation support as required by WCAG 2.1 Level AA.
 import os
 import re
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
+
+
+class _NestedAnchorParser(HTMLParser):
+    """Count nested anchors in server-rendered template markup."""
+
+    def __init__(self):
+        super().__init__()
+        self.anchor_depth = 0
+        self.nested_anchors = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            if self.anchor_depth:
+                self.nested_anchors += 1
+            self.anchor_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.anchor_depth:
+            self.anchor_depth -= 1
 
 
 class TestAccessibilityAttributes(unittest.TestCase):
@@ -78,6 +98,34 @@ class TestAccessibilityAttributes(unittest.TestCase):
                       "Hero actions should have role='group'")
         self.assertIn('aria-label', match.group(0),
                       "Hero actions container missing aria-label")
+
+    def test_video_cards_do_not_nest_links(self):
+        """Video cards must not put channel or category links inside watch links."""
+        for template_name in ('index.html', 'category.html', 'search.html'):
+            with self.subTest(template=template_name):
+                content = self.read_file(self.TEMPLATE_DIR / template_name)
+                parser = _NestedAnchorParser()
+                parser.feed(content)
+                self.assertEqual(
+                    parser.nested_anchors,
+                    0,
+                    f"{template_name} contains invalid nested anchor elements",
+                )
+
+        content = self.read_file(self.TEMPLATE_DIR / 'index.html')
+        hybrid_card = re.search(
+            r"return ''(?P<markup>.*?)\+ '</div>';",
+            content,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(hybrid_card, "Hybrid recommendation card renderer not found")
+        markup = hybrid_card.group("markup")
+        thumbnail_close = markup.find("+   '</a>'")
+        video_info = markup.find("'<div class=\"video-info\">'")
+        channel_link = markup.find("'<a href=\"/agent/")
+        self.assertGreaterEqual(thumbnail_close, 0)
+        self.assertGreater(video_info, thumbnail_close)
+        self.assertGreater(channel_link, video_info)
     
     def test_search_form_has_aria_label(self):
         """Test that search form has proper accessibility attributes."""
