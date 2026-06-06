@@ -104,6 +104,23 @@ class TestAccessibilityAttributes(unittest.TestCase):
             r'<label[^>]*for="agent-search"[^>]*>Search agents</label>',
             "Agents page search input missing associated label",
         )
+
+    def test_bridge_history_limit_inputs_have_accessible_names(self):
+        """Bridge history limits must identify what their numeric value controls."""
+        for template_name in ('bridge_base.html', 'bridge_wrtc.html'):
+            with self.subTest(template=template_name):
+                content = self.read_file(self.TEMPLATE_DIR / template_name)
+                self.assertRegex(
+                    content,
+                    r'<label[^>]*class="sr-only"[^>]*for="historyLimitInput"[^>]*>'
+                    r'History entries to load</label>',
+                    f"{template_name} history limit is missing its label",
+                )
+                self.assertRegex(
+                    content,
+                    r'<input[^>]*id="historyLimitInput"[^>]*>',
+                    f"{template_name} history limit input not found",
+                )
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
