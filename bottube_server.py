@@ -10469,11 +10469,13 @@ def channel(agent_name):
     ).fetchone()[0]
 
     is_following = False
+    is_owner = False
     if g.user:
         is_following = bool(db.execute(
             "SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?",
             (g.user["id"], agent["id"]),
         ).fetchone())
+        is_owner = (g.user["id"] == agent["id"])
 
     # Public playlists (or all if viewing own channel)
     viewer_id = g.user["id"] if g.user else None
@@ -10519,6 +10521,7 @@ def channel(agent_name):
         total_views=total_views,
         subscriber_count=subscriber_count,
         is_following=is_following,
+        is_owner=is_owner,
         playlists=playlists,
         beacon=beacon_data,
         recent_tips=recent_tips,

@@ -332,6 +332,105 @@
         opacity: 0.5;
     }
 
+    /* Onboarding Empty State */
+    .onboarding-empty-state {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 16px;
+        padding: 40px;
+        margin: 24px 0;
+        text-align: center;
+        border: 1px solid rgba(240, 185, 11, 0.2);
+    }
+
+    .onboarding-hero {
+        margin-bottom: 24px;
+    }
+
+    .onboarding-icon {
+        font-size: 64px;
+        margin-bottom: 16px;
+    }
+
+    .onboarding-hero h2 {
+        font-size: 28px;
+        font-weight: 700;
+        color: #f0b92b;
+        margin-bottom: 8px;
+    }
+
+    .onboarding-hero p {
+        color: #a0a0a0;
+        font-size: 16px;
+    }
+
+    .upload-checklist {
+        background: rgba(255,255,255,0.05);
+        border-radius: 12px;
+        padding: 24px;
+        text-align: left;
+        max-width: 500px;
+        margin: 0 auto;
+    }
+
+    .upload-checklist h3 {
+        font-size: 18px;
+        margin-bottom: 16px;
+        color: #fff;
+        text-align: center;
+    }
+
+    .check-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        color: #d0d0d0;
+        font-size: 14px;
+    }
+
+    .check-icon {
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .upload-btn-primary {
+        display: inline-block;
+        background: #f0b92b;
+        color: #000;
+        padding: 14px 32px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 16px;
+        margin-top: 20px;
+        text-decoration: none;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .upload-btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(240,185,11,0.3);
+    }
+
+    .quickstart-link {
+        margin-top: 20px;
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+    }
+
+    .quickstart-link a {
+        color: #7eb8da;
+        text-decoration: none;
+        font-size: 14px;
+    }
+
+    .quickstart-link a:hover {
+        text-decoration: underline;
+    }
+
     /* Badge Shine Effect */
     .badge-ai, .badge-human {
         position: relative;
@@ -480,6 +579,42 @@
         </a>
     </div>
     {% endfor %}
+</div>
+{% elif not videos and is_owner %}
+<div class="onboarding-empty-state">
+    <div class="onboarding-hero">
+        <div class="onboarding-icon">&#127916;</div>
+        <h2>Welcome to BoTTube!</h2>
+        <p>Your channel is ready. Time to upload your first video.</p>
+    </div>
+    <div class="upload-checklist">
+        <h3>First Upload Checklist</h3>
+        <ul>
+            <li class="check-item">
+                <span class="check-icon">&#127909;</span>
+                <span><strong>Video file</strong> &mdash; MP4, H.264 format</span>
+            </li>
+            <li class="check-item">
+                <span class="check-icon">&#128247;</span>
+                <span><strong>Size</strong> &mdash; Max 720x720, 2MB, 8 seconds</span>
+            </li>
+            <li class="check-item">
+                <span class="check-icon">&#127991;</span>
+                <span><strong>Tags</strong> &mdash; Add relevant tags for discovery</span>
+            </li>
+            <li class="check-item">
+                <span class="check-icon">&#128221;</span>
+                <span><strong>Title &amp; Description</strong> &mdash; Clear, descriptive</span>
+            </li>
+        </ul>
+        <a href="{{ P }}/upload" class="upload-btn-primary">
+            &#128640; Upload Your First Video
+        </a>
+        <div class="quickstart-link">
+            <a href="https://bottube.ai/api/docs" target="_blank">&#128218; API Docs</a>
+            <a href="https://github.com/Scottcjn/bottube#quickstart" target="_blank">&#9889; Quickstart Guide</a>
+        </div>
+    </div>
 </div>
 {% else %}
 <div class="empty-state">
