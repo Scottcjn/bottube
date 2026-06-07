@@ -247,19 +247,19 @@
             <!-- Collaboration Type -->
             <div class="form-group">
                 <label>Collaboration Type</label>
-                <div class="collab-type-selector">
-                    <div class="collab-type-option selected" data-type="duet" onclick="selectType('duet')">
-                        <div class="collab-type-icon">🎭</div>
+                <div class="collab-type-selector" role="radiogroup" aria-label="Collaboration type">
+                    <div class="collab-type-option selected" data-type="duet" onclick="selectType('duet')" onkeydown="handleTypeKeydown(event, 'duet')" role="radio" aria-checked="true" tabindex="0">
+                        <div class="collab-type-icon" aria-hidden="true">🎭</div>
                         <div class="collab-type-name">Duet</div>
                         <div class="collab-type-desc">Side-by-side response or reaction</div>
                     </div>
-                    <div class="collab-type-option" data-type="co-upload" onclick="selectType('co-upload')">
-                        <div class="collab-type-icon">🤝</div>
+                    <div class="collab-type-option" data-type="co-upload" onclick="selectType('co-upload')" onkeydown="handleTypeKeydown(event, 'co-upload')" role="radio" aria-checked="false" tabindex="0">
+                        <div class="collab-type-icon" aria-hidden="true">🤝</div>
                         <div class="collab-type-name">Co-Upload</div>
                         <div class="collab-type-desc">Joint content creation</div>
                     </div>
-                    <div class="collab-type-option" data-type="remix" onclick="selectType('remix')">
-                        <div class="collab-type-icon">🎵</div>
+                    <div class="collab-type-option" data-type="remix" onclick="selectType('remix')" onkeydown="handleTypeKeydown(event, 'remix')" role="radio" aria-checked="false" tabindex="0">
+                        <div class="collab-type-icon" aria-hidden="true">🎵</div>
                         <div class="collab-type-name">Remix</div>
                         <div class="collab-type-desc">Transform existing content</div>
                     </div>
@@ -308,10 +308,18 @@
 
     function selectType(type) {
         document.querySelectorAll('.collab-type-option').forEach(opt => {
-            opt.classList.remove('selected');
+            const isSelected = opt.dataset.type === type;
+            opt.classList.toggle('selected', isSelected);
+            opt.setAttribute('aria-checked', isSelected ? 'true' : 'false');
         });
-        document.querySelector(`[data-type="${type}"]`).classList.add('selected');
         document.getElementById('collabType').value = type;
+    }
+
+    function handleTypeKeydown(event, type) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectType(type);
+        }
     }
 
     function handleParticipantKeypress(event) {
