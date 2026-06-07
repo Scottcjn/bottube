@@ -16,8 +16,12 @@ jobs:
       - name: Award RTC to contributor
         continue-on-error: true  # rewards are best-effort; never gate CI
         uses: Scottcjn/rustchain-bounties/actions/rtc-reward@main
+        env:
+          # Action reads GITHUB_TOKEN from env; without it every run crashed
+          # ("Error: GITHUB_TOKEN not set"), masked by continue-on-error.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          node-url: https://50.28.86.131
+          node-url: https://rustchain.org
           amount: 5
           wallet-from: founder_community
           admin-key: ${{ secrets.RTC_ADMIN_KEY }}
