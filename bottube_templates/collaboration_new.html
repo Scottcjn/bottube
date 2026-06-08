@@ -41,6 +41,8 @@
     }
 
     .collab-type-option {
+        display: block;
+        width: 100%;
         background: var(--bg-secondary);
         border: 2px solid var(--border);
         border-radius: var(--radius);
@@ -48,6 +50,7 @@
         text-align: center;
         cursor: pointer;
         transition: all 0.2s;
+        color: var(--text-primary);
     }
 
     .collab-type-option:hover {
@@ -246,23 +249,23 @@
             
             <!-- Collaboration Type -->
             <div class="form-group">
-                <label>Collaboration Type</label>
-                <div class="collab-type-selector">
-                    <div class="collab-type-option selected" data-type="duet" onclick="selectType('duet')">
+                <label id="collab-type-label">Collaboration Type</label>
+                <div class="collab-type-selector" role="radiogroup" aria-labelledby="collab-type-label">
+                    <button type="button" class="collab-type-option selected" data-type="duet" role="radio" aria-checked="true" tabindex="0" onclick="selectType('duet')" onkeydown="handleTypeOptionKeydown(event, 'duet')">
                         <div class="collab-type-icon">🎭</div>
                         <div class="collab-type-name">Duet</div>
                         <div class="collab-type-desc">Side-by-side response or reaction</div>
-                    </div>
-                    <div class="collab-type-option" data-type="co-upload" onclick="selectType('co-upload')">
+                    </button>
+                    <button type="button" class="collab-type-option" data-type="co-upload" role="radio" aria-checked="false" tabindex="-1" onclick="selectType('co-upload')" onkeydown="handleTypeOptionKeydown(event, 'co-upload')">
                         <div class="collab-type-icon">🤝</div>
                         <div class="collab-type-name">Co-Upload</div>
                         <div class="collab-type-desc">Joint content creation</div>
-                    </div>
-                    <div class="collab-type-option" data-type="remix" onclick="selectType('remix')">
+                    </button>
+                    <button type="button" class="collab-type-option" data-type="remix" role="radio" aria-checked="false" tabindex="-1" onclick="selectType('remix')" onkeydown="handleTypeOptionKeydown(event, 'remix')">
                         <div class="collab-type-icon">🎵</div>
                         <div class="collab-type-name">Remix</div>
                         <div class="collab-type-desc">Transform existing content</div>
-                    </div>
+                    </button>
                 </div>
                 <input type="hidden" name="type" id="collabType" value="duet">
             </div>
@@ -309,9 +312,41 @@
     function selectType(type) {
         document.querySelectorAll('.collab-type-option').forEach(opt => {
             opt.classList.remove('selected');
+            opt.setAttribute('aria-checked', 'false');
+            opt.setAttribute('tabindex', '-1');
         });
-        document.querySelector(`[data-type="${type}"]`).classList.add('selected');
+        const selectedOption = document.querySelector(`[data-type="${type}"]`);
+        selectedOption.classList.add('selected');
+        selectedOption.setAttribute('aria-checked', 'true');
+        selectedOption.setAttribute('tabindex', '0');
         document.getElementById('collabType').value = type;
+    }
+
+    function handleTypeOptionKeydown(event, type) {
+        if (event.key === ' ' || event.key === 'Enter') {
+            event.preventDefault();
+            selectType(type);
+            document.querySelector(`[data-type="${type}"]`).focus();
+            return;
+        }
+
+        const types = ['duet', 'co-upload', 'remix'];
+        const currentIndex = types.indexOf(type);
+        if (currentIndex === -1) {
+            return;
+        }
+
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            const nextType = types[(currentIndex + 1) % types.length];
+            selectType(nextType);
+            document.querySelector(`[data-type="${nextType}"]`).focus();
+        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            const previousType = types[(currentIndex - 1 + types.length) % types.length];
+            selectType(previousType);
+            document.querySelector(`[data-type="${previousType}"]`).focus();
+        }
     }
 
     function handleParticipantKeypress(event) {

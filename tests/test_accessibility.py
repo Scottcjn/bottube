@@ -168,6 +168,28 @@ class TestAccessibilityAttributes(unittest.TestCase):
                     rf'[^<]*{re.escape(label_text)}',
                     f"{control_id} missing associated label",
                 )
+
+    def test_collaboration_type_cards_expose_keyboard_radio_group(self):
+        """Collaboration type cards should expose radio semantics and keyboard support."""
+        content = self.read_file(self.TEMPLATE_DIR / 'collaboration_new.html')
+
+        self.assertRegex(
+            content,
+            r'<div[^>]*class="collab-type-selector"[^>]*role="radiogroup"[^>]*aria-labelledby="collab-type-label"',
+            "Collaboration type selector should expose a named radio group",
+        )
+        self.assertIn('id="collab-type-label"', content,
+                      "Collaboration type selector missing visible label id")
+
+        for collab_type in ("duet", "co-upload", "remix"):
+            self.assertRegex(
+                content,
+                rf'data-type="{re.escape(collab_type)}"[^>]*role="radio"[^>]*aria-checked=',
+                f"{collab_type} option should expose radio semantics",
+            )
+
+        self.assertIn('handleTypeOptionKeydown', content,
+                      "Collaboration type cards missing keyboard handler")
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
