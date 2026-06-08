@@ -99,6 +99,24 @@ class TestAccessibilityAttributes(unittest.TestCase):
         self.assertIn('aria-label', match.group(0),
                       "Hero actions container missing aria-label")
 
+    def test_bridge_result_panels_are_live_regions(self):
+        """Bridge status panels should announce updates without stealing focus."""
+        expected_ids = ("infoPanel", "depositPanel", "withdrawPanel", "historyPanel")
+
+        for template_name in ("bridge_wrtc.html", "bridge_base.html"):
+            with self.subTest(template=template_name):
+                content = self.read_file(self.TEMPLATE_DIR / template_name)
+                for panel_id in expected_ids:
+                    match = re.search(rf'<div[^>]*id="{panel_id}"[^>]*>', content)
+                    self.assertIsNotNone(match, f"{template_name} missing {panel_id}")
+                    markup = match.group(0)
+                    self.assertIn('role="status"', markup,
+                                  f"{template_name} {panel_id} missing role='status'")
+                    self.assertIn('aria-live="polite"', markup,
+                                  f"{template_name} {panel_id} missing aria-live")
+                    self.assertIn('aria-atomic="true"', markup,
+                                  f"{template_name} {panel_id} missing aria-atomic")
+
     def test_video_cards_do_not_nest_links(self):
         """Video cards must not put channel or category links inside watch links."""
         for template_name in ('index.html', 'category.html', 'search.html'):
