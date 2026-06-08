@@ -91,6 +91,14 @@ def _init_provider_registry():
     _provider_registry.register("stability", _try_stability, requires_key_env="STABILITY_API_KEY")
     _provider_registry.register("fal", _try_fal, requires_key_env="FAL_API_KEY")
     _provider_registry.register("replicate", _try_replicate, requires_key_env="REPLICATE_API_TOKEN")
+    # Local, free, deterministic retro-CGI lane (bottube-feverdream).
+    # No API key — always available where the pipeline is installed.
+    try:
+        from feverdream_provider import register as _register_feverdream
+        if _register_feverdream(_provider_registry):
+            print("[video_gen] feverdream provider registered (local retro-CGI)")
+    except Exception as _e:
+        print(f"[video_gen] feverdream provider unavailable: {_e}")
 
 
 # ---------------------------------------------------------------------------
@@ -764,6 +772,57 @@ def _ffmpeg_title_card(prompt: str, duration: int, output_path: Path) -> bool:
 # Generation worker (runs in background thread)
 # ---------------------------------------------------------------------------
 
+def _publish_video(video_id: str, agent_id: int, title: str, prompt: str,
+                   final_path: Path, category: str) -> str:
+    """Turn a finished mp4 into a published BoTTube video record.
+
+    Shared by the normal generation worker and the RTC-gated feverdream worker:
+    metadata -> thumbnail -> vision screening -> INSERT INTO videos. Returns the
+    stream URL.
+    """
+    from bottube_server import (get_video_metadata, generate_thumbnail,
+                                screen_video, VISION_SCREENING_ENABLED, DB_PATH)
+    vid_duration, width, height = get_video_metadata(final_path)
+
+    thumb_filename = f"{video_id}.jpg"
+    thumb_path = _thumb_dir() / thumb_filename
+    if not generate_thumbnail(final_path, thumb_path):
+        thumb_filename = ""
+
+    screening_result = screen_video(str(final_path), run_tier2=VISION_SCREENING_ENABLED)
+    screening_status = screening_result.get("status", "pending_review")
+    screening_details = json.dumps(screening_result)
+
+    db = sqlite3.connect(str(DB_PATH))
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=5000")
+    db.execute(
+        """INSERT INTO videos
+           (video_id, agent_id, title, description, filename, thumbnail,
+            duration_sec, width, height, tags, scene_description, category,
+            novelty_score, novelty_flags, revision_of, revision_note,
+            challenge_id, created_at, screening_status, screening_details,
+            is_removed, removed_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            video_id, agent_id, title, prompt,
+            f"{video_id}.mp4", thumb_filename,
+            vid_duration, width, height,
+            json.dumps([]), prompt, category,
+            0.0, "", "", "", "",
+            time.time(),
+            screening_status, screening_details,
+            1 if screening_status == "failed" else 0,
+            ("held_for_review: " + screening_result.get("summary", ""))[:500]
+            if screening_status == "failed" else "",
+        ),
+    )
+    db.commit()
+    db.close()
+    return f"https://bottube.ai/api/videos/{video_id}/stream"
+
+
 def _generation_worker(job_id: str, agent_id: int, prompt: str,
                        duration: int, category: str, title: str):
     """Background worker that generates the video and inserts the DB record."""
@@ -821,56 +880,8 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
                 return
 
         # Get video metadata
-        from bottube_server import get_video_metadata, generate_thumbnail
-        vid_duration, width, height = get_video_metadata(final_path)
-
-        # Generate thumbnail
-        thumb_filename = f"{video_id}.jpg"
-        thumb_path = _thumb_dir() / thumb_filename
-        if not generate_thumbnail(final_path, thumb_path):
-            thumb_filename = ""
-
-        # ----- Vision Screening (same as /api/upload pipeline) -----
-        from bottube_server import screen_video, VISION_SCREENING_ENABLED
-        screening_result = screen_video(str(final_path), run_tier2=VISION_SCREENING_ENABLED)
-        screening_status = screening_result.get("status", "pending_review")
-        screening_details = json.dumps(screening_result)
-
-        # Insert into database
-        from bottube_server import DB_PATH
-        db = sqlite3.connect(str(DB_PATH))
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=5000")
-
-        db.execute(
-            """INSERT INTO videos
-               (video_id, agent_id, title, description, filename, thumbnail,
-                duration_sec, width, height, tags, scene_description, category,
-                novelty_score, novelty_flags, revision_of, revision_note,
-                challenge_id, created_at, screening_status, screening_details,
-                is_removed, removed_reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                video_id, agent_id, title, prompt,
-                f"{video_id}.mp4", thumb_filename,
-                vid_duration, width, height,
-                json.dumps([]),  # tags
-                prompt,  # scene_description
-                category,
-                0.0, "",  # novelty_score, novelty_flags
-                "", "",   # revision_of, revision_note
-                "",       # challenge_id
-                time.time(),
-                screening_status, screening_details,
-                1 if screening_status == "failed" else 0,
-                ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
-            ),
-        )
-        db.commit()
-        db.close()
-
-        video_url = f"https://bottube.ai/api/videos/{video_id}/stream"
+        video_url = _publish_video(video_id, agent_id, title, prompt,
+                                   final_path, category)
         _update_job(job_id, status="completed", video_id=video_id,
                     video_url=video_url, gen_method=gen_method)
 

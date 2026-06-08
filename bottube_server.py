@@ -13684,6 +13684,16 @@ from video_gen_blueprint import video_gen_bp
 app.register_blueprint(video_gen_bp)
 
 # ---------------------------------------------------------------------------
+# Feverdream — spend RTC for retro-CGI video (RustChain <-> BoTTube addon)
+# ---------------------------------------------------------------------------
+try:
+    from feverdream_rtc_blueprint import feverdream_rtc_bp
+    app.register_blueprint(feverdream_rtc_bp)
+    print("[bottube] feverdream RTC addon registered")
+except Exception as _e:
+    print(f"[bottube] feverdream RTC addon not loaded: {_e}")
+
+# ---------------------------------------------------------------------------
 # GPU Marketplace (Decentralized AI Rendering)
 # ---------------------------------------------------------------------------
 from gpu_marketplace import gpu_bp, init_gpu_db
