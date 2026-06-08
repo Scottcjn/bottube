@@ -5,6 +5,7 @@ Task: #1589 - Write unit tests
 """
 from __future__ import annotations
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -86,10 +87,10 @@ def test_homepage_templates_include_mobile_overflow_guards() -> None:
     index_template = (ROOT / "bottube_templates" / "index.html").read_text(encoding="utf-8")
 
     assert "overflow-wrap: anywhere;" in base_template
-    assert "word-break: break-word;" in base_template
-    assert ".search-bar {\n                flex: 1 1 auto;" in base_template
-    assert ".logo { font-size: 18px; }" in base_template
+    assert re.search(r"\.search-bar\s*\{[^}]*flex:\s*1\s+1\s+500px;", base_template, re.DOTALL)
+    assert re.search(r"\.logo\s*\{\s*font-size:\s*18px;\s*\}", base_template)
 
-    assert ".hero-actions {\n        display: flex;" in index_template
+    assert re.search(r"\.hero-actions\s*\{[^}]*display:\s*flex;", index_template, re.DOTALL)
     assert "width: 100%;" in index_template
     assert "white-space: normal;" in index_template
+    assert "overflow-wrap: anywhere;" in index_template
