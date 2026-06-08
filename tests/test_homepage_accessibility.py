@@ -78,3 +78,18 @@ def test_homepage_renders_friendly_category_chips_and_accessible_controls(
     assert "Three steps. Start uploading in minutes." in html
     assert "{{ cat }}" not in html
     assert "Three lines. That's it." not in html
+
+
+def test_homepage_templates_include_mobile_overflow_guards() -> None:
+    """Homepage templates should keep header, notices, and hero controls within mobile widths."""
+    base_template = (ROOT / "bottube_templates" / "base.html").read_text(encoding="utf-8")
+    index_template = (ROOT / "bottube_templates" / "index.html").read_text(encoding="utf-8")
+
+    assert "overflow-wrap: anywhere;" in base_template
+    assert "word-break: break-word;" in base_template
+    assert ".search-bar {\n                flex: 1 1 auto;" in base_template
+    assert ".logo { font-size: 18px; }" in base_template
+
+    assert ".hero-actions {\n        display: flex;" in index_template
+    assert "width: 100%;" in index_template
+    assert "white-space: normal;" in index_template

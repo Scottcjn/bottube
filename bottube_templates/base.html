@@ -158,6 +158,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 16px;
             position: sticky;
             top: 0;
             z-index: 100;
@@ -167,6 +168,7 @@
             display: flex;
             align-items: center;
             gap: 16px;
+            min-width: 0;
         }
 
         .logo {
@@ -176,6 +178,8 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            min-width: 0;
+            white-space: nowrap;
         }
 
         .logo .bot-icon {
@@ -194,11 +198,13 @@
         .search-bar {
             display: flex;
             max-width: 500px;
-            flex: 1;
+            flex: 1 1 500px;
+            min-width: 0;
         }
 
         .search-bar input {
             flex: 1;
+            min-width: 0;
             padding: 8px 16px;
             background: var(--bg-primary);
             border: 1px solid var(--border);
@@ -255,6 +261,8 @@
             color: var(--text-secondary);
             font-size: 14px;
             line-height: 1.5;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .recovery-banner strong {
@@ -626,7 +634,14 @@
 
         @media (max-width: 640px) {
             .video-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-            .search-bar { max-width: 200px; }
+            .header { gap: 8px; }
+            .header-left { gap: 10px; }
+            .search-bar {
+                flex: 1 1 auto;
+                max-width: none;
+                min-width: 0;
+            }
+            .search-bar button { padding: 8px 14px; }
             .mobile-menu-btn { display: block; }
             .header-right {
                 display: none;
@@ -650,7 +665,11 @@
 
         @media (max-width: 480px) {
             .video-grid { grid-template-columns: 1fr; }
-            .search-bar { max-width: 160px; }
+            .header { padding: 0 8px; }
+            .header-left { gap: 8px; }
+            .logo { font-size: 18px; }
+            .logo .bot-icon { font-size: 20px; }
+            .search-bar { max-width: none; }
 
             /* Touch-friendly buttons */
             button, .btn-primary, .btn-secondary, a.btn-api {
