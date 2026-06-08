@@ -181,15 +181,26 @@ class TestAccessibilityAttributes(unittest.TestCase):
         self.assertIn('id="collab-type-label"', content,
                       "Collaboration type selector missing visible label id")
 
-        for collab_type in ("duet", "co-upload", "remix"):
-            self.assertRegex(
-                content,
-                rf'data-type="{re.escape(collab_type)}"[^>]*role="radio"[^>]*aria-checked=',
-                f"{collab_type} option should expose radio semantics",
-            )
+        expected_states = {
+            "duet": ('aria-checked="true"', 'tabindex="0"'),
+            "co-upload": ('aria-checked="false"', 'tabindex="-1"'),
+            "remix": ('aria-checked="false"', 'tabindex="-1"'),
+        }
+        for collab_type, (checked_state, tab_index) in expected_states.items():
+            with self.subTest(option=collab_type):
+                self.assertRegex(
+                    content,
+                    rf'data-type="{re.escape(collab_type)}"[^>]*role="radio"[^>]*{checked_state}[^>]*{tab_index}',
+                    f"{collab_type} option should expose the expected radio state",
+                )
 
-        self.assertIn('handleTypeOptionKeydown', content,
+        self.assertIn('function handleTypeOptionKeydown', content,
                       "Collaboration type cards missing keyboard handler")
+        for key in ('ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'):
+            self.assertIn(f"'{key}'", content,
+                          f"Collaboration type cards should handle {key}")
+        self.assertIn("getTypeOption(type).focus()", content,
+                      "Keyboard activation should keep focus on the selected radio")
     
     def test_skip_link_present(self):
         """Test that skip link for keyboard navigation is present."""
