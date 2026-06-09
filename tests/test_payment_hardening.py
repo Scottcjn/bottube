@@ -2,9 +2,15 @@ import json
 import os
 import sqlite3
 import sys
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+import werkzeug
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -124,6 +130,49 @@ def test_x402_requires_structured_receipt_and_blocks_cross_endpoint_replay(clien
     replay = client.get("/x402/api/videos", headers={"X-PAYMENT": receipt})
     assert replay.status_code == 402
     assert replay.get_json()["reason"] == "payment_already_consumed"
+
+
+@pytest.mark.parametrize(
+    ("query", "error"),
+    [
+        ("page=not-a-number", "page must be a positive integer"),
+        ("page=0", "page must be a positive integer"),
+        ("page=1.5", "page must be a positive integer"),
+        ("per_page=not-a-number", "per_page must be a positive integer"),
+        ("per_page=0", "per_page must be a positive integer"),
+        ("per_page=true", "per_page must be a positive integer"),
+    ],
+)
+def test_x402_video_list_rejects_invalid_pagination(client, monkeypatch, query, error):
+    tx_hash = "0x" + ("cd" * 32)
+
+    def _fake_verify(tx_hash_arg, network, recipient):
+        return (
+            {
+                "tx_hash": tx_hash_arg,
+                "network": network,
+                "recipient": recipient,
+                "amount_raw": 100,
+                "amount_usdc": 0.0001,
+                "block_number": 123,
+            },
+            None,
+        )
+
+    monkeypatch.setattr(x402_payment, "_verify_evm_usdc_transfer", _fake_verify)
+    receipt = json.dumps(
+        {
+            "tx_hash": tx_hash,
+            "network": "base",
+            "recipient": x402_payment.USDC_RECEIVING_ADDRESS,
+            "amount": "0.000100",
+        }
+    )
+
+    resp = client.get(f"/x402/api/videos?{query}", headers={"X-PAYMENT": receipt})
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": error}
 
 
 def test_store_capture_credits_agent_balance_and_earnings(client, monkeypatch):

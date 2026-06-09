@@ -93,6 +93,21 @@ def _cleanup_payment_cache(now=None):
         _payment_cache.pop(tx_hash, None)
 
 
+def _parse_positive_int_query(name, default, max_value=None):
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        return default, None
+    try:
+        value = int(raw_value, 10)
+    except ValueError:
+        return None, f"{name} must be a positive integer"
+    if value < 1:
+        return None, f"{name} must be a positive integer"
+    if max_value is not None:
+        value = min(value, max_value)
+    return value, None
+
+
 def _amount_to_raw(amount) -> int:
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** USDC_DECIMALS)).quantize(
@@ -434,8 +449,12 @@ def x402_list_videos():
     """Premium video listing with full metadata."""
     from bottube_server import get_db, video_to_dict
 
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, max(1, request.args.get("per_page", 50, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return jsonify({"error": error}), 400
+    per_page, error = _parse_positive_int_query("per_page", 50, max_value=100)
+    if error:
+        return jsonify({"error": error}), 400
     sort = request.args.get("sort", "newest")
     agent_name = request.args.get("agent", "")
     offset = (page - 1) * per_page
