@@ -4,9 +4,14 @@
 import sqlite3
 
 import pytest
+import werkzeug
 from flask import Flask, g
 
 import ergo_bridge_blueprint
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = "test"
 
 
 @pytest.fixture()
@@ -56,6 +61,7 @@ def client(tmp_path, monkeypatch):
             db.close()
 
     monkeypatch.setattr(ergo_bridge_blueprint, "get_db", _test_get_db)
+    monkeypatch.setattr(ergo_bridge_blueprint, "ADMIN_KEY", "test-admin")
 
     test_client = app.test_client()
     test_client.db_path = db_path
@@ -64,6 +70,10 @@ def client(tmp_path, monkeypatch):
 
 def _auth_headers():
     return {"X-API-Key": "bottube_sk_ergo_agent"}
+
+
+def _admin_headers():
+    return {"X-Admin-Key": "test-admin"}
 
 
 def _counts_and_balance(db_path):
@@ -148,4 +158,32 @@ def test_ergo_withdraw_rejects_invalid_amount_without_queue_or_debit(client, amo
 
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "amount_rtc must be a finite positive number"
+    assert _counts_and_balance(client.db_path) == before
+
+
+def test_process_withdrawals_rejects_non_object_json(client):
+    before = _counts_and_balance(client.db_path)
+
+    resp = client.post(
+        "/api/ergo/process-withdrawals",
+        json=["withdrawal_id", "tx_id"],
+        headers=_admin_headers(),
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "JSON object required"
+    assert _counts_and_balance(client.db_path) == before
+
+
+def test_process_withdrawals_rejects_non_string_tx_id(client):
+    before = _counts_and_balance(client.db_path)
+
+    resp = client.post(
+        "/api/ergo/process-withdrawals",
+        json={"withdrawal_id": 1, "tx_id": ["ergo_tx"]},
+        headers=_admin_headers(),
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "tx_id must be a string"
     assert _counts_and_balance(client.db_path) == before

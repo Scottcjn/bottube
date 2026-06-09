@@ -533,9 +533,13 @@ def process_withdrawals():
     if not _admin_ok(admin_key):
         return jsonify({"error": "Admin key required"}), 401
 
-    data = request.get_json() or {}
+    data, error = _request_json_object()
+    if error:
+        return error
     withdrawal_id = data.get("withdrawal_id")
-    tx_id = data.get("tx_id", "").strip()
+    tx_id, error = _string_field(data, "tx_id")
+    if error:
+        return error
 
     if not withdrawal_id or not tx_id:
         return jsonify({"error": "withdrawal_id and tx_id required"}), 400
