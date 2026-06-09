@@ -2,9 +2,15 @@ import os
 import sqlite3
 import sys
 import time
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+import werkzeug
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -211,3 +217,13 @@ def test_api_search_matches_caption_text(client):
     caption_resp = client.get("/api/search/captions?q=swamp sermon")
     assert caption_resp.status_code == 200
     assert caption_resp.get_json()["video_ids"] == ["captionvid2"]
+
+
+@pytest.mark.parametrize("limit", ["not-a-number", "0", "-5", "1.5", "true"])
+def test_caption_search_rejects_invalid_limit(client, limit):
+    bottube_server.app.config["PROPAGATE_EXCEPTIONS"] = False
+
+    resp = client.get(f"/api/search/captions?q=swamp sermon&limit={limit}")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "limit must be a positive integer"}

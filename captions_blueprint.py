@@ -41,10 +41,14 @@ WHISPER_MODEL = os.environ.get("BOTTUBE_WHISPER_MODEL", "whisper-1")
 
 def _db_path() -> str:
     from pathlib import Path
-    return os.environ.get(
-        "BOTTUBE_DB_PATH",
-        str(Path(__file__).resolve().parent / "bottube.db"),
+    if "DB_PATH" in globals():
+        return str(globals()["DB_PATH"])
+    if os.environ.get("BOTTUBE_DB_PATH"):
+        return os.environ["BOTTUBE_DB_PATH"]
+    base_dir = Path(
+        os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     )
+    return str(base_dir / "bottube.db")
 
 
 def _connect_db() -> sqlite3.Connection:
@@ -499,6 +503,19 @@ def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
         return []
 
 
+def _parse_caption_limit(default: int = 50, max_value: int = 500) -> int:
+    raw_value = request.args.get("limit")
+    if raw_value is None or raw_value == "":
+        return default
+    try:
+        limit = int(raw_value, 10)
+    except ValueError:
+        raise ValueError("limit must be a positive integer")
+    if limit < 1:
+        raise ValueError("limit must be a positive integer")
+    return min(limit, max_value)
+
+
 @captions_bp.route("/api/videos/<video_id>/captions")
 def get_captions(video_id):
     """Serve VTT or SRT captions for a video."""
@@ -565,5 +582,10 @@ def search_captions():
     if not query:
         return jsonify({"error": "Query parameter 'q' is required"}), 400
 
-    video_ids = find_caption_video_ids(query, limit=request.args.get("limit", 50, type=int))
+    try:
+        limit = _parse_caption_limit()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    video_ids = find_caption_video_ids(query, limit=limit)
     return jsonify({"query": query, "count": len(video_ids), "video_ids": video_ids})
