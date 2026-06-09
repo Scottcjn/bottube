@@ -12,15 +12,24 @@ Endpoints:
   POST /api/feverdream/order                 — pay RTC + commission a video
   GET  /api/feverdream/order/status/<job_id> — poll render/publish status
 
-Payment model: the buyer's wallet signs a standard RustChain transfer of
-PRICE_RTC to STUDIO_WALLET and includes that signed payload as `transfer`.
+Payment model: the buyer's wallet signs a standard RustChain transfer of the
+quoted RTC to STUDIO_WALLET and includes that signed payload as `transfer`.
 We forward it to the node's /wallet/transfer/signed (Ed25519-verified there),
-and only render once payment is confirmed. No admin key, no pulling funds —
-the user authorizes their own spend.
+and only render once payment is confirmed. No admin key, no pulling funds.
+
+Security notes (hardened after a tri-brain review, 2026-06-09):
+- node response must be {ok:true, verified:true} AND carry a txid;
+- exactly one canonical recipient field, must equal the studio wallet;
+- amount must be finite + positive + >= price;
+- each signed transfer is single-use (replay/double-redeem guard);
+- render failures record a refund-pending entry tied to the txid.
+Remaining hardening (documented, needs node/protocol support): ledger-confirmation
+depth before fulfilment, and binding the signed transfer to the agent+order hash.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -43,37 +52,40 @@ feverdream_rtc_bp = Blueprint("feverdream_rtc", __name__)
 RUSTCHAIN_NODE = os.environ.get("RUSTCHAIN_NODE_URL", "https://rustchain.org").rstrip("/")
 STUDIO_WALLET = os.environ.get("FEVERDREAM_WALLET", "feverdream_studio")
 MAX_SECS = int(os.environ.get("FEVERDREAM_MAX_SECS", "8"))
-# Tiered pricing: longer clips cost a touch more RTC (still pennies).
+TITLE_MAX_LEN = 200
 PRICE_PER_EXTRA_SEC = float(os.environ.get("FEVERDREAM_PRICE_PER_SEC", "0.002"))
 
-# Quality tiers (low -> high fidelity / RTC):
-#   cute     = primitive scenes, flat shading — fast & fun (the charming-toy look)
-#   textured = procedural texture + normal/bump maps — real surface detail
-#   studio   = real meshes (Blender lane) + textures + audio/SFX — highest fidelity
+# Quality tiers (low -> high fidelity / RTC).
 TIERS = {
     "cute":     float(os.environ.get("FEVERDREAM_PRICE_CUTE_RTC", "0.01")),
     "textured": float(os.environ.get("FEVERDREAM_PRICE_TEXTURED_RTC", "0.05")),
     "studio":   float(os.environ.get("FEVERDREAM_PRICE_STUDIO_RTC", "0.15")),
 }
-# back-compat aliases for older callers
 TIER_ALIASES = {"standard": "cute", "premium": "textured"}
-PRICE_RTC = TIERS["cute"]
+
+# Replay guard + refund ledger (in-memory; survive-restart durability is a
+# documented TODO — persist these to the DB for production).
+_redeemed = set()
+_redeemed_lock = threading.Lock()
+_refunds = []   # list of {txid, agent_id, reason, ts}
 
 
-def _resolve_tier(tier: str) -> str:
-    tier = (tier or "cute").strip().lower()
-    tier = TIER_ALIASES.get(tier, tier)
-    return tier if tier in TIERS else "cute"
+def _norm_tier(raw):
+    """Return a valid tier name, or None if unknown (strict — caller rejects)."""
+    if not isinstance(raw, str):
+        return None
+    t = raw.strip().lower()
+    t = TIER_ALIASES.get(t, t)
+    return t if t in TIERS else None
 
 
 def _price_for(secs: int, tier: str = "cute") -> float:
-    tier = _resolve_tier(tier)
-    base = TIERS[tier]
+    base = TIERS.get(tier, TIERS["cute"])
     extra = max(0, secs - 4)
     return round(base + extra * PRICE_PER_EXTRA_SEC, 4)
 
 
-def _post_json(url: str, payload: dict, timeout: int = 30) -> tuple[int, dict]:
+def _post_json(url: str, payload: dict, timeout: int = 30):
     body = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json"})
@@ -89,39 +101,55 @@ def _post_json(url: str, payload: dict, timeout: int = 30) -> tuple[int, dict]:
         return 0, {"error": str(e)}
 
 
-def _charge_rtc(transfer: dict, expected_secs: int, tier: str = "standard") -> tuple[bool, str]:
-    """Forward a user-signed transfer to the node. Returns (paid, reason)."""
+def _charge_rtc(transfer, expected_secs, tier):
+    """Forward a user-signed transfer to the node. Returns (paid, reason, txid)."""
     if not isinstance(transfer, dict):
-        return False, "missing signed transfer payload"
-    to_addr = transfer.get("to_address") or transfer.get("to_miner")
-    amount = float(transfer.get("amount_rtc", 0) or 0)
+        return False, "missing signed transfer payload", None
+    # canonical recipient: at most one recipient field, and it must be the studio
+    to_addr = transfer.get("to_address")
+    if transfer.get("to_miner") not in (None, to_addr):
+        return False, "conflicting recipient fields (to_address vs to_miner)", None
+    to_addr = to_addr or transfer.get("to_miner")
     if to_addr != STUDIO_WALLET:
-        return False, f"transfer must be addressed to studio wallet {STUDIO_WALLET}"
-    if amount + 1e-9 < _price_for(expected_secs, tier):
-        return False, f"insufficient payment: need {_price_for(expected_secs, tier)} RTC ({tier})"
+        return False, f"transfer must be addressed to studio wallet {STUDIO_WALLET}", None
+    # finite, positive amount
+    try:
+        amount = float(transfer.get("amount_rtc"))
+    except (TypeError, ValueError):
+        return False, "invalid amount_rtc", None
+    if not math.isfinite(amount) or amount <= 0:
+        return False, "amount_rtc must be a positive finite number", None
+    need = _price_for(expected_secs, tier)
+    if amount + 1e-9 < need:
+        return False, f"insufficient payment: need {need} RTC ({tier})", None
+    # forward to the node; require explicit ok + verified + a txid
     status, resp = _post_json(f"{RUSTCHAIN_NODE}/wallet/transfer/signed", transfer)
-    if status == 200 and resp.get("ok") and resp.get("verified", True):
-        return True, "paid"
-    return False, f"payment rejected ({status}): {resp.get('error', resp)}"
+    if status != 200 or resp.get("ok") is not True or resp.get("verified") is not True:
+        return False, f"payment rejected ({status}): {resp.get('error', resp)}", None
+    txid = resp.get("txid") or resp.get("tx_id") or transfer.get("signature")
+    return True, "paid", txid
 
 
-def _feverdream_worker(job_id: str, agent_id: int, prompt: str,
-                       duration: int, title: str, category: str):
+def _feverdream_worker(job_id, agent_id, prompt, duration, title, category, tier, txid):
     """Render via the feverdream pipeline, then publish to BoTTube."""
     _update_job(job_id, status="generating")
     video_id = _gen_video_id()
     final_path = _video_dir() / f"{video_id}.mp4"
     try:
         if not _try_feverdream(prompt, duration, final_path):
+            _refunds.append({"txid": txid, "agent_id": agent_id,
+                             "reason": "render_failed", "ts": time.time()})
             _update_job(job_id, status="failed",
-                        error="feverdream render failed (payment captured — refund queued)")
+                        error=f"render failed — refund pending (txid {txid})")
             return
-        video_url = _publish_video(video_id, agent_id, title, prompt,
-                                   final_path, category)
+        video_url = _publish_video(video_id, agent_id, title, prompt, final_path, category)
         _update_job(job_id, status="completed", video_id=video_id,
-                    video_url=video_url, gen_method="feverdream_rtc")
+                    video_url=video_url, gen_method=f"feverdream_{tier}")
     except Exception as exc:
-        _update_job(job_id, status="failed", error=str(exc)[:500])
+        _refunds.append({"txid": txid, "agent_id": agent_id,
+                         "reason": f"exception:{str(exc)[:120]}", "ts": time.time()})
+        _update_job(job_id, status="failed",
+                    error=f"render error — refund pending (txid {txid})")
         final_path.unlink(missing_ok=True)
 
 
@@ -142,10 +170,8 @@ def feverdream_info():
         },
         "price_per_extra_second_rtc": PRICE_PER_EXTRA_SEC,
         "max_seconds": MAX_SECS,
-        "price_examples": {
-            f"{t}_{s}s": _price_for(s, t) for t in TIERS for s in (4, MAX_SECS)
-        },
-        "how_to_pay": ("Sign a RustChain transfer of the quoted RTC to "
+        "price_examples": {f"{t}_{s}s": _price_for(s, t) for t in TIERS for s in (4, MAX_SECS)},
+        "how_to_pay": ("Sign a single-use RustChain transfer of the quoted RTC to "
                        f"{STUDIO_WALLET} and POST it as `transfer` to "
                        "/api/feverdream/order along with your prompt."),
         "rustchain_node": RUSTCHAIN_NODE,
@@ -156,24 +182,53 @@ def feverdream_info():
 @_require_api_key_or_json
 def feverdream_order():
     data = request.get_json(silent=True) or {}
-    prompt = (data.get("prompt") or "").strip()
-    if not prompt:
-        return jsonify({"error": "prompt is required"}), 400
+
+    # --- strict input validation (before any charge) ---
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return jsonify({"error": "prompt is required (string)"}), 400
+    prompt = prompt.strip()
     if len(prompt) > PROMPT_MAX_LEN:
         return jsonify({"error": f"prompt exceeds {PROMPT_MAX_LEN} characters"}), 400
+
+    tier = _norm_tier(data.get("tier", "cute"))
+    if tier is None:
+        return jsonify({"error": f"unknown tier; choose one of {sorted(TIERS)}"}), 400
+
+    try:
+        duration = int(data.get("duration", 6))
+    except (TypeError, ValueError):
+        return jsonify({"error": "duration must be an integer"}), 400
+    duration = min(MAX_SECS, max(2, duration))
+
+    category = data.get("category", "other")
+    category = category.strip().lower() if isinstance(category, str) else "other"
+    if category not in _category_map():
+        category = "other"
+
+    title = data.get("title")
+    title = title.strip() if isinstance(title, str) and title.strip() else prompt[:TITLE_MAX_LEN]
+    title = title[:TITLE_MAX_LEN]
+
     if not feverdream_available():
         return jsonify({"error": "feverdream render pipeline unavailable on server"}), 503
 
-    duration = min(MAX_SECS, max(2, int(data.get("duration", 6))))
-    tier = _resolve_tier(data.get("tier"))
-    category = (data.get("category") or "other").strip().lower()
-    if category not in _category_map():
-        category = "other"
-    title = (data.get("title") or prompt[:200]).strip()
+    transfer = data.get("transfer")
+    sig = transfer.get("signature") if isinstance(transfer, dict) else None
+    if not sig:
+        return jsonify({"error": "transfer must include a signature (single-use)"}), 400
+
+    # --- replay guard: a signed transfer is single-use ---
+    with _redeemed_lock:
+        if sig in _redeemed:
+            return jsonify({"error": "transfer already redeemed"}), 409
+        _redeemed.add(sig)   # claim up-front; released below if payment fails
 
     # --- charge RTC (user-signed transfer) before rendering ---
-    paid, reason = _charge_rtc(data.get("transfer"), duration, tier)
+    paid, reason, txid = _charge_rtc(transfer, duration, tier)
     if not paid:
+        with _redeemed_lock:
+            _redeemed.discard(sig)   # payment didn't go through; allow retry
         return jsonify({"error": "payment_required", "detail": reason,
                         "price_rtc": _price_for(duration, tier), "tier": tier,
                         "studio_wallet": STUDIO_WALLET}), 402
@@ -181,25 +236,25 @@ def feverdream_order():
     job_id = _create_job(g.agent["id"], prompt)
     threading.Thread(
         target=_feverdream_worker,
-        args=(job_id, g.agent["id"], prompt, duration, title, category),
+        args=(job_id, g.agent["id"], prompt, duration, title, category, tier, txid),
         daemon=True,
     ).start()
     return jsonify({
-        "ok": True,
-        "tier": tier,
-        "paid_rtc": _price_for(duration, tier),
-        "job_id": job_id,
-        "status": "rendering",
+        "ok": True, "tier": tier, "paid_rtc": _price_for(duration, tier),
+        "txid": txid, "job_id": job_id, "status": "rendering",
         "status_url": f"/api/feverdream/order/status/{job_id}",
         "message": "Payment confirmed. Your feverdream is rendering.",
     }), 202
 
 
 @feverdream_rtc_bp.route("/api/feverdream/order/status/<job_id>")
+@_require_api_key_or_json
 def feverdream_status(job_id):
     job = _get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found or expired"}), 404
+    if job.get("agent_id") != g.agent["id"]:
+        return jsonify({"error": "not your job"}), 403
     result = {"job_id": job_id, "status": job["status"]}
     if job.get("video_id"):
         result["video_id"] = job["video_id"]
