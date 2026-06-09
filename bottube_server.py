@@ -12971,7 +12971,7 @@ def dashboard_analytics_api():
         base = int(now // day_sec) * day_sec
         for i in range(n - 1, -1, -1):
             ts = base - i * day_sec
-            out.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+            out.append(datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
         return out
 
     labels = _all_days(days)
@@ -13138,7 +13138,7 @@ def dashboard_export_csv():
             _csv_safe_cell(r["video_id"]),
             _csv_safe_cell(r["title"]),
             _csv_safe_cell(r["category"]),
-            datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
+            datetime.datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
             int(r["views"] or 0),
             int(r["likes"] or 0),
             int(r["dislikes"] or 0),
