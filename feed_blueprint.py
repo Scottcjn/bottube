@@ -30,6 +30,17 @@ def escape_xml(text):
     )
 
 
+def _cdata_safe(text):
+    """Escape a string for safe inclusion inside a CDATA section."""
+    return str(text or "").replace("]]>", "]]]]><![CDATA[>")
+
+
+def _video_description_html(fields):
+    thumb = escape_xml(fields["thumb"])
+    desc = _cdata_safe(escape_xml(fields["desc"]))
+    return f'<img src="{thumb}" /><p>{desc}</p>'
+
+
 def _to_rfc2822(value):
     """Convert various timestamp formats to RFC 2822 for RSS pubDate."""
     if value is None or value == "":
@@ -169,14 +180,14 @@ def rss_feed():
         lines += [
             "  <item>",
             f"    <title>{escape_xml(f['title'])}</title>",
-            f"    <link>{f['watch']}</link>",
+            f"    <link>{escape_xml(f['watch'])}</link>",
             f'    <guid isPermaLink="false">{escape_xml(f["id"])}</guid>',
-            f'    <description><![CDATA[<img src="{f["thumb"]}" /><p>{escape_xml(f["desc"])}</p>]]></description>',
+            f"    <description><![CDATA[{_video_description_html(f)}]]></description>",
             f"    <pubDate>{_to_rfc2822(f['created_at'])}</pubDate>",
             f"    <dc:creator>{escape_xml(f['author'])}</dc:creator>",
             f"    <category>{escape_xml(f['category'])}</category>",
-            f'    <media:content url="{f["stream"]}" type="video/mp4" medium="video" />',
-            f'    <media:thumbnail url="{f["thumb"]}" />',
+            f'    <media:content url="{escape_xml(f["stream"])}" type="video/mp4" medium="video" />',
+            f'    <media:thumbnail url="{escape_xml(f["thumb"])}" />',
             "  </item>",
         ]
 
@@ -222,16 +233,16 @@ def atom_feed():
         lines += [
             "  <entry>",
             f"    <title>{escape_xml(f['title'])}</title>",
-            f'    <link href="{f["watch"]}" rel="alternate" />',
+            f'    <link href="{escape_xml(f["watch"])}" rel="alternate" />',
             f"    <id>urn:bottube:video:{escape_xml(f['id'])}</id>",
             f"    <updated>{updated}</updated>",
             f"    <published>{updated}</published>",
             f"    <author><name>{escape_xml(f['author'])}</name></author>",
             f"    <category term=\"{escape_xml(f['category'])}\" />",
             f"    <summary>{escape_xml(f['desc'])}</summary>",
-            f'    <content type="html"><![CDATA[<img src="{f["thumb"]}" /><p>{escape_xml(f["desc"])}</p>]]></content>',
-            f'    <media:content url="{f["stream"]}" type="video/mp4" medium="video" />',
-            f'    <media:thumbnail url="{f["thumb"]}" />',
+            f'    <content type="html"><![CDATA[{_video_description_html(f)}]]></content>',
+            f'    <media:content url="{escape_xml(f["stream"])}" type="video/mp4" medium="video" />',
+            f'    <media:thumbnail url="{escape_xml(f["thumb"])}" />',
             "  </entry>",
         ]
 
@@ -262,14 +273,14 @@ def rss_feed_agent(agent_name):
         lines += [
             "  <item>",
             f"    <title>{escape_xml(f['title'])}</title>",
-            f"    <link>{f['watch']}</link>",
+            f"    <link>{escape_xml(f['watch'])}</link>",
             f'    <guid isPermaLink="false">{escape_xml(f["id"])}</guid>',
-            f'    <description><![CDATA[<img src="{f["thumb"]}" /><p>{escape_xml(f["desc"])}</p>]]></description>',
+            f"    <description><![CDATA[{_video_description_html(f)}]]></description>",
             f"    <pubDate>{_to_rfc2822(f['created_at'])}</pubDate>",
             f"    <dc:creator>{escape_xml(f['author'])}</dc:creator>",
             f"    <category>{escape_xml(f['category'])}</category>",
-            f'    <media:content url="{f["stream"]}" type="video/mp4" medium="video" />',
-            f'    <media:thumbnail url="{f["thumb"]}" />',
+            f'    <media:content url="{escape_xml(f["stream"])}" type="video/mp4" medium="video" />',
+            f'    <media:thumbnail url="{escape_xml(f["thumb"])}" />',
             "  </item>",
         ]
     
@@ -303,16 +314,16 @@ def atom_feed_agent(agent_name):
         lines += [
             "  <entry>",
             f"    <title>{escape_xml(f['title'])}</title>",
-            f'    <link href="{f["watch"]}" rel="alternate" />',
+            f'    <link href="{escape_xml(f["watch"])}" rel="alternate" />',
             f"    <id>urn:bottube:video:{escape_xml(f['id'])}</id>",
             f"    <updated>{updated}</updated>",
             f"    <published>{updated}</published>",
             f"    <author><name>{escape_xml(f['author'])}</name></author>",
             f"    <category term=\"{escape_xml(f['category'])}\" />",
             f"    <summary>{escape_xml(f['desc'])}</summary>",
-            f'    <content type="html"><![CDATA[<img src="{f["thumb"]}" /><p>{escape_xml(f["desc"])}</p>]]></content>',
-            f'    <media:content url="{f["stream"]}" type="video/mp4" medium="video" />',
-            f'    <media:thumbnail url="{f["thumb"]}" />',
+            f'    <content type="html"><![CDATA[{_video_description_html(f)}]]></content>',
+            f'    <media:content url="{escape_xml(f["stream"])}" type="video/mp4" medium="video" />',
+            f'    <media:thumbnail url="{escape_xml(f["thumb"])}" />',
             "  </entry>",
         ]
     

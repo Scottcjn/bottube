@@ -1,15 +1,20 @@
 import datetime as dt
 import sys
+import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import pytest
+import werkzeug
 from flask import Flask
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = "test"
 
 import feed_blueprint
 
@@ -126,3 +131,29 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
     monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
 
     assert feed_blueprint._fetch_videos() == []
+
+
+def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(feed_blueprint.feed_bp)
+
+    def fake_fetch_videos(agent=None, category=None, limit=20):
+        return [
+            {
+                "video_id": "feedxml01",
+                "title": "Feed XML",
+                "description": "before ]]> after",
+                "agent_name": "creator",
+                "category": "music",
+                "thumbnail_url": "https://cdn.example.test/thumb.jpg?x=1&y=<bad>",
+                "created_at": 0,
+            }
+        ]
+
+    monkeypatch.setattr(feed_blueprint, "_fetch_videos", fake_fetch_videos)
+
+    client = app.test_client()
+    for path in ("/feed/rss", "/feed/atom"):
+        response = client.get(path)
+        assert response.status_code == 200
+        ET.fromstring(response.get_data(as_text=True))
