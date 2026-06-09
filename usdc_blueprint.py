@@ -519,7 +519,9 @@ def usdc_payout():
     if error:
         return error
     to_address_raw = data.get("to_address", "")
-    to_address = to_address_raw.strip() if isinstance(to_address_raw, str) else ""
+    if not isinstance(to_address_raw, str):
+        return jsonify({"error": "to_address must be a string"}), 400
+    to_address = to_address_raw.strip()
 
     if amount < 1.0:
         return jsonify({"error": "Minimum payout is 1.00 USDC"}), 400

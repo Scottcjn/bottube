@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: MIT
 import sqlite3
 import time
+from importlib import metadata
 
 import pytest
+import werkzeug
 from flask import Flask, g
 
 import usdc_blueprint
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 @pytest.fixture
@@ -96,6 +101,22 @@ def test_usdc_payout_rejects_malformed_amounts_without_writes(usdc_client, amoun
 
     assert response.status_code == 400
     assert response.get_json()["error"] == "amount_usdc must be a finite number"
+    assert _table_count(usdc_client.db_path, "usdc_payouts") == before_payouts
+    assert _balance(usdc_client.db_path, "alice") == before_alice
+
+
+def test_usdc_payout_rejects_non_string_address_without_writes(usdc_client):
+    before_payouts = _table_count(usdc_client.db_path, "usdc_payouts")
+    before_alice = _balance(usdc_client.db_path, "alice")
+
+    response = usdc_client.post(
+        "/api/usdc/payout",
+        json={"to_address": ["0x" + "a" * 40], "amount_usdc": "1.25"},
+        headers=usdc_client.auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "to_address must be a string"
     assert _table_count(usdc_client.db_path, "usdc_payouts") == before_payouts
     assert _balance(usdc_client.db_path, "alice") == before_alice
 
