@@ -331,6 +331,12 @@
     // Load trending videos on page load
     document.addEventListener('DOMContentLoaded', () => {
         loadTrending();
+
+        document.getElementById('tagsCloud').addEventListener('click', function(e) {
+            const target = e.target.closest('.tag-item');
+            if (!target) return;
+            searchByTag(target.dataset.tag);
+        });
     });
 
     // Search on Enter key
@@ -447,7 +453,7 @@
                 const data = await response.json();
                 
                 tagsCloud.innerHTML = data.tags.map(tag => `
-                    <span class="tag-item" onclick="searchByTag('${escapeHtml(tag.name)}')">
+                    <span class="tag-item" data-tag="${escapeAttribute(tag.name)}">
                         ${escapeHtml(tag.name)}<span class="tag-count">${tag.count}</span>
                     </span>
                 `).join('');
