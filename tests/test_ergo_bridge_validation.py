@@ -149,3 +149,30 @@ def test_ergo_withdraw_rejects_invalid_amount_without_queue_or_debit(client, amo
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "amount_rtc must be a finite positive number"
     assert _counts_and_balance(client.db_path) == before
+
+
+@pytest.mark.parametrize("limit", ["abc", "-5", "0"])
+def test_ergo_history_rejects_invalid_limit(client, limit):
+    app = client.application
+
+    with app.test_request_context(
+        f"/api/ergo/history?limit={limit}",
+        headers=_auth_headers(),
+    ):
+        resp, status = ergo_bridge_blueprint.ergo_history()
+
+    assert status == 400
+    assert resp.get_json()["error"] == "limit must be a positive integer"
+
+
+def test_ergo_history_clamps_large_limit(client):
+    app = client.application
+
+    with app.test_request_context(
+        "/api/ergo/history?limit=500",
+        headers=_auth_headers(),
+    ):
+        resp = ergo_bridge_blueprint.ergo_history()
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"deposits": [], "withdrawals": []}

@@ -488,7 +488,13 @@ def ergo_history():
     else:
         agent_id = user_id
 
-    limit = min(int(request.args.get("limit", 20)), 50)
+    try:
+        limit = int(request.args.get("limit", 20))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be a positive integer"}), 400
+    if limit < 1:
+        return jsonify({"error": "limit must be a positive integer"}), 400
+    limit = min(limit, 50)
 
     deposits = db.execute(
         "SELECT tx_id, amount_erg, fee_erg, rtc_credited, status, created_at "
