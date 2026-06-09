@@ -4,6 +4,11 @@ import sys
 from pathlib import Path
 
 import pytest
+import werkzeug
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = "test"
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +104,28 @@ def test_update_item_requires_owner_scope(client):
         json={"status": "success", "external_id": "x_123"},
     )
     assert allowed.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("post", "/api/syndication/run/start", ["run_type"]),
+        ("post", "/api/syndication/run/1/end", ["status"]),
+        ("post", "/api/syndication/item", ["run_id"]),
+        ("put", "/api/syndication/item/1", ["status"]),
+    ],
+)
+def test_write_routes_reject_non_object_json(client, method, path, payload):
+    _insert_agent("jsonbot", "bottube_sk_jsonbot")
+
+    resp = getattr(client, method)(
+        path,
+        headers={"X-API-Key": "bottube_sk_jsonbot"},
+        json=payload,
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "JSON body must be an object"}
 
 
 def test_report_routes_scope_normal_agents_and_expand_for_admin(client):

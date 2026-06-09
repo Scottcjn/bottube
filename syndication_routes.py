@@ -66,6 +66,15 @@ def _is_admin_request() -> bool:
     return bool(ADMIN_KEY and admin_key == ADMIN_KEY)
 
 
+def _json_object_body():
+    data = request.get_json()
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
 def require_api_key(f):
     """Decorator to require API key authentication."""
     @wraps(f)
@@ -104,7 +113,9 @@ def start_run():
     Response:
         run_id (int): The new run ID
     """
-    data = request.get_json() or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     
     run_type = data.get("run_type")
     if not run_type:
@@ -143,7 +154,9 @@ def end_run(run_id):
     Response:
         ok (bool): Success indicator
     """
-    data = request.get_json() or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     
     status = data.get("status", "completed")
     if status not in ("completed", "failed", "partial", "cancelled"):
@@ -193,7 +206,9 @@ def log_item():
     Response:
         item_id (int): The new item ID
     """
-    data = request.get_json() or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     
     run_id = data.get("run_id")
     content_id = data.get("content_id")
@@ -256,7 +271,9 @@ def update_item(item_id):
     Response:
         ok (bool): Success indicator
     """
-    data = request.get_json() or {}
+    data, error = _json_object_body()
+    if error:
+        return error
 
     status = data.get("status")
     if not status or status not in ("success", "failed", "pending", "skipped"):
