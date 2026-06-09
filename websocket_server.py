@@ -54,7 +54,13 @@ def on_chat_message(data):
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
     user_id = data.get("user_id", "")
-    message = (data.get("message") or "").strip()
+    raw_message = data.get("message", "")
+    if raw_message is None:
+        raw_message = ""
+    if not isinstance(raw_message, str):
+        emit("error", {"message": "Message must be 1-500 characters"})
+        return
+    message = raw_message.strip()
 
     if not message or len(message) > 500:
         emit("error", {"message": "Message must be 1-500 characters"})
