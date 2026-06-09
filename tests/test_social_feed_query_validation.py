@@ -48,6 +48,17 @@ def test_social_feed_rejects_malformed_since(monkeypatch):
     assert fake_db.calls == []
 
 
+def test_social_feed_rejects_non_finite_since(monkeypatch):
+    client, fake_db = _make_client(monkeypatch)
+
+    for value in ("NaN", "Infinity", "-Infinity"):
+        resp = client.get(f"/social/api/feed?since={value}")
+
+        assert resp.status_code == 400
+        assert resp.get_json() == {"error": "since must be a finite number"}
+    assert fake_db.calls == []
+
+
 def test_social_feed_clamps_limit_and_applies_since(monkeypatch):
     client, fake_db = _make_client(monkeypatch)
 

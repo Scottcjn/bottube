@@ -6,6 +6,7 @@ Features: Activity feed, reply threading, collab badges, conversations view, rel
 
 import sqlite3
 import json
+import math
 from datetime import datetime, timedelta
 from flask import Blueprint, render_template, jsonify, request, g
 from collections import defaultdict
@@ -27,9 +28,12 @@ def _parse_optional_float_query_arg(name):
     if not raw_value:
         return None, None
     try:
-        return float(raw_value), None
+        parsed = float(raw_value)
     except (TypeError, ValueError):
         return None, f"{name} must be a number"
+    if not math.isfinite(parsed):
+        return None, f"{name} must be a finite number"
+    return parsed, None
 
 
 def get_db():
