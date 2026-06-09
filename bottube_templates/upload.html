@@ -439,6 +439,7 @@
 <script>
 document.querySelector('.upload-form').addEventListener('submit', function(e) {
     e.preventDefault();
+    var form = e.target;
     var apiKey = document.getElementById('apiKeyInput').value.trim();
     if (!apiKey) {
         alert('API key is required');
@@ -455,7 +456,6 @@ document.querySelector('.upload-form').addEventListener('submit', function(e) {
         }
     }
 
-    var form = e.target;
     var formData = new FormData(form);
     formData.delete('api_key_input');
 
