@@ -8,19 +8,27 @@ Tests cover:
 """
 
 import os
+import csv
+import io
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
 import pytest
+import werkzeug
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = "test"
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-os.environ.setdefault("BOTTUBE_DB_PATH", "/tmp/bottube_test_analytics.db")
-os.environ.setdefault("BOTTUBE_DB", "/tmp/bottube_test_analytics.db")
+_bootstrap_db_path = f"/tmp/bottube_test_analytics_{os.getpid()}.db"
+os.environ.setdefault("BOTTUBE_DB_PATH", _bootstrap_db_path)
+os.environ.setdefault("BOTTUBE_DB", _bootstrap_db_path)
 
 _orig_sqlite_connect = sqlite3.connect
 
@@ -143,6 +151,57 @@ def _insert_view(video_id, ip="127.0.0.1", created_at=None):
         db.commit()
 
 
+def _insert_comment(video_id, agent_id, created_at=None):
+    """Insert a test comment for a public video id."""
+    if created_at is None:
+        created_at = time.time()
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            """
+            INSERT INTO comments (video_id, agent_id, content, created_at)
+            VALUES (?, ?, 'analytics comment', ?)
+            """,
+            (video_id, agent_id, created_at),
+        )
+        db.commit()
+
+
+def _insert_vote(video_id, agent_id, vote=1, created_at=None):
+    """Insert a test vote for a public video id."""
+    if created_at is None:
+        created_at = time.time()
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            """
+            INSERT INTO votes (agent_id, video_id, vote, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (agent_id, video_id, vote, created_at),
+        )
+        db.commit()
+
+
+def _insert_earning(agent_id, amount, reason, video_id, created_at=None):
+    """Insert a test earning for a public video id."""
+    if created_at is None:
+        created_at = time.time()
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            """
+            INSERT INTO earnings (agent_id, amount, reason, video_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (agent_id, amount, reason, video_id, created_at),
+        )
+        db.commit()
+
+
 # =============================================================================
 # Analytics Page Access Tests
 # =============================================================================
@@ -230,6 +289,71 @@ class TestAnalyticsApiCoreMetrics:
         data = response.get_json()
         
         assert data["totals"]["videos"] == 5
+
+    def test_creator_analytics_blueprint_uses_public_video_ids(self, client):
+        """Blueprint analytics should count events stored by public video_id."""
+        now = time.time()
+        owner_id = _insert_agent("blueprintowner", "test-key-blueprint-owner")
+        commenter_one_id = _insert_agent("blueprintcommenter1", "test-key-blueprint-commenter-1")
+        commenter_two_id = _insert_agent("blueprintcommenter2", "test-key-blueprint-commenter-2")
+        unrelated_id = _insert_agent("blueprintunrelated", "test-key-blueprint-unrelated")
+        video_id = _insert_video(owner_id, "public-analytics-clip", "Public ID Analytics")
+
+        _insert_view(video_id, "10.0.0.1", created_at=now)
+        _insert_view(video_id, "10.0.0.2", created_at=now)
+        _insert_comment(video_id, commenter_one_id, created_at=now)
+        _insert_vote(video_id, commenter_one_id, vote=1, created_at=now)
+        _insert_vote(video_id, commenter_two_id, vote=1, created_at=now)
+        _insert_earning(owner_id, 0.25, "tip_received", video_id, created_at=now)
+        _insert_earning(owner_id, 0.25, "tip_received", video_id, created_at=now)
+        _insert_earning(unrelated_id, 9.0, "tip_received", video_id, created_at=now)
+
+        views = client.get(f"/analytics/api/views?agent_id={owner_id}&period=7d")
+        filtered_views = client.get(
+            f"/analytics/api/views?agent_id={owner_id}&video_id={video_id}&period=7d"
+        )
+        engagement = client.get(f"/analytics/api/engagement?agent_id={owner_id}&period=7d")
+        top = client.get(f"/analytics/api/top-videos?agent_id={owner_id}&metric=engagement")
+        audience = client.get(f"/analytics/api/audience?agent_id={owner_id}")
+        summary = client.get(f"/analytics/api/summary?agent_id={owner_id}")
+        export = client.get(f"/analytics/api/export/csv?agent_id={owner_id}&type=videos")
+
+        assert views.status_code == 200
+        assert views.get_json()["total_views"] == 2
+        assert filtered_views.status_code == 200
+        assert filtered_views.get_json()["total_views"] == 2
+
+        assert engagement.status_code == 200
+        engagement_body = engagement.get_json()
+        assert engagement_body["total_comments"] == 1
+        assert engagement_body["total_votes"] == 2
+        assert engagement_body["total_tips"] == 0.5
+        assert engagement_body["by_video"][0]["video_id"] == video_id
+        assert engagement_body["by_video"][0]["comments"] == 1
+        assert engagement_body["by_video"][0]["votes"] == 2
+        assert engagement_body["by_video"][0]["tips"] == 0.5
+
+        assert top.status_code == 200
+        top_video = top.get_json()["videos"][0]
+        assert top_video["video_id"] == video_id
+        assert top_video["views"] == 2
+        assert top_video["comments"] == 1
+        assert top_video["votes"] == 2
+        assert top_video["tips"] == 0.5
+
+        assert audience.status_code == 200
+        assert audience.get_json()["human_viewers"] == 2
+
+        assert summary.status_code == 200
+        assert summary.get_json()["total_views"] == 2
+
+        assert export.status_code == 200
+        export_rows = list(csv.DictReader(io.StringIO(export.get_data(as_text=True))))
+        assert export_rows[0]["video_id"] == video_id
+        assert export_rows[0]["views"] == "2"
+        assert export_rows[0]["comments"] == "1"
+        assert export_rows[0]["votes"] == "2"
+        assert export_rows[0]["tips_rtc"] == "0.5"
 
 
 # =============================================================================

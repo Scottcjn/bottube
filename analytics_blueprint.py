@@ -20,6 +20,11 @@ def get_db():
     """Get database connection from Flask app context or create new one."""
     if 'db' in g:
         return g.db
+    try:
+        from bottube_server import get_db as app_get_db
+        return app_get_db()
+    except ImportError:
+        pass
     # Fallback: create connection directly
     db = sqlite3.connect(str(Path(__file__).parent / "bottube.db"))
     db.row_factory = sqlite3.Row
@@ -73,7 +78,7 @@ def api_views():
     if video_id:
         # Check if video exists and belongs to the agent
         video_exists = db.execute(
-            """SELECT 1 FROM videos WHERE id = ? AND agent_id = ?""",
+            """SELECT 1 FROM videos WHERE video_id = ? AND agent_id = ?""",
             (video_id, agent_id)
         ).fetchone()
         if not video_exists:
@@ -96,7 +101,7 @@ def api_views():
     else:
         # Get all videos by this agent
         videos = db.execute(
-            "SELECT id FROM videos WHERE agent_id = ?",
+            "SELECT video_id FROM videos WHERE agent_id = ?",
             (agent_id,)
         ).fetchall()
         video_ids = [v[0] for v in videos]
@@ -156,7 +161,7 @@ def api_engagement():
     
     # Get agent's videos
     videos = db.execute(
-        "SELECT id FROM videos WHERE agent_id = ?",
+        "SELECT video_id FROM videos WHERE agent_id = ?",
         (agent_id,)
     ).fetchall()
     video_ids = [v[0] for v in videos]
@@ -189,27 +194,42 @@ def api_engagement():
     # Tips count (from earnings table with 'tip' reason)
     tips_result = db.execute(
         f"""SELECT COALESCE(SUM(amount), 0) FROM earnings 
-            WHERE agent_id = ? AND reason LIKE '%tip%' AND created_at >= ?""",
-        (agent_id, start_timestamp)
+            WHERE agent_id = ? AND video_id IN ({placeholders})
+            AND reason LIKE '%tip%' AND created_at >= ?""",
+        (agent_id, *video_ids, start_timestamp)
     ).fetchone()
     total_tips = tips_result[0] if tips_result else 0
     
-    # Breakdown by video
+    # Breakdown by video. Pre-aggregate each event table so repeated equal
+    # votes/tips are counted instead of collapsed by DISTINCT during joins.
     by_video = db.execute(
         f"""SELECT 
-                v.id,
+                v.video_id,
                 v.title,
-                COUNT(DISTINCT c.id) as comments,
-                COALESCE(SUM(DISTINCT vo.vote), 0) as votes,
-                COALESCE(SUM(DISTINCT e.amount), 0) as tips
+                COALESCE(c.comments, 0) as comments,
+                COALESCE(vo.votes, 0) as votes,
+                COALESCE(e.tips, 0) as tips
             FROM videos v
-            LEFT JOIN comments c ON c.video_id = v.id AND c.created_at >= ?
-            LEFT JOIN votes vo ON vo.video_id = v.id AND vo.created_at >= ?
-            LEFT JOIN earnings e ON e.video_id = v.id AND e.agent_id = v.agent_id 
-                AND e.reason LIKE '%tip%' AND e.created_at >= ?
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) as comments
+                FROM comments
+                WHERE created_at >= ?
+                GROUP BY video_id
+            ) c ON c.video_id = v.video_id
+            LEFT JOIN (
+                SELECT video_id, SUM(vote) as votes
+                FROM votes
+                WHERE created_at >= ?
+                GROUP BY video_id
+            ) vo ON vo.video_id = v.video_id
+            LEFT JOIN (
+                SELECT agent_id, video_id, SUM(amount) as tips
+                FROM earnings
+                WHERE reason LIKE '%tip%' AND created_at >= ?
+                GROUP BY agent_id, video_id
+            ) e ON e.video_id = v.video_id AND e.agent_id = v.agent_id
             WHERE v.agent_id = ?
-            GROUP BY v.id
-            ORDER BY (comments + votes) DESC""",
+            ORDER BY (COALESCE(c.comments, 0) + COALESCE(vo.votes, 0)) DESC""",
         (start_timestamp, start_timestamp, start_timestamp, agent_id)
     ).fetchall()
     
@@ -263,7 +283,7 @@ def api_top_videos():
         order_clause = "ORDER BY view_count DESC"
     
     query = f"""SELECT 
-            v.id,
+            v.video_id,
             v.title,
             v.created_at,
             COALESCE(vc.count, 0) as view_count,
@@ -273,17 +293,17 @@ def api_top_videos():
         FROM videos v
         LEFT JOIN (
             SELECT video_id, COUNT(*) as count FROM views GROUP BY video_id
-        ) vc ON vc.video_id = v.id
+        ) vc ON vc.video_id = v.video_id
         LEFT JOIN (
             SELECT video_id, COUNT(*) as count FROM comments GROUP BY video_id
-        ) cc ON cc.video_id = v.id
+        ) cc ON cc.video_id = v.video_id
         LEFT JOIN (
             SELECT video_id, SUM(vote) as sum_votes FROM votes GROUP BY video_id
-        ) vc2 ON vc2.video_id = v.id
+        ) vc2 ON vc2.video_id = v.video_id
         LEFT JOIN (
-            SELECT video_id, SUM(amount) as total FROM earnings 
-            WHERE reason LIKE '%tip%' GROUP BY video_id
-        ) te ON te.video_id = v.id
+            SELECT agent_id, video_id, SUM(amount) as total FROM earnings
+            WHERE reason LIKE '%tip%' GROUP BY agent_id, video_id
+        ) te ON te.video_id = v.video_id AND te.agent_id = v.agent_id
         WHERE v.agent_id = ?
         {order_clause}
         LIMIT ?"""
@@ -320,7 +340,7 @@ def api_audience():
     
     # Get agent's videos
     videos = db.execute(
-        "SELECT id FROM videos WHERE agent_id = ?",
+        "SELECT video_id FROM videos WHERE agent_id = ?",
         (agent_id,)
     ).fetchall()
     video_ids = [v[0] for v in videos]
@@ -386,7 +406,7 @@ def api_export_csv():
         writer.writerow(['video_id', 'title', 'created_at', 'views', 'comments', 'votes', 'tips_rtc'])
         
         videos = db.execute("""SELECT 
-                v.id,
+                v.video_id,
                 v.title,
                 v.created_at,
                 COALESCE(vc.count, 0) as view_count,
@@ -396,17 +416,17 @@ def api_export_csv():
             FROM videos v
             LEFT JOIN (
                 SELECT video_id, COUNT(*) as count FROM views GROUP BY video_id
-            ) vc ON vc.video_id = v.id
+            ) vc ON vc.video_id = v.video_id
             LEFT JOIN (
                 SELECT video_id, COUNT(*) as count FROM comments GROUP BY video_id
-            ) cc ON cc.video_id = v.id
+            ) cc ON cc.video_id = v.video_id
             LEFT JOIN (
                 SELECT video_id, SUM(vote) as sum_votes FROM votes GROUP BY video_id
-            ) vc2 ON vc2.video_id = v.id
+            ) vc2 ON vc2.video_id = v.video_id
             LEFT JOIN (
-                SELECT video_id, SUM(amount) as total FROM earnings 
-                WHERE reason LIKE '%tip%' GROUP BY video_id
-            ) te ON te.video_id = v.id
+                SELECT agent_id, video_id, SUM(amount) as total FROM earnings
+                WHERE reason LIKE '%tip%' GROUP BY agent_id, video_id
+            ) te ON te.video_id = v.video_id AND te.agent_id = v.agent_id
             WHERE v.agent_id = ?
             ORDER BY v.created_at DESC""", (agent_id,)).fetchall()
         
@@ -428,7 +448,7 @@ def api_export_csv():
         writer.writerow(['date', 'views'])
         
         videos = db.execute(
-            "SELECT id FROM videos WHERE agent_id = ?",
+            "SELECT video_id FROM videos WHERE agent_id = ?",
             (agent_id,)
         ).fetchall()
         video_ids = [v[0] for v in videos]
@@ -481,7 +501,7 @@ def api_summary():
     
     # Total views (all time)
     video_ids = db.execute(
-        "SELECT id FROM videos WHERE agent_id = ?",
+        "SELECT video_id FROM videos WHERE agent_id = ?",
         (agent_id,)
     ).fetchall()
     
@@ -503,7 +523,7 @@ def api_summary():
     # Subscribers
     subscribers = db.execute(
         """SELECT COUNT(*) FROM subscriptions 
-           WHERE channel_id = (SELECT id FROM agents WHERE id = ?)""",
+           WHERE following_id = (SELECT id FROM agents WHERE id = ?)""",
         (agent_id,)
     ).fetchone()[0]
     
