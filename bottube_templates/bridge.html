@@ -369,8 +369,8 @@
                 </div>
             </div>
             <div class="field-group">
-                <label>Transaction Signature (Solana)</label>
-                <input type="text" id="wrtc-deposit-tx" placeholder="5X... (Base58 signature)">
+                <label for="wrtc-deposit-tx">Transaction Signature (Solana)</label>
+                <input type="text" id="wrtc-deposit-tx" name="wrtc_deposit_tx" placeholder="5X... (Base58 signature)">
             </div>
             <button class="btn-primary" id="wrtc-deposit-btn" onclick="submitWrtcDeposit()" aria-label="Verify wRTC deposit transaction">Verify Transaction</button>
             <div class="fee-info">No deposit fee. Minimum deposit: 1 wRTC. Credits appear after on-chain confirmation. Security: sender wallet must match your bound Solana address.</div>
@@ -392,12 +392,12 @@
                 <span class="label">Your Balance</span>
             </div>
             <div class="field-group">
-                <label>Destination Wallet (Solana)</label>
-                <input type="text" id="wrtc-withdraw-addr" placeholder="Your Solana public key" value="{{ user_sol_address or '' }}">
+                <label for="wrtc-withdraw-addr">Destination Wallet (Solana)</label>
+                <input type="text" id="wrtc-withdraw-addr" name="wrtc_withdraw_addr" placeholder="Your Solana public key" value="{{ user_sol_address or '' }}">
             </div>
             <div class="field-group">
-                <label>Amount to Withdraw (wRTC)</label>
-                <input type="number" id="wrtc-withdraw-amount" placeholder="10.0" min="10" step="0.1">
+                <label for="wrtc-withdraw-amount">Amount to Withdraw (wRTC)</label>
+                <input type="number" id="wrtc-withdraw-amount" name="wrtc_withdraw_amount" placeholder="10.0" min="10" step="0.1">
             </div>
             <button class="btn-primary" id="wrtc-withdraw-btn" onclick="submitWrtcWithdraw()" aria-label="Queue vault withdrawal for wRTC">Queue Vault Withdrawal</button>
             <div class="fee-info">Withdrawal fee: 0.5 wRTC. Minimum: 10 wRTC. Processed within 1 hour.</div>
@@ -472,8 +472,8 @@
                 </div>
             </div>
             <div class="field-group">
-                <label>Ergo Transaction ID</label>
-                <input type="text" id="ergo-deposit-tx" placeholder="Paste your Ergo transaction ID...">
+                <label for="ergo-deposit-tx">Ergo Transaction ID</label>
+                <input type="text" id="ergo-deposit-tx" name="ergo_deposit_tx" placeholder="Paste your Ergo transaction ID...">
             </div>
             <button class="btn-primary btn-ergo" id="ergo-deposit-btn" onclick="submitErgoDeposit()" aria-label="Verify ERG deposit and credit account">Verify &amp; Credit</button>
             <div class="fee-info">Deposit fee: 1%. Minimum: 0.1 ERG. Rate: 1 ERG = 8 RTC. Verified via Ergo Explorer.</div>
@@ -492,12 +492,12 @@
                 <span class="label">Your Balance</span>
             </div>
             <div class="field-group">
-                <label>Ergo Wallet Address</label>
-                <input type="text" id="ergo-withdraw-addr" placeholder="Your Ergo address (starts with 9)...">
+                <label for="ergo-withdraw-addr">Ergo Wallet Address</label>
+                <input type="text" id="ergo-withdraw-addr" name="ergo_withdraw_addr" placeholder="Your Ergo address (starts with 9)...">
             </div>
             <div class="field-group">
-                <label>Amount (RTC to convert)</label>
-                <input type="number" id="ergo-withdraw-amount" placeholder="16.0" min="8" step="0.1">
+                <label for="ergo-withdraw-amount">Amount (RTC to convert)</label>
+                <input type="number" id="ergo-withdraw-amount" name="ergo_withdraw_amount" placeholder="16.0" min="8" step="0.1">
             </div>
             <button class="btn-primary btn-ergo" id="ergo-withdraw-btn" onclick="submitErgoWithdraw()" aria-label="Request ERG withdrawal">Request Withdrawal</button>
             <div class="fee-info">Withdrawal fee: 0.5 RTC. Minimum: 8 RTC (= 1 ERG). Rate: 8 RTC = 1 ERG.</div>
