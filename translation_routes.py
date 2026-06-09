@@ -5,6 +5,16 @@ import json
 
 translation_bp = Blueprint('translation', __name__)
 
+
+def _request_json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({'error': 'JSON object required'}), 400)
+    return data, None
+
+
 @translation_bp.route('/translations')
 def translations_page():
     db = get_db()
@@ -60,7 +70,9 @@ def get_translation_by_language(video_id, language):
 @translation_bp.route('/api/translations', methods=['POST'])
 @require_auth
 def add_translation():
-    data = request.get_json()
+    data, error = _request_json_object()
+    if error:
+        return error
     
     if not all(k in data for k in ['video_id', 'language', 'title', 'description']):
         return jsonify({'error': 'Missing required fields'}), 400
