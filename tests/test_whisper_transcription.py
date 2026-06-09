@@ -14,6 +14,7 @@ Covers:
 """
 from __future__ import annotations
 
+import importlib.metadata
 import os
 import sqlite3
 import sys
@@ -24,6 +25,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import werkzeug
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = importlib.metadata.version("werkzeug")
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -482,6 +487,39 @@ def test_search_endpoint(tmp_db, flask_client, monkeypatch):
 def test_search_endpoint_no_query(flask_client):
     resp = flask_client.get("/api/transcript/search")
     assert resp.status_code == 400
+
+
+def test_backfill_rejects_non_object_json(flask_client):
+    resp = flask_client.post("/api/transcript/backfill", json=["not", "an", "object"])
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "JSON object required"
+
+
+def test_backfill_rejects_invalid_batch_size(flask_client):
+    resp = flask_client.post("/api/transcript/backfill", json={"batch_size": "not-an-int"})
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "batch_size must be a positive integer"
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, 1.5, float("inf")])
+def test_backfill_rejects_non_positive_or_non_integer_batch_size(
+    flask_client,
+    monkeypatch,
+    batch_size,
+):
+    import whisper_transcription_blueprint as wtb
+
+    def fail_backfill(**_kwargs):
+        raise AssertionError("invalid batch_size should not enqueue backfill work")
+
+    monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
+
+    resp = flask_client.post("/api/transcript/backfill", json={"batch_size": batch_size})
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "batch_size must be a positive integer"
 
 
 def test_trigger_transcription_video_not_found(flask_client):

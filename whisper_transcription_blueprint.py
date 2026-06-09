@@ -25,6 +25,51 @@ log = logging.getLogger("bottube.whisper_transcription_blueprint")
 whisper_bp = Blueprint("whisper_transcription", __name__)
 
 
+def _request_json_object():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _parse_positive_int(data, field_name: str, default: int):
+    value = data.get(field_name, default)
+    if isinstance(value, bool):
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None, (
+                jsonify({"error": f"{field_name} must be a positive integer"}),
+                400,
+            )
+        try:
+            parsed = int(stripped, 10)
+        except ValueError:
+            return None, (
+                jsonify({"error": f"{field_name} must be a positive integer"}),
+                400,
+            )
+    else:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if parsed < 1:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    return parsed, None
+
+
 def _video_dir() -> str:
     return os.environ.get(
         "BOTTUBE_VIDEO_DIR",
@@ -170,9 +215,15 @@ def trigger_backfill():
     Body (JSON, optional):
         { "force": false, "batch_size": 50 }
     """
-    body = request.get_json(silent=True) or {}
+    body, error = _request_json_object()
+    if error:
+        return error
+
     force = bool(body.get("force", False))
-    batch_size = int(body.get("batch_size", 50))
+    batch_size, error = _parse_positive_int(body, "batch_size", 50)
+    if error:
+        return error
+
     enqueued = wt.backfill_existing_videos(
         video_dir=_video_dir(),
         force=force,
