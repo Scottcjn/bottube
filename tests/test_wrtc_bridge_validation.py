@@ -267,5 +267,8 @@ def test_bridge_landing_handles_user_with_null_sol_address(monkeypatch):
     client = flask_app.test_client()
     resp = client.get("/bridge")
     assert resp.status_code == 200
-    assert captured["kwargs"]["user_sol_address"] == ""
-    assert captured["kwargs"]["user_b(fix(#1359): pass missing template context to /bridge landing)
+    kw = captured["kwargs"]
+    assert kw["user_sol_address"] == ""
+    assert kw["user_balance"] == 0.0
+    assert kw["swap_url"] == bridge_mod.WRTC_BUY_URL
+    assert kw["reserve_wallet"] == bridge_mod.WRTC_RESERVE_WALLET
