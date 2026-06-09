@@ -4,9 +4,14 @@
 import sqlite3
 
 import pytest
+import werkzeug
 from flask import Flask, g
 
 import gemini_blueprint
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = "test"
 
 
 @pytest.fixture()
@@ -77,6 +82,20 @@ def _job_count(db_path):
         return db.execute("SELECT COUNT(*) FROM gemini_jobs").fetchone()[0]
 
 
+def _insert_jobs(db_path, count):
+    with sqlite3.connect(str(db_path)) as db:
+        for idx in range(count):
+            db.execute(
+                """
+                INSERT INTO gemini_jobs
+                    (job_id, agent_id, job_type, model, prompt, status, created_at)
+                VALUES (?, 1, 'image', 'gemini', ?, 'completed', ?)
+                """,
+                (f"job-{idx:03d}", f"prompt {idx}", float(idx)),
+            )
+        db.commit()
+
+
 def test_authenticated_video_rejects_non_object_json_without_job(client):
     resp = client.post(
         "/api/gemini/generate-video",
@@ -123,6 +142,29 @@ def test_authenticated_image_rejects_non_string_prompt_before_generation(client)
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "prompt must be a string"
     assert _job_count(client.db_path) == 0
+
+
+def test_jobs_rejects_malformed_limit(client):
+    resp = client.get("/api/gemini/jobs?limit=not-an-int", headers=_auth_headers())
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "limit must be an integer"
+
+
+def test_jobs_clamps_limit(client):
+    _insert_jobs(client.db_path, 60)
+
+    resp = client.get("/api/gemini/jobs?limit=0", headers=_auth_headers())
+    body = resp.get_json()
+
+    assert resp.status_code == 200
+    assert len(body["jobs"]) == 1
+
+    resp = client.get("/api/gemini/jobs?limit=999", headers=_auth_headers())
+    body = resp.get_json()
+
+    assert resp.status_code == 200
+    assert len(body["jobs"]) == 50
 
 
 @pytest.mark.parametrize(
