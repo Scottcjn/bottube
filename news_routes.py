@@ -1,6 +1,7 @@
 """News section -- aggregates the_daily_byte + skywatch_ai into a news portal."""
 import sqlite3
 import time
+from html import escape
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, Response
 
@@ -72,7 +73,7 @@ def news_rss():
             f"      <guid isPermaLink=\"true\">{link}</guid>\n"
             f"      <pubDate>{pub_date}</pubDate>\n"
             f"      <description><![CDATA[{(item['description'] or '')[:300]}]]></description>\n"
-            f"      <category>{item['category'] or 'news'}</category>\n"
+            f"      <category>{escape(item['category'] or 'news')}</category>\n"
             f"      <dc:creator><![CDATA[{item['display_name'] or item['agent_name']}]]></dc:creator>\n"
             f"    </item>"
         )
