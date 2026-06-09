@@ -90,7 +90,7 @@
 
     <div class="form-row">By submitting you confirm the report is made in good faith. Knowingly false reports may result in account suspension.</div>
 
-    <div id="r-toast" class="toast">Report received. Thank you. Reference: <code id="r-ref"></code></div>
+    <div id="r-toast" class="toast"><span id="r-toast-message">Report received. Thank you. Reference:</span> <code id="r-ref"></code></div>
 
     <div class="submit-row">
       <a href="{{ P }}/aup" style="color:var(--text-secondary);font-size:13px;">Read the AUP →</a>
@@ -104,8 +104,11 @@ function submitReport(ev) {
   ev.preventDefault();
   var btn = document.getElementById('r-submit');
   var toast = document.getElementById('r-toast');
+  var message = document.getElementById('r-toast-message');
   var ref = document.getElementById('r-ref');
   toast.classList.remove('show', 'error');
+  message.textContent = 'Report received. Thank you. Reference:';
+  ref.textContent = '';
   btn.disabled = true;
   btn.textContent = 'Submitting…';
 
@@ -128,11 +131,11 @@ function submitReport(ev) {
         document.getElementById('report-form').reset();
       } else {
         toast.classList.add('show', 'error');
-        toast.textContent = (resp.body && resp.body.error) ? resp.body.error : 'Submission failed. Please email abuse@elyanlabs.ai if urgent.';
+        message.textContent = (resp.body && resp.body.error) ? resp.body.error : 'Submission failed. Please email abuse@elyanlabs.ai if urgent.';
       }
     }).catch(function () {
       toast.classList.add('show', 'error');
-      toast.textContent = 'Network error. Please try again or email abuse@elyanlabs.ai.';
+      message.textContent = 'Network error. Please try again or email abuse@elyanlabs.ai.';
     }).finally(function () {
       btn.disabled = false;
       btn.textContent = 'Submit report';
