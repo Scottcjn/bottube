@@ -303,6 +303,8 @@ def _optional_int_field(data: dict, field_name: str):
         return None, None
     if isinstance(value, bool) or not isinstance(value, int):
         return None, (jsonify({"error": f"{field_name} must be an integer"}), 400)
+    if value <= 0:
+        return None, (jsonify({"error": f"{field_name} must be a positive integer"}), 400)
     return value, None
 
 

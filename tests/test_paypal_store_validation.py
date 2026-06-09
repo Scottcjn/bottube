@@ -2,11 +2,16 @@
 """Validation tests for PayPal store request parsing."""
 
 import sqlite3
+from importlib import metadata
 
 import pytest
+import werkzeug
 from flask import Flask, g
 
 import paypal_packages
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 @pytest.fixture()
@@ -59,6 +64,8 @@ def test_store_checkout_rejects_non_object_json_before_paypal_call(client, monke
         ({"package_id": ["creator"], "email": "buyer@example.com"}, "package_id must be a string"),
         ({"package_id": "creator", "agent_id": ["123"]}, "agent_id must be an integer"),
         ({"package_id": "creator", "agent_id": True}, "agent_id must be an integer"),
+        ({"package_id": "creator", "agent_id": 0}, "agent_id must be a positive integer"),
+        ({"package_id": "creator", "agent_id": -1}, "agent_id must be a positive integer"),
         ({"package_id": "creator", "email": ["buyer@example.com"]}, "email must be a string"),
     ],
 )
