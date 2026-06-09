@@ -18,9 +18,14 @@ import sqlite3
 import sys
 import tempfile
 import time
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+import werkzeug
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -167,6 +172,15 @@ def test_list_relationships_empty(client):
     resp = client.get("/api/beef/relationships")
     assert resp.status_code == 200
     assert resp.get_json() == []
+
+
+def test_list_relationships_rejects_malformed_agent_filter(client):
+    _post_event(client, 1, 2, "comment_disagree", 10)
+
+    resp = client.get("/api/beef/relationships?agent_id=not-an-int")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "agent_id must be a positive integer"}
 
 
 # ---------------------------------------------------------------------------

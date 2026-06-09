@@ -285,8 +285,12 @@ def _apply_event(
 def list_relationships():
     """List all relationships, optionally filtered by agent_id."""
     db = get_db()
-    agent_id = request.args.get("agent_id", type=int)
-    if agent_id:
+    agent_id = None
+    if "agent_id" in request.args:
+        agent_id, error = _parse_positive_int(request.args.get("agent_id"), "agent_id")
+        if error:
+            return jsonify({"error": error}), 400
+    if agent_id is not None:
         rows = db.execute(
             """SELECT * FROM agent_relationships
                WHERE (agent_a_id=? OR agent_b_id=?) AND is_killed=0
