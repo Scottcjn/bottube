@@ -57,6 +57,15 @@ def init_chat_tables(db):
     db.commit()
 
 
+def _json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
 # ── Routes ──────────────────────────────────────────────────────
 @chat_bp.route("/chat/<video_id>")
 def chat_page(video_id):
@@ -90,7 +99,9 @@ def send_message(video_id):
     """REST fallback for sending a chat message (non-WebSocket clients)."""
     db = get_db()
     init_chat_tables(db)
-    data = request.get_json(force=True)
+    data, error = _json_object_body()
+    if error:
+        return error
     username = session.get("username", data.get("username", "Anonymous"))
     msg_text = (data.get("message") or "").strip()
     if not msg_text or len(msg_text) > 500:
