@@ -151,3 +151,20 @@ def test_rejected_wrtc_withdrawal_does_not_queue_or_debit(client):
 
     assert queued == 0
     assert balance == 1000.0
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/wrtc",
+        "/wrtc/deposit",
+        "/wrtc/withdraw",
+        "/wrtc/history",
+        "/premium/wrtc",
+    ],
+)
+def test_wrtc_html_alias_routes_redirect_to_bridge_console(client, path):
+    resp = client.get(path)
+
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/bridge/wrtc")

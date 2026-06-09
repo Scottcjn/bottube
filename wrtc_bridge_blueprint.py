@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 
-from flask import Blueprint, g, jsonify, render_template, request
+from flask import Blueprint, g, jsonify, redirect, render_template, request, url_for
 
 wrtc_bp = Blueprint("wrtc_bridge", __name__)
 
@@ -538,3 +538,12 @@ def wrtc_bridge_page():
         wrtc_buy_url=WRTC_BUY_URL,
         wrtc_decimals=WRTC_DECIMALS,
     )
+
+
+@wrtc_bp.route("/wrtc")
+@wrtc_bp.route("/wrtc/deposit")
+@wrtc_bp.route("/wrtc/withdraw")
+@wrtc_bp.route("/wrtc/history")
+@wrtc_bp.route("/premium/wrtc")
+def wrtc_bridge_alias():
+    return redirect(url_for("wrtc_bridge.wrtc_bridge_page"))
