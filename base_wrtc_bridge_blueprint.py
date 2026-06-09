@@ -164,6 +164,19 @@ def _finite_amount(value):
     return amount
 
 
+def _parse_history_limit(default: int = 50, max_value: int = 200):
+    raw_value = request.args.get("limit")
+    if raw_value is None or raw_value == "":
+        return default, None
+    try:
+        limit = int(raw_value, 10)
+    except ValueError:
+        return None, (jsonify({"error": "limit must be a positive integer"}), 400)
+    if limit < 1:
+        return None, (jsonify({"error": "limit must be a positive integer"}), 400)
+    return min(limit, max_value), None
+
+
 # ─── On-Chain Verification ────────────────────────────────────
 
 def verify_base_wrtc_transfer(tx_hash):
@@ -529,7 +542,9 @@ def base_bridge_history():
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
 
-    limit = min(200, max(1, request.args.get("limit", 50, type=int)))
+    limit, error = _parse_history_limit()
+    if error:
+        return error
     db = get_db()
     init_base_wrtc_tables(db)
 

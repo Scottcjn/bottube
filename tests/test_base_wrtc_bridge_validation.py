@@ -2,9 +2,15 @@
 """Validation tests for Base wRTC bridge request parsing."""
 
 import sqlite3
+from importlib import metadata
 
 import pytest
+import werkzeug
 from flask import Flask, g
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 @pytest.fixture()
@@ -121,6 +127,17 @@ def test_base_bridge_withdraw_rejects_non_finite_amounts(client, amount):
 
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "amount must be a finite number"
+
+
+@pytest.mark.parametrize("limit", ["not-a-number", "0", "-5", "1.5", "true"])
+def test_base_bridge_history_rejects_invalid_limit(client, limit):
+    resp = client.get(
+        f"/api/base-bridge/history?limit={limit}",
+        headers=_auth_headers(),
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "limit must be a positive integer"
 
 
 def test_rejected_base_bridge_withdrawal_does_not_queue_or_debit(client):
