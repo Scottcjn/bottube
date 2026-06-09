@@ -141,6 +141,16 @@ def _string_field(data: dict, field_name: str, default: str = ""):
     return value.strip(), None
 
 
+def _integer_field(data: dict, field_name: str, default: int):
+    value = data.get(field_name, default)
+    if isinstance(value, bool):
+        return None, (jsonify({"error": f"{field_name} must be an integer"}), 400)
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": f"{field_name} must be an integer"}), 400)
+
+
 def _require_api_key_or_json(f):
     """Accept X-API-Key header (standard) or agent_api_key in JSON body."""
     @wraps(f)
@@ -931,10 +941,10 @@ def generate_video():
     if len(prompt) > PROMPT_MAX_LEN:
         return jsonify({"error": f"prompt exceeds {PROMPT_MAX_LEN} characters"}), 400
 
-    try:
-        duration = min(MAX_DURATION, max(1, int(data.get("duration", MAX_DURATION))))
-    except (TypeError, ValueError):
-        return jsonify({"error": "duration must be an integer"}), 400
+    duration, error = _integer_field(data, "duration", MAX_DURATION)
+    if error:
+        return error
+    duration = min(MAX_DURATION, max(1, duration))
     category, error = _string_field(data, "category", "other")
     if error:
         return error

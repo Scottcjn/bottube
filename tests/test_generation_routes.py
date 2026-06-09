@@ -2,9 +2,14 @@
 
 import sys
 import types
+from importlib import metadata
 
 import pytest
+import werkzeug
 from flask import Flask
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 @pytest.fixture
@@ -123,6 +128,28 @@ def test_legacy_generate_video_rejects_malformed_fields(legacy_generation_client
     )
     assert title_resp.status_code == 400
     assert title_resp.get_json() == {"error": "title must be a string"}
+
+
+def test_legacy_generate_video_rejects_boolean_duration_before_start(
+    legacy_generation_client,
+    monkeypatch,
+):
+    import video_gen_blueprint
+
+    monkeypatch.setattr(
+        video_gen_blueprint.threading,
+        "Thread",
+        lambda *_args, **_kwargs: pytest.fail("generation should not start"),
+    )
+
+    resp = legacy_generation_client.post(
+        "/api/generate-video",
+        json={"prompt": "make a video", "duration": True},
+        headers={"X-API-Key": "test-key"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "duration must be an integer"}
 
 
 def test_legacy_generate_video_rejects_non_string_body_api_key(
