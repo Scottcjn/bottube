@@ -521,11 +521,18 @@ def wrtc_bridge_history():
 
 @wrtc_bp.route("/bridge")
 def wrtc_bridge_landing():
+    _user = getattr(g, "user", None)
+    user_balance = _user["rtc_balance"] if _user else 0
+    user_sol_address = (_user["sol_address"] or "") if _user else ""
     return render_template(
         "bridge.html",
         wrtc_mint=WRTC_MINT,
         wrtc_reserve_wallet=WRTC_RESERVE_WALLET,
         wrtc_buy_url=WRTC_BUY_URL,
+        user_balance=user_balance,
+        swap_url=WRTC_BUY_URL,
+        reserve_wallet=WRTC_RESERVE_WALLET,
+        user_sol_address=user_sol_address,
     )
 
 

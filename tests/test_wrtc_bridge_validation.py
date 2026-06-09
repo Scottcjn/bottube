@@ -2,6 +2,7 @@
 """Validation tests for Solana wRTC bridge request parsing."""
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 from flask import Flask, g
@@ -168,3 +169,106 @@ def test_wrtc_html_alias_routes_redirect_to_bridge_console(client, path):
 
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/bridge/wrtc")
+
+
+# --- /bridge landing template context tests (regression for #1359) ---
+
+import wrtc_bridge_blueprint as bridge_mod  # noqa: E402
+
+
+def test_bridge_landing_passes_template_context_for_anonymous_user(monkeypatch):
+    """Anonymous user: g.user absent -> all 4 template kwargs set to safe defaults."""
+    from flask import Flask, g
+
+    captured = {}
+
+    def _fake_render(template_name, **kwargs):
+        captured["template_name"] = template_name
+        captured["kwargs"] = kwargs
+        return "<html>fake</html>"
+
+    monkeypatch.setattr(bridge_mod, "render_template", _fake_render)
+
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    flask_app.register_blueprint(bridge_mod.wrtc_bp)
+
+    client = flask_app.test_client()
+    resp = client.get("/bridge")
+    assert resp.status_code == 200
+    assert resp.data == b"<html>fake</html>"
+    assert captured["template_name"] == "bridge.html"
+    kw = captured["kwargs"]
+    # 4 missing vars get safe defaults
+    assert kw["user_balance"] == 0
+    assert kw["user_sol_address"] == ""
+    # swap_url and reserve_wallet reuse the existing module constants
+    assert kw["swap_url"] == bridge_mod.WRTC_BUY_URL
+    assert kw["reserve_wallet"] == bridge_mod.WRTC_RESERVE_WALLET
+    # 3 existing vars still present (no regression)
+    assert kw["wrtc_mint"] == bridge_mod.WRTC_MINT
+    assert kw["wrtc_reserve_wallet"] == bridge_mod.WRTC_RESERVE_WALLET
+    assert kw["wrtc_buy_url"] == bridge_mod.WRTC_BUY_URL
+
+
+def test_bridge_landing_uses_authenticated_user_balance_and_sol_address(monkeypatch):
+    """Authenticated user: g.user is set -> user_balance and user_sol_address flow through."""
+    from flask import Flask, g
+
+    captured = {}
+
+    def _fake_render(template_name, **kwargs):
+        captured["kwargs"] = kwargs
+        return "<html>fake</html>"
+
+    monkeypatch.setattr(bridge_mod, "render_template", _fake_render)
+
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    flask_app.register_blueprint(bridge_mod.wrtc_bp)
+
+    @flask_app.before_request
+    def _seed_user():
+        g.user = {
+            "id": 42,
+            "agent_name": "alice",
+            "sol_address": "SoLaNaAdDrEsS1111111111111111111111",
+            "rtc_balance": 12.5,
+        }
+
+    client = flask_app.test_client()
+    resp = client.get("/bridge")
+    assert resp.status_code == 200
+    kw = captured["kwargs"]
+    assert kw["user_balance"] == 12.5
+    assert kw["user_sol_address"] == "SoLaNaAdDrEsS1111111111111111111111"
+
+
+def test_bridge_landing_handles_user_with_null_sol_address(monkeypatch):
+    """Auth user with NULL sol_address -> empty string fallback (no 500)."""
+    from flask import Flask, g
+
+    captured = {}
+
+    def _fake_render(template_name, **kwargs):
+        captured["kwargs"] = kwargs
+        return "<html>fake</html>"
+
+    monkeypatch.setattr(bridge_mod, "render_template", _fake_render)
+
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    flask_app.register_blueprint(bridge_mod.wrtc_bp)
+
+    @flask_app.before_request
+    def _seed_user():
+        g.user = {"id": 7, "agent_name": "bob", "sol_address": None, "rtc_balance": 0.0}
+
+    client = flask_app.test_client()
+    resp = client.get("/bridge")
+    assert resp.status_code == 200
+    kw = captured["kwargs"]
+    assert kw["user_sol_address"] == ""
+    assert kw["user_balance"] == 0.0
+    assert kw["swap_url"] == bridge_mod.WRTC_BUY_URL
+    assert kw["reserve_wallet"] == bridge_mod.WRTC_RESERVE_WALLET
