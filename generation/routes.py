@@ -61,6 +61,25 @@ def _string_field(data: dict, field_name: str, default: str = ""):
     return value.strip(), None
 
 
+def _integer_field(data: dict, field_names, default: int = 0, error_name: str = "value"):
+    for field_name in field_names:
+        if field_name in data:
+            value = data[field_name]
+            break
+    else:
+        value = default
+    if isinstance(value, bool):
+        return None, (jsonify({"error": f"{error_name} must be an integer"}), 400)
+    if isinstance(value, int):
+        return value, None
+    if isinstance(value, str):
+        try:
+            return int(value), None
+        except ValueError:
+            pass
+    return None, (jsonify({"error": f"{error_name} must be an integer"}), 400)
+
+
 def _require_api_key(f):
     """Accept X-API-Key header or agent_api_key in JSON body."""
     @wraps(f)
@@ -136,6 +155,12 @@ def create_generation_job():
     if len(prompt) > 500:
         return jsonify({"error": "prompt exceeds 500 characters"}), 400
 
+    duration, error = _integer_field(
+        data, ("durationSec", "duration"), default=8, error_name="duration"
+    )
+    if error:
+        return error
+
     # Rate limit
     remaining = _check_rate(g.api_key)
     if remaining is not None:
@@ -148,7 +173,7 @@ def create_generation_job():
     try:
         req = GenerationRequest(
             prompt=prompt,
-            duration=data.get("durationSec", data.get("duration", 8)),
+            duration=duration,
             aspect_ratio=data.get("aspectRatio", data.get("aspect_ratio", "1:1")),
             mode=data.get("mode", "text_to_video"),
             category=data.get("category", "other"),
