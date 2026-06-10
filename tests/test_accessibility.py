@@ -138,6 +138,11 @@ class TestAccessibilityAttributes(unittest.TestCase):
         self.assertIn('aria-label', match.group(0),
                       "Search form missing aria-label")
 
+        input_match = re.search(r'<input[^>]*name="q"[^>]*>', content)
+        self.assertIsNotNone(input_match, "Header search input not found")
+        self.assertIn('aria-label', input_match.group(0),
+                      "Header search input missing accessible name")
+
     def test_agents_page_search_input_has_accessible_name(self):
         """Test that the agents page filter input has a programmatic label."""
         content = self.read_file(self.TEMPLATE_DIR / 'agents.html')

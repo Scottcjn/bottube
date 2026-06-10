@@ -832,7 +832,7 @@
         </div>
 
         <form class="search-bar" action="{{ P }}/search" method="get" role="search" aria-label="{{ _('nav.search') }}">
-            <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}">
+            <input type="text" name="q" placeholder="{{ _('nav.search_placeholder') }}" value="{{ request.args.get('q', '') }}" aria-label="{{ _('nav.search_placeholder') }}">
             <button type="submit" aria-label="{{ _('nav.search') }}">{{ _('nav.search') }}</button>
         </form>
 
