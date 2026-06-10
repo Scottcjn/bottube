@@ -57,3 +57,4 @@ bottube.db
 bottube.db-wal
 bottube.db-shm
 *.db-journal
+.codex

@@ -16,6 +16,7 @@ from flask import Blueprint, request, jsonify, g, session
 import hashlib
 import json
 import logging
+import hmac
 import os
 import sqlite3
 import time
@@ -44,7 +45,14 @@ MIN_WITHDRAW_RTC = 5.0       # Minimum 5 RTC to withdraw as ERG
 EXPLORER_API = "https://api.ergoplatform.com/api/v1"
 
 # Admin key for management endpoints
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "bottube_admin_key_2026")
+ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+
+def _admin_ok(provided):
+    """Constant-time admin check; fails closed when BOTTUBE_ADMIN_KEY is unset."""
+    if not ADMIN_KEY:
+        return False
+    return hmac.compare_digest(provided or "", ADMIN_KEY)
+
 
 # Confirmation threshold (blocks)
 REQUIRED_CONFIRMATIONS = 3
@@ -483,7 +491,7 @@ def process_withdrawals():
       }
     """
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != ADMIN_KEY:
+    if not _admin_ok(admin_key):
         return jsonify({"error": "Admin key required"}), 401
 
     data = request.get_json() or {}
@@ -508,7 +516,7 @@ def process_withdrawals():
 def pending_withdrawals():
     """Admin endpoint: list pending withdrawals."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if admin_key != ADMIN_KEY:
+    if not _admin_ok(admin_key):
         return jsonify({"error": "Admin key required"}), 401
 
     db = get_db()
