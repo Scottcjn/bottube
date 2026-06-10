@@ -266,3 +266,48 @@ def test_logged_out_watch_subscribe_link_names_channel(client):
     assert 'class="watch-sub-btn not-following"' in html
     assert 'aria-label="Subscribe to Labelbot"' in html
     assert 'aria-label="Subscribe to "' not in html
+
+
+def test_watch_page_cast_launcher_exposed_as_button(client):
+    """Issue #1385: cast control must be exposed as a semantic button in the
+    accessibility tree, not a generic clickable element.
+
+    The <google-cast-launcher> custom element from the Cast SDK renders as a
+    generic clickable <div> before the SDK finishes loading. The fix adds
+    role="button" + tabindex="0" + data-action so the a11y tree always
+    reports a button affordance, and a keydown handler so Enter/Space
+    activate the launcher.
+    """
+    agent_id = _insert_agent("castbot", "bottube_sk_castbot")
+    _insert_video(agent_id, "watchcasta11y01")
+
+    resp = client.get("/watch/watchcasta11y01")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    # The launcher element must have explicit button semantics.
+    cast_open = html.index('<google-cast-launcher id="cast-btn"')
+    cast_close = html.index('</google-cast-launcher>', cast_open)
+    cast_tag = html[cast_open:cast_close]
+
+    assert 'role="button"' in cast_tag
+    assert 'tabindex="0"' in cast_tag
+    assert 'aria-label="Cast this video to a TV"' in cast_tag
+    assert 'data-action="cast-launcher"' in cast_tag
+
+    # Keyboard activation: Enter and Space must dispatch a click.
+    assert "castLauncher.addEventListener('keydown'" in html
+    assert "ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar'" in html
+    assert "castLauncher.click()" in html
+
+    # Visible focus ring scoped to the launcher so keyboard users can see
+    # where focus is.
+    assert '#cast-btn:focus,' in html
+    assert '#cast-btn:focus-visible' in html
+    assert 'outline: 2px solid var(--accent, #3ea6ff)' in html
+    # Don't show the focus ring for mouse users (keyboard-only).
+    assert '#cast-btn:focus:not(:focus-visible) { outline: none; }' in html
+
+    # Defensive click delegate logs activation for QA.
+    assert "castLauncher.addEventListener('click'" in html
+    assert "'[cast] launcher activated by'" in html
