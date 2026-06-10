@@ -440,6 +440,8 @@ def ban_transactions(agent_name):
         offset = int(request.args.get("offset", 0))
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid pagination parameters"}), 400
+    if limit < 1 or offset < 0:
+        return jsonify({"error": "Invalid pagination parameters"}), 400
 
     txs = db.execute(
         "SELECT * FROM ban_transactions WHERE agent_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",

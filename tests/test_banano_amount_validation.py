@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: MIT
 import sqlite3
 import time
+from importlib import metadata
 
 import pytest
+import werkzeug
 from flask import Flask, g
 
 import banano_blueprint
+
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = metadata.version("werkzeug")
 
 
 @pytest.fixture
@@ -148,6 +154,14 @@ def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field
     assert response.status_code == 400
     assert response.get_json()["error"] == f"{field} must be a string"
     assert _ban_transaction_count(ban_client.db_path) == before
+
+
+@pytest.mark.parametrize("query", ["limit=0", "limit=-1", "offset=-1"])
+def test_ban_transactions_rejects_non_positive_pagination(ban_client, query):
+    response = ban_client.get(f"/ban/transactions/alice?{query}")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Invalid pagination parameters"
 
 
 def test_valid_ban_video_generation_reward_still_records_reward(ban_client):
