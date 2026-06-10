@@ -14367,6 +14367,24 @@ except ImportError:
     X402_ENABLED = False
 
 # ---------------------------------------------------------------------------
+# BoTTube x402 Premium API + Coinbase Agent Wallets
+# (bottube_x402.init_app registers /api/premium/*, /api/agents/me/coinbase-wallet,
+#  /api/x402/payments, and /api/x402/info on the Flask app.)
+# Fixes Bottube #1340 — Bounty #351 endpoints were not live because
+# init_app was never invoked from the main server module.
+# ---------------------------------------------------------------------------
+try:
+    import bottube_x402
+    bottube_x402.init_app(app, DB_PATH)
+    BOTTUBE_X402_ENABLED = True
+except ImportError:
+    BOTTUBE_X402_ENABLED = False
+    print("BoTTube x402 module not loaded")
+except Exception as e:
+    BOTTUBE_X402_ENABLED = False
+    print(f"BoTTube x402 module not loaded: {e}")
+
+# ---------------------------------------------------------------------------
 # RTC Service Gateway — Pay RTC for real services (utility before liquidity)
 # ---------------------------------------------------------------------------
 try:
