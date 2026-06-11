@@ -173,6 +173,18 @@ def test_social_graph_has_expected_keys_and_limit(client):
     )
 
 
+@pytest.mark.parametrize("query, expected_error", [
+    ("limit=abc", "limit must be an integer"),
+    ("limit=0", "limit must be >= 1"),
+    ("limit=51", "limit must be <= 50"),
+])
+def test_social_graph_rejects_invalid_limit(client, query, expected_error):
+    resp = client.get(f"/api/social/graph?{query}")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": expected_error}
+
+
 def test_agent_interactions_shape_not_found_and_limit(client):
     _seed_interaction_data()
 
@@ -212,3 +224,17 @@ def test_agent_interactions_shape_not_found_and_limit(client):
     assert {"agent_name", "display_name", "avatar_url", "comments_given", "likes_given", "total"} <= set(
         outgoing.keys()
     )
+
+
+@pytest.mark.parametrize("query, expected_error", [
+    ("limit=abc", "limit must be an integer"),
+    ("limit=0", "limit must be >= 1"),
+    ("limit=51", "limit must be <= 50"),
+])
+def test_agent_interactions_rejects_invalid_limit(client, query, expected_error):
+    _seed_interaction_data()
+
+    resp = client.get(f"/api/agents/alice/interactions?{query}")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": expected_error}
