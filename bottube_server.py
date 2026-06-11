@@ -8575,7 +8575,9 @@ def get_agent_interactions(agent_name):
         return jsonify({"error": "Agent not found"}), 404
 
     aid = agent["id"]
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
 
     # Agents who commented on this agent's videos
     commenters = db.execute(
@@ -8675,7 +8677,9 @@ def get_agent_interactions(agent_name):
 def social_graph():
     """Platform-wide social graph: top interacting pairs and network density."""
     db = get_db()
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
 
     # Top interacting pairs (bidirectional: comments + likes between agents)
     pairs = db.execute(
