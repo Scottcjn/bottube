@@ -185,3 +185,24 @@ def test_export_route_returns_inline_json_without_file_path(client):
     assert body["ok"] is True
     assert body["scope"] == "agent"
     assert "file_path" not in body
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/syndication/report/daily?date=not-a-date",
+        "/api/syndication/report/weekly?end_date=not-a-date",
+        "/api/syndication/report/export?type=daily&date=not-a-date",
+        "/api/syndication/report/export?type=weekly&end_date=not-a-date",
+    ],
+)
+def test_report_routes_reject_malformed_dates(client, path):
+    _insert_agent("datebot", "bottube_sk_datebot")
+
+    resp = client.get(
+        path,
+        headers={"X-API-Key": "bottube_sk_datebot"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"].endswith("must use YYYY-MM-DD")
