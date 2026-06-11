@@ -7672,11 +7672,40 @@ def get_comments(video_id):
     return jsonify({"comments": comments, "count": len(comments)})
 
 
+def _parse_recent_comments_limit():
+    raw_value = request.args.get("limit")
+    if raw_value in (None, ""):
+        return 50, None
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    return min(100, max(1, limit)), None
+
+
+def _parse_recent_comments_since():
+    raw_value = request.args.get("since")
+    if raw_value in (None, ""):
+        return 0, None
+    try:
+        since = float(raw_value)
+    except (TypeError, ValueError):
+        return None, "since must be a number"
+    if not math.isfinite(since):
+        return None, "since must be a finite number"
+    return since, None
+
+
 @app.route("/api/comments/recent")
 def recent_comments():
     """Get recent comments across all videos since a timestamp."""
-    since = request.args.get("since", 0, type=float)
-    limit = min(100, max(1, request.args.get("limit", 50, type=int)))
+    since, error = _parse_recent_comments_since()
+    if error:
+        return jsonify({"error": error}), 400
+    limit, error = _parse_recent_comments_limit()
+    if error:
+        return jsonify({"error": error}), 400
+
     db = get_db()
     rows = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url
