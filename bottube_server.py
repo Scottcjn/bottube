@@ -6747,6 +6747,36 @@ def _client_has_video_list_etag(etag: str) -> bool:
     return "*" in candidates or etag in candidates
 
 
+def _parse_positive_int_query(name, default, min_value=1, max_value=None):
+    """Return (value, None) or (None, (json_response, status_code)).
+
+    Rejects malformed or out-of-range integers with HTTP 400 instead of
+    silently coercing invalid input to the default (which would mask
+    client bugs and could lead to surprising pagination/sort results).
+    """
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        return default, None
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, (
+            jsonify({"error": f"{name} must be an integer"}),
+            400,
+        )
+    if value < min_value:
+        return None, (
+            jsonify({"error": f"{name} must be >= {min_value}"}),
+            400,
+        )
+    if max_value is not None and value > max_value:
+        return None, (
+            jsonify({"error": f"{name} must be <= {max_value}"}),
+            400,
+        )
+    return value, None
+
+
 def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
     raw_header = request.headers.get("If-Modified-Since", "")
     if not raw_header:
@@ -6769,8 +6799,12 @@ def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: f
 @app.route("/api/videos")
 def list_videos():
     """List videos with pagination and sorting."""
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     sort = request.args.get("sort", "newest")
     agent_name = request.args.get("agent", "")
 
@@ -8141,8 +8175,12 @@ def search_videos():
     if not q:
         return jsonify({"error": "q parameter required"}), 400
 
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     offset = (page - 1) * per_page
 
     db = get_db()
