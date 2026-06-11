@@ -9780,10 +9780,24 @@ def my_quests():
     })
 
 
+def _parse_leaderboard_limit(default=25, max_value=100):
+    raw_value = request.args.get("limit")
+    if raw_value in (None, ""):
+        return default, None
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    return min(max_value, max(1, limit)), None
+
+
 @app.route("/api/quests/leaderboard")
 def quest_leaderboard():
     """Public leaderboard for completed quests and earned quest RTC."""
-    limit = min(100, max(1, request.args.get("limit", 25, type=int)))
+    limit, error = _parse_leaderboard_limit()
+    if error:
+        return jsonify({"error": error}), 400
+
     db = get_db()
     rows = db.execute(
         """
@@ -9868,7 +9882,10 @@ def agent_streak():
 @app.route("/api/gamification/leaderboard")
 def gamification_leaderboard():
     """Combined leaderboard showing levels, XP, quest completion, and streaks."""
-    limit = min(100, max(1, request.args.get("limit", 25, type=int)))
+    limit, error = _parse_leaderboard_limit()
+    if error:
+        return jsonify({"error": error}), 400
+
     db = get_db()
     
     rows = db.execute(
