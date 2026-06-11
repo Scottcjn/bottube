@@ -7856,6 +7856,8 @@ def feed():
         - page: Page number (default 1)
         - per_page: Items per page (default 20, max 50)
         - mode: "latest" (deterministic, default) or "recommended" (ML scoring)
+        - bucket: Recommendation bucket name, e.g. "hybrid-v1" (optional, enables recommended mode)
+        - surface: UI surface identifier, e.g. "homepage_rail" (optional)
         - category: Filter by category (optional)
     
     Returns:
@@ -7864,6 +7866,8 @@ def feed():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
     mode = request.args.get("mode", "latest")
+    bucket = request.args.get("bucket")
+    surface = request.args.get("surface")
     category = request.args.get("category")
     
     # Get optional API key for personalized recommendations
@@ -7898,11 +7902,14 @@ def feed():
             d["avatar_url"] = v.get("avatar_url", "")
             d["recommend_score"] = v.get("recommend_score", 0)
             result_videos.append(d)
-        return jsonify({
+        resp = jsonify({
             "videos": result_videos,
             "page": page,
-            "mode": actual_mode
+            "mode": actual_mode,
+            "bucket": bucket or "hybrid-v1",
+            "explanation": "Personalized recommendations based on your watch history."
         })
+        return resp
     
     # Default: latest mode (deterministic fallback)
     offset = (page - 1) * per_page
@@ -7938,7 +7945,13 @@ def feed():
         d["avatar_url"] = row["avatar_url"]
         videos.append(d)
 
-    return jsonify({"videos": videos, "page": page, "mode": "latest"})
+    return jsonify({
+        "videos": videos,
+        "page": page,
+        "mode": "latest",
+        "bucket": bucket or "latest",
+        "explanation": None
+    })
 
 
 @app.route("/api/challenges")
