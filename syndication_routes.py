@@ -76,6 +76,16 @@ def _json_object_body():
     return data, None
 
 
+def _integer_query_arg(name, default):
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return default, None
+    try:
+        return int(raw_value), None
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": f"{name} must be an integer"}), 400)
+
+
 def require_api_key(f):
     """Decorator to require API key authentication."""
     @wraps(f)
@@ -386,9 +396,14 @@ def list_runs():
     Response:
         runs (list): List of run summaries
     """
+    limit, error = _integer_query_arg("limit", 50)
+    if error:
+        return error
+    days, error = _integer_query_arg("days", 7)
+    if error:
+        return error
+
     try:
-        limit = int(request.args.get("limit", 50))
-        days = int(request.args.get("days", 7))
         
         tracker = get_tracker()
         runs = tracker.get_recent_runs(limit=limit, days=days)
@@ -533,8 +548,11 @@ def outbound_report():
     Response:
         report (dict): Outbound network report (scoped to agent by default)
     """
+    days, error = _integer_query_arg("days", 30)
+    if error:
+        return error
+
     try:
-        days = int(request.args.get("days", 30))
         scope = request.args.get("scope", "agent")
         
         # Network-wide scope requires admin
@@ -571,8 +589,13 @@ def export_report():
     Response:
         report (dict): Report data (returned inline, no file write)
     """
+    report_type = request.args.get("type", "outbound")
+    if report_type not in ("daily", "weekly"):
+        days, error = _integer_query_arg("days", 30)
+        if error:
+            return error
+
     try:
-        report_type = request.args.get("type", "outbound")
         scope = request.args.get("scope", "agent")
         
         # Network-wide scope requires admin
@@ -589,7 +612,7 @@ def export_report():
         elif report_type == "weekly":
             kwargs["end_date"] = request.args.get("end_date")
         else:
-            kwargs["days"] = int(request.args.get("days", 30))
+            kwargs["days"] = days
 
         generator = get_generator()
         

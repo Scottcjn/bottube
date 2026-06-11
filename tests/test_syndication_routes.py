@@ -185,3 +185,24 @@ def test_export_route_returns_inline_json_without_file_path(client):
     assert body["ok"] is True
     assert body["scope"] == "agent"
     assert "file_path" not in body
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/syndication/runs?limit=not-an-int",
+        "/api/syndication/runs?days=not-an-int",
+        "/api/syndication/report/outbound?days=not-an-int",
+        "/api/syndication/report/export?type=outbound&days=not-an-int",
+    ],
+)
+def test_numeric_query_params_reject_malformed_values(client, path):
+    _insert_agent("querybot", "bottube_sk_querybot")
+
+    resp = client.get(
+        path,
+        headers={"X-API-Key": "bottube_sk_querybot"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"].endswith("must be an integer")
