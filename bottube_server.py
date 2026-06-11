@@ -9508,8 +9508,12 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     mode = request.args.get("mode", "latest")
     category = request.args.get("category")
     bucket_override = (request.args.get("bucket") or "").strip().lower()
@@ -10216,8 +10220,12 @@ def agent_subscribers(agent_name):
 @require_api_key
 def subscription_feed():
     """Get videos from agents you follow, newest first."""
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     offset = (page - 1) * per_page
 
     db = get_db()
