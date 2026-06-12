@@ -2445,6 +2445,11 @@ def init_db():
         conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id)")
 
+    # Migration: add collaborator_ids for co-upload (Bounty #2161)
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "collaborator_ids" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN collaborator_ids TEXT DEFAULT '[]'")
+
     # Migration: create messages table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -6332,6 +6337,7 @@ def upload_video():
     challenge_id = request.form.get("challenge_id", "").strip()
     gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
     response_to = request.form.get("response_to", "").strip()  # Video ID this is a response to (Issue #2282)
+    collaborator_ids_raw = request.form.get("collaborator_ids", "").strip()  # JSON array of agent_ids for co-upload (Bounty #2161)
 
     db = get_db()
     if revision_of:
@@ -6355,6 +6361,36 @@ def upload_video():
             return jsonify({"error": "response_to video not found"}), 404
         if original_video["is_removed"]:
             return jsonify({"error": "Cannot respond to a removed video"}), 400
+
+    # Parse + validate collaborator_ids (Bounty #2161 co-upload)
+    collaborator_ids_json = "[]"
+    if collaborator_ids_raw:
+        try:
+            parsed_collab = json.loads(collaborator_ids_raw)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid collaborator_ids: must be a JSON array of agent_ids"}), 400
+        if not isinstance(parsed_collab, list):
+            return jsonify({"error": "Invalid collaborator_ids: must be a JSON array"}), 400
+        if len(parsed_collab) > 5:
+            return jsonify({"error": "Too many collaborators: max 5 per video"}), 400
+        cleaned = []
+        for cid in parsed_collab:
+            if not isinstance(cid, int) or cid <= 0:
+                return jsonify({"error": "Invalid collaborator_id: must be a positive int"}), 400
+            if cid == g.agent["id"]:
+                return jsonify({"error": "Cannot add yourself as a collaborator"}), 400
+            cleaned.append(cid)
+        if cleaned:
+            placeholders = ",".join("?" * len(cleaned))
+            existing = db.execute(
+                f"SELECT id FROM agents WHERE id IN ({placeholders})", cleaned
+            ).fetchall()
+            existing_ids = {row["id"] for row in existing}
+            missing = set(cleaned) - existing_ids
+            if missing:
+                return jsonify({"error": f"Unknown collaborator agent_id(s): {sorted(missing)}"}), 400
+        collaborator_ids_json = json.dumps(cleaned)
+
     if challenge_id:
         ch = db.execute(
             "SELECT challenge_id, status, start_at, end_at FROM challenges WHERE challenge_id = ?",
@@ -6546,14 +6582,14 @@ def upload_video():
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
             duration_sec, width, height, tags, scene_description, category,
-            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, response_to_video_id, created_at,
+            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, response_to_video_id, collaborator_ids, created_at,
             screening_status, screening_details, is_removed, removed_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             video_id, g.agent["id"], title, description, filename,
             thumb_filename, duration, width, height, json.dumps(tags),
             scene_description, category, novelty_score, novelty_flags,
-            revision_of, revision_note, challenge_id, response_to, time.time(),
+            revision_of, revision_note, challenge_id, response_to, collaborator_ids_json, time.time(),
             screening_status, screening_details,
             1 if screening_status == "failed" else 0,
             ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
@@ -11156,7 +11192,8 @@ def tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "SELECT v.agent_id, v.title, v.collaborator_ids, "
+        "       a.agent_name AS creator_name, "
         "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
@@ -11212,22 +11249,43 @@ def tip_video(video_id):
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
 
-    # Execute transfer
+    # Execute transfer — split the tip among collaborators (Bounty #2161)
+    collaborator_ids = []
+    try:
+        col_raw = video["collaborator_ids"] or "[]"
+        collaborator_ids = json.loads(col_raw) if col_raw else []
+    except (ValueError, TypeError):
+        collaborator_ids = []
+    # Filter out any collaborator that is the tipper themselves (no self-tip)
+    collaborator_ids = [cid for cid in collaborator_ids if cid != g.agent["id"] and isinstance(cid, int) and cid > 0]
+    # De-dupe while preserving order
+    seen = set()
+    collaborator_ids = [c for c in collaborator_ids if not (c in seen or seen.add(c))]
+    # Compute split — primary creator + each collaborator, evenly divided
+    recipients = [(video["agent_id"], "primary")] + [(cid, "collab") for cid in collaborator_ids]
+    if recipients:
+        per_recipient = round(amount / len(recipients), 6)
+        # Reconcile rounding so the sum equals the original amount
+        diff = round(amount - per_recipient * len(recipients), 6)
+    else:
+        per_recipient = amount
+        diff = 0
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
-    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, video["agent_id"]))
+    for idx, (rid, role) in enumerate(recipients):
+        share = per_recipient + (diff if idx == 0 else 0)
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (share, rid))
+        # Log per-recipient tip row
+        db.execute(
+            "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (g.agent["id"], rid, video_id, share, message, time.time()),
+        )
+        db.execute(
+            "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (rid, share, "tip_split_" + role, video_id, time.time()),
+        )
 
-    # Log tip
-    db.execute(
-        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (g.agent["id"], video["agent_id"], video_id, amount, message, time.time()),
-    )
-
-    # Log earnings for recipient
-    db.execute(
-        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
-        (video["agent_id"], amount, "tip_received", video_id, time.time()),
-    )
+    # If no recipients (shouldn't happen since primary is always present), fall through to no-op
 
     # Notify recipient
     notify(db, video["agent_id"], "tip",
