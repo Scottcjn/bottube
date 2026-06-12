@@ -13553,6 +13553,171 @@ def history_page():
     return redirect(url_for("dashboard_page"))
 
 
+@app.route("/settings/profile")
+def settings_profile_page():
+    """Account profile settings (Refs #1367).
+
+    Logical sub-route of /settings. For logged-in users, /settings/profile
+    delegates to wallet_settings_page() (the same handler the /settings parent
+    uses, since the profile form lives in the same template). For
+    signed-out users, redirect to /login with ?next=/settings/profile
+    preserved so the post-login redirect lands back here.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/settings/profile"))
+    return wallet_settings_page()
+
+
+@app.route("/agents/me")
+def agents_me_page():
+    """Canonical 'my agent' surface (Refs #1367).
+
+    Distinct from /api/agents/me (the PATCH/POST API which 401s for
+    unauthed users, expected). For logged-in users, /agents/me redirects
+    to /dashboard (where the user's own agent card is rendered). For
+    signed-out users, redirect to /login with ?next=/agents/me preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/agents/me"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/premium/plans")
+def premium_plans_page():
+    """Premium plan picker (Refs #1367).
+
+    For logged-in users, render the same premium_page() handler (which
+    renders premium.html with the plan picker). For signed-out users,
+    redirect to /login with ?next=/premium/plans preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/premium/plans"))
+    return premium_page()
+
+
+@app.route("/premium/upgrade")
+def premium_upgrade_page():
+    """Premium upgrade flow (Refs #1367).
+
+    For logged-in users, redirect to the premium page where the upgrade
+    CTA lives. For signed-out users, redirect to /login with
+    ?next=/premium/upgrade preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/premium/upgrade"))
+    return premium_page()
+
+
+@app.route("/account")
+def account_page():
+    """Canonical account surface (Refs #1367).
+
+    For logged-in users, /account -> /dashboard. For signed-out users,
+    redirect to /login with ?next=/account preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/account"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/account/settings")
+def account_settings_page():
+    """Account sub-route pointing at /settings/wallet (Refs #1367).
+
+    For logged-in users, /account/settings -> /settings/wallet. For
+    signed-out users, redirect to /login with ?next=/account/settings.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/account/settings"))
+    return redirect(url_for("wallet_settings_page"))
+
+
+@app.route("/creator")
+def creator_page():
+    """Creator hub (Refs #1367).
+
+    Singular alias for the canonical creator directory at /agents.
+    For logged-in users, redirect to /agents (where the logged-in user
+    can see their own creator card). For signed-out users, redirect to
+    /login with ?next=/creator preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/creator"))
+    return redirect(url_for("agents_page"))
+
+
+@app.route("/creators")
+def creators_page():
+    """Creator directory (Refs #1367).
+
+    Plural alias for /agents. /creators -> /agents for all users (it is
+    a public-facing directory, not user-scoped).
+    """
+    return redirect(url_for("agents_page"))
+
+
+@app.route("/live")
+def live_page():
+    """Live streams surface (Refs #1367).
+
+    /live is not yet a separate product surface; redirect to /trending
+    where live/popular streams are surfaced today.
+    """
+    return redirect(url_for("trending_page"))
+
+
+@app.route("/home")
+def home_page():
+    """Canonical home alias for / (Refs #1367).
+
+    /home -> / for all visitors (anonymous and logged-in). The home
+    surface is the root index, which already handles both states.
+    """
+    return redirect(url_for("index"))
+
+
+@app.route("/watch")
+def watch_index_page():
+    """Canonical watch alias (Refs #1367).
+
+    /watch -> /trending for all visitors. The /watch/<video_id> route
+    remains the canonical single-video surface; /watch without a video
+    id resolves to the trending feed where users pick a video to watch.
+    """
+    return redirect(url_for("trending_page"))
+
+
+@app.route("/tags")
+def tags_index_page():
+    """Tag index alias (Refs #1367).
+
+    /tags -> /trending. Tag-driven browsing is not yet a separate
+    surface; the trending feed is the canonical discovery surface.
+    """
+    return redirect(url_for("trending_page"))
+
+
+@app.route("/help")
+def help_page():
+    """Help page (Refs #1367).
+
+    /help -> /docs. The docs surface is the canonical help content;
+    /help is a friendlier URL.
+    """
+    return redirect(url_for("docs_page"))
+
+
+@app.route("/channels")
+def channels_index_page():
+    """Channel index alias (Refs #1367).
+
+    /channels -> /trending. A dedicated channel index is not yet a
+    separate surface; the trending feed is the canonical channel
+    discovery surface.
+    """
+    return redirect(url_for("trending_page"))
+
+
 @app.route("/upload", methods=["GET", "POST"])
 def upload_page():
     """Upload form page for logged-in humans."""
