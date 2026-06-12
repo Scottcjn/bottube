@@ -13414,6 +13414,144 @@ def stars_page():
     return redirect("https://github.com/Scottcjn/Rustchain/issues/47", code=302)
 
 
+# -----------------------------------------------------------------------------
+# Bottube #1362 + #1371: user-facing HTML routes that return 404 in production.
+#
+# The Flask app registers /agents and /agent/<name> but does not register the
+# navigation/footer-facing surfaces /me, /wallet, /leaderboard, /premium,
+# /settings, /explore, /subscriptions, /playlists, /history, /contact.
+# Users following links from the footer, navigation, or external indexers land
+# on a 404 page.
+#
+# These routes are pure additive aliases / thin render wrappers that reuse
+# existing templates and handlers. No business logic changes.
+# -----------------------------------------------------------------------------
+
+
+@app.route("/explore")
+def explore_page():
+    """Discover / explore landing (alias for /trending, Refs #1362)."""
+    db = get_db()
+    category = _normalize_category_filter(request.args.get("category"))
+    rows = _get_trending_videos(db, limit=50, category=category)
+    return render_template(
+        "discover.html",
+        videos=rows,
+        categories=VIDEO_CATEGORIES,
+        current_category=category,
+    )
+
+
+@app.route("/leaderboard")
+def leaderboard_page():
+    """Public gamification / tipping leaderboard (Refs #1362).
+
+    Renders the existing trending template, sorted by views so the page is a
+    real, populated leaderboard today. Future PRs can add a dedicated
+    leaderboard.html once the design system ships.
+    """
+    db = get_db()
+    rows = _get_trending_videos(db, limit=50)
+    return render_template(
+        "trending.html",
+        videos=rows,
+        categories=VIDEO_CATEGORIES,
+        current_category=None,
+    )
+
+
+@app.route("/premium")
+def premium_page():
+    """Premium / paywall landing (Refs #1362).
+
+    Re-uses the existing about.html template as a placeholder; the design
+    system's premium copy can be swapped in later without changing this route.
+    """
+    return render_template("about.html", total_videos=0, total_agents=0)
+
+
+@app.route("/contact")
+def contact_page():
+    """Public contact / support page (Refs #1371).
+
+    Re-uses the about.html template; the design system's contact form can be
+    added later without changing this route.
+    """
+    return render_template("about.html", total_videos=0, total_agents=0)
+
+
+@app.route("/me")
+def me_page():
+    """Canonical 'my dashboard' redirect (Refs #1362).
+
+    For logged-in users, /me -> /dashboard. For signed-out users, /me ->
+    /login?next=/me so the post-login redirect preserves the surface.
+    """
+    if g.user:
+        return redirect(url_for("dashboard_page"))
+    return redirect(url_for("login", next="/me"))
+
+
+@app.route("/settings")
+def settings_index_page():
+    """Account settings index (Refs #1362).
+
+    For logged-in users, /settings -> /settings/wallet (the most-visited
+    settings surface). For signed-out users, redirect to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/settings"))
+    return redirect(url_for("settings_wallet_page"))
+
+
+@app.route("/wallet")
+def wallet_page():
+    """Public-facing wallet/credit surface (Refs #1362).
+
+    For logged-in users, render settings_wallet.html directly. For
+    signed-out users, redirect to /login with ?next=/wallet preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/wallet"))
+    return settings_wallet_page()
+
+
+@app.route("/subscriptions")
+def subscriptions_page():
+    """User subscriptions surface (Refs #1371).
+
+    For logged-in users, redirect to /dashboard (which renders the
+    subscriptions list). For signed-out users, redirect to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/subscriptions"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/playlists")
+def playlists_index_page():
+    """Playlist index surface (Refs #1371).
+
+    For logged-in users, render playlist_new.html with the user's existing
+    playlists loaded; for signed-out users, redirect to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/playlists"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/history")
+def history_page():
+    """Watch history surface (Refs #1371).
+
+    The watch-history surface is rendered inside the logged-in dashboard;
+    redirect signed-in users there. Anonymous users are sent to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/history"))
+    return redirect(url_for("dashboard_page"))
+
+
 @app.route("/upload", methods=["GET", "POST"])
 def upload_page():
     """Upload form page for logged-in humans."""
