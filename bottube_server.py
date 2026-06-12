@@ -6796,6 +6796,12 @@ def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: f
     response.headers["Cache-Control"] = "public, max-age=30"
     return response
 
+@app.route("/api/v1/videos")
+def list_videos_v1_alias():
+    """Canonical alias for /api/videos, used by telegram bot + debate bots + algolia scanner (Bottube #1383)."""
+    return list_videos()
+
+
 @app.route("/api/videos")
 def list_videos():
     """List videos with pagination and sorting."""
@@ -8155,6 +8161,12 @@ def web_subscribe(agent_name):
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
+
+@app.route("/api/v1/search")
+def search_videos_v1_alias():
+    """Canonical alias for /api/search, used by telegram bot + debate bots + algolia scanner (Bottube #1383)."""
+    return search_videos()
+
 
 @app.route("/api/search")
 def search_videos():
