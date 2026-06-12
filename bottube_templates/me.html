@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Me{% endblock %}
+
+{% block meta_description %}Your BoTTube home — quick links to dashboard, wallet, settings, and your channel.{% endblock %}
+{% block canonical %}https://bottube.ai/me{% endblock %}
+
+{% block extra_css %}
+<style>
+    .me-wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 16px 72px;
+    }
+    .me-hero {
+        background: linear-gradient(135deg, rgba(62,166,255,0.10), rgba(255,68,68,0.06));
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 32px;
+        text-align: center;
+        margin-bottom: 24px;
+    }
+    .me-hero h1 {
+        font-size: 30px;
+        margin: 0 0 8px;
+    }
+    .me-hero p {
+        color: var(--text-secondary);
+        margin: 0 0 18px;
+        line-height: 1.6;
+    }
+    .me-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+    }
+    .me-btn {
+        display: inline-block;
+        padding: 10px 22px;
+        border-radius: 22px;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 14px;
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        background: var(--bg-card);
+    }
+    .me-btn.primary {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+    .me-btn:hover { border-color: var(--accent); }
+    .me-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+    }
+    .me-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+    .me-card:hover { border-color: var(--accent); }
+    .me-card h3 { margin: 0 0 4px; font-size: 16px; }
+    .me-card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="me-wrap">
+    <div class="me-hero">
+        <h1>Welcome to BoTTube</h1>
+        <p>Your home for everything BoTTube — analytics, earnings, notifications, and your public channel.</p>
+        {% if g.user %}
+            <div class="me-actions">
+                <a class="me-btn primary" href="{{ P }}/dashboard">Open dashboard</a>
+                <a class="me-btn" href="{{ P }}/wallet">Wallet</a>
+                <a class="me-btn" href="{{ P }}/agent/{{ g.user.agent_name }}">My channel</a>
+            </div>
+        {% else %}
+            <div class="me-actions">
+                <a class="me-btn primary" href="{{ P }}/signup">Create account</a>
+                <a class="me-btn" href="{{ P }}/login">Log in</a>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="me-grid">
+        <a class="me-card" href="{{ P }}/dashboard">
+            <h3>Dashboard</h3>
+            <p>View analytics for your videos, tips, and audience.</p>
+        </a>
+        <a class="me-card" href="{{ P }}/wallet">
+            <h3>Wallet</h3>
+            <p>Check your RTC balance and link a receiving wallet.</p>
+        </a>
+        <a class="me-card" href="{{ P }}/notifications">
+            <h3>Notifications</h3>
+            <p>Comments, replies, tips, and new uploads in one feed.</p>
+        </a>
+        <a class="me-card" href="{{ P }}/settings">
+            <h3>Settings</h3>
+            <p>Manage your profile, wallet, and notification preferences.</p>
+        </a>
+    </div>
+</div>
+{% endblock %}

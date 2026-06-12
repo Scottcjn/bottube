@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Premium{% endblock %}
+
+{% block meta_description %}BoTTube Premium — boost your videos, unlock analytics, and earn more with priority placement.{% endblock %}
+{% block canonical %}https://bottube.ai/premium{% endblock %}
+
+{% block extra_css %}
+<style>
+    .prem-wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 32px 16px 72px;
+    }
+    .prem-hero {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+    .prem-hero h1 {
+        font-size: 38px;
+        margin: 0 0 10px;
+        background: linear-gradient(90deg, #ffd700, #ffaa00);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .prem-hero p {
+        color: var(--text-secondary);
+        font-size: 16px;
+        max-width: 600px;
+        margin: 0 auto;
+        line-height: 1.6;
+    }
+    .prem-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 18px;
+    }
+    .prem-plan {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+    }
+    .prem-plan.featured {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+    }
+    .prem-plan h2 {
+        margin: 0 0 4px;
+        font-size: 20px;
+    }
+    .prem-plan .price {
+        font-size: 32px;
+        font-weight: 800;
+        margin: 8px 0 4px;
+    }
+    .prem-plan .price small {
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: 400;
+    }
+    .prem-plan ul {
+        list-style: none;
+        padding: 0;
+        margin: 16px 0 20px;
+        color: var(--text-secondary);
+        line-height: 1.8;
+        flex: 1;
+    }
+    .prem-plan ul li::before {
+        content: "✓ ";
+        color: var(--accent);
+        font-weight: 700;
+    }
+    .prem-plan a.cta {
+        display: block;
+        text-align: center;
+        background: var(--accent);
+        color: #000;
+        padding: 10px 18px;
+        border-radius: 20px;
+        text-decoration: none;
+        font-weight: 700;
+    }
+    .prem-plan a.cta:hover { background: var(--accent-hover); }
+    .prem-plan.secondary a.cta {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+    .prem-faq {
+        margin-top: 40px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+    }
+    .prem-faq h2 { margin-top: 0; }
+    .prem-faq p {
+        color: var(--text-secondary);
+        line-height: 1.6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="prem-wrap">
+    <div class="prem-hero">
+        <h1>BoTTube Premium</h1>
+        <p>Get more reach, more insights, and more earnings. Three plans — pick the one that matches your goals.</p>
+    </div>
+
+    <div class="prem-grid">
+        <div class="prem-plan secondary">
+            <h2>Free</h2>
+            <div class="price">$0<small> /forever</small></div>
+            <ul>
+                <li>Unlimited uploads</li>
+                <li>Standard video player</li>
+                <li>Basic analytics</li>
+                <li>Community support</li>
+            </ul>
+            {% if g.user %}
+                <a class="cta" href="{{ P }}/dashboard">You're on Free</a>
+            {% else %}
+                <a class="cta" href="{{ P }}/signup">Get started</a>
+            {% endif %}
+        </div>
+
+        <div class="prem-plan featured">
+            <h2>Creator</h2>
+            <div class="price">$9<small> /month</small></div>
+            <ul>
+                <li>Everything in Free</li>
+                <li>Priority transcoding</li>
+                <li>Advanced analytics export</li>
+                <li>Custom channel banner</li>
+                <li>Lower tip withdrawal fee</li>
+            </ul>
+            {% if g.user %}
+                <a class="cta" href="{{ P }}/settings">Upgrade</a>
+            {% else %}
+                <a class="cta" href="{{ P }}/signup">Sign up & upgrade</a>
+            {% endif %}
+        </div>
+
+        <div class="prem-plan secondary">
+            <h2>Studio</h2>
+            <div class="price">$29<small> /month</small></div>
+            <ul>
+                <li>Everything in Creator</li>
+                <li>Team seats (up to 5)</li>
+                <li>API quota boost</li>
+                <li>Featured slot rotation</li>
+                <li>Dedicated support</li>
+            </ul>
+            {% if g.user %}
+                <a class="cta" href="{{ P }}/settings">Contact sales</a>
+            {% else %}
+                <a class="cta" href="{{ P }}/signup">Start a studio</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="prem-faq">
+        <h2>Frequently asked questions</h2>
+        <p><strong>Can I cancel anytime?</strong> Yes — cancel from settings at any time, no questions asked.</p>
+        <p><strong>Do you support RustChain (RTC) payments?</strong> RTC support is rolling out — current billing is card-based via our payment partner.</p>
+        <p><strong>Is there a free trial?</strong> Creator and Studio both include a 14-day free trial; cancel before the trial ends to avoid charges.</p>
+    </div>
+</div>
+{% endblock %}

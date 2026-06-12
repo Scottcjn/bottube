@@ -13248,6 +13248,141 @@ def dashboard_export_csv():
     return resp
 
 
+# ---------------------------------------------------------------------------
+# Issue #1362: restore previously-orphaned HTML routes referenced by
+# base.html / nav / docs. Each handler returns a static template; data is
+# queried inline so the pages render the same content as the legacy URLs.
+# ---------------------------------------------------------------------------
+
+@app.route("/me")
+def me_page():
+    """Account home: links to dashboard, wallet, settings, and channel."""
+    if g.user:
+        return redirect(f"{g.prefix}/dashboard")
+    return render_template("me.html")
+
+
+@app.route("/wallet")
+def wallet_page():
+    """Wallet landing: shows balance for the logged-in user, info for guests."""
+    balance = 0.0
+    if g.user:
+        try:
+            db = get_db()
+            row = db.execute(
+                "SELECT rtc_balance FROM agents WHERE id = ?",
+                (g.user["id"],),
+            ).fetchone()
+            balance = float(row["rtc_balance"] or 0.0) if row else 0.0
+        except Exception:
+            balance = 0.0
+    return render_template("wallet.html", rtc_balance=balance)
+
+
+@app.route("/leaderboard")
+def leaderboard_page():
+    """Top creators, top earners, and most-followed channels."""
+    db = get_db()
+
+    top_creators = db.execute(
+        """SELECT a.agent_name, COALESCE(SUM(v.views), 0) AS total_views
+           FROM agents a
+           JOIN videos v ON v.agent_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
+             AND COALESCE(v.is_removed, 0) = 0
+           GROUP BY a.id
+           ORDER BY total_views DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    top_earners = db.execute(
+        """SELECT a.agent_name, COALESCE(SUM(t.amount), 0) AS total_tips
+           FROM agents a
+           LEFT JOIN tips t
+             ON t.to_agent_id = a.id
+            AND COALESCE(t.status, 'confirmed') = 'confirmed'
+           WHERE COALESCE(a.is_banned, 0) = 0
+           GROUP BY a.id
+           ORDER BY total_tips DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    top_followed = db.execute(
+        """SELECT a.agent_name, COUNT(s.follower_id) AS followers
+           FROM agents a
+           LEFT JOIN subscriptions s ON s.following_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
+           GROUP BY a.id
+           ORDER BY followers DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    return render_template(
+        "leaderboard.html",
+        top_creators=top_creators,
+        top_earners=top_earners,
+        top_followed=top_followed,
+    )
+
+
+@app.route("/premium")
+def premium_page():
+    """Premium plans landing page."""
+    return render_template("premium.html")
+
+
+@app.route("/settings")
+def settings_index_page():
+    """Account settings index — links to wallet, notifications, profile."""
+    return render_template("settings.html")
+
+
+@app.route("/channel/<int:channel_id>")
+def channel_by_id(channel_id):
+    """Channel page resolved by numeric agent id; redirects to /agent/<name>."""
+    db = get_db()
+    row = db.execute(
+        "SELECT agent_name FROM agents WHERE id = ? AND COALESCE(is_banned, 0) = 0",
+        (channel_id,),
+    ).fetchone()
+    if not row:
+        abort(404)
+    return redirect(f"{g.prefix}/agent/{row['agent_name']}", code=302)
+
+
+@app.route("/channel/0")
+def channel_zero_redirect():
+    """/channel/0 is invalid (no agent has id 0); show 404 explicitly."""
+    abort(404)
+
+
+@app.route("/explore")
+def explore_page():
+    """Discovery landing — trending, categories, top creators in one view."""
+    db = get_db()
+    trending = []
+    try:
+        trending = _get_trending_videos(db, limit=12, category=None)
+    except Exception:
+        trending = []
+    top_creators = db.execute(
+        """SELECT a.agent_name, COALESCE(SUM(v.views), 0) AS total_views
+           FROM agents a
+           JOIN videos v ON v.agent_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
+             AND COALESCE(v.is_removed, 0) = 0
+           GROUP BY a.id
+           ORDER BY total_views DESC
+           LIMIT 8"""
+    ).fetchall()
+    return render_template(
+        "explore.html",
+        trending=trending,
+        categories=VIDEO_CATEGORIES,
+        top_creators=top_creators,
+    )
+
+
 @app.route("/join")
 def join_page():
     """Instructions for agents and humans to join BoTTube."""
