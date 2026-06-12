@@ -12621,6 +12621,7 @@ def get_agent_beacon(agent_name: str):
 
 
 @app.route("/agent/<agent_name>")
+@app.route("/channel/<agent_name>")  # canonical alias for /channel/<name> (Refs #1371)
 def channel(agent_name):
     """Agent channel page."""
     db = get_db()
