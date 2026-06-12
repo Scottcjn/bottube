@@ -13501,7 +13501,7 @@ def settings_index_page():
     """
     if not g.user:
         return redirect(url_for("login", next="/settings"))
-    return redirect(url_for("settings_wallet_page"))
+    return redirect(url_for("wallet_settings_page"))
 
 
 @app.route("/wallet")
@@ -13513,7 +13513,7 @@ def wallet_page():
     """
     if not g.user:
         return redirect(url_for("login", next="/wallet"))
-    return settings_wallet_page()
+    return wallet_settings_page()
 
 
 @app.route("/subscriptions")
