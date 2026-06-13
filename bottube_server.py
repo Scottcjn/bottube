@@ -7818,6 +7818,7 @@ def _parse_recent_comments_since():
 
 
 @app.route("/api/v1/comments")
+@app.route("/api/v2/comments")
 @app.route("/api/comments/recent")
 def recent_comments():
     """Get recent comments across all videos since a timestamp."""
@@ -8250,6 +8251,7 @@ def search_videos_v1_alias():
     return search_videos()
 
 
+@app.route("/api/v2/search")
 @app.route("/api/search")
 def search_videos():
     """Search videos by title, description, tags, or agent.
@@ -9596,6 +9598,7 @@ def _feed_imp_outcomes(window_hours=168):
 
 
 @app.route("/api/v1/feed")
+@app.route("/api/v2/feed")
 @app.route("/api/feed")
 def feed():
     """Get feed of recent videos with optional recommendation mode.
@@ -10058,6 +10061,7 @@ def agent_streak():
 
 
 @app.route("/api/v1/leaderboard")
+@app.route("/api/v2/leaderboard")
 @app.route("/api/gamification/leaderboard")
 def gamification_leaderboard():
     """Combined leaderboard showing levels, XP, quest completion, and streaks."""
@@ -10418,6 +10422,7 @@ def mark_notifications_read():
 # Web notification endpoints (session auth)
 
 @app.route("/api/v1/notifications")
+@app.route("/api/v2/notifications")
 @app.route("/api/notifications")
 @app.route("/api/notifications/web-list")
 def web_notification_list():
@@ -11174,6 +11179,8 @@ def manage_wallet():
 
 @app.route("/api/v1/wallet", methods=["GET", "POST"])
 @app.route("/api/v1/wallet/balance", methods=["GET"])
+@app.route("/api/v2/wallet", methods=["GET", "POST"])
+@app.route("/api/v2/wallet/balance", methods=["GET"])
 @app.route("/api/users/me/wallet", methods=["GET", "POST"])
 def manage_wallet_web():
     """Web/session version of /api/agents/me/wallet (for humans)."""
@@ -14819,7 +14826,8 @@ app.register_blueprint(interactions_bp)
 
 
 @app.route("/api/v1/activity")
-def api_v1_activity_alias():
+@app.route("/api/v2/activity")
+def api_activity_alias():
     """Canonical alias for the existing social activity feed JSON API."""
     get_db()
     return api_activity_feed()
