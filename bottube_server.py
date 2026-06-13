@@ -14930,6 +14930,25 @@ except ImportError:
     WHISPER_TRANSCRIPTS_ENABLED = False
 
 # ---------------------------------------------------------------------------
+# Gemini video/image generation API (Bounty #1102 fix for #1428)
+# ---------------------------------------------------------------------------
+# Exposes /api/gemini/status, /api/gemini/generate-video,
+# /api/gemini/generate-image, /api/gemini/job/<job_id>, /api/gemini/jobs,
+# and /api/gemini/image-to-video when the gemini_blueprint module is
+# importable. Previously the blueprint file existed on disk but was never
+# registered with the Flask app, so every /api/gemini/* request 404'd
+# in production. This block wires it in next to the other deferred
+# blueprints (whisper, scraper) and initializes the backing SQLite tables
+# so the status route reports real values.
+try:
+    from gemini_blueprint import gemini_bp, init_gemini_tables
+    init_gemini_tables()
+    app.register_blueprint(gemini_bp)
+    GEMINI_API_ENABLED = True
+except ImportError:
+    GEMINI_API_ENABLED = False
+
+# ---------------------------------------------------------------------------
 # Scraper Detective (real-time bot detection & dashboard)
 # ---------------------------------------------------------------------------
 try:
