@@ -14814,6 +14814,15 @@ init_wrtc_tables(_wrtc_db)
 _wrtc_db.close()
 app.register_blueprint(wrtc_bp)
 
+# Ergo Bridge Integration
+from ergo_bridge_blueprint import ergo_bp, init_ergo_tables
+import sqlite3 as _ergo_sqlite3
+_ergo_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_ergo_db = _ergo_sqlite3.connect(_ergo_db_path)
+init_ergo_tables(_ergo_db)
+_ergo_db.close()
+app.register_blueprint(ergo_bp)
+
 # wRTC Bridge Integration (Base L2 / Ethereum)
 from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
 import sqlite3 as _base_wrtc_sqlite3
