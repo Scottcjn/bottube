@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timedelta
 from flask import Blueprint, render_template, jsonify, request, g
 from functools import wraps
+from urllib.parse import quote
 
 search_bp = Blueprint('search', __name__, url_prefix='/discover')
 
@@ -52,6 +53,17 @@ def _parse_int_query(name, default, min_val=0, max_val=None):
     if max_val is not None and value > max_val:
         raise ValueError(f"Invalid '{name}' parameter: maximum is {max_val}.")
     return value
+
+
+def _thumbnail_url(thumbnail):
+    if not thumbnail:
+        return ""
+    thumbnail = str(thumbnail).strip()
+    if not thumbnail:
+        return ""
+    if thumbnail.startswith(("http://", "https://", "/")):
+        return thumbnail
+    return f"/thumbnails/{quote(thumbnail)}"
 
 
 @search_bp.route('/')
@@ -150,6 +162,7 @@ def api_search():
             "title": row['title'],
             "description": row['description'][:200] + "..." if len(row['description']) > 200 else row['description'],
             "thumbnail": row['thumbnail'],
+            "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
             "likes": row['likes'],
             "tags": tags,
@@ -284,6 +297,7 @@ def api_videos_by_tag(tag_name):
             "id": row['video_id'],
             "title": row['title'],
             "thumbnail": row['thumbnail'],
+            "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
             "likes": row['likes'],
             "tags": tags,
@@ -359,6 +373,7 @@ def api_trending():
             "id": row['video_id'],
             "title": row['title'],
             "thumbnail": row['thumbnail'],
+            "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
             "likes": row['likes'],
             "category": row['category'],
@@ -499,6 +514,7 @@ def api_for_you():
             "title": row['title'],
             "description": row['description'][:150] + "..." if len(row['description']) > 150 else row['description'],
             "thumbnail": row['thumbnail'],
+            "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
             "likes": row['likes'],
             "tags": tags,
