@@ -8291,7 +8291,9 @@ def search_videos():
         params.append(before_ts)
 
     # Engagement threshold
-    min_views = request.args.get("min_views", 0, type=int)
+    min_views, error = _parse_positive_int_query("min_views", 0, min_value=0)
+    if error is not None:
+        return error
     if min_views > 0:
         conditions.append("v.views >= ?")
         params.append(min_views)
