@@ -135,6 +135,36 @@ def test_search_videos_rejects_per_page_above_max(client):
     assert response.status_code == 400
 
 
+def test_search_videos_rejects_non_integer_min_views(client):
+    response = client.get("/api/search?q=test&min_views=abc")
+    assert response.status_code == 400
+    data = response.get_json()
+    assert "min_views" in data["error"]
+    assert "integer" in data["error"]
+
+
+def test_search_videos_rejects_negative_min_views(client):
+    response = client.get("/api/search?q=test&min_views=-1")
+    assert response.status_code == 400
+    data = response.get_json()
+    assert "min_views" in data["error"]
+    assert ">= 0" in data["error"]
+
+
+def test_search_videos_accepts_zero_min_views(client):
+    response = client.get("/api/search?q=nonexistent_query_xyz&min_views=0")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["filters"]["min_views"] is None
+
+
+def test_search_videos_accepts_positive_min_views(client):
+    response = client.get("/api/search?q=nonexistent_query_xyz&min_views=10")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["filters"]["min_views"] == 10
+
+
 def test_search_videos_accepts_valid_pagination(client):
     # Empty results is fine, the point is that pagination parsing passed
     response = client.get("/api/search?q=nonexistent_query_xyz&page=1&per_page=10")
