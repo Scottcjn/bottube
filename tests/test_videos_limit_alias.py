@@ -185,3 +185,53 @@ def test_make_param_conflict_error_shape(app):
         assert body["error"]
         assert "per_page" in body["error"]
         assert "limit" in body["error"]
+
+
+# ---------- `page` upper bound (issue #1414 follow-up) ----------
+#
+# Bottube's live production binary (v1.2.0, months behind
+# `scottcjn/main`) lets `?page=99999` through and returns
+# `{"page":99999,"per_page":20,"total":1860,"videos":[]}`, an unbounded
+# SQLite OFFSET scan + a useless empty page. The 2026-06-14 live check
+# on bottube.ai reproduced this; the same call after the fix in this
+# branch returns HTTP 400 with a clear error so the client knows the
+# request is invalid. The cap is 10000 (i.e. ~500k rows even at the
+# `per_page<=50` ceiling), which is well past the current catalogue of
+# ~1860 videos so no legitimate pagination is affected.
+
+
+def test_list_videos_page_rejects_over_max(client):
+    """`page=99999` is rejected with HTTP 400 (defense in depth)."""
+    response = client.get("/api/videos?page=99999")
+    assert response.status_code == 400
+    data = response.get_json()
+    assert "page" in data["error"]
+    assert "<= 10000" in data["error"]
+
+
+def test_list_videos_page_accepts_max_boundary(client):
+    """`page=10000` (the cap) is accepted and clamped server-side."""
+    response = client.get("/api/videos?page=10000")
+    assert response.status_code == 200
+    data = response.get_json()
+    # The actual returned `page` may be even lower when the catalogue is
+    # shorter than 10000 pages, but it must be a positive integer and
+    # not 99999.
+    assert isinstance(data["page"], int)
+    assert 1 <= data["page"] <= 10000
+
+
+def test_list_videos_page_rejects_just_above_max(client):
+    """`page=10001` is rejected (off-by-one around the cap)."""
+    response = client.get("/api/videos?page=10001")
+    assert response.status_code == 400
+    data = response.get_json()
+    assert "page" in data["error"]
+
+
+def test_list_videos_v1_alias_page_rejects_over_max(client):
+    """The /api/v1/videos alias inherits the new page cap."""
+    response = client.get("/api/v1/videos?page=99999")
+    assert response.status_code == 400
+    data = response.get_json()
+    assert "page" in data["error"]

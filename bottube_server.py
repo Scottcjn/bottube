@@ -6866,7 +6866,15 @@ def list_videos():
     the conflict instead of getting an undocumented precedence. Bottube
     issue #1414.
     """
-    page, error = _parse_positive_int_query("page", 1)
+    # `page` is bounded at 10000 so malicious or buggy clients cannot ask
+    # for an arbitrarily deep offset that would still translate into a
+    # full-table `OFFSET` scan in SQLite. 10000 pages of `per_page<=50`
+    # is ~500k rows, already well past Bottube's whole-video catalogue
+    # (the production count is currently ~1860), so the cap does not
+    # affect any legitimate use case. Bottube issue #1414 (page-bound
+    # follow-up; the live `bottube.ai` binary is v1.2.0 and still lets
+    # `page=99999` through with `videos=[]`).
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
     if error:
         return error
 
