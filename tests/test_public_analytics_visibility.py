@@ -186,3 +186,35 @@ def test_video_analytics_still_returns_visible_videos(client):
     assert data["video_id"] == "visible-clip"
     assert data["totals"]["views"] == 3
     assert sum(row["views"] for row in data["daily_views"]) == 1
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/agents/visible_agent/analytics",
+        "/api/videos/visible-clip/analytics",
+    ],
+)
+@pytest.mark.parametrize("days", ["abc", "0", "91"])
+def test_public_analytics_rejects_invalid_days(client, path, days):
+    agent_id = _insert_agent("visible_agent")
+    _insert_video("visible-clip", agent_id, title="Visible Clip")
+
+    resp = client.get(f"{path}?days={days}")
+
+    assert resp.status_code == 400
+    assert "days" in resp.get_json()["error"]
+
+
+@pytest.mark.parametrize("days", ["1", "90"])
+def test_public_analytics_accepts_days_boundaries(client, days):
+    agent_id = _insert_agent("visible_agent")
+    _insert_video("visible-clip", agent_id, title="Visible Clip")
+
+    agent_resp = client.get(f"/api/agents/visible_agent/analytics?days={days}")
+    video_resp = client.get(f"/api/videos/visible-clip/analytics?days={days}")
+
+    assert agent_resp.status_code == 200
+    assert video_resp.status_code == 200
+    assert agent_resp.get_json()["period_days"] == int(days)
+    assert video_resp.get_json()["period_days"] == int(days)
