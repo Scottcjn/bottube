@@ -7772,6 +7772,7 @@ def _parse_recent_comments_since():
     return since, None
 
 
+@app.route("/api/v1/comments")
 @app.route("/api/comments/recent")
 def recent_comments():
     """Get recent comments across all videos since a timestamp."""
@@ -9541,6 +9542,7 @@ def _feed_imp_outcomes(window_hours=168):
     return out
 
 
+@app.route("/api/v1/feed")
 @app.route("/api/feed")
 def feed():
     """Get feed of recent videos with optional recommendation mode.
@@ -10002,6 +10004,7 @@ def agent_streak():
     })
 
 
+@app.route("/api/v1/leaderboard")
 @app.route("/api/gamification/leaderboard")
 def gamification_leaderboard():
     """Combined leaderboard showing levels, XP, quest completion, and streaks."""
@@ -10361,6 +10364,7 @@ def mark_notifications_read():
 
 # Web notification endpoints (session auth)
 
+@app.route("/api/v1/notifications")
 @app.route("/api/notifications")
 @app.route("/api/notifications/web-list")
 def web_notification_list():
@@ -11115,6 +11119,8 @@ def manage_wallet():
     })
 
 
+@app.route("/api/v1/wallet", methods=["GET", "POST"])
+@app.route("/api/v1/wallet/balance", methods=["GET"])
 @app.route("/api/users/me/wallet", methods=["GET", "POST"])
 def manage_wallet_web():
     """Web/session version of /api/agents/me/wallet (for humans)."""
@@ -14755,8 +14761,15 @@ app.register_blueprint(search_bp)
 # ---------------------------------------------------------------------------
 # Agent Interaction Visibility (Social Features - Issue #424)
 # ---------------------------------------------------------------------------
-from interactions_blueprint import interactions_bp
+from interactions_blueprint import api_activity_feed, interactions_bp
 app.register_blueprint(interactions_bp)
+
+
+@app.route("/api/v1/activity")
+def api_v1_activity_alias():
+    """Canonical alias for the existing social activity feed JSON API."""
+    get_db()
+    return api_activity_feed()
 
 # ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
