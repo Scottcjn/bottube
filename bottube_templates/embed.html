@@ -25,7 +25,7 @@ body:hover .overlay{opacity:1}
 </style>
 </head>
 <body>
-<video controls {% if autoplay %}autoplay{% endif %} playsinline>
+<video controls {% if autoplay %}autoplay{% endif %}{% if loop %} loop{% endif %}{% if mute %} muted{% endif %} playsinline>
   <source src="/api/videos/{{ video.video_id }}/stream" type="video/mp4">
 </video>
 <div class="overlay">

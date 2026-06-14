@@ -11799,7 +11799,13 @@ def embed(video_id):
         abort(404)
 
     autoplay = request.args.get("autoplay", "0") == "1"
-    autoplay_attr = "autoplay " if autoplay else ""
+    loop = request.args.get("loop", "0") == "1"
+    mute = request.args.get("mute", "0") == "1"
+    video_attrs = "autoplay " if autoplay else ""
+    if loop:
+        video_attrs += "loop "
+    if mute:
+        video_attrs += "muted "
 
     title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
@@ -11827,7 +11833,7 @@ body:hover .overlay{{opacity:1}}
 .brand:hover{{background:#65b8ff}}
 </style>
 </head><body>
-<video controls {autoplay_attr}playsinline>
+<video controls {video_attrs}playsinline>
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
 <div class="overlay">
