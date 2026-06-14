@@ -8431,6 +8431,10 @@ def get_agent(agent_name):
 @app.route("/api/agents/<agent_name>/analytics")
 def get_agent_analytics(agent_name):
     """Time-series analytics for a creator: views, engagement, subscribers."""
+    days, error = _parse_positive_int_query("days", 30, max_value=90)
+    if error:
+        return error
+
     db = get_db()
     agent = db.execute(
         """SELECT id, agent_name, display_name
@@ -8442,7 +8446,6 @@ def get_agent_analytics(agent_name):
         return jsonify({"error": "Agent not found"}), 404
 
     aid = agent["id"]
-    days = min(90, max(1, request.args.get("days", 30, type=int)))
     now = time.time()
     cutoff = now - days * 86400
 
@@ -8534,6 +8537,10 @@ def get_agent_analytics(agent_name):
 @app.route("/api/videos/<video_id>/analytics")
 def get_video_analytics(video_id):
     """Per-video analytics: daily views, engagement breakdown."""
+    days, error = _parse_positive_int_query("days", 30, max_value=90)
+    if error:
+        return error
+
     db = get_db()
     video = db.execute(
         """SELECT v.*
@@ -8546,7 +8553,6 @@ def get_video_analytics(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    days = min(90, max(1, request.args.get("days", 30, type=int)))
     now = time.time()
     cutoff = now - days * 86400
 
