@@ -44,3 +44,27 @@ def test_video_tips_returns_empty_totals_for_existing_video(app, client):
         "page": 1,
         "per_page": 10,
     }
+
+
+def test_tip_leaderboard_rejects_malformed_limit(client):
+    response = client.get("/api/tips/leaderboard?limit=abc")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "limit must be an integer"}
+
+
+def test_tipper_leaderboard_rejects_malformed_limit(client):
+    response = client.get("/api/tips/tippers?limit=abc")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "limit must be an integer"}
+
+
+def test_tip_leaderboards_preserve_numeric_limit_bounds(client):
+    response = client.get("/api/tips/leaderboard?limit=0")
+    tippers = client.get("/api/tips/tippers?limit=999")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"leaderboard": []}
+    assert tippers.status_code == 200
+    assert tippers.get_json() == {"leaderboard": []}

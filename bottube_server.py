@@ -11713,7 +11713,9 @@ def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_tip_leaderboard_limit()
+    if error:
+        return jsonify({"error": error}), 400
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
@@ -11740,12 +11742,25 @@ def tip_leaderboard():
     })
 
 
+def _parse_tip_leaderboard_limit(default=20, max_value=50):
+    raw_value = request.args.get("limit")
+    if raw_value in (None, ""):
+        return default, None
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    return min(max_value, max(1, limit)), None
+
+
 @app.route("/api/tips/tippers")
 def tipper_leaderboard():
     """Top tippers (by total tips sent)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_tip_leaderboard_limit()
+    if error:
+        return jsonify({"error": error}), 400
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
