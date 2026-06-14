@@ -9023,7 +9023,10 @@ def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=20, category=category)
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
+    rows = _get_trending_videos(db, limit=limit, category=category)
 
     videos = []
     for row in rows:
@@ -9035,7 +9038,7 @@ def trending():
         d["recent_comments"] = row["recent_comments"]
         videos.append(d)
 
-    return jsonify({"videos": videos, "category": category})
+    return jsonify({"videos": videos, "category": category, "limit": limit})
 
 
 # --- Phase 7: bucketed feed (latest / heuristic / hybrid-v1) -------------
