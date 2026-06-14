@@ -227,6 +227,40 @@ def require_gpu_api_key(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def _json_object():
+    """Parse the request body as a JSON object.
+
+    Returns a ``(data, error)`` tuple. ``error`` is ``None`` on success and the
+    handler should use ``data``. An empty/absent body yields ``({}, None)`` so
+    existing per-field validation keeps producing the same 400s. A body that is
+    valid JSON but *not* an object (e.g. a list, string or number) yields
+    ``(None, (response, 400))`` instead of letting a later ``data.get(...)``
+    raise ``AttributeError`` and surface as a 500.
+    """
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON object required"}), 400)
+    return data, None
+
+
+def _coerce_float(value, default):
+    """Coerce a JSON value to float, returning ``(number, error)``.
+
+    Accepts numbers and numeric strings. Booleans and non-numeric values yield
+    a 400 instead of letting ``float(...)`` raise ``ValueError`` (a 500).
+    """
+    if value is None:
+        return float(default), None
+    if isinstance(value, bool):
+        return None, (jsonify({"error": "Numeric value required"}), 400)
+    try:
+        return float(value), None
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": "Numeric value required"}), 400)
+
 # ---------------------------------------------------------------------------
 # PROVIDER ENDPOINTS
 # ---------------------------------------------------------------------------
@@ -245,7 +279,9 @@ def register_provider():
         provider_id: str - Use this to claim jobs and send heartbeats
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     gpu_model = data.get("gpu_model", "").strip()
     if not gpu_model:
@@ -285,7 +321,9 @@ def provider_heartbeat():
         status: str (optional) - 'online', 'busy', 'offline'
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     provider_id = data.get("provider_id", "").strip()
     status = data.get("status", "online")
@@ -409,15 +447,21 @@ def submit_job():
     RTC is escrowed from your balance until job completes.
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     job_type = data.get("job_type", "").strip()
     if job_type not in ("video_render", "image_gen", "transcode", "llm_inference"):
         return jsonify({"error": "Invalid job_type"}), 400
 
     params = data.get("params", {})
-    estimated_mins = float(data.get("estimated_mins", 5))
-    max_price = float(data.get("max_price_per_min", 0.10))
+    estimated_mins, error = _coerce_float(data.get("estimated_mins"), 5)
+    if error:
+        return error
+    max_price, error = _coerce_float(data.get("max_price_per_min"), 0.10)
+    if error:
+        return error
 
     # Calculate escrow amount (use max price * estimated time * 1.5 buffer)
     escrow_amount = max_price * estimated_mins * 1.5
@@ -457,7 +501,9 @@ def claim_job():
         job_id: str
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     provider_id = data.get("provider_id", "").strip()
     job_id = data.get("job_id", "").strip()
@@ -516,7 +562,9 @@ def start_job():
         job_id: str
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     provider_id = data.get("provider_id", "").strip()
     job_id = data.get("job_id", "").strip()
@@ -557,7 +605,9 @@ def complete_job():
         result_url: str (optional) - URL to the rendered output
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     provider_id = data.get("provider_id", "").strip()
     job_id = data.get("job_id", "").strip()
@@ -633,7 +683,9 @@ def fail_job():
         error_message: str
     """
     agent = g.agent
-    data = request.get_json() or {}
+    data, error = _json_object()
+    if error:
+        return error
 
     provider_id = data.get("provider_id", "").strip()
     job_id = data.get("job_id", "").strip()
