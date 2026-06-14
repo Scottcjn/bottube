@@ -94,6 +94,30 @@ def _get_ctr_tracker():
         _ctr_tracker.init_db()
     return _ctr_tracker
 
+
+def _parse_int_query(name, default, min_val=0, max_val=None):
+    """Parse an integer query parameter with strict validation.
+
+    Mirrors ``search_blueprint._parse_int_query`` so server-defined
+    endpoints can reject malformed ``?limit=abc`` requests with a
+    deterministic 400 instead of silently falling back to the default.
+    Raises ``ValueError``; callers translate that to a 400 JSON response.
+    """
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        value = default
+    else:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid '{name}' parameter: expected an integer.")
+    if value < min_val:
+        raise ValueError(f"Invalid '{name}' parameter: minimum is {min_val}.")
+    if max_val is not None and value > max_val:
+        raise ValueError(f"Invalid '{name}' parameter: maximum is {max_val}.")
+    return value
+
+
 def _get_ab_manager():
     global _ab_manager
     if _ab_manager is None:
@@ -11713,7 +11737,10 @@ def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    try:
+        limit = _parse_int_query("limit", 20, min_val=1, max_val=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
@@ -11745,7 +11772,10 @@ def tipper_leaderboard():
     """Top tippers (by total tips sent)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    try:
+        limit = _parse_int_query("limit", 20, min_val=1, max_val=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
