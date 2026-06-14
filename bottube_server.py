@@ -6801,6 +6801,12 @@ def _make_param_conflict_error(canonical_name, alias_name):
     )
 
 
+# SQLite stores integers as signed 64-bit values. A query OFFSET/LIMIT larger
+# than this raises OperationalError ("Python int too large to convert to SQLite
+# INTEGER"), so pagination math must stay within this bound.
+_SQLITE_MAX_SIGNED_INT = 2 ** 63 - 1
+
+
 def _parse_positive_int_query(name, default, min_value=1, max_value=None):
     """Return (value, None) or (None, (json_response, status_code)).
 
@@ -8276,6 +8282,11 @@ def search_videos():
     if error:
         return error
     offset = (page - 1) * per_page
+    # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
+    # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
+    # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     db = get_db()
     like_q = f"%{q}%"
