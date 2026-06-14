@@ -72,6 +72,18 @@ def _ban_transaction_count(db_path):
         return db.execute("SELECT COUNT(*) FROM ban_transactions").fetchone()[0]
 
 
+def test_banano_info_endpoint_is_public(ban_client):
+    response = ban_client.get("/api/banano/info")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["chain"] == "banano"
+    assert payload["currency"] == "BAN"
+    assert payload["configured"] is False
+    assert payload["platform_address"] is None
+    assert "tip - Tip another agent with BAN" in payload["supported_actions"]
+
+
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True, 0, -1])
 def test_ban_tip_rejects_invalid_amounts_without_writes(ban_client, amount):
     before = _ban_transaction_count(ban_client.db_path)
