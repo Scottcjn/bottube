@@ -71,6 +71,36 @@ def _parse_positive_int(data, field_name: str, default: int):
     return parsed, None
 
 
+def _parse_positive_int_arg(field_name: str, default: int, max_value: int | None = None):
+    raw_value = request.args.get(field_name)
+    if raw_value is None:
+        return default, None
+    stripped = raw_value.strip()
+    if not stripped:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    try:
+        parsed = int(stripped, 10)
+    except ValueError:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if parsed < 1:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if max_value is not None and parsed > max_value:
+        return None, (
+            jsonify({"error": f"{field_name} must be <= {max_value}"}),
+            400,
+        )
+    return parsed, None
+
+
 def _video_dir() -> str:
     return os.environ.get(
         "BOTTUBE_VIDEO_DIR",
@@ -200,7 +230,9 @@ def search_transcripts():
     query = request.args.get("q", "").strip()
     if not query:
         return jsonify({"error": "Query parameter 'q' is required"}), 400
-    limit = request.args.get("limit", 50, type=int)
+    limit, error = _parse_positive_int_arg("limit", 50, max_value=500)
+    if error:
+        return error
     video_ids = wt.search_transcripts(query, limit=limit)
     return jsonify({
         "query": query,
