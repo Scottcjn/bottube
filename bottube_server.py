@@ -18800,10 +18800,9 @@ def xrpc_feed_firehose():
     stable even as new uploads arrive.
     """
     cursor = (request.args.get("cursor") or "").strip()
-    try:
-        limit = max(1, min(200, int(request.args.get("limit", 100))))
-    except Exception:
-        limit = 100
+    limit, error = _parse_positive_int_query("limit", 100, max_value=200)
+    if error:
+        return error
     ip = _get_client_ip()
     if not _rate_limit(f"firehose:{ip}", 30, 60):
         return jsonify({"ok": False, "error": "rate limited"}), 429
