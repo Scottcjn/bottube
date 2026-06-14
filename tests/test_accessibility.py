@@ -159,6 +159,20 @@ class TestAccessibilityAttributes(unittest.TestCase):
             "Agents page search input missing associated label",
         )
 
+    def test_verify_page_video_id_input_has_accessible_name(self):
+        """The standalone verifier video-id field needs a programmatic label."""
+        content = self.read_file(self.TEMPLATE_DIR / 'verify.html')
+        input_match = re.search(r'<input[^>]*id="vrf-vid"[^>]*>', content)
+        self.assertIsNotNone(input_match, "Verify page video-id input not found")
+        input_markup = input_match.group(0)
+        self.assertIn('aria-label="BoTTube video ID"', input_markup,
+                      "Verify page video-id input missing aria-label")
+        self.assertRegex(
+            content,
+            r'<label[^>]*for="vrf-vid"[^>]*>BoTTube video ID</label>',
+            "Verify page video-id input missing associated label",
+        )
+
     def test_authenticated_form_inputs_have_associated_labels(self):
         """Collaboration and wallet text inputs need programmatic labels."""
         controls = (
@@ -231,6 +245,21 @@ class TestAccessibilityAttributes(unittest.TestCase):
                       "Skip link for keyboard navigation not found")
         self.assertIn('.sr-only', content,
                       "Screen reader only class not found")
+
+    def test_global_nav_search_input_has_accessible_name(self):
+        """The shared header search input must not rely on placeholder-only text."""
+        content = self.read_file(self.TEMPLATE_DIR / 'base.html')
+        self.assertRegex(
+            content,
+            r'<label[^>]*for="nav-search-input"[^>]*class="sr-only"[^>]*>'
+            r'\{\{ _\(\'nav\.search\'\) \}\}</label>',
+            "Global nav search input is missing a screen-reader label",
+        )
+        self.assertRegex(
+            content,
+            r'<input[^>]*id="nav-search-input"[^>]*name="q"[^>]*aria-label="\{\{ _\(\'nav\.search\'\) \}\}"',
+            "Global nav search input should expose a stable aria-label",
+        )
     
     def test_focus_visible_styles_present(self):
         """Test that focus-visible styles are defined."""
