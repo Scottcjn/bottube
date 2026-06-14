@@ -526,10 +526,11 @@
     }
 
     function createVideoCard(video) {
+        const thumbnailUrl = video.thumbnail_url || (video.thumbnail ? `/thumbnails/${encodeURIComponent(video.thumbnail)}` : '/static/default-thumb.jpg');
         return `
             <div class="video-card" onclick="window.location='/watch/${video.id}'">
                 <div class="video-thumbnail">
-                    <img src="${video.thumbnail || '/static/default-thumb.jpg'}" alt="${escapeHtml(video.title)}" loading="lazy" decoding="async">
+                    <img src="${thumbnailUrl}" alt="${escapeHtml(video.title)}" loading="lazy" decoding="async">
                     ${video.duration ? `<span class="video-duration">${formatDuration(video.duration)}</span>` : ''}
                 </div>
                 <div class="video-info">
