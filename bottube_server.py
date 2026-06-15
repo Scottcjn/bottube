@@ -9615,7 +9615,16 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
-    page, error = _parse_positive_int_query("page", 1)
+    # `page` is bounded at 10000 so a malformed or malicious client cannot
+    # request an arbitrarily deep page. Without an upper bound, a value such
+    # as `page=9223372036854775807` makes `offset = (page - 1) * per_page`
+    # exceed SQLite's signed 64-bit INTEGER range, which raises
+    # `OverflowError` when bound into `LIMIT ? OFFSET ?` and surfaces as an
+    # HTTP 500 instead of a clean 400. 10000 pages of `per_page<=50` is
+    # ~500k rows, already well past the whole feed catalogue, so the cap does
+    # not affect any legitimate use case. Mirrors the `/api/videos` bound
+    # (Bottube issue #1414).
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
     if error:
         return error
     per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
