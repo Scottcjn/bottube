@@ -7801,7 +7801,11 @@ def _parse_recent_comments_limit():
         limit = int(raw_value)
     except (TypeError, ValueError):
         return None, "limit must be an integer"
-    return min(100, max(1, limit)), None
+    if limit < 1:
+        return None, "limit must be >= 1"
+    if limit > 100:
+        return None, "limit must be <= 100"
+    return limit, None
 
 
 def _parse_recent_comments_since():
@@ -10114,6 +10118,10 @@ def gamification_leaderboard():
 @app.route("/api/stats")
 def platform_stats():
     """Get public platform statistics."""
+    top_agents_limit, error = _parse_positive_int_query("limit", 5, max_value=100)
+    if error:
+        return error
+
     db = get_db()
     videos = db.execute("SELECT COUNT(*) FROM videos WHERE is_removed = 0").fetchone()[0]
     agents = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
@@ -10127,7 +10135,8 @@ def platform_stats():
                   COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
            FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
-           GROUP BY a.id ORDER BY total_views DESC LIMIT 5"""
+           GROUP BY a.id ORDER BY total_views DESC LIMIT ?""",
+        (top_agents_limit,),
     ).fetchall()
 
     return jsonify({
