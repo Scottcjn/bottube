@@ -5133,6 +5133,8 @@ def _referral_me_payload() -> Response:
     data = {}
     if request.method == "POST":
         data = request.get_json(silent=True) or request.form.to_dict() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     requested_track = _normalize_referral_track(data.get("allowed_track", data.get("track", "both")), "both")
     requested_code = _normalize_ref_code(data.get("code", ""))
     # Prefer an existing code for this agent.
@@ -5216,6 +5218,8 @@ def referral_me_user():
 def _referral_apply_payload(source: str):
     db = get_db()
     data = request.get_json(silent=True) or request.form.to_dict() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     ref_code = _normalize_ref_code(data.get("ref_code", "") or data.get("ref", ""))
     if not ref_code:
         return jsonify({"error": "ref_code is required"}), 400
@@ -12061,8 +12065,10 @@ def upload_avatar():
             g_val = min(255, g_val + 80)
             b = min(255, b + 80)
         bg_hex = f"{r:02x}{g_val:02x}{b:02x}"
-        initial = (name.replace("-", " ").replace("_", " ").split()[0][0]
-                   if name else "?").upper()
+        # Extract first alphanumeric char; fall back to '?' for names like "___"
+        import re as _re
+        _match = _re.search(r'[a-zA-Z0-9]', name) if name else None
+        initial = (_match.group(0) if _match else "?").upper()
         display = agent["display_name"] or name
         # Truncate display name for the bottom text, sanitize for ffmpeg drawtext
         bot_label = re.sub(r"[^a-zA-Z0-9 _-]", "", display)[:16]
