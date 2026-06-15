@@ -9619,7 +9619,7 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
-    page, error = _parse_positive_int_query("page", 1)
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
     if error:
         return error
     per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
