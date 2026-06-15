@@ -525,6 +525,18 @@ def test_search_endpoint_rejects_invalid_limit(flask_client, monkeypatch, limit)
     assert "limit" in resp.get_json()["error"]
 
 
+def test_parse_positive_int_arg_allows_unbounded_limit(flask_client):
+    import whisper_transcription_blueprint as wtb
+
+    with flask_client.application.test_request_context(
+        "/api/transcript/search?q=unicorn&limit=10000"
+    ):
+        value, error = wtb._parse_positive_int_arg("limit", 50)
+
+    assert error is None
+    assert value == 10000
+
+
 def test_search_endpoint_no_query(flask_client):
     resp = flask_client.get("/api/transcript/search")
     assert resp.status_code == 400

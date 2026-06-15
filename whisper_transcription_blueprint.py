@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 from flask import Blueprint, current_app, jsonify, request, Response
 
@@ -36,6 +37,7 @@ def _request_json_object():
 
 
 def _parse_positive_int(data, field_name: str, default: int):
+    """Parse positive integer fields from JSON request bodies."""
     value = data.get(field_name, default)
     if isinstance(value, bool):
         return None, (
@@ -71,7 +73,10 @@ def _parse_positive_int(data, field_name: str, default: int):
     return parsed, None
 
 
-def _parse_positive_int_arg(field_name: str, default: int, max_value: int | None = None):
+def _parse_positive_int_arg(field_name: str, default: int, max_value: Optional[int] = None):
+    """Parse positive integer fields from query-string arguments."""
+    if max_value is not None:
+        assert default <= max_value
     raw_value = request.args.get(field_name)
     if raw_value is None:
         return default, None
