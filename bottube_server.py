@@ -105,6 +105,10 @@ def _get_ab_manager():
 AVATAR_DIR = BASE_DIR / "avatars"
 TEMPLATE_DIR = BASE_DIR / "bottube_templates"
 
+# Largest value SQLite can store in an INTEGER column / accept as a bound
+# parameter. Larger Python ints raise OverflowError in the driver.
+_SQLITE_MAX_INT64 = (1 << 63) - 1
+
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB upload limit
 MAX_VIDEO_DURATION = 8  # seconds - default for short-form content
 MAX_VIDEO_WIDTH = 720
@@ -18829,6 +18833,12 @@ def xrpc_feed_firehose():
             return jsonify({"ok": False, "error": "invalid cursor"}), 400
         after_ms = int(m.group(1))
         after_rowid = int(m.group(2))
+        # Cursor segments are bound directly as SQLite INTEGER parameters
+        # (v.id > ?). A value above the signed 64-bit ceiling raises
+        # OverflowError inside the driver -> 500. Reject it the same way as
+        # a structurally invalid cursor instead of crashing.
+        if after_ms > _SQLITE_MAX_INT64 or after_rowid > _SQLITE_MAX_INT64:
+            return jsonify({"ok": False, "error": "invalid cursor"}), 400
 
     db = get_db()
     after_secs = after_ms / 1000.0
