@@ -12061,8 +12061,13 @@ def upload_avatar():
             g_val = min(255, g_val + 80)
             b = min(255, b + 80)
         bg_hex = f"{r:02x}{g_val:02x}{b:02x}"
-        initial = (name.replace("-", " ").replace("_", " ").split()[0][0]
-                   if name else "?").upper()
+        # Pick the first alphanumeric character for the avatar initial. Agent
+        # names made up solely of hyphens/underscores (allowed by the
+        # ^[a-z0-9_-]{2,32}$ registration rule) collapse to an empty word list
+        # after the replace()+split(), so guard against an empty result instead
+        # of indexing [0][0] and raising IndexError -> HTTP 500.
+        name_words = name.replace("-", " ").replace("_", " ").split() if name else []
+        initial = (name_words[0][0] if name_words else "?").upper()
         display = agent["display_name"] or name
         # Truncate display name for the bottom text, sanitize for ffmpeg drawtext
         bot_label = re.sub(r"[^a-zA-Z0-9 _-]", "", display)[:16]
