@@ -13196,11 +13196,9 @@ def dashboard_analytics_api():
     db = get_db()
     uid = g.user["id"]
 
-    try:
-        days = int(request.args.get("days", 30))
-    except Exception:
-        days = 30
-    days = max(7, min(days, 90))
+    days, err = _parse_positive_int_query("days", 30, min_value=7, max_value=90)
+    if err:
+        return err
 
     now = time.time()
     day_sec = 86400
