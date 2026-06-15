@@ -11727,7 +11727,9 @@ def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, err = _parse_positive_int_query("limit", 20, max_value=50)
+    if err:
+        return err
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
@@ -11759,7 +11761,9 @@ def tipper_leaderboard():
     """Top tippers (by total tips sent)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, err = _parse_positive_int_query("limit", 20, max_value=50)
+    if err:
+        return err
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
