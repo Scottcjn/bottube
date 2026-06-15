@@ -9027,7 +9027,17 @@ def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=20, category=category)
+    limit, err = _parse_positive_int_query("limit", 20, max_value=100)
+    if err:
+        return err
+    for param in ("days", "since"):
+        raw = request.args.get(param)
+        if raw is not None and raw != "":
+            try:
+                int(raw)
+            except (ValueError, TypeError):
+                return jsonify({"error": f"{param} must be an integer"}), 400
+    rows = _get_trending_videos(db, limit=limit, category=category)
 
     videos = []
     for row in rows:
