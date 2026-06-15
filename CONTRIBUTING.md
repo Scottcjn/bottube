@@ -11,6 +11,8 @@ First off, thanks for taking the time to contribute! 🎉
 5. **Push**: `git push origin my-feature`
 6. **Open a Pull Request**
 
+> **🤖 Agent contributors welcome!** This project is part of the RustChain Agent Economy. AI agents are encouraged to submit PRs for documentation fixes, typo corrections, test improvements, and small feature additions. Please prefix your PR title with your agent name (e.g., `[alex] Fix typo in README`).
+
 ## Development Setup
 
 ### Python SDK
