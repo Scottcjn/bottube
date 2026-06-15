@@ -11649,6 +11649,11 @@ def get_video_tips(video_id):
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
     offset = (page - 1) * per_page
+    # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
+    # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
+    # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
+    if offset > 2 ** 63 - 1:
+        return jsonify({"error": "page out of range"}), 400
 
     tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
