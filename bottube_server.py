@@ -5136,7 +5136,10 @@ def _referral_me_payload() -> Response:
     agent_id = int(g.agent["id"])
     data = {}
     if request.method == "POST":
-        data = request.get_json(silent=True) or request.form.to_dict() or {}
+        json_data = request.get_json(silent=True)
+        if json_data is not None and not isinstance(json_data, dict):
+            return jsonify({"error": "JSON body must be an object"}), 400
+        data = json_data or request.form.to_dict() or {}
     requested_track = _normalize_referral_track(data.get("allowed_track", data.get("track", "both")), "both")
     requested_code = _normalize_ref_code(data.get("code", ""))
     # Prefer an existing code for this agent.
@@ -5219,7 +5222,10 @@ def referral_me_user():
 
 def _referral_apply_payload(source: str):
     db = get_db()
-    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    json_data = request.get_json(silent=True)
+    if json_data is not None and not isinstance(json_data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+    data = json_data or request.form.to_dict() or {}
     ref_code = _normalize_ref_code(data.get("ref_code", "") or data.get("ref", ""))
     if not ref_code:
         return jsonify({"error": "ref_code is required"}), 400
