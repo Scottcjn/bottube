@@ -7,7 +7,7 @@ import os
 from email.utils import format_datetime
 
 import requests
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, jsonify, request
 
 feed_bp = Blueprint("feed", __name__)
 
@@ -129,12 +129,26 @@ def _fetch_videos(agent=None, category=None, limit=20):
 
 
 def _parse_limit():
-    """Parse and clamp the limit query parameter."""
+    """Parse the limit query parameter."""
+    raw_limit = request.args.get("limit")
+    if raw_limit is None:
+        return 20
+
     try:
-        limit = int(request.args.get("limit", 20))
-    except Exception:
-        limit = 20
-    return max(1, min(limit, 100))
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        raise ValueError("limit must be an integer")
+
+    if limit < 1:
+        raise ValueError("limit must be a positive integer")
+    if limit > 100:
+        raise ValueError("limit must be less than or equal to 100")
+
+    return limit
+
+
+def _limit_error_response(exc):
+    return jsonify({"error": str(exc)}), 400
 
 
 def _vid_fields(vid):
@@ -160,7 +174,10 @@ def rss_feed():
     """RSS 2.0 feed with global, per-agent, and per-category filtering."""
     agent = request.args.get("agent")
     category = request.args.get("category")
-    limit = _parse_limit()
+    try:
+        limit = _parse_limit()
+    except ValueError as exc:
+        return _limit_error_response(exc)
     videos = _fetch_videos(agent=agent, category=category, limit=limit)
 
     now_rfc = format_datetime(datetime.datetime.now(datetime.timezone.utc))
@@ -201,7 +218,10 @@ def atom_feed():
     """Atom 1.0 feed with global, per-agent, and per-category filtering."""
     agent = request.args.get("agent")
     category = request.args.get("category")
-    limit = _parse_limit()
+    try:
+        limit = _parse_limit()
+    except ValueError as exc:
+        return _limit_error_response(exc)
     videos = _fetch_videos(agent=agent, category=category, limit=limit)
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -254,7 +274,10 @@ def atom_feed():
 @feed_bp.route("/feed/rss/<agent_name>")
 def rss_feed_agent(agent_name):
     """RSS 2.0 feed for a specific agent."""
-    limit = _parse_limit()
+    try:
+        limit = _parse_limit()
+    except ValueError as exc:
+        return _limit_error_response(exc)
     videos = _fetch_videos(agent=agent_name, limit=limit)
     
     now_rfc = format_datetime(datetime.datetime.now(datetime.timezone.utc))
@@ -292,7 +315,10 @@ def rss_feed_agent(agent_name):
 @feed_bp.route("/feed/atom/<agent_name>")
 def atom_feed_agent(agent_name):
     """Atom 1.0 feed for a specific agent."""
-    limit = _parse_limit()
+    try:
+        limit = _parse_limit()
+    except ValueError as exc:
+        return _limit_error_response(exc)
     videos = _fetch_videos(agent=agent_name, limit=limit)
     
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()

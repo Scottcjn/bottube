@@ -83,16 +83,55 @@ def test_vid_fields_applies_defaults_and_derived_urls():
     [
         ("/feed/rss", 20),
         ("/feed/rss?limit=5", 5),
-        ("/feed/rss?limit=0", 1),
-        ("/feed/rss?limit=-30", 1),
-        ("/feed/rss?limit=250", 100),
-        ("/feed/rss?limit=invalid", 20),
+        ("/feed/rss?limit=1", 1),
+        ("/feed/rss?limit=100", 100),
     ],
 )
-def test_parse_limit_defaults_and_clamps_values(path, expected):
+def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
     app = Flask(__name__)
     with app.test_request_context(path):
         assert feed_blueprint._parse_limit() == expected
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [
+        ("/feed/rss?limit=0", "limit must be a positive integer"),
+        ("/feed/rss?limit=-30", "limit must be a positive integer"),
+        ("/feed/rss?limit=101", "limit must be less than or equal to 100"),
+        ("/feed/rss?limit=invalid", "limit must be an integer"),
+        ("/feed/rss?limit=1.5", "limit must be an integer"),
+        ("/feed/rss?limit=", "limit must be an integer"),
+    ],
+)
+def test_parse_limit_rejects_invalid_values(path, message):
+    app = Flask(__name__)
+    with app.test_request_context(path), pytest.raises(ValueError, match=message):
+        feed_blueprint._parse_limit()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/feed/rss?limit=invalid",
+        "/feed/atom?limit=0",
+        "/feed/rss/agent-name?limit=-1",
+        "/feed/atom/agent-name?limit=101",
+    ],
+)
+def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, path):
+    app = Flask(__name__)
+    app.register_blueprint(feed_blueprint.feed_bp)
+
+    def fail_fetch_videos(*args, **kwargs):
+        raise AssertionError("_fetch_videos should not run for invalid limits")
+
+    monkeypatch.setattr(feed_blueprint, "_fetch_videos", fail_fetch_videos)
+
+    response = app.test_client().get(path)
+
+    assert response.status_code == 400
+    assert "error" in response.get_json()
 
 
 def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatch):
