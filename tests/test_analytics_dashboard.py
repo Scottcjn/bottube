@@ -405,6 +405,35 @@ class TestAnalyticsApiTimeSeries:
 class TestAnalyticsApiTopVideos:
     """Test analytics API top videos ranking."""
 
+    @pytest.mark.parametrize("limit", ["0", "-1", "51"])
+    def test_analytics_api_top_videos_rejects_out_of_range_limit(self, client, limit):
+        """Top videos API should reject limits outside the supported 1..50 range."""
+        aid = _insert_agent("toplimit" + limit.replace("-", "neg"), "test-key-top-limit-" + limit)
+
+        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&limit={limit}")
+
+        assert response.status_code == 400
+        assert "limit" in response.get_json()["error"]
+
+    def test_analytics_api_top_videos_rejects_non_integer_limit(self, client):
+        """Top videos API should reject malformed limit values."""
+        aid = _insert_agent("toplimitbad", "test-key-top-limit-bad")
+
+        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&limit=abc")
+
+        assert response.status_code == 400
+        assert "limit" in response.get_json()["error"]
+
+    @pytest.mark.parametrize("limit", ["1", "50"])
+    def test_analytics_api_top_videos_accepts_boundary_limits(self, client, limit):
+        """Top videos API should accept the documented 1..50 boundary values."""
+        aid = _insert_agent("toplimitvalid" + limit, "test-key-top-limit-valid-" + limit)
+
+        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&limit={limit}")
+
+        assert response.status_code == 200
+        assert response.get_json()["videos"] == []
+
     def test_analytics_api_top_videos_by_views(self, client):
         """Top videos should be ranked by views."""
         aid = _insert_agent("topuser", "test-key-top")
