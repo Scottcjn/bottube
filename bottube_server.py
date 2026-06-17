@@ -24193,6 +24193,41 @@ def admin_moderation_reports():
     return jsonify({"ok": True, "count": len(out), "reports": out})
 
 
+# ---------------------------------------------------------------------------
+# Route aliases — fix 404s from deployment drift (issues #1471, #1472)
+# ---------------------------------------------------------------------------
+# These aliases ensure documented endpoints resolve even when the canonical
+# route was registered under a slightly different URL pattern.
+
+app.add_url_rule(
+    "/api/videos/<video_id>/anchor",
+    endpoint="api_video_anchor_alias",
+    view_func=api_video_anchor_proof,
+)
+
+app.add_url_rule(
+    "/api/videos/<video_id>/anchor_proof",
+    endpoint="api_video_anchor_underscore_alias",
+    view_func=api_video_anchor_proof,
+)
+
+app.add_url_rule(
+    "/api/transparency/v2",
+    endpoint="api_transparency_v2",
+    view_func=api_transparency,
+)
+
+
+@app.route("/api/embed")
+def api_embed_discovery():
+    """JSON oEmbed discovery endpoint for external link previews.
+
+    Wraps the existing ``/oembed`` handler so consumers that expect the
+    conventional ``/api/embed`` path still receive a valid oEmbed response.
+    """
+    return oembed()
+
+
 if __name__ == "__main__":
     init_db()
     print(f"[BoTTube] Starting on port 8097 - v{APP_VERSION}")
