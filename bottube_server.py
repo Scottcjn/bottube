@@ -5508,11 +5508,9 @@ def founding_page():
 @app.route("/api/referrals/leaderboard")
 def referrals_leaderboard_api():
     db = get_db()
-    limit = request.args.get("limit", "50")
-    try:
-        limit_i = int(limit)
-    except Exception:
-        limit_i = 50
+    limit_i, error = _parse_positive_int_query("limit", 50, max_value=200)
+    if error:
+        return error
     return jsonify({"ok": True, "leaderboard": _get_referral_leaderboard(db, limit=limit_i)})
 
 

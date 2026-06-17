@@ -97,6 +97,29 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
         return row
 
 
+@pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "201"])
+def test_referral_leaderboard_rejects_invalid_limit(client, limit):
+    resp = client.get(f"/api/referrals/leaderboard?limit={limit}")
+
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert "limit" in body["error"]
+
+
+@pytest.mark.parametrize("limit", [None, "1", "200"])
+def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit):
+    path = "/api/referrals/leaderboard"
+    if limit is not None:
+        path = f"{path}?limit={limit}"
+
+    resp = client.get(path)
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert isinstance(body["leaderboard"], list)
+
+
 def test_referral_dashboard_tracks_human_and_agent_funnels(client):
     referrer_id = _insert_agent("founder1337", "bottube_sk_founder", is_human=True)
 
