@@ -20657,10 +20657,9 @@ def _ue_top_k_for_video(video_id, k=10, exclude_self=True):
 @app.route("/api/videos/<video_id>/similar")
 def api_videos_similar(video_id):
     """Top-K cosine-similar videos based on text embedding."""
-    try:
-        k = max(1, min(50, int(request.args.get("k", 10))))
-    except Exception:
-        k = 10
+    k, error = _parse_positive_int_query("k", 10, max_value=50)
+    if error:
+        return error
     db = get_db()
     video = db.execute(
         """SELECT 1 FROM videos
