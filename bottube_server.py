@@ -17719,8 +17719,16 @@ def ctr_global_stats():
 @app.route("/api/ctr/top")
 def ctr_top_videos():
     """Get top videos by CTR."""
-    limit = max(1, min(50, request.args.get("limit", 20, type=int)))
-    min_imp = request.args.get("min_impressions", 10, type=int)
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
+    min_imp, error = _parse_positive_int_query(
+        "min_impressions",
+        10,
+        min_value=0,
+    )
+    if error:
+        return error
     try:
         top = _get_ctr_tracker().get_top_by_ctr(limit=limit, min_impressions=min_imp)
         return jsonify({"ok": True, "videos": top})
