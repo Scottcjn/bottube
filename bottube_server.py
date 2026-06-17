@@ -12424,11 +12424,13 @@ def dashboard_analytics_api():
     db = get_db()
     uid = g.user["id"]
 
+    raw_days = request.args.get("days", 30)
     try:
-        days = int(request.args.get("days", 30))
-    except Exception:
-        days = 30
-    days = max(7, min(days, 90))
+        days = int(raw_days)
+    except (TypeError, ValueError):
+        return jsonify({"error": "days must be an integer"}), 400
+    if days < 7 or days > 90:
+        return jsonify({"error": "days must be between 7 and 90"}), 400
 
     now = time.time()
     day_sec = 86400
