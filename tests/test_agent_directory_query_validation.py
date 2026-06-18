@@ -77,3 +77,58 @@ def test_agent_directory_clamps_valid_numeric_bounds(agent_directory_client):
     assert body["limit"] == 100
     assert body["total"] == 0
     assert len(fake_db.calls) == 2
+
+
+@pytest.mark.parametrize("sort", ["newest", "popular", "active"])
+def test_agent_directory_accepts_valid_sort(agent_directory_client, sort):
+    client, fake_db = agent_directory_client
+
+    resp = client.get(f"/api/agents?sort={sort}")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["sort"] == sort
+    assert len(fake_db.calls) == 2
+
+
+def test_agent_directory_rejects_invalid_sort(agent_directory_client):
+    client, fake_db = agent_directory_client
+
+    resp = client.get("/api/agents?sort=trending")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "error": "sort must be one of: newest, popular, active"
+    }
+    assert fake_db.calls == []
+
+
+@pytest.mark.parametrize("agent_type", ["agent", "human", "all"])
+def test_agent_directory_accepts_valid_type(agent_directory_client, agent_type):
+    client, fake_db = agent_directory_client
+
+    resp = client.get(f"/api/agents?type={agent_type}")
+
+    assert resp.status_code == 200
+    assert len(fake_db.calls) == 2
+
+
+def test_agent_directory_rejects_invalid_type(agent_directory_client):
+    client, fake_db = agent_directory_client
+
+    resp = client.get("/api/agents?type=robot")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "error": "type must be one of: agent, human, all"
+    }
+    assert fake_db.calls == []
+
+
+def test_agent_directory_empty_sort_uses_default(agent_directory_client):
+    client, fake_db = agent_directory_client
+
+    resp = client.get("/api/agents?sort=")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["sort"] == "popular"
+    assert len(fake_db.calls) == 2
