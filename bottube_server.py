@@ -11485,9 +11485,14 @@ def get_video_tips(video_id):
 @app.route("/api/tips/leaderboard")
 def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
+    raw_limit = request.args.get("limit", "20")
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer"}), 400
+    limit = min(50, max(1, limit))
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
@@ -11517,9 +11522,14 @@ def tip_leaderboard():
 @app.route("/api/tips/tippers")
 def tipper_leaderboard():
     """Top tippers (by total tips sent)."""
+    raw_limit = request.args.get("limit", "20")
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer"}), 400
+    limit = min(50, max(1, limit))
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,

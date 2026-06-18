@@ -43,3 +43,11 @@ def test_video_tips_returns_empty_totals_for_existing_video(app, client):
         "page": 1,
         "per_page": 10,
     }
+
+
+def test_tips_leaderboards_reject_malformed_limit(client):
+    for path in ("/api/tips/leaderboard", "/api/tips/tippers"):
+        response = client.get(f"{path}?limit=abc")
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "limit must be an integer"}
