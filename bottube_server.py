@@ -8847,9 +8847,33 @@ def _get_trending_videos(db, limit=20, category=None):
 @app.route("/api/trending")
 def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
+    raw_limit = request.args.get("limit", "20")
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer"}), 400
+    if limit < 1 or limit > 50:
+        return jsonify({"error": "limit must be between 1 and 50"}), 400
+
+    if "days" in request.args:
+        try:
+            days = int(request.args.get("days", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "days must be an integer"}), 400
+        if days < 1 or days > 90:
+            return jsonify({"error": "days must be between 1 and 90"}), 400
+
+    if "since" in request.args:
+        try:
+            since = float(request.args.get("since", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "since must be a timestamp"}), 400
+        if not math.isfinite(since) or since < 0:
+            return jsonify({"error": "since must be a non-negative timestamp"}), 400
+
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=20, category=category)
+    rows = _get_trending_videos(db, limit=limit, category=category)
 
     videos = []
     for row in rows:

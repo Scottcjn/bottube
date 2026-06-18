@@ -166,6 +166,26 @@ class TestTrendingEnhancements:
         for video in data["videos"]:
             assert video["category"] == "music"
 
+    @pytest.mark.parametrize(
+        ("query", "error"),
+        [
+            ("limit=abc", {"error": "limit must be an integer"}),
+            ("limit=0", {"error": "limit must be between 1 and 50"}),
+            ("limit=51", {"error": "limit must be between 1 and 50"}),
+            ("days=abc", {"error": "days must be an integer"}),
+            ("days=-1", {"error": "days must be between 1 and 90"}),
+            ("days=99999", {"error": "days must be between 1 and 90"}),
+            ("since=invalid", {"error": "since must be a timestamp"}),
+            ("since=-1", {"error": "since must be a non-negative timestamp"}),
+        ],
+    )
+    def test_trending_rejects_malformed_query_params(self, client, query, error):
+        """Malformed trending query params should fail instead of falling back."""
+        resp = client.get(f"/api/trending?{query}")
+
+        assert resp.status_code == 400
+        assert resp.get_json() == error
+
     def test_trending_rising_endpoint(self, client, registered_agent):
         """Test rising videos API."""
         # Upload a recent video
