@@ -45,6 +45,18 @@ def test_contact_returns_200_for_anonymous(client):
     assert resp.content_type.startswith("text/html")
 
 
+def test_stars_returns_native_page_for_anonymous(client):
+    resp = client.get("/stars", follow_redirects=False)
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert resp.content_type.startswith("text/html")
+    assert "7-Day Star Sprint" in html
+    assert "https://github.com/Scottcjn/Rustchain" in html
+    assert "githubassets" not in html
+    assert 'data-color-mode="auto"' not in html
+
+
 # --- Auth-required surfaces (must 302 -> /login?next=...) -------------------
 
 

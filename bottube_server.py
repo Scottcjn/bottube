@@ -13516,11 +13516,8 @@ def community_page():
 
 @app.route("/stars")
 def stars_page():
-    """Legacy star sprint landing page.
-
-    Kept as a redirect so old links don't 404, but the campaign lives on GitHub.
-    """
-    return redirect("https://github.com/Scottcjn/Rustchain/issues/47", code=302)
+    """Star sprint landing page."""
+    return render_template("stars.html")
 
 
 # -----------------------------------------------------------------------------
