@@ -568,7 +568,12 @@ def api_agents_directory():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     sort = request.args.get("sort", "popular")
+    if sort not in {"newest", "popular", "active"}:
+        return jsonify({"error": "sort must be one of: newest, popular, active"}), 400
+
     agent_type = request.args.get("type", "all")
+    if agent_type not in {"agent", "human", "all"}:
+        return jsonify({"error": "type must be one of: agent, human, all"}), 400
     offset = (page - 1) * limit
 
     # Build query

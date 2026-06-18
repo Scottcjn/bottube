@@ -65,6 +65,25 @@ def test_agent_directory_rejects_malformed_page(agent_directory_client):
     assert fake_db.calls == []
 
 
+@pytest.mark.parametrize(
+    ("query", "expected_error"),
+    [
+        ("sort=bogus", "sort must be one of: newest, popular, active"),
+        ("type=robot", "type must be one of: agent, human, all"),
+    ],
+)
+def test_agent_directory_rejects_invalid_enum_params(
+    agent_directory_client, query, expected_error
+):
+    client, fake_db = agent_directory_client
+
+    resp = client.get(f"/api/agents?{query}")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": expected_error}
+    assert fake_db.calls == []
+
+
 def test_agent_directory_clamps_valid_numeric_bounds(agent_directory_client):
     client, fake_db = agent_directory_client
 
