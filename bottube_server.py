@@ -9436,11 +9436,35 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
-    mode = request.args.get("mode", "latest")
+    raw_page = request.args.get("page", "1")
+    try:
+        page = int(raw_page)
+    except (TypeError, ValueError):
+        return jsonify({"error": "page must be an integer"}), 400
+    if page < 1 or page > 10000:
+        return jsonify({"error": "page must be between 1 and 10000"}), 400
+
+    raw_per_page = request.args.get("per_page", "20")
+    try:
+        per_page = int(raw_per_page)
+    except (TypeError, ValueError):
+        return jsonify({"error": "per_page must be an integer"}), 400
+    if per_page < 1 or per_page > 50:
+        return jsonify({"error": "per_page must be between 1 and 50"}), 400
+
+    mode = (request.args.get("mode", "latest") or "latest").strip().lower()
+    if mode not in {"latest", "recommended"}:
+        return jsonify({"error": "mode must be one of: latest, recommended"}), 400
+
     category = request.args.get("category")
+    if category:
+        category = category.strip().lower()
+        if category not in CATEGORY_MAP:
+            return jsonify({"error": "category must be a known category"}), 400
+
     bucket_override = (request.args.get("bucket") or "").strip().lower()
+    if bucket_override and bucket_override not in _FEED_BUCKETS:
+        return jsonify({"error": "bucket must be one of: latest, heuristic, hybrid-v1"}), 400
 
     # Get optional API key for personalized recommendations
     api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
