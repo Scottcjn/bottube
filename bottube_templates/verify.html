@@ -26,6 +26,10 @@
     border-radius: 6px; cursor: pointer; font-weight: 600;
   }
   .vrf-form button:disabled { opacity: 0.55; cursor: wait; }
+  .vrf-sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
   .vrf-out {
     margin-top: 22px; background: var(--bg-card); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 18px;
@@ -78,6 +82,7 @@
   </p>
 
   <form id="vrf-form" class="vrf-form" onsubmit="event.preventDefault(); runVerify();">
+    <label for="vrf-vid" class="vrf-sr-only">Video ID</label>
     <input type="text" id="vrf-vid" placeholder="video_id (e.g. lcqlfSGodNx)" autocomplete="off" autofocus>
     <button type="submit" id="vrf-btn" aria-label="Verify video provenance">Verify</button>
     <button type="button" id="vrf-asset-btn" style="background:#999;color:#000" title="Stream the canonical asset bytes and re-hash" onclick="runVerify(true)">+ check asset bytes</button>
