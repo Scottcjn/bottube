@@ -266,10 +266,11 @@ def api_top_videos():
     
     metric = request.args.get('metric', 'views')
     try:
-        limit = int(request.args.get('limit', 10))
-    except ValueError:
+        limit = int(request.args.get('limit', '10'))
+    except (TypeError, ValueError):
         return jsonify({"error": "Invalid limit, must be an integer"}), 400
-    limit = max(1, min(limit, 50))
+    if limit < 1 or limit > 50:
+        return jsonify({"error": "Invalid limit, must be between 1 and 50"}), 400
     
     db = get_db()
     
