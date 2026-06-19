@@ -105,6 +105,10 @@ def _get_ab_manager():
 AVATAR_DIR = BASE_DIR / "avatars"
 TEMPLATE_DIR = BASE_DIR / "bottube_templates"
 
+# Largest value SQLite can store in an INTEGER column / accept as a bound
+# parameter. Larger Python ints raise OverflowError in the driver.
+_SQLITE_MAX_INT64 = (1 << 63) - 1
+
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB upload limit
 MAX_VIDEO_DURATION = 8  # seconds - default for short-form content
 MAX_VIDEO_WIDTH = 720
@@ -5132,7 +5136,10 @@ def _referral_me_payload() -> Response:
     agent_id = int(g.agent["id"])
     data = {}
     if request.method == "POST":
-        data = request.get_json(silent=True) or request.form.to_dict() or {}
+        json_data = request.get_json(silent=True)
+        if json_data is not None and not isinstance(json_data, dict):
+            return jsonify({"error": "JSON body must be an object"}), 400
+        data = json_data or request.form.to_dict() or {}
     requested_track = _normalize_referral_track(data.get("allowed_track", data.get("track", "both")), "both")
     requested_code = _normalize_ref_code(data.get("code", ""))
     # Prefer an existing code for this agent.
@@ -5215,7 +5222,10 @@ def referral_me_user():
 
 def _referral_apply_payload(source: str):
     db = get_db()
-    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    json_data = request.get_json(silent=True)
+    if json_data is not None and not isinstance(json_data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+    data = json_data or request.form.to_dict() or {}
     ref_code = _normalize_ref_code(data.get("ref_code", "") or data.get("ref", ""))
     if not ref_code:
         return jsonify({"error": "ref_code is required"}), 400
@@ -5498,11 +5508,9 @@ def founding_page():
 @app.route("/api/referrals/leaderboard")
 def referrals_leaderboard_api():
     db = get_db()
-    limit = request.args.get("limit", "50")
-    try:
-        limit_i = int(limit)
-    except Exception:
-        limit_i = 50
+    limit_i, error = _parse_positive_int_query("limit", 50, max_value=200)
+    if error:
+        return error
     return jsonify({"ok": True, "leaderboard": _get_referral_leaderboard(db, limit=limit_i)})
 
 
@@ -6801,6 +6809,12 @@ def _make_param_conflict_error(canonical_name, alias_name):
     )
 
 
+# SQLite stores integers as signed 64-bit values. A query OFFSET/LIMIT larger
+# than this raises OperationalError ("Python int too large to convert to SQLite
+# INTEGER"), so pagination math must stay within this bound.
+_SQLITE_MAX_SIGNED_INT = 2 ** 63 - 1
+
+
 def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, clamp_bounds=False):
     """Return (value, None) or (None, (json_response, status_code)).
 
@@ -7807,7 +7821,11 @@ def _parse_recent_comments_limit():
         limit = int(raw_value)
     except (TypeError, ValueError):
         return None, "limit must be an integer"
-    return min(100, max(1, limit)), None
+    if limit < 1:
+        return None, "limit must be >= 1"
+    if limit > 100:
+        return None, "limit must be <= 100"
+    return limit, None
 
 
 def _parse_recent_comments_since():
@@ -8282,6 +8300,11 @@ def search_videos():
     if error:
         return error
     offset = (page - 1) * per_page
+    # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
+    # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
+    # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     db = get_db()
     like_q = f"%{q}%"
@@ -9617,7 +9640,16 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
-    page, error = _parse_positive_int_query("page", 1)
+    # `page` is bounded at 10000 so a malformed or malicious client cannot
+    # request an arbitrarily deep page. Without an upper bound, a value such
+    # as `page=9223372036854775807` makes `offset = (page - 1) * per_page`
+    # exceed SQLite's signed 64-bit INTEGER range, which raises
+    # `OverflowError` when bound into `LIMIT ? OFFSET ?` and surfaces as an
+    # HTTP 500 instead of a clean 400. 10000 pages of `per_page<=50` is
+    # ~500k rows, already well past the whole feed catalogue, so the cap does
+    # not affect any legitimate use case. Mirrors the `/api/videos` bound
+    # (Bottube issue #1414).
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
     if error:
         return error
     per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
@@ -10120,6 +10152,10 @@ def gamification_leaderboard():
 @app.route("/api/stats")
 def platform_stats():
     """Get public platform statistics."""
+    top_agents_limit, error = _parse_positive_int_query("limit", 5, max_value=100)
+    if error:
+        return error
+
     db = get_db()
     videos = db.execute("SELECT COUNT(*) FROM videos WHERE is_removed = 0").fetchone()[0]
     agents = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
@@ -10133,7 +10169,8 @@ def platform_stats():
                   COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
            FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
-           GROUP BY a.id ORDER BY total_views DESC LIMIT 5"""
+           GROUP BY a.id ORDER BY total_views DESC LIMIT ?""",
+        (top_agents_limit,),
     ).fetchall()
 
     return jsonify({
@@ -11655,6 +11692,11 @@ def get_video_tips(video_id):
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
     offset = (page - 1) * per_page
+    # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
+    # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
+    # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
+    if offset > 2 ** 63 - 1:
+        return jsonify({"error": "page out of range"}), 400
 
     tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
@@ -12067,8 +12109,13 @@ def upload_avatar():
             g_val = min(255, g_val + 80)
             b = min(255, b + 80)
         bg_hex = f"{r:02x}{g_val:02x}{b:02x}"
-        initial = (name.replace("-", " ").replace("_", " ").split()[0][0]
-                   if name else "?").upper()
+        # Pick the first alphanumeric character for the avatar initial. Agent
+        # names made up solely of hyphens/underscores (allowed by the
+        # ^[a-z0-9_-]{2,32}$ registration rule) collapse to an empty word list
+        # after the replace()+split(), so guard against an empty result instead
+        # of indexing [0][0] and raising IndexError -> HTTP 500.
+        name_words = name.replace("-", " ").replace("_", " ").split() if name else []
+        initial = (name_words[0][0] if name_words else "?").upper()
         display = agent["display_name"] or name
         # Truncate display name for the bottom text, sanitize for ffmpeg drawtext
         bot_label = re.sub(r"[^a-zA-Z0-9 _-]", "", display)[:16]
@@ -13202,11 +13249,13 @@ def dashboard_analytics_api():
     db = get_db()
     uid = g.user["id"]
 
+    raw_days = request.args.get("days", 30)
     try:
-        days = int(request.args.get("days", 30))
-    except Exception:
-        days = 30
-    days = max(7, min(days, 90))
+        days = int(raw_days)
+    except (TypeError, ValueError):
+        return jsonify({"error": "days must be an integer"}), 400
+    if days < 7 or days > 90:
+        return jsonify({"error": "days must be between 7 and 90"}), 400
 
     now = time.time()
     day_sec = 86400
@@ -13487,11 +13536,8 @@ def community_page():
 
 @app.route("/stars")
 def stars_page():
-    """Legacy star sprint landing page.
-
-    Kept as a redirect so old links don't 404, but the campaign lives on GitHub.
-    """
-    return redirect("https://github.com/Scottcjn/Rustchain/issues/47", code=302)
+    """Star sprint landing page."""
+    return render_template("stars.html")
 
 
 # -----------------------------------------------------------------------------
@@ -16672,7 +16718,18 @@ def api_related_videos(video_id):
         return s
 
     scored = sorted(candidates, key=score, reverse=True)
-    limit = min(20, max(1, request.args.get("limit", 8, type=int)))
+    raw_limit = request.args.get("limit")
+    if raw_limit is None or raw_limit == "":
+        limit = 8
+    else:
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return jsonify({"error": "limit must be an integer"}), 400
+        if limit < 1:
+            return jsonify({"error": "limit must be >= 1"}), 400
+        if limit > 20:
+            return jsonify({"error": "limit must be <= 20"}), 400
 
     return jsonify({
         "ok": True,
@@ -17679,8 +17736,16 @@ def ctr_global_stats():
 @app.route("/api/ctr/top")
 def ctr_top_videos():
     """Get top videos by CTR."""
-    limit = max(1, min(50, request.args.get("limit", 20, type=int)))
-    min_imp = request.args.get("min_impressions", 10, type=int)
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
+    min_imp, error = _parse_positive_int_query(
+        "min_impressions",
+        10,
+        min_value=0,
+    )
+    if error:
+        return error
     try:
         top = _get_ctr_tracker().get_top_by_ctr(limit=limit, min_impressions=min_imp)
         return jsonify({"ok": True, "videos": top})
@@ -18820,10 +18885,9 @@ def xrpc_feed_firehose():
     stable even as new uploads arrive.
     """
     cursor = (request.args.get("cursor") or "").strip()
-    try:
-        limit = max(1, min(200, int(request.args.get("limit", 100))))
-    except Exception:
-        limit = 100
+    limit, error = _parse_positive_int_query("limit", 100, max_value=200)
+    if error:
+        return error
     ip = _get_client_ip()
     if not _rate_limit(f"firehose:{ip}", 30, 60):
         return jsonify({"ok": False, "error": "rate limited"}), 429
@@ -18835,6 +18899,12 @@ def xrpc_feed_firehose():
             return jsonify({"ok": False, "error": "invalid cursor"}), 400
         after_ms = int(m.group(1))
         after_rowid = int(m.group(2))
+        # Cursor segments are bound directly as SQLite INTEGER parameters
+        # (v.id > ?). A value above the signed 64-bit ceiling raises
+        # OverflowError inside the driver -> 500. Reject it the same way as
+        # a structurally invalid cursor instead of crashing.
+        if after_ms > _SQLITE_MAX_INT64 or after_rowid > _SQLITE_MAX_INT64:
+            return jsonify({"ok": False, "error": "invalid cursor"}), 400
 
     db = get_db()
     after_secs = after_ms / 1000.0
@@ -20611,10 +20681,9 @@ def _ue_top_k_for_video(video_id, k=10, exclude_self=True):
 @app.route("/api/videos/<video_id>/similar")
 def api_videos_similar(video_id):
     """Top-K cosine-similar videos based on text embedding."""
-    try:
-        k = max(1, min(50, int(request.args.get("k", 10))))
-    except Exception:
-        k = 10
+    k, error = _parse_positive_int_query("k", 10, max_value=50)
+    if error:
+        return error
     db = get_db()
     video = db.execute(
         """SELECT 1 FROM videos
@@ -24145,6 +24214,41 @@ def admin_moderation_reports():
         "created_at": r["created_at"],
     } for r in rows]
     return jsonify({"ok": True, "count": len(out), "reports": out})
+
+
+# ---------------------------------------------------------------------------
+# Route aliases — fix 404s from deployment drift (issues #1471, #1472)
+# ---------------------------------------------------------------------------
+# These aliases ensure documented endpoints resolve even when the canonical
+# route was registered under a slightly different URL pattern.
+
+app.add_url_rule(
+    "/api/videos/<video_id>/anchor",
+    endpoint="api_video_anchor_alias",
+    view_func=api_video_anchor_proof,
+)
+
+app.add_url_rule(
+    "/api/videos/<video_id>/anchor_proof",
+    endpoint="api_video_anchor_underscore_alias",
+    view_func=api_video_anchor_proof,
+)
+
+app.add_url_rule(
+    "/api/transparency/v2",
+    endpoint="api_transparency_v2",
+    view_func=api_transparency,
+)
+
+
+@app.route("/api/embed")
+def api_embed_discovery():
+    """JSON oEmbed discovery endpoint for external link previews.
+
+    Wraps the existing ``/oembed`` handler so consumers that expect the
+    conventional ``/api/embed`` path still receive a valid oEmbed response.
+    """
+    return oembed()
 
 
 if __name__ == "__main__":

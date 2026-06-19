@@ -568,6 +568,29 @@ class TestStatsEndpoint:
         assert "total_views" in data
         assert "top_agents" in data
 
+    def test_stats_accepts_valid_top_agents_limit(self, client):
+        resp = client.get("/api/stats?limit=1")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data["top_agents"]) <= 1
+
+    @pytest.mark.parametrize(
+        ("query", "expected_error"),
+        [
+            ("limit=abc", "limit must be an integer"),
+            ("limit=-1", "limit must be >= 1"),
+            ("limit=0", "limit must be >= 1"),
+            ("limit=101", "limit must be <= 100"),
+            ("limit=999999999999999", "limit must be <= 100"),
+        ],
+    )
+    def test_stats_rejects_malformed_or_out_of_range_limit(
+        self, client, query, expected_error
+    ):
+        resp = client.get(f"/api/stats?{query}")
+        assert resp.status_code == 400
+        assert resp.get_json() == {"error": expected_error}
+
 
 class TestCategoriesEndpoint:
     """Tests for GET /api/categories."""

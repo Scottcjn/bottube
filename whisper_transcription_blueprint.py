@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 from flask import Blueprint, current_app, jsonify, request, Response
 
@@ -36,6 +37,7 @@ def _request_json_object():
 
 
 def _parse_positive_int(data, field_name: str, default: int):
+    """Parse positive integer fields from JSON request bodies."""
     value = data.get(field_name, default)
     if isinstance(value, bool):
         return None, (
@@ -66,6 +68,39 @@ def _parse_positive_int(data, field_name: str, default: int):
     if parsed < 1:
         return None, (
             jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    return parsed, None
+
+
+def _parse_positive_int_arg(field_name: str, default: int, max_value: Optional[int] = None):
+    """Parse positive integer fields from query-string arguments."""
+    if max_value is not None:
+        assert default <= max_value
+    raw_value = request.args.get(field_name)
+    if raw_value is None:
+        return default, None
+    stripped = raw_value.strip()
+    if not stripped:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    try:
+        parsed = int(stripped, 10)
+    except ValueError:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if parsed < 1:
+        return None, (
+            jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if max_value is not None and parsed > max_value:
+        return None, (
+            jsonify({"error": f"{field_name} must be <= {max_value}"}),
             400,
         )
     return parsed, None
@@ -200,7 +235,9 @@ def search_transcripts():
     query = request.args.get("q", "").strip()
     if not query:
         return jsonify({"error": "Query parameter 'q' is required"}), 400
-    limit = request.args.get("limit", 50, type=int)
+    limit, error = _parse_positive_int_arg("limit", 50, max_value=500)
+    if error:
+        return error
     video_ids = wt.search_transcripts(query, limit=limit)
     return jsonify({
         "query": query,

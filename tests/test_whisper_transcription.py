@@ -485,6 +485,58 @@ def test_search_endpoint(tmp_db, flask_client, monkeypatch):
     assert "search_vid_001" in data["video_ids"]
 
 
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [(None, 50), ("1", 1), ("500", 500)],
+)
+def test_search_endpoint_accepts_valid_limit(flask_client, monkeypatch, limit, expected):
+    import whisper_transcription_blueprint as wtb
+
+    seen = []
+
+    def fake_search(query, limit=50):
+        seen.append((query, limit))
+        return ["search_vid_limit"]
+
+    monkeypatch.setattr(wtb.wt, "search_transcripts", fake_search)
+
+    query_string = "q=unicorn"
+    if limit is not None:
+        query_string += f"&limit={limit}"
+    resp = flask_client.get(f"/api/transcript/search?{query_string}")
+
+    assert resp.status_code == 200
+    assert seen == [("unicorn", expected)]
+    assert resp.get_json()["video_ids"] == ["search_vid_limit"]
+
+
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "1.5", "501", ""])
+def test_search_endpoint_rejects_invalid_limit(flask_client, monkeypatch, limit):
+    import whisper_transcription_blueprint as wtb
+
+    def fail_search(*_args, **_kwargs):
+        raise AssertionError("invalid limit should not search transcripts")
+
+    monkeypatch.setattr(wtb.wt, "search_transcripts", fail_search)
+
+    resp = flask_client.get(f"/api/transcript/search?q=unicorn&limit={limit}")
+
+    assert resp.status_code == 400
+    assert "limit" in resp.get_json()["error"]
+
+
+def test_parse_positive_int_arg_allows_unbounded_limit(flask_client):
+    import whisper_transcription_blueprint as wtb
+
+    with flask_client.application.test_request_context(
+        "/api/transcript/search?q=unicorn&limit=10000"
+    ):
+        value, error = wtb._parse_positive_int_arg("limit", 50)
+
+    assert error is None
+    assert value == 10000
+
+
 def test_search_endpoint_no_query(flask_client):
     resp = flask_client.get("/api/transcript/search")
     assert resp.status_code == 400

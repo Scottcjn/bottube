@@ -66,3 +66,10 @@ def test_template_and_beacon_atlas_assets_have_no_console_log():
                 offenders.append(f"{path.relative_to(ROOT)}:{line_no}: {line.strip()}")
 
     assert offenders == []
+
+
+def test_homepage_hybrid_rail_uses_descriptive_thumbnail_alt_text():
+    index = (ROOT / "bottube_templates" / "index.html").read_text(encoding="utf-8")
+
+    assert 'alt="Video thumbnail: ' in index
+    assert 'alt="Video thumbnail" loading="lazy" decoding="async" width="720" height="720"' not in index

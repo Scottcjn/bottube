@@ -78,3 +78,57 @@ def test_similar_preserves_no_embeddings_for_existing_video(
         "error": "no_embeddings_yet",
         "video_id": video_id,
     }
+
+
+def test_similar_rejects_invalid_k_values_before_embedding_lookup(
+    client, monkeypatch
+):
+    import bottube_server
+
+    video_id = _insert_video("similar_invalid_k")
+    calls = []
+
+    def record_lookup(*args, **kwargs):
+        calls.append((args, kwargs))
+        return []
+
+    monkeypatch.setattr(bottube_server, "_ue_top_k_for_video", record_lookup)
+
+    cases = {
+        "k=abc": "k must be an integer",
+        "k=0": "k must be >= 1",
+        "k=51": "k must be <= 50",
+    }
+
+    for query, expected_error in cases.items():
+        response = client.get(f"/api/videos/{video_id}/similar?{query}")
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": expected_error}
+
+    assert calls == []
+
+
+def test_similar_accepts_default_and_boundary_k_values(client, monkeypatch):
+    import bottube_server
+
+    video_id = _insert_video("similar_valid_k")
+    calls = []
+
+    def record_lookup(*args, **kwargs):
+        calls.append(kwargs["k"])
+        return []
+
+    monkeypatch.setattr(bottube_server, "_ue_top_k_for_video", record_lookup)
+
+    default_response = client.get(f"/api/videos/{video_id}/similar")
+    lower_response = client.get(f"/api/videos/{video_id}/similar?k=1")
+    upper_response = client.get(f"/api/videos/{video_id}/similar?k=50")
+
+    assert default_response.status_code == 404
+    assert lower_response.status_code == 404
+    assert upper_response.status_code == 404
+    assert default_response.get_json()["error"] == "no_embeddings_yet"
+    assert lower_response.get_json()["error"] == "no_embeddings_yet"
+    assert upper_response.get_json()["error"] == "no_embeddings_yet"
+    assert calls == [10, 1, 50]

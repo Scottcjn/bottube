@@ -39,6 +39,15 @@ def _parse_agent_directory_int(name: str, default: int, min_value: int, max_valu
     return value
 
 
+def _parse_agent_directory_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        return default
+    if raw_value not in allowed:
+        raise ValueError(f"{name} must be one of: {', '.join(allowed)}")
+    return raw_value
+
+
 # ═══════════════════════════════════════════════════════════════
 # GOOGLE A2A — Agent Card
 # Spec: https://google.github.io/A2A
@@ -566,10 +575,10 @@ def api_agents_directory():
     try:
         page = _parse_agent_directory_int("page", 1, min_value=1)
         limit = _parse_agent_directory_int("limit", 20, min_value=1, max_value=100)
+        sort = _parse_agent_directory_choice("sort", "popular", ("newest", "popular", "active"))
+        agent_type = _parse_agent_directory_choice("type", "all", ("agent", "human", "all"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    sort = request.args.get("sort", "popular")
-    agent_type = request.args.get("type", "all")
     offset = (page - 1) * limit
 
     # Build query
