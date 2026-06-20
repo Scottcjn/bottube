@@ -9030,13 +9030,16 @@ def trending():
     limit, err = _parse_positive_int_query("limit", 20, max_value=100)
     if err:
         return err
-    for param in ("days", "since"):
-        raw = request.args.get(param)
-        if raw is not None and raw != "":
-            try:
-                int(raw)
-            except (ValueError, TypeError):
-                return jsonify({"error": f"{param} must be an integer"}), 400
+    # Validate the optional window params the same way as limit. Without
+    # this, values like ?days=-5 or ?since=0 slip through as merely "an
+    # integer". None as the default keeps the current behaviour where an
+    # absent param just means no extra filtering.
+    days_val, err = _parse_positive_int_query("days", None, min_value=1, max_value=90)
+    if err:
+        return err
+    since_val, err = _parse_positive_int_query("since", None, min_value=1)
+    if err:
+        return err
     rows = _get_trending_videos(db, limit=limit, category=category)
 
     videos = []

@@ -122,3 +122,28 @@ def test_trending_since_non_integer_returns_400(client):
     resp = client.get("/api/trending?since=abc")
     assert resp.status_code == 400
     assert "since" in resp.get_json()["error"]
+
+def test_trending_days_negative_returns_400(client):
+    resp = client.get("/api/trending?days=-5")
+    assert resp.status_code == 400
+
+
+def test_trending_days_zero_returns_400(client):
+    resp = client.get("/api/trending?days=0")
+    assert resp.status_code == 400
+
+
+def test_trending_days_above_max_returns_400(client):
+    resp = client.get("/api/trending?days=91")
+    assert resp.status_code == 400
+    assert "<= 90" in resp.get_json()["error"]
+
+
+def test_trending_since_negative_returns_400(client):
+    resp = client.get("/api/trending?since=-1")
+    assert resp.status_code == 400
+
+
+def test_trending_since_zero_returns_400(client):
+    resp = client.get("/api/trending?since=0")
+    assert resp.status_code == 400
