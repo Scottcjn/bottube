@@ -79,3 +79,31 @@ def test_run_with_retries_records_semantic_false_result_as_failure():
     assert metrics["successes"] == 0
     assert metrics["failures"] == 1
     assert metrics["error_categories"]["throttled"] == 1
+
+
+def test_run_with_retries_does_not_reuse_stale_semantic_failure_after_exception():
+    calls = {"count": 0}
+
+    def semantic_then_exception():
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return (False, "quota exhausted")
+        raise TimeoutError("temporary provider timeout")
+
+    ok, value, category, latency_s, attempts = run_with_retries(
+        "unit_provider_semantic_then_exception",
+        "submit",
+        semantic_then_exception,
+        RetryPolicy(attempts=2, base_delay_s=0.0, max_delay_s=0.0, jitter_s=0.0),
+        success_predicate=lambda result: result[0],
+    )
+
+    assert ok is False
+    assert value is None
+    assert category == "transient"
+    assert attempts == 2
+    assert latency_s >= 0
+    metrics = provider_metrics_snapshot()["unit_provider_semantic_then_exception"]
+    assert metrics["successes"] == 0
+    assert metrics["failures"] == 1
+    assert metrics["error_categories"]["transient"] == 1

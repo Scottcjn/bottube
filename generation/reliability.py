@@ -112,12 +112,10 @@ def run_with_retries(
     """
     start = time.monotonic()
     last_category = "permanent"
-    last_value: Optional[T] = None
     attempts = max(1, policy.attempts)
     for attempt_index in range(attempts):
         try:
             value = func()
-            last_value = value
             latency = time.monotonic() - start
             if success_predicate is not None and not success_predicate(value):
                 last_category = classify_error(value)
@@ -152,4 +150,4 @@ def run_with_retries(
 
     latency = time.monotonic() - start
     record_provider_metric(provider, success=False, latency_s=latency, category=last_category)
-    return False, last_value, last_category, latency, attempts
+    return False, None, last_category, latency, attempts
