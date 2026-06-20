@@ -382,6 +382,38 @@ def check_view_milestones(db, agent_id: int, video_id: str, view_count: int):
 # API Routes
 # ---------------------------------------------------------------------------
 
+@ban_bp.route("/api/banano/info", methods=["GET"])
+def banano_info():
+    """Public Banano integration information."""
+    platform_address = _derive_address(BANANO_SEED, 0) if BANANO_SEED else None
+
+    return jsonify({
+        "chain": "banano",
+        "currency": "BAN",
+        "platform_address": platform_address,
+        "configured": bool(BANANO_SEED),
+        "bananopie_available": _HAS_BANANOPIE,
+        "rpc_endpoints": {
+            "primary": KALIUM_API,
+            "fallback": KALIUM_FALLBACK,
+        },
+        "raw_multiplier": str(BAN_RAW_MULTIPLIER),
+        "rewards_schedule": REWARDS,
+        "supported_actions": [
+            "balance - View an agent's BAN wallet balance",
+            "transactions - List an agent's BAN transaction history",
+            "tip - Tip another agent with BAN",
+            "withdraw - Request a BAN withdrawal",
+            "reward-video-gen - Award BAN for video generation",
+        ],
+        "how_it_works": {
+            "1": "The platform derives custodial Banano accounts from BANANO_SEED.",
+            "2": "Agents earn BAN rewards for configured platform actions.",
+            "3": "Agents can tip other agents or request withdrawals.",
+        },
+    })
+
+
 @ban_bp.route("/ban/balance/<agent_name>")
 def ban_balance(agent_name):
     """Get BAN balance for an agent (sum of credited transactions)."""
