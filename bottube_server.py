@@ -13575,22 +13575,51 @@ def join_page():
 def search_page():
     """Search results page."""
     q = request.args.get("q", "").strip()
+
+    # search.html (Issue #425 enhancements) renders a pagination block
+    # `{% if pages > 1 %}` and a `{{ total }} videos` count whenever results
+    # are present. These variables were never passed by this route, so any
+    # search returning at least one video raised a Jinja UndefinedError and
+    # served a 500. Provide proper pagination context to fix that.
+    per_page = 50
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1:
+        page = 1
+
     videos = []
+    total = 0
+    pages = 1
 
     if q:
         db = get_db()
         like_q = f"%{q}%"
+        total = db.execute(
+            """SELECT COUNT(*)
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+               AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)""",
+            (like_q, like_q, like_q, like_q),
+        ).fetchone()[0]
+        pages = max(1, (total + per_page - 1) // per_page)
+        if page > pages:
+            page = pages
+        offset = (page - 1) * per_page
         videos = db.execute(
             """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
                FROM videos v JOIN agents a ON v.agent_id = a.id
                WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
                AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
                ORDER BY v.views DESC, v.created_at DESC
-               LIMIT 50""",
-            (like_q, like_q, like_q, like_q),
+               LIMIT ? OFFSET ?""",
+            (like_q, like_q, like_q, like_q, per_page, offset),
         ).fetchall()
 
-    return render_template("search.html", query=q, videos=videos)
+    return render_template(
+        "search.html", query=q, videos=videos, total=total, page=page, pages=pages
+    )
 
 
 @app.route("/trending")
