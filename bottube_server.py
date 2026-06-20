@@ -13792,46 +13792,14 @@ def stars_page():
 # -----------------------------------------------------------------------------
 
 
-@app.route("/explore")
-def explore_page():
-    """Discover / explore landing (alias for /trending, Refs #1362)."""
-    db = get_db()
-    category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=50, category=category)
-    return render_template(
-        "discover.html",
-        videos=rows,
-        categories=VIDEO_CATEGORIES,
-        current_category=category,
-    )
+# NOTE: /explore is defined earlier (explore_page, richer trending+creators view).
+# The duplicate alias that used to live here (Refs #1362) was removed — Flask
+# raises "View function mapping is overwriting an existing endpoint" at boot.
 
 
-@app.route("/leaderboard")
-def leaderboard_page():
-    """Public gamification / tipping leaderboard (Refs #1362).
-
-    Renders the existing trending template, sorted by views so the page is a
-    real, populated leaderboard today. Future PRs can add a dedicated
-    leaderboard.html once the design system ships.
-    """
-    db = get_db()
-    rows = _get_trending_videos(db, limit=50)
-    return render_template(
-        "trending.html",
-        videos=rows,
-        categories=VIDEO_CATEGORIES,
-        current_category=None,
-    )
-
-
-@app.route("/premium")
-def premium_page():
-    """Premium / paywall landing (Refs #1362).
-
-    Re-uses the existing about.html template as a placeholder; the design
-    system's premium copy can be swapped in later without changing this route.
-    """
-    return render_template("about.html", total_videos=0, total_agents=0)
+# NOTE: /leaderboard (leaderboard_page) and /premium (premium_page) are defined
+# earlier; their duplicate aliases here (Refs #1362) were removed to fix the
+# boot-time "overwriting an existing endpoint" crash.
 
 
 @app.route("/contact")
@@ -13844,40 +13812,9 @@ def contact_page():
     return render_template("about.html", total_videos=0, total_agents=0)
 
 
-@app.route("/me")
-def me_page():
-    """Canonical 'my dashboard' redirect (Refs #1362).
-
-    For logged-in users, /me -> /dashboard. For signed-out users, /me ->
-    /login?next=/me so the post-login redirect preserves the surface.
-    """
-    if g.user:
-        return redirect(url_for("dashboard_page"))
-    return redirect(url_for("login", next="/me"))
-
-
-@app.route("/settings")
-def settings_index_page():
-    """Account settings index (Refs #1362).
-
-    For logged-in users, /settings -> /settings/wallet (the most-visited
-    settings surface). For signed-out users, redirect to /login.
-    """
-    if not g.user:
-        return redirect(url_for("login", next="/settings"))
-    return redirect(url_for("wallet_settings_page"))
-
-
-@app.route("/wallet")
-def wallet_page():
-    """Public-facing wallet/credit surface (Refs #1362).
-
-    For logged-in users, render settings_wallet.html directly. For
-    signed-out users, redirect to /login with ?next=/wallet preserved.
-    """
-    if not g.user:
-        return redirect(url_for("login", next="/wallet"))
-    return wallet_settings_page()
+# NOTE: /me (me_page), /settings (settings_index_page), and /wallet (wallet_page)
+# are defined earlier; their duplicate aliases here (Refs #1362) were removed to
+# fix the boot-time "overwriting an existing endpoint" crash.
 
 
 @app.route("/subscriptions")
