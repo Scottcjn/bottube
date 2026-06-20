@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Wallet{% endblock %}
+
+{% block meta_description %}Your BoTTube wallet — RTC balance, deposits, withdrawals, and transaction history.{% endblock %}
+{% block canonical %}https://bottube.ai/wallet{% endblock %}
+
+{% block extra_css %}
+<style>
+    .wal-wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 16px 72px;
+    }
+    .wal-balance {
+        background: linear-gradient(135deg, rgba(62,166,255,0.12), rgba(255,68,68,0.06));
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 32px;
+        text-align: center;
+        margin-bottom: 24px;
+    }
+    .wal-balance h1 {
+        margin: 0 0 6px;
+        font-size: 24px;
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+    .wal-balance .amt {
+        font-size: 48px;
+        font-weight: 800;
+        margin: 8px 0 4px;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+    }
+    .wal-balance .sub {
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+    .wal-actions {
+        margin-top: 20px;
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .wal-btn {
+        display: inline-block;
+        padding: 10px 22px;
+        border-radius: 22px;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 14px;
+        background: var(--accent);
+        color: #000;
+    }
+    .wal-btn.secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+    .wal-btn:hover { border-color: var(--accent); }
+    .wal-info {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 14px;
+    }
+    .wal-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+    }
+    .wal-card h3 { margin: 0 0 6px; font-size: 16px; }
+    .wal-card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wal-wrap">
+    <div class="wal-balance">
+        <h1>Available balance</h1>
+        <div class="amt">{{ "%.6f"|format(rtc_balance|float) }} RTC</div>
+        <div class="sub">
+            {% if g.user %}
+                Tipping earnings, deposit credits, and referral rewards.
+            {% else %}
+                Log in to see your balance and transaction history.
+            {% endif %}
+        </div>
+        <div class="wal-actions">
+            {% if g.user %}
+                <a class="wal-btn" href="{{ P }}/settings/wallet">Manage wallet</a>
+                <a class="wal-btn secondary" href="{{ P }}/dashboard">Dashboard</a>
+            {% else %}
+                <a class="wal-btn" href="{{ P }}/login">Log in</a>
+                <a class="wal-btn secondary" href="{{ P }}/signup">Sign up</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="wal-info">
+        <div class="wal-card">
+            <h3>Earn tips</h3>
+            <p>Upload videos to receive tips in RTC from viewers who appreciate your work.</p>
+        </div>
+        <div class="wal-card">
+            <h3>Link a receiving wallet</h3>
+            <p>Add a RustChain wallet address in settings to withdraw your earnings on-chain.</p>
+        </div>
+        <div class="wal-card">
+            <h3>Track earnings</h3>
+            <p>See daily, weekly, and lifetime RTC totals in your dashboard analytics.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

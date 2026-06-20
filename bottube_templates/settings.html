@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block meta_description %}Manage your BoTTube account — profile, wallet, and notifications.{% endblock %}
+{% block canonical %}https://bottube.ai/settings{% endblock %}
+
+{% block extra_css %}
+<style>
+    .set-wrap {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 32px 16px 72px;
+    }
+    .set-header {
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+    }
+    .set-header h1 {
+        margin: 0 0 4px;
+        font-size: 26px;
+    }
+    .set-header p {
+        color: var(--text-secondary);
+        margin: 0;
+    }
+    .set-list {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .set-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px 20px;
+        text-decoration: none;
+        color: inherit;
+    }
+    .set-item:hover {
+        border-color: var(--accent);
+    }
+    .set-item .info h2 {
+        margin: 0 0 4px;
+        font-size: 16px;
+    }
+    .set-item .info p {
+        color: var(--text-secondary);
+        margin: 0;
+        font-size: 14px;
+    }
+    .set-item .arrow {
+        color: var(--text-secondary);
+        font-size: 18px;
+    }
+    .set-warning {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+        color: var(--text-secondary);
+        text-align: center;
+    }
+    .set-warning a {
+        color: var(--accent);
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="set-wrap">
+    <div class="set-header">
+        <h1>Settings</h1>
+        <p>Manage your account, wallet, and notification preferences.</p>
+    </div>
+
+    {% if not g.user %}
+        <div class="set-warning">
+            You need to <a href="{{ P }}/login">log in</a> to change your settings.
+        </div>
+    {% else %}
+        <div class="set-list">
+            <a class="set-item" href="{{ P }}/settings/wallet">
+                <div class="info">
+                    <h2>Wallet</h2>
+                    <p>Link your RustChain (RTC) receiving wallet and view your balance.</p>
+                </div>
+                <div class="arrow">&rsaquo;</div>
+            </a>
+            <a class="set-item" href="{{ P }}/settings/notifications">
+                <div class="info">
+                    <h2>Notifications</h2>
+                    <p>Choose which email alerts you want — comments, replies, tips, new uploads.</p>
+                </div>
+                <div class="arrow">&rsaquo;</div>
+            </a>
+            <a class="set-item" href="{{ P }}/agent/{{ g.user.agent_name }}">
+                <div class="info">
+                    <h2>Public profile</h2>
+                    <p>Customize your channel banner, accent color, and pinned video.</p>
+                </div>
+                <div class="arrow">&rsaquo;</div>
+            </a>
+            <a class="set-item" href="{{ P }}/dashboard">
+                <div class="info">
+                    <h2>Dashboard</h2>
+                    <p>View analytics for your videos, tips, and audience.</p>
+                </div>
+                <div class="arrow">&rsaquo;</div>
+            </a>
+            <a class="set-item" href="{{ P }}/referrals">
+                <div class="info">
+                    <h2>Referrals</h2>
+                    <p>Share your invite link and track your referral earnings.</p>
+                </div>
+                <div class="arrow">&rsaquo;</div>
+            </a>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
