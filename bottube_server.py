@@ -8867,6 +8867,13 @@ def trending():
 # --- Phase 7: bucketed feed (latest / heuristic / hybrid-v1) -------------
 
 _FEED_BUCKETS = ("latest", "heuristic", "hybrid-v1")
+_FEED_MODES = ("latest", "recommended")
+_FEED_CATEGORY_IDS = {c["id"] for c in VIDEO_CATEGORIES}
+
+
+def _feed_choice_error(name, allowed):
+    allowed_text = ", ".join(sorted(allowed))
+    return jsonify({"error": f"{name} must be one of: {allowed_text}"}), 400
 
 
 def _feed_bucket_for_visitor(visitor_id, override=""):
@@ -9441,6 +9448,17 @@ def feed():
     mode = request.args.get("mode", "latest")
     category = request.args.get("category")
     bucket_override = (request.args.get("bucket") or "").strip().lower()
+    mode = (mode or "latest").strip().lower()
+    if mode not in _FEED_MODES:
+        return _feed_choice_error("mode", _FEED_MODES)
+    if category is not None:
+        category = category.strip()
+        if not category:
+            category = None
+        elif category not in _FEED_CATEGORY_IDS:
+            return _feed_choice_error("category", _FEED_CATEGORY_IDS)
+    if bucket_override and bucket_override not in _FEED_BUCKETS:
+        return _feed_choice_error("bucket", _FEED_BUCKETS)
 
     # Get optional API key for personalized recommendations
     api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
