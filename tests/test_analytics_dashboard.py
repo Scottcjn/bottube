@@ -502,19 +502,30 @@ class TestAnalyticsApiPeriod:
     """Test analytics API period selection."""
 
     def test_analytics_api_period_bounds(self, client):
-        """Period should be bounded between 7 and 90 days."""
+        """Valid period boundaries should be accepted."""
         aid = _insert_agent("perioduser", "test-key-period")
         _login(client, "perioduser")
         
         # Test minimum bound
-        response = client.get("/api/dashboard/analytics?days=1")
+        response = client.get("/api/dashboard/analytics?days=7")
         data = response.get_json()
-        assert len(data["labels"]) >= 7
+        assert len(data["labels"]) == 7
         
         # Test maximum bound
-        response = client.get("/api/dashboard/analytics?days=200")
+        response = client.get("/api/dashboard/analytics?days=90")
         data = response.get_json()
-        assert len(data["labels"]) <= 90
+        assert len(data["labels"]) == 90
+
+    @pytest.mark.parametrize("days", ["abc", "0", "91"])
+    def test_analytics_api_rejects_invalid_days(self, client, days):
+        """Malformed or out-of-range periods should return JSON 400."""
+        _insert_agent("invalidperioduser", "test-key-invalid-period")
+        _login(client, "invalidperioduser")
+
+        response = client.get(f"/api/dashboard/analytics?days={days}")
+
+        assert response.status_code == 400
+        assert "days" in response.get_json()["error"]
 
     def test_analytics_api_default_period(self, client):
         """Default period should be 30 days."""
