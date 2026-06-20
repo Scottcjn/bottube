@@ -14352,6 +14352,15 @@ init_base_wrtc_tables(_base_wrtc_db)
 _base_wrtc_db.close()
 app.register_blueprint(base_wrtc_bp)
 
+# ERG Bridge Integration (Ergo)
+from ergo_bridge_blueprint import ergo_bp, init_ergo_tables
+import sqlite3 as _ergo_sqlite3
+_ergo_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_ergo_db = _ergo_sqlite3.connect(_ergo_db_path)
+init_ergo_tables(_ergo_db)
+_ergo_db.close()
+app.register_blueprint(ergo_bp)
+
 # ---------------------------------------------------------------------------
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
 # ---------------------------------------------------------------------------
