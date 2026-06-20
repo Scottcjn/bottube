@@ -99,18 +99,38 @@ def provider_metrics_snapshot() -> Dict[str, dict]:
     return {name: metrics.to_dict() for name, metrics in _PROVIDER_METRICS.items()}
 
 
-def run_with_retries(provider: str, operation: str, func: Callable[[], T], policy: RetryPolicy = RetryPolicy()) -> Tuple[bool, Optional[T], str, float, int]:
+def run_with_retries(
+    provider: str,
+    operation: str,
+    func: Callable[[], T],
+    policy: RetryPolicy = RetryPolicy(),
+    success_predicate: Optional[Callable[[T], bool]] = None,
+) -> Tuple[bool, Optional[T], str, float, int]:
     """Run a provider operation with bounded retries for transient categories.
 
     Returns: (ok, value, category_or_ok, total_latency_s, attempts_used)
     """
     start = time.monotonic()
     last_category = "permanent"
+    last_value: Optional[T] = None
     attempts = max(1, policy.attempts)
     for attempt_index in range(attempts):
         try:
             value = func()
+            last_value = value
             latency = time.monotonic() - start
+            if success_predicate is not None and not success_predicate(value):
+                last_category = classify_error(value)
+                retry = attempt_index + 1 < attempts and is_retryable(last_category)
+                log.warning(
+                    "provider_attempt provider=%s operation=%s attempt=%d success=false category=%s retry=%s result=%s",
+                    provider, operation, attempt_index + 1, last_category, retry, str(value)[:300],
+                )
+                if not retry:
+                    record_provider_metric(provider, success=False, latency_s=latency, category=last_category)
+                    return False, value, last_category, latency, attempt_index + 1
+                time.sleep(policy.delay_for(attempt_index))
+                continue
             record_provider_metric(provider, success=True, latency_s=latency)
             log.info(
                 "provider_attempt provider=%s operation=%s attempt=%d success=true latency_s=%.3f",
@@ -132,4 +152,4 @@ def run_with_retries(provider: str, operation: str, func: Callable[[], T], polic
 
     latency = time.monotonic() - start
     record_provider_metric(provider, success=False, latency_s=latency, category=last_category)
-    return False, None, last_category, latency, attempts
+    return False, last_value, last_category, latency, attempts

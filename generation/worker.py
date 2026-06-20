@@ -247,8 +247,9 @@ def _run_pipeline(
             provider_name,
             "submit",
             lambda: provider.submit(req, work_dir),
+            success_predicate=lambda result: bool(result and result[0]),
         )
-        if not ok or submit_result is None:
+        if submit_result is None:
             detail = f"submit {category} after {tries} attempt(s) in {latency_s:.2f}s"
             log.error("Provider %s %s", provider_name, detail)
             _record_attempt(job_id, provider_name, attempt_num, False, detail, category, latency_s)
@@ -256,8 +257,8 @@ def _run_pipeline(
 
         success, external_id = submit_result
 
-        if not success:
-            category = classify_error(external_id)
+        if not ok or not success:
+            category = category if category != "ok" else classify_error(external_id)
             log.warning("Provider %s failed: %s (%s)", provider_name, external_id, category)
             _record_attempt(job_id, provider_name, attempt_num, False, external_id, category, latency_s)
             continue

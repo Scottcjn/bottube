@@ -59,3 +59,23 @@ def test_run_with_retries_does_not_retry_auth_errors():
     metrics = provider_metrics_snapshot()["unit_provider_auth"]
     assert metrics["failures"] >= 1
     assert metrics["error_categories"]["auth"] >= 1
+
+
+def test_run_with_retries_records_semantic_false_result_as_failure():
+    ok, value, category, latency_s, attempts = run_with_retries(
+        "unit_provider_semantic_false",
+        "submit",
+        lambda: (False, "quota exhausted"),
+        RetryPolicy(attempts=1, base_delay_s=0.0, max_delay_s=0.0, jitter_s=0.0),
+        success_predicate=lambda result: result[0],
+    )
+
+    assert ok is False
+    assert value == (False, "quota exhausted")
+    assert category == "throttled"
+    assert attempts == 1
+    assert latency_s >= 0
+    metrics = provider_metrics_snapshot()["unit_provider_semantic_false"]
+    assert metrics["successes"] == 0
+    assert metrics["failures"] == 1
+    assert metrics["error_categories"]["throttled"] == 1
