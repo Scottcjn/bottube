@@ -13894,6 +13894,19 @@ def contact_page():
 # fix the boot-time "overwriting an existing endpoint" crash.
 
 
+@app.route("/api")
+def api_index_redirect():
+    """Bare /api entry point -> interactive API docs (Refs #1500).
+
+    External indexers, old bookmarks, and the top-nav 'API' surface point at
+    the bare /api path. Without an explicit route it falls through to the
+    catch-all and renders the confusing 'Video Not Found' (404) page with
+    video-only links. Redirect to the Swagger UI so /api is a stable,
+    documented developer entry point.
+    """
+    return redirect(url_for("api_docs_swagger_ui"))
+
+
 @app.route("/subscriptions")
 def subscriptions_page():
     """User subscriptions surface (Refs #1371).
