@@ -44,6 +44,9 @@
 {% endblock %}
 
 {% block content %}
+<!-- TESTNET-only Pi app → init the Pi SDK in sandbox/testnet mode (matches server
+     PI_SANDBOX=1). Set before the deferred pi_auth.js / pi_pay.js execute. -->
+<script>window.PI_SANDBOX = true;</script>
 <div class="pi-wrap">
     <div class="pi-hero">
         <span class="pi-badge">π  PI NETWORK</span>
