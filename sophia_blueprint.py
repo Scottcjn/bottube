@@ -252,11 +252,22 @@ def _kick_generation(api_key: str, prompt: str):
     return None, (r.json().get("error") if r.headers.get("content-type", "").startswith("application/json") else f"gen status {r.status_code}")
 
 
+def _origin_allowed(origin):
+    if not origin:
+        return False
+    if origin in _ALLOWED_ORIGINS:
+        return True
+    # Pi-owned app hosts (the app's pinet subdomain, e.g. bottube2858.pinet.com).
+    host = origin.split("//", 1)[-1].split("/", 1)[0].split(":")[0].lower()
+    return host.endswith(".pinet.com") or host.endswith(".minepi.com") or host.endswith(".pi")
+
+
 @sophia_bp.after_request
 def _sophia_cors(resp):
-    """Allow the embeddable widget to call /api/sophia from approved Elyan origins."""
+    """Allow the embeddable widget to call /api/sophia from approved Elyan origins
+    and from the app's Pi host (*.pinet.com / *.minepi.com)."""
     origin = request.headers.get("Origin", "")
-    if origin in _ALLOWED_ORIGINS:
+    if _origin_allowed(origin):
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
         resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
