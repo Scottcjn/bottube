@@ -138,7 +138,8 @@ def pi_approve():
     try:
         p = _pi_get_payment(payment_id)
     except requests.RequestException as e:
-        return jsonify({"error": f"pi lookup failed: {e}"}), 502
+        print(f"[pi] lookup failed: {e}", flush=True)
+        return jsonify({"error": "Pi lookup failed, try again"}), 502
     product, amount = _verify_against_products(p)
     if product is None:
         return jsonify({"error": f"refusing to approve: {amount}"}), 400
@@ -163,7 +164,8 @@ def pi_approve():
                      (time.time(), payment_id))
         conn.commit()
     except requests.RequestException as e:
-        return jsonify({"error": f"pi approve error: {e}"}), 502
+        print(f"[pi] approve error: {e}", flush=True)
+        return jsonify({"error": "Pi approve failed, try again"}), 502
     finally:
         conn.close()
     return jsonify({"ok": True, "payment_id": payment_id, "status": "approved"})
@@ -182,7 +184,8 @@ def pi_complete():
     try:
         p = _pi_get_payment(payment_id)
     except requests.RequestException as e:
-        return jsonify({"error": f"pi lookup failed: {e}"}), 502
+        print(f"[pi] lookup failed: {e}", flush=True)
+        return jsonify({"error": "Pi lookup failed, try again"}), 502
     product, amount = _verify_against_products(p)
     if product is None:
         return jsonify({"error": f"refusing to complete: {amount}"}), 400
@@ -232,7 +235,8 @@ def pi_complete():
             return jsonify({"error": "payment settled but entitlement failed; will reconcile",
                             "payment_id": payment_id, "status": "completed_ungranted"}), 500
     except requests.RequestException as e:
-        return jsonify({"error": f"pi complete error: {e}"}), 502
+        print(f"[pi] complete error: {e}", flush=True)
+        return jsonify({"error": "Pi complete failed, try again"}), 502
     finally:
         conn.close()
     return jsonify({"ok": True, "payment_id": payment_id, "status": "completed"})

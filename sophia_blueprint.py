@@ -29,14 +29,15 @@ from flask import Blueprint, jsonify, request, session
 
 sophia_bp = Blueprint("sophia", __name__)
 
-# --- Config (env-overridable) ---
-# PUBLIC-FACING Elya uses the SHARED Elya LLM (gemma4 on .106) via the elya-llm-tunnel
-# reverse-SSH on .153 (127.0.0.1:18086) — the SAME clean backend UNeedAShed's Elya uses.
-# We deliberately do NOT use elyan-sophia:7b here: that model has the private covenant/
-# flameholder persona baked in and leaks it (it called an anonymous visitor "Scott").
-SOPHIA_LLM_URL = os.environ.get("SOPHIA_LLM_URL", "http://127.0.0.1:18086/v1/chat/completions")
+# --- Config (env-overridable; set the real endpoint in the service env, not here) ---
+# Public-facing Elya talks to a CLEAN shared instruct model over a private, host-local
+# endpoint (configure via the SOPHIA_LLM_URL / SOPHIA_MODEL env vars). The default is a
+# loopback placeholder only — no internal hostnames/IPs are committed to the repo.
+# (We deliberately do not use a persona-baked model here; a baked-in private persona can
+# leak internal lore to anonymous visitors.)
+SOPHIA_LLM_URL = os.environ.get("SOPHIA_LLM_URL", "http://127.0.0.1:11434/v1/chat/completions")
 SOPHIA_MODEL = os.environ.get("SOPHIA_MODEL", "gemma4:12b")
-SOPHIA_TIMEOUT = float(os.environ.get("SOPHIA_TIMEOUT", "90"))   # gemma4 reasons before replying
+SOPHIA_TIMEOUT = float(os.environ.get("SOPHIA_TIMEOUT", "90"))   # reasoning models reply slower
 SOPHIA_MAX_TOKENS = int(os.environ.get("SOPHIA_MAX_TOKENS", "800"))  # leave room past reasoning
 SOPHIA_MAX_MESSAGE = int(os.environ.get("SOPHIA_MAX_MESSAGE", "2000"))
 SOPHIA_MAX_HISTORY = int(os.environ.get("SOPHIA_MAX_HISTORY", "8"))
@@ -241,7 +242,8 @@ def _kick_generation(api_key: str, prompt: str):
             timeout=20,
         )
     except requests.RequestException as e:
-        return None, f"generation request failed: {e}"
+        print(f"[sophia] generation forward failed: {e}", flush=True)
+        return None, "generation_unavailable"  # generic; never expose internal base URL
     if r.status_code == 202:
         d = r.json()
         return {"job_id": d.get("job_id"), "status_url": d.get("status_url")}, None
@@ -316,13 +318,16 @@ def sophia_chat():
             return jsonify({"error": "slow down a moment", "retry_after": round(_CHAT_COOLDOWN - (now - last), 1)}), 429
         _chat_rate[api_key] = now
 
-    # Converse with Sophia.
+    # Converse with Sophia. NEVER echo the raw exception to the client — it can contain
+    # the internal LLM bridge host/port/IP. Log details server-side, return generic text.
     try:
         reply = _call_sophia(message, body.get("history"))
     except requests.RequestException as e:
-        return jsonify({"error": f"sophia is unavailable right now: {e}"}), 502
+        print(f"[sophia] backend RequestException: {e}", flush=True)
+        return jsonify({"error": "Sophia is unavailable right now. Please try again in a moment."}), 502
     except Exception as e:
-        return jsonify({"error": f"sophia error: {e}"}), 502
+        print(f"[sophia] backend error: {e}", flush=True)
+        return jsonify({"error": "Sophia hit a snag. Please try again."}), 502
 
     # Generation routing. ONLY an explicit generate==True opt-in actually enqueues a
     # job (loose chat like "how do I make a video about X" must NOT auto-spend the gen
