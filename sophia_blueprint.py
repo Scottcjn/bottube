@@ -38,7 +38,7 @@ sophia_bp = Blueprint("sophia", __name__)
 SOPHIA_LLM_URL = os.environ.get("SOPHIA_LLM_URL", "http://127.0.0.1:11434/v1/chat/completions")
 SOPHIA_MODEL = os.environ.get("SOPHIA_MODEL", "gemma4:12b")
 SOPHIA_TIMEOUT = float(os.environ.get("SOPHIA_TIMEOUT", "90"))   # reasoning models reply slower
-SOPHIA_MAX_TOKENS = int(os.environ.get("SOPHIA_MAX_TOKENS", "800"))  # leave room past reasoning
+SOPHIA_MAX_TOKENS = int(os.environ.get("SOPHIA_MAX_TOKENS", "1500"))  # reasoning trace + full reply
 SOPHIA_MAX_MESSAGE = int(os.environ.get("SOPHIA_MAX_MESSAGE", "2000"))
 SOPHIA_MAX_HISTORY = int(os.environ.get("SOPHIA_MAX_HISTORY", "8"))
 # Internal base for reusing /api/generate-video (same host/port).
