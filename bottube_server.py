@@ -15400,7 +15400,8 @@ except Exception as _pi_pay_e:
 # converses or routes to video generation. Conversational backend = local
 # elyan-sophia model on .160 over Tailscale; generation reuses /api/generate-video. ---
 try:
-    from sophia_blueprint import sophia_bp
+    from sophia_blueprint import sophia_bp, init_sophia_corpus
+    init_sophia_corpus()
     app.register_blueprint(sophia_bp)
     print('[sophia] registered Sophia router blueprint')
 except Exception as _sophia_e:

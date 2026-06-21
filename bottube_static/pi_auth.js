@@ -29,7 +29,13 @@
     diag("init");
     await piInit();
     diag("auth_start");
-    var auth = await Pi.authenticate(["username"], onIncompletePaymentFound);
+    // Fail fast if the native bridge doesn't answer (Pi's own timeout is 120s, which
+    // looks frozen). If this rejects with "bridge_timeout", the app almost certainly
+    // isn't opened as an APPROVED Pi app from the Developer Portal.
+    var auth = await Promise.race([
+      Pi.authenticate(["username"], onIncompletePaymentFound),
+      new Promise(function (_, rej) { setTimeout(function () { rej(new Error("bridge_timeout")); }, 12000); })
+    ]);
     diag("auth_ok");   // do NOT log the username (PII in access logs)
     var res = await fetch("/pi/auth", {
       method: "POST", headers: { "Content-Type": "application/json" },

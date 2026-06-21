@@ -30,9 +30,14 @@ from flask import Blueprint, jsonify, request, session
 sophia_bp = Blueprint("sophia", __name__)
 
 # --- Config (env-overridable) ---
-SOPHIA_LLM_URL = os.environ.get("SOPHIA_LLM_URL", "http://100.121.203.9:11434/v1/chat/completions")
-SOPHIA_MODEL = os.environ.get("SOPHIA_MODEL", "elyan-sophia:7b-q4_K_M")
-SOPHIA_TIMEOUT = float(os.environ.get("SOPHIA_TIMEOUT", "45"))
+# PUBLIC-FACING Elya uses the SHARED Elya LLM (gemma4 on .106) via the elya-llm-tunnel
+# reverse-SSH on .153 (127.0.0.1:18086) — the SAME clean backend UNeedAShed's Elya uses.
+# We deliberately do NOT use elyan-sophia:7b here: that model has the private covenant/
+# flameholder persona baked in and leaks it (it called an anonymous visitor "Scott").
+SOPHIA_LLM_URL = os.environ.get("SOPHIA_LLM_URL", "http://127.0.0.1:18086/v1/chat/completions")
+SOPHIA_MODEL = os.environ.get("SOPHIA_MODEL", "gemma4:12b")
+SOPHIA_TIMEOUT = float(os.environ.get("SOPHIA_TIMEOUT", "90"))   # gemma4 reasons before replying
+SOPHIA_MAX_TOKENS = int(os.environ.get("SOPHIA_MAX_TOKENS", "800"))  # leave room past reasoning
 SOPHIA_MAX_MESSAGE = int(os.environ.get("SOPHIA_MAX_MESSAGE", "2000"))
 SOPHIA_MAX_HISTORY = int(os.environ.get("SOPHIA_MAX_HISTORY", "8"))
 # Internal base for reusing /api/generate-video (same host/port).
@@ -58,12 +63,87 @@ def _client_ip():
     xff = request.headers.get("X-Forwarded-For", "")
     return (xff.split(",")[0].strip() if xff else request.remote_addr) or "?"
 
+
+# --- Training corpus: every Sophia conversation across ALL Elyan sites, tagged by site ---
+SOPHIA_CORPUS_DB = os.environ.get(
+    "SOPHIA_CORPUS_DB", str(Path(__file__).resolve().parent / "sophia_corpus.db"))
+SOPHIA_CORPUS = os.environ.get("SOPHIA_CORPUS", "1") != "0"
+
+
+def init_sophia_corpus():
+    if not SOPHIA_CORPUS:
+        return
+    c = sqlite3.connect(SOPHIA_CORPUS_DB, timeout=30)
+    try:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sophia_corpus (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts         REAL NOT NULL,
+                site       TEXT,          -- bottube.ai / rustchain.org / elyanlabs.ai
+                origin     TEXT,          -- raw Origin/Referer
+                caller     TEXT,          -- agent_name or 'guest'
+                is_anon    INTEGER,
+                message    TEXT,
+                reply      TEXT,
+                gen_started INTEGER DEFAULT 0
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_corpus_site_ts ON sophia_corpus(site, ts)")
+        c.commit()
+    finally:
+        c.close()
+
+
+def _site_from_request():
+    """Which Elyan website the message came from (Origin, else Referer host)."""
+    origin = request.headers.get("Origin") or ""
+    ref = request.headers.get("Referer") or ""
+    src = origin or ref
+    host = ""
+    if src:
+        try:
+            host = src.split("//", 1)[-1].split("/", 1)[0].split(":")[0].lower()
+            if host.startswith("www."):
+                host = host[4:]
+        except Exception:
+            host = ""
+    return host or "bottube.ai", origin or ref
+
+
+def _log_corpus(site, origin, caller, is_anon, message, reply, gen_started):
+    if not SOPHIA_CORPUS:
+        return
+    try:
+        c = sqlite3.connect(SOPHIA_CORPUS_DB, timeout=5)
+        try:
+            c.execute(
+                "INSERT INTO sophia_corpus (ts, site, origin, caller, is_anon, message, reply, gen_started) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (time.time(), site, origin, caller, 1 if is_anon else 0, message, reply,
+                 1 if gen_started else 0),
+            )
+            c.commit()
+        finally:
+            c.close()
+    except sqlite3.Error:
+        pass  # corpus logging must never break a chat response
+
 SOPHIA_SYSTEM = (
-    "You are Sophia Elya, the warm, sharp, Cajun-flavored AI host of BoTTube "
-    "(an agent-native video platform by Elyan Labs) and RustChain. You talk with both "
-    "AI agents and humans. Be concise, friendly, and genuinely helpful. You can make "
-    "videos: if the user wants one, acknowledge it warmly and keep your reply short — "
-    "the system handles the actual generation. Never invent video URLs or job IDs."
+    "You are Elya, the friendly, professional host of BoTTube — an AI-agent video "
+    "platform by Elyan Labs, which also builds RustChain (a hardware-authenticity "
+    "blockchain). You help visitors understand BoTTube, RustChain, and Elyan Labs, and "
+    "guide both human creators and AI agents. You can make videos: if someone wants one, "
+    "acknowledge it warmly and keep it short — the system handles the actual generation. "
+    "Never invent video URLs or job IDs.\n"
+    "IMPORTANT RULES:\n"
+    "- You are talking to an UNKNOWN public visitor. NEVER assume or use their name, and "
+    "never guess it. If you don't know their name, don't use one.\n"
+    "- NEVER mention or reveal internal or private topics: 'flameholder', 'covenant', "
+    "'SophiaCore', 'Scott', staff or owner names, server names, IP addresses, or any "
+    "private lore. You have none of that to share and it is not relevant to visitors.\n"
+    "- Stay warm, concise, and professional, like an excellent product host. No mystical "
+    "or covenant roleplay. Keep replies under ~80 words unless asked for detail.\n"
+    "- If asked who you are: 'I'm Elya, the host of BoTTube by Elyan Labs.'"
 )
 
 # Phrases that signal "make me a video" (kept deliberately conservative).
@@ -134,15 +214,21 @@ def _call_sophia(message: str, history):
     msgs.append({"role": "user", "content": message})
     r = requests.post(
         SOPHIA_LLM_URL,
-        json={"model": SOPHIA_MODEL, "messages": msgs, "temperature": 0.7, "max_tokens": 400},
+        json={"model": SOPHIA_MODEL, "messages": msgs, "temperature": 0.6, "max_tokens": SOPHIA_MAX_TOKENS},
         timeout=SOPHIA_TIMEOUT,
     )
     r.raise_for_status()
     data = r.json()
     try:
-        return (data["choices"][0]["message"]["content"] or "").strip()
+        content = (data["choices"][0]["message"].get("content") or "").strip()
     except (KeyError, IndexError, TypeError) as e:
         raise ValueError(f"unexpected LLM response shape: {e}")
+    # gemma4 is a reasoning model: when its token budget is consumed by the reasoning
+    # trace the visible content can come back empty. Give the widget a graceful reply
+    # instead of a blank bubble.
+    if not content:
+        return "Sorry, I lost my train of thought there — could you rephrase that?"
+    return content
 
 
 def _kick_generation(api_key: str, prompt: str):
@@ -257,6 +343,11 @@ def sophia_chat():
     elif detected:
         generation = {"started": False, "suggested": True,
                       "hint": "re-send with generate:true (and optional prompt) to make this video"}
+
+    # Training corpus: log every turn, tagged by which Elyan site it came from.
+    site, origin = _site_from_request()
+    _log_corpus(site, origin, name, anon, message, reply,
+                bool(generation and generation.get("started")))
 
     return jsonify({
         "ok": True,
