@@ -98,7 +98,12 @@
       // Only redirect to /pi on the real apex host. If the app was opened via a Pi
       // subdomain (e.g. *.pinet.com), a relative redirect to /pi may not be proxied —
       // so stay put and just sign in in place.
-      if (location.pathname === "/" && /(^|\.)bottube\.ai$/i.test(location.hostname)) {
+      // Redirect home -> /pi on bottube.ai AND on the Pi app host (*.pinet.com /
+      // *.minepi.com), which proxies our full paths (confirmed: /api/feed loads there).
+      if (location.pathname === "/" && (
+            /(^|\.)bottube\.ai$/i.test(location.hostname) ||
+            /\.pinet\.com$/i.test(location.hostname) ||
+            /\.minepi\.com$/i.test(location.hostname))) {
         var redirected = false;
         try { redirected = !!sessionStorage.getItem("pi_redirected"); } catch (e) {}
         if (!redirected) {
