@@ -82,6 +82,12 @@ def is_retryable(category: str) -> bool:
     return category in {"transient", "throttled"}
 
 
+def _semantic_failure_detail(value: object) -> object:
+    if isinstance(value, (tuple, list)) and len(value) >= 2:
+        return value[1]
+    return value
+
+
 def record_provider_metric(provider: str, *, success: bool, latency_s: float, category: Optional[str] = None) -> dict:
     metrics = _PROVIDER_METRICS.setdefault(provider, ProviderMetrics())
     metrics.attempts += 1
@@ -110,15 +116,15 @@ def run_with_retries(
 
     Returns: (ok, value, category_or_ok, total_latency_s, attempts_used)
     """
-    start = time.monotonic()
+    wall_start = time.monotonic()
     last_category = "permanent"
     attempts = max(1, policy.attempts)
     for attempt_index in range(attempts):
         try:
             value = func()
-            latency = time.monotonic() - start
+            latency = time.monotonic() - wall_start
             if success_predicate is not None and not success_predicate(value):
-                last_category = classify_error(value)
+                last_category = classify_error(_semantic_failure_detail(value))
                 retry = attempt_index + 1 < attempts and is_retryable(last_category)
                 log.warning(
                     "provider_attempt provider=%s operation=%s attempt=%d success=false category=%s retry=%s result=%s",
@@ -143,11 +149,11 @@ def run_with_retries(
                 provider, operation, attempt_index + 1, last_category, retry, str(exc)[:300],
             )
             if not retry:
-                latency = time.monotonic() - start
+                latency = time.monotonic() - wall_start
                 record_provider_metric(provider, success=False, latency_s=latency, category=last_category)
                 return False, None, last_category, latency, attempt_index + 1
             time.sleep(policy.delay_for(attempt_index))
 
-    latency = time.monotonic() - start
+    latency = time.monotonic() - wall_start
     record_provider_metric(provider, success=False, latency_s=latency, category=last_category)
     return False, None, last_category, latency, attempts

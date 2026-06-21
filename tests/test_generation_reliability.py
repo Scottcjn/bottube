@@ -81,6 +81,53 @@ def test_run_with_retries_records_semantic_false_result_as_failure():
     assert metrics["error_categories"]["throttled"] == 1
 
 
+def test_run_with_retries_classifies_semantic_failure_reason_not_tuple_repr():
+    class NoisyFalse:
+        def __bool__(self):
+            return False
+
+        def __repr__(self):
+            return "api key noise"
+
+    ok, value, category, latency_s, attempts = run_with_retries(
+        "unit_provider_semantic_reason",
+        "submit",
+        lambda: (NoisyFalse(), "validation failed"),
+        RetryPolicy(attempts=1, base_delay_s=0.0, max_delay_s=0.0, jitter_s=0.0),
+        success_predicate=lambda result: result[0],
+    )
+
+    assert ok is False
+    assert value[1] == "validation failed"
+    assert category == "permanent"
+    assert attempts == 1
+    assert latency_s >= 0
+
+
+def test_run_with_retries_latency_includes_semantic_retry_sleep():
+    calls = {"count": 0}
+
+    def semantic_then_permanent():
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return (False, "quota exhausted")
+        return (False, "validation failed")
+
+    ok, value, category, latency_s, attempts = run_with_retries(
+        "unit_provider_semantic_sleep_latency",
+        "submit",
+        semantic_then_permanent,
+        RetryPolicy(attempts=2, base_delay_s=0.01, max_delay_s=0.01, jitter_s=0.0),
+        success_predicate=lambda result: result[0],
+    )
+
+    assert ok is False
+    assert value == (False, "validation failed")
+    assert category == "permanent"
+    assert attempts == 2
+    assert latency_s >= 0.01
+
+
 def test_run_with_retries_does_not_reuse_stale_semantic_failure_after_exception():
     calls = {"count": 0}
 
