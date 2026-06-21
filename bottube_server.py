@@ -13894,7 +13894,7 @@ def contact_page():
 # fix the boot-time "overwriting an existing endpoint" crash.
 
 
-@app.route("/api")
+@app.route("/api", strict_slashes=False)
 def api_index_redirect():
     """Bare /api entry point -> interactive API docs (Refs #1500).
 
@@ -13903,8 +13903,14 @@ def api_index_redirect():
     catch-all and renders the confusing 'Video Not Found' (404) page with
     video-only links. Redirect to the Swagger UI so /api is a stable,
     documented developer entry point.
+
+    Uses 308 (permanent, method-preserving) instead of the default 302 so
+    crawlers and HTTP caches consolidate on the canonical /api/docs target,
+    matching the "stable, documented entry point" intent. ``strict_slashes=
+    False`` lets both ``/api`` and ``/api/`` resolve in one redirect rather
+    than two.
     """
-    return redirect(url_for("api_docs_swagger_ui"))
+    return redirect(url_for("api_docs_swagger_ui"), code=308)
 
 
 @app.route("/subscriptions")
