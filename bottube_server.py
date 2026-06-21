@@ -15396,6 +15396,16 @@ try:
 except Exception as _pi_pay_e:
     print(f"[WARN] Pi payment blueprint not loaded: {_pi_pay_e}")
 
+# --- Sophia router (/api/sophia) — agents + humans chat with Sophia Elya; she
+# converses or routes to video generation. Conversational backend = local
+# elyan-sophia model on .160 over Tailscale; generation reuses /api/generate-video. ---
+try:
+    from sophia_blueprint import sophia_bp
+    app.register_blueprint(sophia_bp)
+    print('[sophia] registered Sophia router blueprint')
+except Exception as _sophia_e:
+    print(f"[WARN] Sophia router not loaded: {_sophia_e}")
+
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
 # ---------------------------------------------------------------------------
