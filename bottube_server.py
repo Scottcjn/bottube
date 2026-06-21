@@ -13043,6 +13043,12 @@ def developers_page():
     return render_template("developers.html")
 
 
+@app.route("/api")
+def api_redirect():
+    """Redirect /api to the API documentation page."""
+    return redirect(url_for("docs_page"))
+
+
 @app.route("/docs")
 def docs_page():
     """API documentation page."""
