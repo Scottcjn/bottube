@@ -92,7 +92,10 @@
       // from the home page. Deep links inside Pi Browser (/watch, /search, /agent,
       // account flows) must NOT be hijacked. The Pi app should also be registered to
       // https://bottube.ai/pi so first launch lands there directly.
-      if (location.pathname === "/") {
+      // Only redirect to /pi on the real apex host. If the app was opened via a Pi
+      // subdomain (e.g. *.pinet.com), a relative redirect to /pi may not be proxied —
+      // so stay put and just sign in in place.
+      if (location.pathname === "/" && /(^|\.)bottube\.ai$/i.test(location.hostname)) {
         var redirected = false;
         try { redirected = !!sessionStorage.getItem("pi_redirected"); } catch (e) {}
         if (!redirected) {
