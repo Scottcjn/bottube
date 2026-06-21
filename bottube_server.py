@@ -1442,7 +1442,7 @@ def set_url_prefix():
     host = request.host.split(":")[0].lower()
     canonical_host = os.getenv("BOTTUBE_CANONICAL_HOST", "bottube.ai").strip().lower()
     if os.getenv("BOTTUBE_WWW_REDIRECT", "1").strip().lower() not in {"0", "false", "no"}:
-        if host == f"www.{canonical_host}" and request.path != "/validation-key.txt":
+        if host == f"www.{canonical_host}" and not request.path.endswith("/validation-key.txt"):
             scheme = (
                 "https"
                 if (request.is_secure or request.headers.get("X-Forwarded-Proto") == "https")
@@ -5101,12 +5101,13 @@ def signup():
 
 
 @app.route("/validation-key.txt")
+@app.route("/pi/validation-key.txt")
 def pi_validation_key():
     """Serve the Pi Network app validation key (proves bottube.ai ownership to the Pi
-    Developer Portal). The key is read from validation_key.txt at request time, so
-    pasting a new key into that file takes effect with no restart. Pi fetches this at
-    https://www.bottube.ai/validation-key.txt and does NOT follow redirects, so the
-    www->apex redirect in set_url_prefix() is exempted for this exact path."""
+    Developer Portal). Read from validation_key.txt at request time (paste a new key,
+    no restart). Served at BOTH /validation-key.txt and /pi/validation-key.txt because
+    the Pi App URL is bottube.ai/pi, so Pi may check the key relative to that path.
+    Pi does NOT follow redirects, so the www->apex redirect exempts these paths."""
     from flask import Response
     try:
         with open(os.path.join(str(BASE_DIR), "validation_key.txt")) as fp:
