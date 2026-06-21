@@ -5116,6 +5116,44 @@ def pi_validation_key():
     return Response(key, mimetype="text/plain")
 
 
+@app.route("/pi")
+def pi_home():
+    """Pi-friendly BoTTube landing — the URL the Pi app should be registered to in
+    the Pi Developer Portal so Pioneers launch straight into the Pi experience
+    (Sign in with Pi + pay-in-Pi video generation). The standard site stays RTC.
+    Sets a pi_mode cookie so the server keeps Pi-launched users in Pi mode."""
+    from flask import make_response
+    # Prices come from pi_payments.PI_PRODUCTS (single source of truth; the server
+    # re-verifies amount on approve/complete). UI copy (name/desc/badge) lives here.
+    try:
+        from pi_payments import PI_PRODUCTS as _PIP
+    except Exception:
+        _PIP = {}
+    _ui = [
+        ("video_text_card", "Text Card", "Instant title-card video", "CHEAPEST"),
+        ("video_ken_burns", "Ken Burns", "Cinematic pan & zoom over images", "POPULAR"),
+        ("video_full_ai", "Full AI Video", "LTX-2 generated, with audio", "PREMIUM"),
+    ]
+    pi_tiers = [
+        {"key": k, "name": n, "desc": d, "badge": b,
+         "pi": _PIP.get(k, {}).get("pi", 0)}
+        for (k, n, d, b) in _ui
+    ]
+    resp = make_response(render_template("pi_home.html", pi_tiers=pi_tiers))
+    # 1 year; SameSite=Lax so it survives the Pi-app navigation.
+    resp.set_cookie("pi_mode", "1", max_age=31536000, samesite="Lax", secure=True)
+    return resp
+
+
+@app.route("/pi/diag")
+def pi_diag():
+    """Tiny telemetry beacon for the Pi auth flow (pi_auth.js GETs this with
+    ?stage=...). Returns a 1x1 gif; the value is the server access-log line."""
+    from flask import Response
+    gif = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
+    return Response(gif, mimetype="image/gif")
+
+
 @app.route("/pi/auth", methods=["POST"])
 def pi_auth():
     """Pi Network login. Validate the Pi access token SERVER-SIDE via /v2/me, then
@@ -13693,24 +13731,63 @@ def join_page():
 
 @app.route("/search")
 def search_page():
-    """Search results page."""
-    q = request.args.get("q", "").strip()
-    videos = []
+    """Search results page (paginated, optional category filter).
 
+    search.html needs: query, videos, total, page, pages, categories,
+    selected_categories, categories_map, suggestions. Missing any of these
+    raised jinja2 UndefinedError -> HTTP 500 (e.g. categories_map).
+    """
+    q = request.args.get("q", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    per_page = 24
+    # Category checkboxes submit repeated ?cat=<id> params.
+    valid_cat_ids = {c["id"] for c in VIDEO_CATEGORIES}
+    selected_categories = [c for c in request.args.getlist("cat") if c in valid_cat_ids]
+    # id -> {name, icon} for the template's categories_map.get(...) lookups.
+    categories_map = {c["id"]: {"name": c["name"], "icon": c["icon"]} for c in VIDEO_CATEGORIES}
+
+    videos = []
+    total = 0
     if q:
         db = get_db()
         like_q = f"%{q}%"
+        params = [like_q, like_q, like_q, like_q]
+        where = (
+            "v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0 "
+            "AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)"
+        )
+        if selected_categories:
+            where += " AND v.category IN (%s)" % ",".join("?" * len(selected_categories))
+            params.extend(selected_categories)
+        total = db.execute(
+            f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id WHERE {where}",
+            params,
+        ).fetchone()[0]
         videos = db.execute(
-            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+            f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-               AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
+               WHERE {where}
                ORDER BY v.views DESC, v.created_at DESC
-               LIMIT 50""",
-            (like_q, like_q, like_q, like_q),
+               LIMIT ? OFFSET ?""",
+            params + [per_page, (page - 1) * per_page],
         ).fetchall()
 
-    return render_template("search.html", query=q, videos=videos)
+    pages = max(1, (total + per_page - 1) // per_page)
+    return render_template(
+        "search.html",
+        query=q,
+        videos=videos,
+        total=total,
+        page=page,
+        pages=pages,
+        categories=VIDEO_CATEGORIES,
+        selected_categories=selected_categories,
+        categories_map=categories_map,
+        suggestions=[],
+    )
 
 
 @app.route("/trending")
@@ -15307,6 +15384,17 @@ try:
     print('[avap] registered AVAP blueprint')
 except Exception as _avap_e:
     print(f"[WARN] AVAP blueprint not loaded: {_avap_e}")
+
+# --- Pi Network PAYMENT routes (/pi/approve, /pi/complete, /pi/health) ---
+# Auth (/pi/auth) is in this file already; this module adds ONLY payment legs so it
+# cannot collide with /pi/auth. Dormant (503) until PI_API_KEY is set in the env.
+try:
+    from pi_payments import pi_pay_bp, init_pi_payment_tables
+    init_pi_payment_tables()
+    app.register_blueprint(pi_pay_bp)
+    print('[pi] registered Pi payment blueprint')
+except Exception as _pi_pay_e:
+    print(f"[WARN] Pi payment blueprint not loaded: {_pi_pay_e}")
 
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
