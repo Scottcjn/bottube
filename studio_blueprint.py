@@ -99,6 +99,27 @@ def _save_media(data: bytes, ext: str) -> str:
     return fname
 
 
+def _studio_video_worker(job_id, agent_id, prompt, duration, cost):
+    """Run the shared video worker, then refund RTC if the async job FAILED.
+
+    The shared _generation_worker marks failed jobs but does not refund (it is
+    used by non-Studio callers with their own billing). The Studio debits up
+    front, so we own the async refund here — scoped to this job, fired once.
+    """
+    from video_gen_blueprint import _generation_worker, _get_job
+    try:
+        _generation_worker(job_id, agent_id, prompt, duration, "ai-art", prompt[:200])
+    except Exception as e:
+        print(f"[studio] video worker raised for {job_id}: {e}", flush=True)
+    try:
+        j = _get_job(job_id)
+        if j and j.get("status") == "failed":
+            _refund(agent_id, cost)
+            print(f"[studio] refunded {cost} RTC to {agent_id} (job {job_id} failed)", flush=True)
+    except Exception as e:
+        print(f"[studio] refund-check failed for {job_id}: {e}", flush=True)
+
+
 @studio_bp.route("/studio")
 def studio_home():
     return render_template("studio.html",
@@ -181,10 +202,10 @@ def studio_generate():
     # ---- VIDEO: async job (reuse the cascade) ----
     if gtype == "video":
         try:
-            from video_gen_blueprint import _create_job, _generation_worker
+            from video_gen_blueprint import _create_job
             job_id = _create_job(agent_id, prompt)
-            threading.Thread(target=_generation_worker,
-                             args=(job_id, agent_id, prompt, VIDEO_TIERS[tier]["duration"], "ai-art", prompt[:200]),
+            threading.Thread(target=_studio_video_worker,
+                             args=(job_id, agent_id, prompt, VIDEO_TIERS[tier]["duration"], cost),
                              daemon=True).start()
         except Exception as e:
             _refund(agent_id, cost)
