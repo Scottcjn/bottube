@@ -5128,7 +5128,10 @@ def pi_home():
     # other host (e.g. legacy bottube.ai/pi), send it there. index() calls this for the
     # onpi/4pi hosts (which pass), so those serve normally with no redirect loop.
     _h = request.host.split(":")[0].lower()
-    if not (_h.startswith("onpi.") or _h.startswith("4pi.")):
+    _hb = _h[4:] if _h.startswith("www.") else _h
+    # Serve the storefront for onpi.*/4pi.* AND their www. variants (Pi opens the www
+    # host it verified). Any OTHER host (e.g. legacy bottube.ai/pi) -> canonical onpi.
+    if not (_hb.startswith("onpi.") or _hb.startswith("4pi.")):
         return redirect("https://onpi.bottube.ai/", code=301)
     # Prices come from pi_payments.PI_PRODUCTS (single source of truth; the server
     # re-verifies amount on approve/complete). UI copy (name/desc/badge) lives here.
@@ -12313,7 +12316,10 @@ def index():
     itself — no redirect (the Pi Developer Portal App URL points straight at the
     subdomain). Same backend, different front door."""
     _host = request.host.split(":")[0].lower()
-    if _host.startswith("onpi.") or _host.startswith("4pi."):
+    # Pi may open the app at the www. variant it verified (www.onpi.bottube.ai), so
+    # match both onpi.* and www.onpi.* (and the 4pi.* alias).
+    _hbase = _host[4:] if _host.startswith("www.") else _host
+    if _hbase.startswith("onpi.") or _hbase.startswith("4pi."):
         return pi_home()
 
     db = get_db()
