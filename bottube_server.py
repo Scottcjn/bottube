@@ -15437,6 +15437,16 @@ try:
 except Exception as _studio_e:
     print(f"[WARN] Studio blueprint not loaded: {_studio_e}")
 
+# --- Forge3D (/studio 3D mode) — pay RTC to generate 3D models; swappable backend
+# (Meshy wrap in Phase-0, local TRELLIS/Tripo later). Own per-type job + async refund. ---
+try:
+    from forge3d_blueprint import forge3d_bp, init_forge3d_tables
+    init_forge3d_tables()
+    app.register_blueprint(forge3d_bp)
+    print('[forge3d] registered Forge3D blueprint')
+except Exception as _forge3d_e:
+    print(f"[WARN] Forge3D blueprint not loaded: {_forge3d_e}")
+
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
 # ---------------------------------------------------------------------------

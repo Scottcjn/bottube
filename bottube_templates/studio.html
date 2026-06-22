@@ -51,6 +51,7 @@
     <button class="st-mode active" data-mode="video" onclick="stMode('video')">🎬 Video</button>
     <button class="st-mode" data-mode="image" onclick="stMode('image')">🖼️ Image</button>
     <button class="st-mode" data-mode="voice" onclick="stMode('voice')">🔊 Voice</button>
+    <button class="st-mode" data-mode="model" onclick="stMode('model')">🧊 3D</button>
   </div>
 
   <div class="st-bal" id="st-bal">Checking your RTC balance…</div>
@@ -82,6 +83,12 @@
     <button class="gen" id="voice-btn" onclick="stGenerate('voice')">Generate Voice · <span class="price">{{ voice_rtc }} RTC</span></button>
   </div>
 
+  <!-- 3D MODEL -->
+  <div class="st-single" id="mode-model" style="display:none">
+    <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">Describe an object; we generate a downloadable 3D model (GLB). Swappable backend — Meshy now, our own fleet next. ~1 min.</p>
+    <button class="gen" onclick="stGenerate('model')">Generate 3D Model · <span class="price">{{ model_rtc }} RTC</span></button>
+  </div>
+
   <div class="st-status" id="st-status"></div>
   <div class="st-result" id="st-result"></div>
 
@@ -110,15 +117,17 @@
     document.querySelectorAll(".st-mode").forEach(function(b){
       b.classList.toggle("active", b.getAttribute("data-mode") === mode);
     });
-    document.getElementById("mode-video").style.display = (mode === "video") ? "" : "none";
-    document.getElementById("mode-image").style.display = (mode === "image") ? "" : "none";
-    document.getElementById("mode-voice").style.display = (mode === "voice") ? "" : "none";
+    ["video","image","voice","model"].forEach(function(m){
+      document.getElementById("mode-" + m).style.display = (mode === m) ? "" : "none";
+    });
     say(""); clearResult();
-    promptEl.placeholder = (mode === "video")
-      ? "Describe the video you want… e.g. 'a neon cajun bayou at night, fireflies over the water, cinematic'"
-      : (mode === "image")
-      ? "Describe the image… e.g. 'a vintage IBM POWER8 server glowing in a cathedral of voltage, dramatic light'"
-      : "Type what Sophia should say… e.g. 'Welcome to Elyan Labs. Let me show you what we built.'";
+    var ph = {
+      video: "Describe the video you want… e.g. 'a neon cajun bayou at night, fireflies over the water, cinematic'",
+      image: "Describe the image… e.g. 'a vintage IBM POWER8 server glowing in a cathedral of voltage, dramatic light'",
+      voice: "Type what Sophia should say… e.g. 'Welcome to Elyan Labs. Let me show you what we built.'",
+      model: "Describe an object to model in 3D… e.g. 'a low-poly treasure chest, game-ready'"
+    };
+    promptEl.placeholder = ph[mode] || "";
   };
 
   function loadInfo() {
@@ -180,7 +189,16 @@
     var iv = setInterval(function(){
       tries++;
       fetch(url, { credentials: "same-origin" }).then(function(r){ return r.json(); }).then(function(d){
-        if (d.status === "completed" || d.video_id) {
+        if (d.model_url) {
+          clearInterval(iv); setBusy(false);
+          say("🧊 Done! Charged successfully.");
+          resultEl.innerHTML =
+            '<model-viewer src="' + d.model_url + '" camera-controls auto-rotate ' +
+            'style="width:100%;height:360px;background:#111;border-radius:8px;" ' +
+            'ar shadow-intensity="1"></model-viewer>' +
+            '<div style="margin-top:8px"><a href="' + d.model_url + '" download>Download GLB →</a>' +
+            ((d.formats && d.formats.length) ? ' · formats: ' + d.formats.join(", ") : "") + '</div>';
+        } else if (d.status === "completed" || d.video_id) {
           clearInterval(iv); setBusy(false);
           var watch = d.watch_url || (d.video_id ? ("/watch/" + d.video_id) : null);
           say(watch ? ("🎬 Done! <a href='" + watch + "'>Watch your video →</a>") : "🎬 Done — check your channel.");
@@ -196,4 +214,5 @@
   }
 })();
 </script>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 {% endblock %}

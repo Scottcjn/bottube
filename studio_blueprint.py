@@ -41,6 +41,7 @@ VIDEO_TIERS = {
 }
 IMAGE_RTC = float(os.environ.get("STUDIO_RTC_IMAGE", "0.5"))
 VOICE_RTC = float(os.environ.get("STUDIO_RTC_VOICE", "0.5"))
+MODEL_RTC = float(os.environ.get("STUDIO_RTC_MODEL", "3"))
 
 PROMPT_MAX = 1000
 _rate = {}
@@ -124,13 +125,19 @@ def _studio_video_worker(job_id, agent_id, prompt, duration, cost):
 def studio_home():
     return render_template("studio.html",
                            video_tiers=[{"key": k, **v} for k, v in VIDEO_TIERS.items()],
-                           image_rtc=IMAGE_RTC, voice_rtc=VOICE_RTC)
+                           image_rtc=IMAGE_RTC, voice_rtc=VOICE_RTC, model_rtc=MODEL_RTC)
+
+
+_MEDIA_MIME = {".glb": "model/gltf-binary", ".fbx": "application/octet-stream",
+               ".usdz": "model/vnd.usdz+zip"}
 
 
 @studio_bp.route("/studio/media/<path:fname>")
 def studio_media(fname):
     # uuid filenames only; send_from_directory blocks path traversal.
-    return send_from_directory(STUDIO_MEDIA_DIR, fname)
+    ext = os.path.splitext(fname)[1].lower()
+    kw = {"mimetype": _MEDIA_MIME[ext]} if ext in _MEDIA_MIME else {}
+    return send_from_directory(STUDIO_MEDIA_DIR, fname, **kw)
 
 
 @studio_bp.route("/api/studio/info", methods=["GET"])
@@ -147,6 +154,7 @@ def studio_info():
             "video": {k: v["rtc"] for k, v in VIDEO_TIERS.items()},
             "image": IMAGE_RTC,
             "voice": VOICE_RTC,
+            "model": MODEL_RTC,
         },
         "voice_enabled": bool(STUDIO_TTS_URL),
     })
@@ -173,6 +181,8 @@ def studio_generate():
         if not STUDIO_TTS_URL:
             return jsonify({"error": "voice generation is not configured"}), 503
         cost = VOICE_RTC
+    elif gtype == "model":
+        cost = MODEL_RTC
     else:
         return jsonify({"error": "unknown type"}), 400
 
@@ -213,6 +223,18 @@ def studio_generate():
             return jsonify({"error": "couldn't start generation; your RTC was refunded"}), 502
         return jsonify({"ok": True, "type": "video", "job_id": job_id, "charged_rtc": cost,
                         "new_balance": new_balance, "status_url": f"/api/generate-video/status/{job_id}"}), 202
+
+    # ---- MODEL (3D): async via forge3d provider cascade ----
+    if gtype == "model":
+        try:
+            from forge3d_blueprint import start_job
+            job_id = start_job(agent_id, prompt, cost)
+        except Exception as e:
+            _refund(agent_id, cost)
+            print(f"[studio] 3d start failed (refunded {cost}): {e}", flush=True)
+            return jsonify({"error": "couldn't start generation; your RTC was refunded"}), 502
+        return jsonify({"ok": True, "type": "model", "job_id": job_id, "charged_rtc": cost,
+                        "new_balance": new_balance, "status_url": f"/api/studio/3d/status/{job_id}"}), 202
 
     # ---- IMAGE: sync via Gemini ----
     if gtype == "image":
