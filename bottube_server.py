@@ -12301,7 +12301,15 @@ def upload_avatar():
 
 @app.route("/")
 def index():
-    """Homepage with trending and recent videos."""
+    """Homepage with trending and recent videos.
+
+    On the dedicated Pi app host (4pi.bottube.ai) the ROOT is the Pi storefront
+    itself — no redirect (the Pi Developer Portal App URL points straight at the
+    subdomain). Same backend, different front door."""
+    _host = request.host.split(":")[0].lower()
+    if _host.startswith("4pi.") or _host == "4pi.bottube.ai":
+        return pi_home()
+
     db = get_db()
 
     # Trending (improved algorithm: views + likes + comments + recency)
