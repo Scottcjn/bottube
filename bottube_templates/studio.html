@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Studio — Pay RTC, Generate Video{% endblock %}
+{% block title %}Studio — Pay RTC, Generate Video · Image · Voice{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -7,7 +7,11 @@
   .st-hero { text-align:center; padding: 26px 16px 6px; }
   .st-hero h1 { font-size: 30px; margin-bottom: 8px; }
   .st-hero p { color: var(--text-secondary); font-size:16px; max-width:580px; margin:0 auto; }
-  .st-bal { text-align:center; margin: 14px 0 6px; color: var(--text-secondary); font-size: 14px; }
+  .st-modes { display:flex; justify-content:center; gap:8px; margin:18px auto 6px; flex-wrap:wrap; }
+  .st-mode { padding:9px 20px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-secondary);
+    border-radius:999px; cursor:pointer; font-weight:700; font-size:14px; }
+  .st-mode.active { background:var(--accent); color:#0a0a0a; border-color:var(--accent); }
+  .st-bal { text-align:center; margin: 12px 0 6px; color: var(--text-secondary); font-size: 14px; }
   .st-bal strong { color:#ffcf33; font-size: 18px; }
   .st-prompt { width:100%; box-sizing:border-box; background:var(--bg-secondary); border:1px solid var(--border);
     border-radius:var(--radius); color:var(--text-primary); padding:14px; font-size:15px; min-height:84px; resize:vertical; margin:10px 0 6px; }
@@ -22,8 +26,15 @@
   .tier.t0 .tbadge { background:#2ba640; } .tier.t1 .tbadge { background:#3ea6ff; } .tier.t2 .tbadge { background:#ff4444; }
   .tier .gen { width:100%; padding:10px; border:none; border-radius:999px; background:var(--accent); color:#0a0a0a; font-weight:700; cursor:pointer; }
   .tier .gen:hover { background:var(--accent-hover); } .tier .gen:disabled { opacity:.5; cursor:default; }
+  .st-single { text-align:center; margin-top:8px; }
+  .st-single .gen { padding:13px 34px; border:none; border-radius:999px; background:var(--accent); color:#0a0a0a; font-weight:800; font-size:16px; cursor:pointer; }
+  .st-single .gen:disabled { opacity:.5; cursor:default; }
+  .st-single .price { color:#ffcf33; font-weight:700; }
   .st-status { text-align:center; margin:18px auto; max-width:600px; color:var(--text-secondary); font-size:14px; min-height:20px; }
   .st-status a { color:var(--accent); font-weight:700; }
+  .st-result { max-width:600px; margin:16px auto 0; text-align:center; }
+  .st-result img { max-width:100%; border-radius:var(--radius); border:1px solid var(--border); }
+  .st-result audio { width:100%; margin-top:6px; }
   .st-foot { text-align:center; color:var(--text-muted); font-size:12px; margin-top:24px; }
 </style>
 {% endblock %}
@@ -32,30 +43,50 @@
 <div class="st-wrap">
   <div class="st-hero">
     <span style="display:inline-block;background:#3ea6ff;color:#001;font-weight:700;font-size:12px;letter-spacing:.5px;padding:4px 12px;border-radius:999px;margin-bottom:12px;">🎬 BOTTUBE STUDIO</span>
-    <h1>Pay RTC · Generate an AI Video</h1>
-    <p>Type a prompt, pick a tier, pay in RTC — we render it on the LTX-2 pipeline and post it to your channel.</p>
+    <h1>Pay RTC · Generate AI Media</h1>
+    <p>Type a prompt, pick a mode, pay in RTC — video, image, or voice, rendered on our own pipeline. No gatekeepers.</p>
+  </div>
+
+  <div class="st-modes">
+    <button class="st-mode active" data-mode="video" onclick="stMode('video')">🎬 Video</button>
+    <button class="st-mode" data-mode="image" onclick="stMode('image')">🖼️ Image</button>
+    <button class="st-mode" data-mode="voice" onclick="stMode('voice')">🔊 Voice</button>
   </div>
 
   <div class="st-bal" id="st-bal">Checking your RTC balance…</div>
 
-  <textarea class="st-prompt" id="st-prompt" maxlength="500" placeholder="Describe the video you want… e.g. 'a neon cajun bayou at night, fireflies over the water, cinematic'"></textarea>
+  <textarea class="st-prompt" id="st-prompt" maxlength="1000" placeholder="Describe what you want…"></textarea>
 
-  <div class="tiers">
-    {% for t in studio_tiers %}
+  <!-- VIDEO: 3 tiers -->
+  <div class="tiers" id="mode-video">
+    {% for t in video_tiers %}
     <div class="tier t{{ loop.index0 }}">
       <span class="tbadge">{{ t.badge }}</span>
       <h3>{{ t.name }}</h3>
       <p>{{ t.desc }}</p>
       <div class="price">{{ t.rtc }} RTC</div>
-      <button class="gen" data-tier="{{ t.key }}" onclick="stGenerate(this.getAttribute('data-tier'))">Generate · {{ t.rtc }} RTC</button>
+      <button class="gen" data-tier="{{ t.key }}" onclick="stGenerate('video', this.getAttribute('data-tier'))">Generate · {{ t.rtc }} RTC</button>
     </div>
     {% endfor %}
   </div>
 
+  <!-- IMAGE -->
+  <div class="st-single" id="mode-image" style="display:none">
+    <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">A single high-quality AI image (Gemini 2.5 Flash Image). Posted nowhere — yours to download.</p>
+    <button class="gen" onclick="stGenerate('image')">Generate Image · <span class="price">{{ image_rtc }} RTC</span></button>
+  </div>
+
+  <!-- VOICE -->
+  <div class="st-single" id="mode-voice" style="display:none">
+    <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">Type up to ~600 characters; we voice it in the Sophia Elya XTTS voice.</p>
+    <button class="gen" id="voice-btn" onclick="stGenerate('voice')">Generate Voice · <span class="price">{{ voice_rtc }} RTC</span></button>
+  </div>
+
   <div class="st-status" id="st-status"></div>
+  <div class="st-result" id="st-result"></div>
 
   <div class="st-foot">
-    Generation engine is pluggable — LTX-2 today, more backends soon. RTC powers it; no gatekeepers.
+    Generation engine is pluggable — more backends soon. RTC powers it; no gatekeepers.
     Need RTC? <a href="/bridge/wrtc">Bridge credits</a>.
   </div>
 </div>
@@ -63,29 +94,60 @@
 <script>
 (function () {
   var statusEl = document.getElementById("st-status");
+  var resultEl = document.getElementById("st-result");
   var balEl = document.getElementById("st-bal");
-  var buttons = function(){ return document.querySelectorAll(".tier .gen"); };
-  function setBusy(b){ buttons().forEach(function(x){ x.disabled = b; }); }
+  var promptEl = document.getElementById("st-prompt");
+  var curMode = "video";
+  var signedIn = false, voiceEnabled = true;
+
+  function allButtons(){ return document.querySelectorAll(".gen"); }
+  function setBusy(b){ allButtons().forEach(function(x){ x.disabled = b; }); }
   function say(m){ statusEl.innerHTML = m; }
+  function clearResult(){ resultEl.innerHTML = ""; }
+
+  window.stMode = function (mode) {
+    curMode = mode;
+    document.querySelectorAll(".st-mode").forEach(function(b){
+      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
+    });
+    document.getElementById("mode-video").style.display = (mode === "video") ? "" : "none";
+    document.getElementById("mode-image").style.display = (mode === "image") ? "" : "none";
+    document.getElementById("mode-voice").style.display = (mode === "voice") ? "" : "none";
+    say(""); clearResult();
+    promptEl.placeholder = (mode === "video")
+      ? "Describe the video you want… e.g. 'a neon cajun bayou at night, fireflies over the water, cinematic'"
+      : (mode === "image")
+      ? "Describe the image… e.g. 'a vintage IBM POWER8 server glowing in a cathedral of voltage, dramatic light'"
+      : "Type what Sophia should say… e.g. 'Welcome to Elyan Labs. Let me show you what we built.'";
+  };
 
   function loadInfo() {
     fetch("/api/studio/info", { credentials: "same-origin" })
       .then(function(r){ return r.json(); })
       .then(function(d){
-        if (!d.signed_in) { balEl.innerHTML = 'Sign in to generate — <a href="/login">log in</a>.'; setBusy(true); }
+        signedIn = !!d.signed_in;
+        voiceEnabled = d.voice_enabled !== false;
+        if (!signedIn) { balEl.innerHTML = 'Sign in to generate — <a href="/login">log in</a>.'; setBusy(true); }
         else { balEl.innerHTML = "Your balance: <strong>" + (d.rtc_balance != null ? d.rtc_balance : "?") + " RTC</strong>"; }
+        if (!voiceEnabled) {
+          var vb = document.getElementById("voice-btn");
+          if (vb) { vb.disabled = true; vb.textContent = "Voice temporarily unavailable"; }
+        }
       })
       .catch(function(){ balEl.textContent = ""; });
   }
   loadInfo();
 
-  window.stGenerate = function (tier) {
-    var prompt = (document.getElementById("st-prompt").value || "").trim();
+  window.stGenerate = function (mode, tier) {
+    var prompt = (promptEl.value || "").trim();
     if (!prompt) { say("Type a prompt first."); return; }
-    setBusy(true); say("Charging RTC and starting generation…");
+    setBusy(true); clearResult();
+    say(mode === "video" ? "Charging RTC and starting generation…" : "Charging RTC and generating…");
+    var payload = { type: mode, prompt: prompt };
+    if (mode === "video") payload.tier = tier;
     fetch("/api/studio/generate", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      credentials: "same-origin", body: JSON.stringify({ prompt: prompt, tier: tier })
+      credentials: "same-origin", body: JSON.stringify(payload)
     }).then(function(r){ return r.json().then(function(d){ return { ok: r.ok, status: r.status, d: d }; }); })
       .then(function(res){
         if (!res.ok) {
@@ -95,8 +157,20 @@
           return;
         }
         balEl.innerHTML = "Your balance: <strong>" + res.d.new_balance + " RTC</strong>";
-        say("✅ Charged " + res.d.charged_rtc + " RTC. Generating your video… this can take a couple minutes.");
-        poll(res.d.status_url);
+        if (res.d.type === "image") {
+          setBusy(false);
+          say("✅ Charged " + res.d.charged_rtc + " RTC.");
+          resultEl.innerHTML = '<img src="' + res.d.media_url + '" alt="generated image">' +
+            '<div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download image →</a></div>';
+        } else if (res.d.type === "voice") {
+          setBusy(false);
+          say("✅ Charged " + res.d.charged_rtc + " RTC.");
+          resultEl.innerHTML = '<audio controls autoplay src="' + res.d.media_url + '"></audio>' +
+            '<div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download audio →</a></div>';
+        } else {
+          say("✅ Charged " + res.d.charged_rtc + " RTC. Generating your video… this can take a couple minutes.");
+          poll(res.d.status_url);
+        }
       })
       .catch(function(){ setBusy(false); say("Couldn't reach the studio. Try again."); });
   };
