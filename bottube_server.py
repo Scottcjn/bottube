@@ -5123,7 +5123,13 @@ def pi_home():
     the Pi Developer Portal so Pioneers launch straight into the Pi experience
     (Sign in with Pi + pay-in-Pi video generation). The standard site stays RTC.
     Sets a pi_mode cookie so the server keeps Pi-launched users in Pi mode."""
-    from flask import make_response
+    from flask import make_response, redirect
+    # onpi.bottube.ai is the canonical Pi domain. If the Pi storefront is reached on any
+    # other host (e.g. legacy bottube.ai/pi), send it there. index() calls this for the
+    # onpi/4pi hosts (which pass), so those serve normally with no redirect loop.
+    _h = request.host.split(":")[0].lower()
+    if not (_h.startswith("onpi.") or _h.startswith("4pi.")):
+        return redirect("https://onpi.bottube.ai/", code=301)
     # Prices come from pi_payments.PI_PRODUCTS (single source of truth; the server
     # re-verifies amount on approve/complete). UI copy (name/desc/badge) lives here.
     try:
