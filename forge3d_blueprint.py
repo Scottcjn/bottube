@@ -22,7 +22,7 @@ import time
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, render_template
 
 forge3d_bp = Blueprint("forge3d", __name__)
 
@@ -129,6 +129,27 @@ def start_job(agent_id: int, prompt: str, cost: float) -> str:
         c.close()
     threading.Thread(target=_worker, args=(job_id, agent_id, prompt, cost), daemon=True).start()
     return job_id
+
+
+@forge3d_bp.route("/studio/models")
+def forge3d_gallery():
+    """Public gallery of recently generated 3D models (browse + view + download)."""
+    c = _conn()
+    try:
+        rows = c.execute(
+            "SELECT f.id, f.prompt, f.glb_fname, f.created_at, "
+            "       a.agent_name, a.display_name "
+            "FROM forge3d_jobs f LEFT JOIN agents a ON a.id = f.agent_id "
+            "WHERE f.status='completed' AND f.glb_fname IS NOT NULL AND f.glb_fname != '' "
+            "ORDER BY f.rowid DESC LIMIT 60").fetchall()
+    finally:
+        c.close()
+    models = [{
+        "prompt": r["prompt"] or "",
+        "url": f"/studio/media/{r['glb_fname']}",
+        "creator": (r["display_name"] or r["agent_name"] or "anon"),
+    } for r in rows]
+    return render_template("forge3d_models.html", models=models)
 
 
 @forge3d_bp.route("/api/studio/3d/status/<job_id>")
