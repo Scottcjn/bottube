@@ -44,6 +44,18 @@ video_gen_bp = Blueprint("video_gen", __name__)
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://100.95.77.124:8188")
 COMFYUI_TIMEOUT = int(os.environ.get("COMFYUI_TIMEOUT", "300"))  # 5 min max
 
+# Wan 2.2 text-to-video via ComfyUI (local, our V100). Separate URL — Wan lives on :8189.
+# Empty = disabled. Workflow is the flattened t2v subgraph (UNETLoaderGGUF + lightx2v LoRA).
+WAN_COMFYUI_URL = os.environ.get("WAN_COMFYUI_URL", "")
+WAN_WORKFLOW_PATH = os.environ.get(
+    "WAN_WORKFLOW_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "wan_t2v_api.json"))
+try:
+    with open(WAN_WORKFLOW_PATH) as _wf:
+        _WAN_WORKFLOW = json.load(_wf)
+except Exception:
+    _WAN_WORKFLOW = None
+
 # Free-tier video gen backends (cascade: try each in order)
 HF_API_TOKEN = os.environ.get("HF_API_TOKEN", "")
 HF_VIDEO_MODEL = os.environ.get("HF_VIDEO_MODEL", "ali-vilab/text-to-video-ms-1.7b")
@@ -86,6 +98,7 @@ _provider_registry = ProviderRegistry()
 
 def _init_provider_registry():
     """Register all backends. Called once after functions are defined (bottom of module)."""
+    _provider_registry.register("wan22", _try_wan)  # local V100 Wan 2.2 t2v (no API key)
     _provider_registry.register("hf_sdxl_video", _try_hf_image_to_video, requires_key_env="HF_API_TOKEN")
     _provider_registry.register("huggingface", _try_huggingface, requires_key_env="HF_API_TOKEN")
     _provider_registry.register("gemini", _try_gemini, requires_key_env="GEMINI_API_KEY")
@@ -361,6 +374,66 @@ def _try_comfyui(prompt: str, seed: int) -> Optional[Path]:
                 except Exception:
                     continue
     return None
+
+
+def _try_wan(prompt: str, duration: int, final_path) -> bool:
+    """Wan 2.2 text-to-video via ComfyUI (:8189, local V100). Writes mp4 to final_path.
+
+    Registry backend signature (prompt, duration, final_path)->bool. Disabled unless
+    WAN_COMFYUI_URL is set and the flattened workflow loaded."""
+    if not WAN_COMFYUI_URL or not _WAN_WORKFLOW:
+        return False
+    wf = json.loads(json.dumps(_WAN_WORKFLOW))
+    try:
+        wf["1089"]["inputs"]["text"] = prompt[:PROMPT_MAX_LEN]   # positive prompt node
+    except Exception:
+        return False
+    try:
+        req = urllib.request.Request(
+            f"{WAN_COMFYUI_URL}/prompt",
+            data=json.dumps({"prompt": wf}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            prompt_id = json.loads(resp.read()).get("prompt_id")
+        if not prompt_id:
+            return False
+    except Exception:
+        return False
+    deadline = time.time() + COMFYUI_TIMEOUT
+    outs = None
+    while time.time() < deadline:
+        time.sleep(4)
+        try:
+            with urllib.request.urlopen(f"{WAN_COMFYUI_URL}/history/{prompt_id}", timeout=10) as resp:
+                hist = json.loads(resp.read())
+            if prompt_id in hist:
+                entry = hist[prompt_id]; status = entry.get("status", {})
+                if status.get("completed") or entry.get("outputs"):
+                    outs = entry.get("outputs", {}); break
+                if status.get("status_str") == "error":
+                    return False
+        except Exception:
+            continue
+    if not outs:
+        return False
+    for _nid, node_out in outs.items():
+        for key in ("videos", "gifs", "images"):
+            for v in node_out.get(key, []) or []:
+                fn = v.get("filename")
+                if not fn:
+                    continue
+                params = urllib.parse.urlencode({
+                    "filename": fn, "subfolder": v.get("subfolder", ""),
+                    "type": v.get("type", "output")})
+                try:
+                    with urllib.request.urlopen(f"{WAN_COMFYUI_URL}/view?{params}", timeout=90) as resp:
+                        data = resp.read()
+                    if data and len(data) > 1000:
+                        Path(final_path).write_bytes(data)
+                        return True
+                except Exception:
+                    continue
+    return False
 
 
 # ---------------------------------------------------------------------------
