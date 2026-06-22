@@ -13058,6 +13058,12 @@ def developers_page():
     return render_template("developers.html")
 
 
+@app.route("/api")
+@app.route("/api/")
+def api_redirect():
+    """Redirect legacy /api routes to /docs."""
+    return redirect("/docs", code=301)
+
 @app.route("/docs")
 def docs_page():
     """API documentation page."""
