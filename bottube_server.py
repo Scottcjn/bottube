@@ -15428,6 +15428,15 @@ try:
 except Exception as _sophia_e:
     print(f"[WARN] Sophia router not loaded: {_sophia_e}")
 
+# --- BoTTube Studio (/studio) — pay RTC to generate video (demo of pay-to-generate on
+# our own token; generation layer pluggable, Alibaba API slots in later). ---
+try:
+    from studio_blueprint import studio_bp
+    app.register_blueprint(studio_bp)
+    print('[studio] registered Studio blueprint')
+except Exception as _studio_e:
+    print(f"[WARN] Studio blueprint not loaded: {_studio_e}")
+
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
 # ---------------------------------------------------------------------------

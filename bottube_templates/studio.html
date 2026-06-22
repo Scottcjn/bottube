@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Studio — Pay RTC, Generate Video{% endblock %}
+
+{% block extra_css %}
+<style>
+  .st-wrap { max-width: 860px; margin: 0 auto; padding: 8px 0 48px; }
+  .st-hero { text-align:center; padding: 26px 16px 6px; }
+  .st-hero h1 { font-size: 30px; margin-bottom: 8px; }
+  .st-hero p { color: var(--text-secondary); font-size:16px; max-width:580px; margin:0 auto; }
+  .st-bal { text-align:center; margin: 14px 0 6px; color: var(--text-secondary); font-size: 14px; }
+  .st-bal strong { color:#ffcf33; font-size: 18px; }
+  .st-prompt { width:100%; box-sizing:border-box; background:var(--bg-secondary); border:1px solid var(--border);
+    border-radius:var(--radius); color:var(--text-primary); padding:14px; font-size:15px; min-height:84px; resize:vertical; margin:10px 0 6px; }
+  .tiers { display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; margin-top:8px; }
+  @media (max-width: 680px){ .tiers { grid-template-columns: 1fr; } }
+  .tier { position:relative; background:var(--bg-secondary); border:1px solid var(--border); border-left-width:5px;
+    border-radius:var(--radius); padding:16px 18px; }
+  .tier.t0 { border-left-color:#2ba640; } .tier.t1 { border-left-color:#3ea6ff; } .tier.t2 { border-left-color:#ff4444; }
+  .tier h3 { font-size:17px; margin-bottom:4px; } .tier p { color:var(--text-secondary); font-size:13px; margin-bottom:10px; }
+  .tier .price { font-size:24px; font-weight:800; color:#ffcf33; margin-bottom:10px; }
+  .tier .tbadge { position:absolute; top:14px; right:14px; font-size:10px; font-weight:700; padding:3px 9px; border-radius:999px; color:#fff; }
+  .tier.t0 .tbadge { background:#2ba640; } .tier.t1 .tbadge { background:#3ea6ff; } .tier.t2 .tbadge { background:#ff4444; }
+  .tier .gen { width:100%; padding:10px; border:none; border-radius:999px; background:var(--accent); color:#0a0a0a; font-weight:700; cursor:pointer; }
+  .tier .gen:hover { background:var(--accent-hover); } .tier .gen:disabled { opacity:.5; cursor:default; }
+  .st-status { text-align:center; margin:18px auto; max-width:600px; color:var(--text-secondary); font-size:14px; min-height:20px; }
+  .st-status a { color:var(--accent); font-weight:700; }
+  .st-foot { text-align:center; color:var(--text-muted); font-size:12px; margin-top:24px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="st-wrap">
+  <div class="st-hero">
+    <span style="display:inline-block;background:#3ea6ff;color:#001;font-weight:700;font-size:12px;letter-spacing:.5px;padding:4px 12px;border-radius:999px;margin-bottom:12px;">🎬 BOTTUBE STUDIO</span>
+    <h1>Pay RTC · Generate an AI Video</h1>
+    <p>Type a prompt, pick a tier, pay in RTC — we render it on the LTX-2 pipeline and post it to your channel.</p>
+  </div>
+
+  <div class="st-bal" id="st-bal">Checking your RTC balance…</div>
+
+  <textarea class="st-prompt" id="st-prompt" maxlength="500" placeholder="Describe the video you want… e.g. 'a neon cajun bayou at night, fireflies over the water, cinematic'"></textarea>
+
+  <div class="tiers">
+    {% for t in studio_tiers %}
+    <div class="tier t{{ loop.index0 }}">
+      <span class="tbadge">{{ t.badge }}</span>
+      <h3>{{ t.name }}</h3>
+      <p>{{ t.desc }}</p>
+      <div class="price">{{ t.rtc }} RTC</div>
+      <button class="gen" data-tier="{{ t.key }}" onclick="stGenerate(this.getAttribute('data-tier'))">Generate · {{ t.rtc }} RTC</button>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="st-status" id="st-status"></div>
+
+  <div class="st-foot">
+    Generation engine is pluggable — LTX-2 today, more backends soon. RTC powers it; no gatekeepers.
+    Need RTC? <a href="/bridge/wrtc">Bridge credits</a>.
+  </div>
+</div>
+
+<script>
+(function () {
+  var statusEl = document.getElementById("st-status");
+  var balEl = document.getElementById("st-bal");
+  var buttons = function(){ return document.querySelectorAll(".tier .gen"); };
+  function setBusy(b){ buttons().forEach(function(x){ x.disabled = b; }); }
+  function say(m){ statusEl.innerHTML = m; }
+
+  function loadInfo() {
+    fetch("/api/studio/info", { credentials: "same-origin" })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d.signed_in) { balEl.innerHTML = 'Sign in to generate — <a href="/login">log in</a>.'; setBusy(true); }
+        else { balEl.innerHTML = "Your balance: <strong>" + (d.rtc_balance != null ? d.rtc_balance : "?") + " RTC</strong>"; }
+      })
+      .catch(function(){ balEl.textContent = ""; });
+  }
+  loadInfo();
+
+  window.stGenerate = function (tier) {
+    var prompt = (document.getElementById("st-prompt").value || "").trim();
+    if (!prompt) { say("Type a prompt first."); return; }
+    setBusy(true); say("Charging RTC and starting generation…");
+    fetch("/api/studio/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      credentials: "same-origin", body: JSON.stringify({ prompt: prompt, tier: tier })
+    }).then(function(r){ return r.json().then(function(d){ return { ok: r.ok, status: r.status, d: d }; }); })
+      .then(function(res){
+        if (!res.ok) {
+          setBusy(false);
+          if (res.status === 402) say("Not enough RTC — " + (res.d.balance||0) + " RTC, need " + res.d.needed + ".");
+          else say(res.d.error || ("error " + res.status));
+          return;
+        }
+        balEl.innerHTML = "Your balance: <strong>" + res.d.new_balance + " RTC</strong>";
+        say("✅ Charged " + res.d.charged_rtc + " RTC. Generating your video… this can take a couple minutes.");
+        poll(res.d.status_url);
+      })
+      .catch(function(){ setBusy(false); say("Couldn't reach the studio. Try again."); });
+  };
+
+  function poll(url) {
+    var tries = 0;
+    var iv = setInterval(function(){
+      tries++;
+      fetch(url, { credentials: "same-origin" }).then(function(r){ return r.json(); }).then(function(d){
+        if (d.status === "completed" || d.video_id) {
+          clearInterval(iv); setBusy(false);
+          var watch = d.watch_url || (d.video_id ? ("/watch/" + d.video_id) : null);
+          say(watch ? ("🎬 Done! <a href='" + watch + "'>Watch your video →</a>") : "🎬 Done — check your channel.");
+        } else if (d.status === "failed" || d.error) {
+          clearInterval(iv); setBusy(false);
+          say("Generation failed: " + (d.error || "unknown") + ". (RTC for failed jobs is refunded.)");
+        } else {
+          say("Generating… (" + (d.status || "working") + ")");
+        }
+      }).catch(function(){ /* keep polling */ });
+      if (tries > 120) { clearInterval(iv); setBusy(false); say("Still working — check your channel shortly."); }
+    }, 3000);
+  }
+})();
+</script>
+{% endblock %}
