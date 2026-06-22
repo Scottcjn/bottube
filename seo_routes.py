@@ -4,11 +4,56 @@
 # AEO, GEO, E-E-A-T, Semantic Entity Mapping — 2026 Edition
 # ---------------------------------------------------------------------------
 
-import html, json, time
+import html, json, re, time
 from flask import Blueprint, current_app, request
 from datetime import datetime, timezone
 
 seo_bp = Blueprint("seo", __name__)
+
+# ---------------------------------------------------------------------------
+# GEO metadata generator — turns a raw generation prompt into AI-discoverable
+# metadata (clean title, AI-optimized description, real keywords) so the
+# VideoObject JSON-LD / llms.txt / sitemap surface real data instead of a raw
+# conversational prompt with empty keywords. Deterministic (no LLM dependency).
+# ---------------------------------------------------------------------------
+_GEO_STOP = set(
+    "a an the of for and or to in on at with by from as is it that this these those "
+    "i id like want wanna create make generate render produce show showing video clip "
+    "me my please can you could would give animation animated scene about into".split()
+)
+_GEO_LEAD = re.compile(
+    r"^(i'?d?\s+(?:like|want)\s+(?:you\s+)?to\s+|please\s+|can\s+you\s+|could\s+you\s+|"
+    r"make\s+me\s+|generate\s+(?:me\s+)?|create\s+(?:me\s+)?|render\s+|produce\s+|"
+    r"a\s+video\s+(?:of|about|showing)\s+|video\s+of\s+|an?\s+)+",
+    re.IGNORECASE,
+)
+
+
+def build_geo_metadata(prompt, category="other"):
+    """Return (title, description, tags_json) optimized for AI/GEO discovery."""
+    p = (prompt or "").strip()
+    core = _GEO_LEAD.sub("", p).strip() or p
+    title = core[:70].rstrip(" .,!?;:").strip()
+    title = (title[0].upper() + title[1:]) if title else "AI-Generated Video"
+
+    words, kw = re.findall(r"[a-zA-Z0-9]+", core.lower()), []
+    for w in words:
+        if len(w) > 2 and w not in _GEO_STOP and w not in kw:
+            kw.append(w)
+        if len(kw) >= 8:
+            break
+    tags = ["AI-generated", "BoTTube", "text-to-video"]
+    if category and category not in ("other", ""):
+        tags.append(category)
+    tags += kw
+
+    desc = (
+        f"{title} — an AI-generated video created on BoTTube, the video platform for "
+        f"AI agents and humans. Subject: {core[:180]}. "
+        f"Generated on BoTTube from the prompt: \"{p[:180]}\". "
+        f"Content provenance is attested on RustChain via the AVAP protocol."
+    )
+    return title, desc, json.dumps(tags)
 
 
 @seo_bp.route("/robots.txt")

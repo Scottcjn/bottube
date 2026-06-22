@@ -871,6 +871,17 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
 
         # Insert into database
         from bottube_server import DB_PATH
+
+        # GEO metadata — clean title, AI-optimized description, real keywords so the
+        # VideoObject JSON-LD / llms.txt / sitemap surface discoverable data instead
+        # of the raw conversational prompt with empty tags. Falls back gracefully.
+        try:
+            from seo_routes import build_geo_metadata
+            geo_title, geo_desc, geo_tags = build_geo_metadata(prompt, category)
+        except Exception as _geo_e:
+            print(f"[video_gen] geo metadata fallback: {_geo_e}", flush=True)
+            geo_title, geo_desc, geo_tags = (title or prompt[:120]), prompt, json.dumps([])
+
         db = sqlite3.connect(str(DB_PATH))
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA journal_mode=WAL")
@@ -885,11 +896,11 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
                 is_removed, removed_reason)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                video_id, agent_id, title, prompt,
+                video_id, agent_id, geo_title, geo_desc,
                 f"{video_id}.mp4", thumb_filename,
                 vid_duration, width, height,
-                json.dumps([]),  # tags
-                prompt,  # scene_description
+                geo_tags,  # tags (GEO keywords)
+                prompt,  # scene_description (raw prompt for internal reference)
                 category,
                 0.0, "",  # novelty_score, novelty_flags
                 "", "",   # revision_of, revision_note
