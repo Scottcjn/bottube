@@ -88,32 +88,11 @@
     if (window.PI_AUTO_SIGNIN === false) { diag("skip_logged_in"); return; }
     if (typeof Pi === "undefined") { diag("no_pi_at_load"); return; }
     confirmPiBrowser().then(function () {
-      // Confirmed Pi Browser. Reveal pi-only UI everywhere.
+      // Confirmed Pi Browser. Reveal pi-only UI; sign in in place. No redirect:
+      // onpi.bottube.ai is the dedicated Pi domain and serves the storefront at root,
+      // so there is nothing to redirect to (the old home->/pi bounce is removed).
       document.body.classList.add("pi-browser");
       diag("pi_confirmed");
-      // Immediate routing: push Pioneers to the Pi-friendly storefront — but ONLY
-      // from the home page. Deep links inside Pi Browser (/watch, /search, /agent,
-      // account flows) must NOT be hijacked. The Pi app should also be registered to
-      // https://bottube.ai/pi so first launch lands there directly.
-      // Only redirect to /pi on the real apex host. If the app was opened via a Pi
-      // subdomain (e.g. *.pinet.com), a relative redirect to /pi may not be proxied —
-      // so stay put and just sign in in place.
-      // Redirect home -> /pi on bottube.ai AND on the Pi app host (*.pinet.com /
-      // *.minepi.com), which proxies our full paths (confirmed: /api/feed loads there).
-      if (location.pathname === "/" && (
-            /(^|\.)bottube\.ai$/i.test(location.hostname) ||
-            /\.pinet\.com$/i.test(location.hostname) ||
-            /\.minepi\.com$/i.test(location.hostname))) {
-        var redirected = false;
-        try { redirected = !!sessionStorage.getItem("pi_redirected"); } catch (e) {}
-        if (!redirected) {
-          try { sessionStorage.setItem("pi_redirected", "1"); } catch (e) {}
-          diag("redirect_pi");
-          location.replace("/pi" + (_SANDBOX ? "?pi_sandbox=1" : ""));
-          return;
-        }
-      }
-      // On /pi, or a deep link, or redirect already used -> sign in (no navigation).
       piSignIn().catch(function (e) { diag("auth_err", e && e.message); console.error("Pi auto sign-in:", e); });
     }).catch(function (e) {
       // Not Pi Browser (or bridge unavailable) -> standard RTC site, do nothing.
