@@ -19,6 +19,9 @@ import requests
 MESHY_ROOT = "https://api.meshy.ai/openapi"
 _TIMEOUT = float(os.environ.get("FORGE3D_TIMEOUT", "300"))   # total wait for a task
 _POLL = float(os.environ.get("FORGE3D_POLL", "5"))
+# Local TRELLIS backend (our V100 fleet). Internal host -> env, not repo. Empty = disabled.
+TRELLIS_URL = os.environ.get("TRELLIS_URL", "").strip()
+_TRELLIS_TIMEOUT = float(os.environ.get("FORGE3D_TRELLIS_TIMEOUT", "600"))
 
 
 class Forge3DError(Exception):
@@ -68,14 +71,32 @@ def _provider_meshy(prompt: str, art_style: str = "realistic"):
     raise Forge3DError("backend_timeout")
 
 
-# Ordered cascade — first that succeeds wins; all raise -> refund.
-PROVIDERS = [_provider_meshy]
+def _provider_trellis(prompt: str, art_style: str = "realistic"):
+    """Local TRELLIS (our V100): text -> image (local SDXL) -> image-to-3D -> GLB.
+
+    The TRELLIS box does the whole text->image->3D pipeline on-GPU (no external
+    image API, no quota, zero per-job COGS). We just hand it the prompt."""
+    if not TRELLIS_URL:
+        raise Forge3DError("trellis_not_configured")
+    r = requests.post(
+        TRELLIS_URL.rstrip("/") + "/generate",
+        data={"prompt": prompt[:600], "seed": "1"}, timeout=_TRELLIS_TIMEOUT)
+    if r.status_code != 200:
+        raise Forge3DError(f"trellis_http_{r.status_code}")
+    if not r.content or len(r.content) < 256:
+        raise Forge3DError("trellis_empty")
+    return r.content, {"backend": "trellis-v100", "formats": ["glb"]}
 
 
 def generate_3d(prompt: str, art_style: str = "realistic"):
-    """Try each provider in order. Returns (glb_bytes, meta). Raises Forge3DError."""
+    """Cascade: local TRELLIS first (free, our hardware), Meshy as fallback.
+    Returns (glb_bytes, meta). Raises Forge3DError if all backends fail (-> refund)."""
+    providers = []
+    if TRELLIS_URL:
+        providers.append(_provider_trellis)
+    providers.append(_provider_meshy)
     last = None
-    for prov in PROVIDERS:
+    for prov in providers:
         try:
             return prov(prompt, art_style=art_style)
         except Forge3DNoCredits as e:
