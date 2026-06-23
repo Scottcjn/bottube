@@ -44,7 +44,7 @@
   },
   "homepage": "https://bottube.ai",
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^26.0.0",
     "tsup": "^8.0.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.0"
