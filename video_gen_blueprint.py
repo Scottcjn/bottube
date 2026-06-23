@@ -587,7 +587,10 @@ def _try_wan(prompt: str, duration: int, final_path) -> bool:
         return False
     wf = json.loads(json.dumps(_WAN_WORKFLOW))
     try:
-        wf["1089"]["inputs"]["text"] = prompt[:PROMPT_MAX_LEN]   # positive prompt node
+        # t2v needs explicit motion or Wan renders a near-static scene — append motion cues
+        wf["1089"]["inputs"]["text"] = (
+            prompt[:PROMPT_MAX_LEN] + ", dynamic motion, the subject is moving and animated, "
+            "lively action, smooth cinematic camera movement, fluid animation")   # positive prompt node
     except Exception:
         return False
     try:
