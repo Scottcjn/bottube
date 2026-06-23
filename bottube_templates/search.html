@@ -243,7 +243,7 @@
     <main>
         <div class="search-results-header">
             <h1 class="section-title" id="search-results-heading" style="margin:0;">
-                Results for "{{ query }}"
+                Results for "{{ query | e }}"
             </h1>
             <span class="results-count">{{ total }} videos</span>
         </div>

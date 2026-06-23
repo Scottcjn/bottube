@@ -13064,6 +13064,22 @@ def developers_page():
     return render_template("developers.html")
 
 
+@app.route("/api")
+def api_redirect():
+    """Redirect /api to the API documentation page."""
+    return redirect(url_for("docs_page"))
+
+
+@app.route("/bridge")
+def bridge_page():
+    """wRTC bridge landing page with safe defaults for unauthenticated users."""
+    return render_template("bridge.html",
+        user_balance=0.0,
+        swap_url="https://jup.ag/",
+        reserve_wallet="Not connected — log in to view",
+        user_sol_address="")
+
+
 @app.route("/docs")
 def docs_page():
     """API documentation page."""
