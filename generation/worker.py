@@ -25,7 +25,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from generation.models import GenerationRequest, JobStatus
 from generation.quality_gate import check_quality, QualityGateResult
@@ -53,6 +53,17 @@ for _d in (_VIDEO_DIR, _THUMB_DIR, _GEN_WORK_DIR):
 
 _POLL_INTERVAL = 3        # seconds between async polls
 _POLL_TIMEOUT = 300       # 5 minutes max wait per provider
+
+
+def _submit_succeeded(result: object) -> bool:
+    return isinstance(result, tuple) and len(result) == 2 and bool(result[0])
+
+
+def _as_submit_result(result: object) -> Optional[Tuple[bool, object]]:
+    if isinstance(result, tuple) and len(result) == 2:
+        return bool(result[0]), result[1]
+    return None
+
 
 # ---------------------------------------------------------------------------
 # In-memory job store (small -- jobs expire after 2 hours)
@@ -247,17 +258,25 @@ def _run_pipeline(
             provider_name,
             "submit",
             lambda: provider.submit(req, work_dir),
+            success_predicate=_submit_succeeded,
         )
-        if not ok or submit_result is None:
+        if submit_result is None:
             detail = f"submit {category} after {tries} attempt(s) in {latency_s:.2f}s"
             log.error("Provider %s %s", provider_name, detail)
             _record_attempt(job_id, provider_name, attempt_num, False, detail, category, latency_s)
             continue
 
-        success, external_id = submit_result
+        normalized_submit = _as_submit_result(submit_result)
+        if normalized_submit is None:
+            detail = f"submit returned invalid result shape after {tries} attempt(s) in {latency_s:.2f}s"
+            log.error("Provider %s %s: %r", provider_name, detail, submit_result)
+            _record_attempt(job_id, provider_name, attempt_num, False, detail, category, latency_s)
+            continue
 
-        if not success:
-            category = classify_error(external_id)
+        success, external_id = normalized_submit
+
+        if not ok or not success:
+            category = category if category != "ok" else classify_error(external_id)
             log.warning("Provider %s failed: %s (%s)", provider_name, external_id, category)
             _record_attempt(job_id, provider_name, attempt_num, False, external_id, category, latency_s)
             continue
