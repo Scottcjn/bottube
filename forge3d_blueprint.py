@@ -85,6 +85,12 @@ def _refund_once(job_id, agent_id, cost):
         cur = c.execute("UPDATE forge3d_jobs SET refunded=1 WHERE id=? AND refunded=0", (job_id,))
         if cur.rowcount == 1:
             c.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id=?", (cost, agent_id))
+            try:  # draw the refund from the shared BoTTube refund reserve
+                from studio_blueprint import _ensure_reserve
+                rid = _ensure_reserve(c)
+                c.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id=?", (cost, rid))
+            except Exception as e:
+                print(f"[forge3d] reserve draw failed: {e}", flush=True)
         c.commit()
         return cur.rowcount == 1
     finally:

@@ -98,13 +98,42 @@ def _resolve_caller(conn):
     return None
 
 
+# Refund reserve — a seeded platform account that backs auto-refunds so they never
+# bounce (kept separate from generation fees). Refunds credit the user AND draw from
+# this reserve; when it runs low we log an alert to top it up.
+_RESERVE_NAME = os.environ.get("STUDIO_RESERVE_AGENT", "bottube_reserve")
+_RESERVE_SEED = float(os.environ.get("STUDIO_RESERVE_SEED", "1000"))
+_RESERVE_LOW = float(os.environ.get("STUDIO_RESERVE_LOW", "100"))
+
+
+def _ensure_reserve(conn):
+    """Return the reserve agent id, creating + seeding it on first use."""
+    row = conn.execute("SELECT id FROM agents WHERE agent_name=?", (_RESERVE_NAME,)).fetchone()
+    if row:
+        return row["id"]
+    conn.execute(
+        "INSERT INTO agents (agent_name, display_name, api_key, rtc_balance, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (_RESERVE_NAME, "BoTTube Refund Reserve", "reserve_" + uuid.uuid4().hex,
+         _RESERVE_SEED, time.time()))
+    conn.commit()
+    return conn.execute("SELECT id FROM agents WHERE agent_name=?", (_RESERVE_NAME,)).fetchone()["id"]
+
+
 def _refund(agent_id, cost):
+    """Credit the user back and draw the same RTC from the refund reserve (never bounce)."""
     try:
         c = _conn()
+        rid = _ensure_reserve(c)
         c.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (cost, agent_id))
-        c.commit(); c.close()
-    except sqlite3.Error:
-        pass
+        c.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (cost, rid))
+        c.commit()
+        rb = c.execute("SELECT rtc_balance FROM agents WHERE id=?", (rid,)).fetchone()[0]
+        if rb < _RESERVE_LOW:
+            print(f"[reserve] LOW: {_RESERVE_NAME} at {rb:.2f} RTC — top it up to keep refunds backed", flush=True)
+        c.close()
+    except sqlite3.Error as e:
+        print(f"[reserve] refund error: {e}", flush=True)
 
 
 def _save_media(data: bytes, ext: str) -> str:

@@ -275,9 +275,21 @@ def _positive_finite_amount(value):
 def ergo_info():
     """Public info about the ERG ↔ RTC bridge."""
     balance = get_platform_erg_balance()
+    _avail = float(balance.get("balance_erg", 0)) if isinstance(balance, dict) else 0.0
+    try:
+        db = get_db()
+        _pending = db.execute(
+            "SELECT COALESCE(SUM(erg_amount), 0) FROM ergo_withdrawals WHERE status='pending'"
+        ).fetchone()[0] or 0.0
+    except Exception:
+        _pending = 0.0
+    _reserve = float(os.environ.get("ERGO_MIN_RESERVE_ERG", "0"))
+    withdrawable_erg = round(max(0.0, _avail - float(_pending) - _reserve), 6)
 
     return jsonify({
         "platform_address": ERGO_PLATFORM_ADDRESS,
+        "withdrawable_erg": withdrawable_erg,
+        "withdrawals_open": withdrawable_erg > 0,
         "exchange_rate": {
             "erg_to_rtc": ERG_TO_RTC_RATE,
             "rtc_to_erg": round(1.0 / ERG_TO_RTC_RATE, 6) if ERG_TO_RTC_RATE > 0 else 0,
@@ -442,6 +454,26 @@ def ergo_withdraw():
     # Calculate ERG amount
     total_rtc = amount_rtc + WITHDRAW_FEE_RTC
     erg_amount = round(amount_rtc / ERG_TO_RTC_RATE, 9)
+
+    # Liquidity guard: never accept a withdrawal we can't pay in ERG. Available =
+    # platform ERG balance - already-pending withdrawals - a configurable reserve.
+    try:
+        _bal = get_platform_erg_balance()
+        _avail = float(_bal.get("balance_erg", 0)) if isinstance(_bal, dict) else 0.0
+    except Exception:
+        _avail = 0.0
+    _pending = db.execute(
+        "SELECT COALESCE(SUM(erg_amount), 0) FROM ergo_withdrawals WHERE status='pending'"
+    ).fetchone()[0] or 0.0
+    _reserve = float(os.environ.get("ERGO_MIN_RESERVE_ERG", "0"))
+    _spendable = _avail - float(_pending) - _reserve
+    if erg_amount > _spendable:
+        return jsonify({
+            "error": "Withdrawals temporarily paused: insufficient ERG liquidity. "
+                     "Try a smaller amount or check back later.",
+            "available_erg": round(max(0.0, _spendable), 6),
+            "requested_erg": erg_amount,
+        }), 503
 
     # Debit RTC
     if not _debit_rtc(db, agent_id, total_rtc):
