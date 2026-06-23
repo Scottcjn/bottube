@@ -394,6 +394,16 @@ def _try_wan(prompt: str, duration: int, final_path) -> bool:
         wf["1074"]["inputs"]["length"] = frames   # EmptyHunyuanLatentVideo
     except Exception:
         pass
+    # Intelligent GPU selector: make sure the video family owns the GPU (swaps
+    # out the 3D stack if it was hot). Best-effort — proceed if the manager is down.
+    _mgr = os.environ.get("GPU_MANAGER_URL", "")
+    if _mgr:
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                _mgr.rstrip("/") + "/acquire", data=json.dumps({"need": "video"}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST"), timeout=90)
+        except Exception:
+            pass
     try:
         req = urllib.request.Request(
             f"{WAN_COMFYUI_URL}/prompt",
