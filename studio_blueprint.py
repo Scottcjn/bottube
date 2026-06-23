@@ -227,7 +227,8 @@ def studio_info():
 def studio_generate():
     body = request.get_json(silent=True) or {}
     gtype = (body.get("type") or "video").strip()
-    audio = bool(body.get("audio"))
+    audio = body.get("audio")
+    audio = "music" if audio is True else (audio if audio in ("music", "ambient") else "")
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         return jsonify({"error": "prompt required"}), 400

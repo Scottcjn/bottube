@@ -84,7 +84,15 @@ except Exception:
     _ACE_AUDIO_WORKFLOW = None
 
 
-def _gen_audio(prompt, duration):
+def _audio_prompt(prompt, mode):
+    """Build the ACE-Step prompt for the requested audio mode."""
+    p = prompt[:240]
+    if mode == "ambient":
+        return f"ambient atmospheric sound and subtle sound effects for a scene of: {p}; no music"
+    return f"{p}, instrumental cinematic background music, fitting score"   # default: music
+
+
+def _gen_audio(prompt, duration, mode="music"):
     """Run ACE-Step to generate an audio track from the prompt; return mp3 bytes or None."""
     if not WAN_COMFYUI_URL or not _ACE_AUDIO_WORKFLOW:
         return None
@@ -92,7 +100,7 @@ def _gen_audio(prompt, duration):
     for v in wf.values():
         for k, val in list(v.get("inputs", {}).items()):
             if val == "__PROMPT__":
-                v["inputs"][k] = (prompt[:300] + ", instrumental, cinematic background")
+                v["inputs"][k] = _audio_prompt(prompt, mode)
             if v.get("class_type") == "EmptyAceStep1.5LatentAudio" and k in ("seconds", "length"):
                 try:
                     v["inputs"][k] = float(max(3, min(30, int(duration))))
@@ -138,10 +146,10 @@ def _gen_audio(prompt, duration):
     return None
 
 
-def _add_audio(prompt, duration, final_path):
-    """Generate AI audio and mux it onto the (silent) video. Best-effort; keeps the
-    video if anything fails."""
-    audio = _gen_audio(prompt, duration)
+def _add_audio(prompt, duration, final_path, mode="music"):
+    """Generate AI audio (music or ambient) and mux it onto the silent video.
+    Best-effort; keeps the video if anything fails."""
+    audio = _gen_audio(prompt, duration, mode)
     if not audio:
         return False
     apath = Path(final_path).with_suffix(".ace.mp3")
@@ -1193,11 +1201,12 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
             except Exception as _ge:
                 print(f"[grounding] {job_id} error: {_ge}", flush=True)
 
-        # --- Optional AI audio: generate + mux when the user toggled audio on ---
+        # --- Optional AI audio (music or ambient) generated + muxed in ---
         if audio and gen_method in _GROUNDING_REAL and final_path.exists():
+            _mode = audio if audio in ("music", "ambient") else "music"
             try:
-                if _add_audio(prompt, duration, final_path):
-                    _update_job(job_id, audio="added")
+                if _add_audio(prompt, duration, final_path, _mode):
+                    _update_job(job_id, audio=_mode)
             except Exception as _ae:
                 print(f"[audio] {job_id} error: {_ae}", flush=True)
 

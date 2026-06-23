@@ -70,7 +70,10 @@
       <label>Length: <strong id="sec-val">5</strong> s</label>
       <input type="range" id="sec-slider" min="3" max="8" value="5" step="1" oninput="stSeconds()">
       <span class="st-sec-note">longer = more RTC</span>
-      <label style="color:var(--text-secondary);font-size:13px;margin-left:10px;"><input type="checkbox" id="audio-toggle"> 🔊 Audio</label>
+      <label style="color:var(--text-secondary);font-size:13px;margin-left:10px;">🔊 Audio:
+        <select id="audio-mode" style="background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:2px 6px;">
+          <option value="">Off</option><option value="music">🎵 Music</option><option value="ambient">🌫️ Ambient/SFX</option>
+        </select></label>
     </div>
     <div class="tiers">
       {% for t in video_tiers %}
@@ -111,7 +114,10 @@
     <div class="st-seconds" style="margin:6px 0 10px;">
       <label>Length: <strong id="sec-val-i2v">5</strong> s</label>
       <input type="range" id="sec-slider-i2v" min="3" max="8" value="5" step="1" oninput="stSecondsI2v()">
-      <label style="color:var(--text-secondary);font-size:13px;margin-left:10px;"><input type="checkbox" id="audio-toggle-i2v"> 🔊 Audio</label>
+      <label style="color:var(--text-secondary);font-size:13px;margin-left:10px;">🔊 Audio:
+        <select id="audio-mode-i2v" style="background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:2px 6px;">
+          <option value="">Off</option><option value="music">🎵 Music</option><option value="ambient">🌫️ Ambient/SFX</option>
+        </select></label>
     </div>
     <button class="gen" id="i2v-btn" onclick="stGenerate('i2v')">Animate Image · <span class="btnc-i2v">5</span> RTC</button>
   </div>
@@ -226,7 +232,7 @@
       reader.onload = function () {
         _doGenerate({ type: "i2v", prompt: prompt, image: reader.result,
                       seconds: parseInt((document.getElementById("sec-slider-i2v")||{}).value || "5", 10),
-                      audio: !!(document.getElementById("audio-toggle-i2v")||{}).checked });
+                      audio: (document.getElementById("audio-mode-i2v")||{}).value || "" });
       };
       reader.readAsDataURL(fi.files[0]);
       return;
@@ -235,7 +241,7 @@
     if (mode === "video") {
       payload.tier = tier;
       payload.seconds = parseInt((document.getElementById("sec-slider") || {}).value || "5", 10);
-      payload.audio = !!(document.getElementById("audio-toggle") || {}).checked;
+      payload.audio = (document.getElementById("audio-mode") || {}).value || "";
     }
     _doGenerate(payload);
   };
