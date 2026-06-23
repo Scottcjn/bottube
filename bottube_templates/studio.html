@@ -57,6 +57,7 @@
     <button class="st-mode" data-mode="image" onclick="stMode('image')">🖼️ Image</button>
     <button class="st-mode" data-mode="voice" onclick="stMode('voice')">🔊 Voice</button>
     <button class="st-mode" data-mode="model" onclick="stMode('model')">🧊 3D</button>
+    <button class="st-mode" data-mode="i2v" onclick="stMode('i2v')">🎞️ Image→Video</button>
   </div>
 
   <div class="st-bal" id="st-bal">Checking your RTC balance…</div>
@@ -102,6 +103,17 @@
     <div style="margin-top:12px;"><a href="/studio/models" style="color:var(--accent);font-weight:700;font-size:14px;">🧊 Browse the 3D model gallery →</a></div>
   </div>
 
+  <!-- IMAGE -> VIDEO -->
+  <div class="st-single" id="mode-i2v" style="display:none">
+    <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">Upload an image; Wan 2.2 animates it into video. Describe the motion in the prompt. Priced per second.</p>
+    <input type="file" id="i2v-file" accept="image/*" style="margin-bottom:10px;color:var(--text-secondary);">
+    <div class="st-seconds" style="margin:6px 0 10px;">
+      <label>Length: <strong id="sec-val-i2v">5</strong> s</label>
+      <input type="range" id="sec-slider-i2v" min="3" max="8" value="5" step="1" oninput="stSecondsI2v()">
+    </div>
+    <button class="gen" id="i2v-btn" onclick="stGenerate('i2v')">Animate Image · <span class="btnc-i2v">5</span> RTC</button>
+  </div>
+
   <div class="st-status" id="st-status"></div>
   <div class="st-result" id="st-result"></div>
 
@@ -118,7 +130,7 @@
   var balEl = document.getElementById("st-bal");
   var promptEl = document.getElementById("st-prompt");
   var curMode = "video";
-  var signedIn = false, voiceEnabled = true;
+  var signedIn = false, voiceEnabled = true, i2vRate = 1.0;
 
   function allButtons(){ return document.querySelectorAll(".gen"); }
   function setBusy(b){ allButtons().forEach(function(x){ x.disabled = b; }); }
@@ -130,7 +142,7 @@
     document.querySelectorAll(".st-mode").forEach(function(b){
       b.classList.toggle("active", b.getAttribute("data-mode") === mode);
     });
-    ["video","image","voice","model"].forEach(function(m){
+    ["video","image","voice","model","i2v"].forEach(function(m){
       document.getElementById("mode-" + m).style.display = (mode === m) ? "" : "none";
     });
     say(""); clearResult();
@@ -138,7 +150,8 @@
       video: "Describe the video you want… e.g. 'a neon cajun bayou at night, fireflies over the water, cinematic'",
       image: "Describe the image… e.g. 'a vintage IBM POWER8 server glowing in a cathedral of voltage, dramatic light'",
       voice: "Type what Sophia should say… e.g. 'Welcome to Elyan Labs. Let me show you what we built.'",
-      model: "Describe an object to model in 3D… e.g. 'a low-poly treasure chest, game-ready'"
+      model: "Describe an object to model in 3D… e.g. 'a low-poly treasure chest, game-ready'",
+      i2v: "Describe the motion… e.g. 'gentle wind, the character blinks and breathes, slow camera push-in'"
     };
     promptEl.placeholder = ph[mode] || "";
   };
@@ -149,6 +162,7 @@
       .then(function(d){
         signedIn = !!d.signed_in;
         voiceEnabled = d.voice_enabled !== false;
+        try { i2vRate = d.tiers.video.full_ai.rtc_per_sec || 1.0; window.stSecondsI2v && window.stSecondsI2v(); } catch (e) {}
         if (!signedIn) { balEl.innerHTML = 'Sign in to generate — <a href="/login">log in</a>.'; setBusy(true); }
         else { balEl.innerHTML = "Your balance: <strong>" + (d.rtc_balance != null ? d.rtc_balance : "?") + " RTC</strong>"; }
         if (!voiceEnabled) {
@@ -171,16 +185,9 @@
   };
   stSeconds();
 
-  window.stGenerate = function (mode, tier) {
-    var prompt = (promptEl.value || "").trim();
-    if (!prompt) { say("Type a prompt first."); return; }
+  function _doGenerate(payload) {
     setBusy(true); clearResult();
-    say(mode === "video" ? "Charging RTC and starting generation…" : "Charging RTC and generating…");
-    var payload = { type: mode, prompt: prompt };
-    if (mode === "video") {
-      payload.tier = tier;
-      payload.seconds = parseInt((document.getElementById("sec-slider") || {}).value || "5", 10);
-    }
+    say((payload.type === "image" || payload.type === "voice") ? "Charging RTC and generating…" : "Charging RTC and starting generation…");
     fetch("/api/studio/generate", {
       method: "POST", headers: { "Content-Type": "application/json" },
       credentials: "same-origin", body: JSON.stringify(payload)
@@ -194,21 +201,45 @@
         }
         balEl.innerHTML = "Your balance: <strong>" + res.d.new_balance + " RTC</strong>";
         if (res.d.type === "image") {
-          setBusy(false);
-          say("✅ Charged " + res.d.charged_rtc + " RTC.");
-          resultEl.innerHTML = '<img src="' + res.d.media_url + '" alt="generated image">' +
-            '<div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download image →</a></div>';
+          setBusy(false); say("✅ Charged " + res.d.charged_rtc + " RTC.");
+          resultEl.innerHTML = '<img src="' + res.d.media_url + '" alt="generated image"><div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download image →</a></div>';
         } else if (res.d.type === "voice") {
-          setBusy(false);
-          say("✅ Charged " + res.d.charged_rtc + " RTC.");
-          resultEl.innerHTML = '<audio controls autoplay src="' + res.d.media_url + '"></audio>' +
-            '<div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download audio →</a></div>';
+          setBusy(false); say("✅ Charged " + res.d.charged_rtc + " RTC.");
+          resultEl.innerHTML = '<audio controls autoplay src="' + res.d.media_url + '"></audio><div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download audio →</a></div>';
         } else {
-          say("✅ Charged " + res.d.charged_rtc + " RTC. Generating your video… this can take a couple minutes.");
+          say("✅ Charged " + res.d.charged_rtc + " RTC. Generating… this can take a couple minutes.");
           poll(res.d.status_url);
         }
       })
       .catch(function(){ setBusy(false); say("Couldn't reach the studio. Try again."); });
+  }
+
+  window.stGenerate = function (mode, tier) {
+    var prompt = (promptEl.value || "").trim();
+    if (!prompt) { say("Type a prompt first."); return; }
+    if (mode === "i2v") {
+      var fi = document.getElementById("i2v-file");
+      if (!fi || !fi.files || !fi.files[0]) { say("Choose an image to animate first."); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        _doGenerate({ type: "i2v", prompt: prompt, image: reader.result,
+                      seconds: parseInt((document.getElementById("sec-slider-i2v")||{}).value || "5", 10) });
+      };
+      reader.readAsDataURL(fi.files[0]);
+      return;
+    }
+    var payload = { type: mode, prompt: prompt };
+    if (mode === "video") {
+      payload.tier = tier;
+      payload.seconds = parseInt((document.getElementById("sec-slider") || {}).value || "5", 10);
+    }
+    _doGenerate(payload);
+  };
+
+  window.stSecondsI2v = function () {
+    var s = parseInt((document.getElementById("sec-slider-i2v") || {}).value || "5", 10);
+    var sv = document.getElementById("sec-val-i2v"); if (sv) sv.textContent = s;
+    var bc = document.querySelector(".btnc-i2v"); if (bc) bc.textContent = Math.round(i2vRate * s * 100) / 100;
   };
 
   function poll(url) {

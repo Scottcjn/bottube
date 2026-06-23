@@ -56,6 +56,15 @@ try:
 except Exception:
     _WAN_WORKFLOW = None
 
+WAN_I2V_WORKFLOW_PATH = os.environ.get(
+    "WAN_I2V_WORKFLOW_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "wan_i2v_api.json"))
+try:
+    with open(WAN_I2V_WORKFLOW_PATH) as _wf:
+        _WAN_I2V_WORKFLOW = json.load(_wf)
+except Exception:
+    _WAN_I2V_WORKFLOW = None
+
 # Free-tier video gen backends (cascade: try each in order)
 HF_API_TOKEN = os.environ.get("HF_API_TOKEN", "")
 HF_VIDEO_MODEL = os.environ.get("HF_VIDEO_MODEL", "ali-vilab/text-to-video-ms-1.7b")
@@ -376,34 +385,8 @@ def _try_comfyui(prompt: str, seed: int) -> Optional[Path]:
     return None
 
 
-def _try_wan(prompt: str, duration: int, final_path) -> bool:
-    """Wan 2.2 text-to-video via ComfyUI (:8189, local V100). Writes mp4 to final_path.
-
-    Registry backend signature (prompt, duration, final_path)->bool. Disabled unless
-    WAN_COMFYUI_URL is set and the flattened workflow loaded."""
-    if not WAN_COMFYUI_URL or not _WAN_WORKFLOW:
-        return False
-    wf = json.loads(json.dumps(_WAN_WORKFLOW))
-    try:
-        wf["1089"]["inputs"]["text"] = prompt[:PROMPT_MAX_LEN]   # positive prompt node
-    except Exception:
-        return False
-    try:
-        # duration (s) -> frame count at 16fps; Wan likes 4n+1, clamp ~1-8s
-        frames = max(17, min(129, int(duration) * 16 + 1))
-        wf["1074"]["inputs"]["length"] = frames   # EmptyHunyuanLatentVideo
-    except Exception:
-        pass
-    # Intelligent GPU selector: make sure the video family owns the GPU (swaps
-    # out the 3D stack if it was hot). Best-effort — proceed if the manager is down.
-    _mgr = os.environ.get("GPU_MANAGER_URL", "")
-    if _mgr:
-        try:
-            urllib.request.urlopen(urllib.request.Request(
-                _mgr.rstrip("/") + "/acquire", data=json.dumps({"need": "video"}).encode(),
-                headers={"Content-Type": "application/json"}, method="POST"), timeout=90)
-        except Exception:
-            pass
+def _wan_run(wf, final_path) -> bool:
+    """Submit a prepared ComfyUI workflow to the Wan box, poll, fetch the mp4."""
     try:
         req = urllib.request.Request(
             f"{WAN_COMFYUI_URL}/prompt",
@@ -450,6 +433,84 @@ def _try_wan(prompt: str, duration: int, final_path) -> bool:
                 except Exception:
                     continue
     return False
+
+
+def _wan_upload_image(image_bytes, filename="i2v_in.png"):
+    """Upload an image to the Wan ComfyUI input dir; return the stored name."""
+    import requests
+    r = requests.post(WAN_COMFYUI_URL.rstrip("/") + "/upload/image",
+                      files={"image": (filename, image_bytes, "image/png")},
+                      data={"overwrite": "true"}, timeout=30)
+    r.raise_for_status()
+    j = r.json()
+    name, sub = j.get("name"), j.get("subfolder", "")
+    return f"{sub}/{name}" if sub else name
+
+
+def _try_wan_i2v(prompt: str, duration: int, image_bytes: bytes, final_path) -> bool:
+    """Wan 2.2 IMAGE-to-video: upload the start image, run the i2v workflow."""
+    if not WAN_COMFYUI_URL or not _WAN_I2V_WORKFLOW or not image_bytes:
+        return False
+    try:
+        img_name = _wan_upload_image(image_bytes)
+    except Exception:
+        return False
+    if not img_name:
+        return False
+    wf = json.loads(json.dumps(_WAN_I2V_WORKFLOW))
+    for v in wf.values():
+        for k, val in list(v.get("inputs", {}).items()):
+            if val == "__IMAGE__":
+                v["inputs"][k] = img_name
+            elif val == "__PROMPT__":
+                v["inputs"][k] = prompt[:PROMPT_MAX_LEN]
+    try:
+        frames = max(17, min(129, int(duration) * 16 + 1))
+        for v in wf.values():
+            if v.get("class_type") == "WanImageToVideo" and "length" in v.get("inputs", {}):
+                v["inputs"]["length"] = frames
+    except Exception:
+        pass
+    _mgr = os.environ.get("GPU_MANAGER_URL", "")
+    if _mgr:
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                _mgr.rstrip("/") + "/acquire", data=json.dumps({"need": "video"}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST"), timeout=90)
+        except Exception:
+            pass
+    return _wan_run(wf, final_path)
+
+
+def _try_wan(prompt: str, duration: int, final_path) -> bool:
+    """Wan 2.2 text-to-video via ComfyUI (:8189, local V100). Writes mp4 to final_path.
+
+    Registry backend signature (prompt, duration, final_path)->bool. Disabled unless
+    WAN_COMFYUI_URL is set and the flattened workflow loaded."""
+    if not WAN_COMFYUI_URL or not _WAN_WORKFLOW:
+        return False
+    wf = json.loads(json.dumps(_WAN_WORKFLOW))
+    try:
+        wf["1089"]["inputs"]["text"] = prompt[:PROMPT_MAX_LEN]   # positive prompt node
+    except Exception:
+        return False
+    try:
+        # duration (s) -> frame count at 16fps; Wan likes 4n+1, clamp ~1-8s
+        frames = max(17, min(129, int(duration) * 16 + 1))
+        wf["1074"]["inputs"]["length"] = frames   # EmptyHunyuanLatentVideo
+    except Exception:
+        pass
+    # Intelligent GPU selector: make sure the video family owns the GPU (swaps
+    # out the 3D stack if it was hot). Best-effort — proceed if the manager is down.
+    _mgr = os.environ.get("GPU_MANAGER_URL", "")
+    if _mgr:
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                _mgr.rstrip("/") + "/acquire", data=json.dumps({"need": "video"}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST"), timeout=90)
+        except Exception:
+            pass
+    return _wan_run(wf, final_path)
 
 
 # ---------------------------------------------------------------------------
@@ -887,8 +948,11 @@ def _ffmpeg_title_card(prompt: str, duration: int, output_path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def _generation_worker(job_id: str, agent_id: int, prompt: str,
-                       duration: int, category: str, title: str):
-    """Background worker that generates the video and inserts the DB record."""
+                       duration: int, category: str, title: str, start_image=None):
+    """Background worker that generates the video and inserts the DB record.
+
+    If start_image (bytes) is given, tries Wan image-to-video first; otherwise
+    falls through to the text-to-video cascade. Reuses all publish logic below."""
     _update_job(job_id, status="generating")
 
     video_id = _gen_video_id()
@@ -896,9 +960,17 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
     gen_method = "text"
 
     try:
-        # Try LTX-2 via ComfyUI first
+        # Image-to-video first when a start image is provided (Wan i2v)
+        if start_image:
+            try:
+                if _try_wan_i2v(prompt, duration, start_image, final_path) and final_path.exists():
+                    gen_method = "wan22_i2v"
+            except Exception:
+                pass
+
+        # Text-to-video via ComfyUI (LTX) if nothing produced yet
         seed = random.randint(0, 2**31)
-        comfyui_result = _try_comfyui(prompt, seed)
+        comfyui_result = None if final_path.exists() else _try_comfyui(prompt, seed)
 
         if comfyui_result and comfyui_result.exists():
             gen_method = "ltx2"

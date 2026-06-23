@@ -146,11 +146,11 @@ def _save_media(data: bytes, ext: str) -> str:
 
 # gen_method values that mean "real AI video was produced". Anything else (the
 # ffmpeg title-card / text fallback) is NOT what a paid AI tier promised -> refund.
-_REAL_VIDEO_METHODS = {"ltx2", "wan22", "gemini", "stability", "fal", "replicate",
-                       "hf_sdxl_video", "huggingface", "ken_burns"}
+_REAL_VIDEO_METHODS = {"ltx2", "wan22", "wan22_i2v", "gemini", "stability", "fal",
+                       "replicate", "hf_sdxl_video", "huggingface", "ken_burns"}
 
 
-def _studio_video_worker(job_id, agent_id, prompt, duration, cost, tier="full_ai"):
+def _studio_video_worker(job_id, agent_id, prompt, duration, cost, tier="full_ai", image_bytes=None):
     """Run the shared video worker, then refund RTC if the job FAILED, or if a paid
     AI tier silently fell back to the ffmpeg text card (not what the user paid for).
 
@@ -161,7 +161,8 @@ def _studio_video_worker(job_id, agent_id, prompt, duration, cost, tier="full_ai
     """
     from video_gen_blueprint import _generation_worker, _get_job
     try:
-        _generation_worker(job_id, agent_id, prompt, duration, "ai-art", prompt[:200])
+        _generation_worker(job_id, agent_id, prompt, duration, "ai-art", prompt[:200],
+                           start_image=image_bytes)
     except Exception as e:
         print(f"[studio] video worker raised for {job_id}: {e}", flush=True)
     try:
@@ -237,6 +238,20 @@ def studio_generate():
         if tier not in VIDEO_TIERS:
             return jsonify({"error": "unknown video tier"}), 400
         cost, seconds = _video_cost(tier, body.get("seconds", VIDEO_TIERS[tier]["default_s"]))
+    elif gtype == "i2v":
+        # image-to-video: requires a start image (base64), priced like full_ai video
+        img_b64 = body.get("image") or ""
+        if img_b64.strip().startswith("data:") and "," in img_b64:
+            img_b64 = img_b64.split(",", 1)[1]
+        try:
+            import base64 as _b64
+            i2v_image = _b64.b64decode(img_b64) if img_b64 else b""
+        except Exception:
+            i2v_image = b""
+        if not i2v_image or len(i2v_image) < 256:
+            return jsonify({"error": "image required for image-to-video"}), 400
+        tier = "full_ai"
+        cost, seconds = _video_cost(tier, body.get("seconds", VIDEO_TIERS[tier]["default_s"]))
     elif gtype == "image":
         cost = IMAGE_RTC
     elif gtype == "voice":
@@ -284,6 +299,22 @@ def studio_generate():
             print(f"[studio] video start failed (refunded {cost}): {e}", flush=True)
             return jsonify({"error": "couldn't start generation; your RTC was refunded"}), 502
         return jsonify({"ok": True, "type": "video", "job_id": job_id, "charged_rtc": cost,
+                        "seconds": seconds, "new_balance": new_balance,
+                        "status_url": f"/api/generate-video/status/{job_id}"}), 202
+
+    # ---- IMAGE-TO-VIDEO: async Wan i2v (start image animated) ----
+    if gtype == "i2v":
+        try:
+            from video_gen_blueprint import _create_job
+            job_id = _create_job(agent_id, prompt)
+            threading.Thread(target=_studio_video_worker,
+                             args=(job_id, agent_id, prompt, seconds, cost, tier, i2v_image),
+                             daemon=True).start()
+        except Exception as e:
+            _refund(agent_id, cost)
+            print(f"[studio] i2v start failed (refunded {cost}): {e}", flush=True)
+            return jsonify({"error": "couldn't start generation; your RTC was refunded"}), 502
+        return jsonify({"ok": True, "type": "i2v", "job_id": job_id, "charged_rtc": cost,
                         "seconds": seconds, "new_balance": new_balance,
                         "status_url": f"/api/generate-video/status/{job_id}"}), 202
 
