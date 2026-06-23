@@ -65,6 +65,14 @@ try:
 except Exception:
     _WAN_I2V_WORKFLOW = None
 
+# Grounding proof — after a render, a multimodal model verifies the output matches
+# the prompt (right subject, no artifacts); retry once (t2v) if it drifted.
+GROUNDING_CHECK = os.environ.get("GROUNDING_CHECK", "1") == "1"
+GROUNDING_RETRY = os.environ.get("GROUNDING_RETRY", "1") == "1"
+GROUNDING_VISION_URL = os.environ.get("GROUNDING_VISION_URL", os.environ.get("SOPHIA_LLM_URL", ""))
+GROUNDING_MODEL = os.environ.get("GROUNDING_MODEL", os.environ.get("SOPHIA_MODEL", "gemma4:12b"))
+_GROUNDING_REAL = {"wan22", "wan22_i2v", "ltx2", "ken_burns"}
+
 # Free-tier video gen backends (cascade: try each in order)
 HF_API_TOKEN = os.environ.get("HF_API_TOKEN", "")
 HF_VIDEO_MODEL = os.environ.get("HF_VIDEO_MODEL", "ali-vilab/text-to-video-ms-1.7b")
@@ -947,6 +955,77 @@ def _ffmpeg_title_card(prompt: str, duration: int, output_path: Path) -> bool:
 # Generation worker (runs in background thread)
 # ---------------------------------------------------------------------------
 
+def _extract_frame(mp4_path):
+    """Pull one frame from the rendered mp4 as JPEG bytes (for the grounding check)."""
+    out = str(Path(mp4_path).with_suffix(".frame.jpg"))
+    try:
+        subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i", str(mp4_path),
+                        "-frames:v", "1", "-q:v", "4", out], capture_output=True, timeout=30)
+        if os.path.exists(out):
+            data = open(out, "rb").read()
+            os.remove(out)
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _grounding_check(prompt, frame_bytes):
+    """Ask the multimodal model whether the frame matches the prompt. (ok, issues)."""
+    if not GROUNDING_VISION_URL or not frame_bytes:
+        return True, ""   # can't verify -> never block delivery
+    import base64 as _b64
+    img = "data:image/jpeg;base64," + _b64.b64encode(frame_bytes).decode()
+    q = ("Check this AI-generated video frame against its prompt.\n"
+         f"PROMPT: \"{prompt[:300]}\"\n"
+         "Is the MAIN SUBJECT correct and free of obvious artifacts (wrong subject, humans "
+         "when not asked, extra limbs, duplicate or extra parts, extra eyes/scopes, floating "
+         "disconnected objects)? Reply with ONLY JSON: "
+         '{"match": true or false, "issues": "short reason"}')
+    body = {"model": GROUNDING_MODEL, "max_tokens": 500, "messages": [
+        {"role": "user", "content": [{"type": "text", "text": q},
+                                     {"type": "image_url", "image_url": {"url": img}}]}]}
+    try:
+        req = urllib.request.Request(GROUNDING_VISION_URL, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        r = json.load(urllib.request.urlopen(req, timeout=90))
+        txt = r.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+        import re as _re
+        m = _re.search(r"\{.*\}", txt, _re.S)
+        if m:
+            d = json.loads(m.group(0))
+            return bool(d.get("match", True)), str(d.get("issues", ""))[:200]
+    except Exception:
+        pass
+    return True, ""   # vision failed -> don't block
+
+
+def _grounding_verify(job_id, prompt, duration, final_path, start_image):
+    """Verify the render matches the prompt; retry once (t2v only) if it drifted.
+    Returns a replacement gen_method to record, or None to keep the current one."""
+    ok, issues = _grounding_check(prompt, _extract_frame(final_path))
+    if ok:
+        _update_job(job_id, grounding="pass")
+        return None
+    print(f"[grounding] {job_id} flagged: {issues}", flush=True)
+    _update_job(job_id, grounding="flagged", grounding_issues=issues)
+    if not (GROUNDING_RETRY and start_image is None):
+        return None   # i2v is image-anchored — no t2v retry path
+    tighter = (prompt + ". Depict exactly this subject and nothing else; no people unless "
+               "explicitly requested, correct anatomy, a single clear subject.")
+    tmp = Path(final_path).with_suffix(".retry.mp4")
+    try:
+        if _try_wan(tighter, duration, tmp) and tmp.exists() and tmp.stat().st_size > 1000:
+            ok2, issues2 = _grounding_check(prompt, _extract_frame(tmp))
+            tmp.replace(final_path)
+            _update_job(job_id, grounding=("retry_pass" if ok2 else "retry_done"),
+                        grounding_issues="" if ok2 else issues2)
+            return "wan22"
+    except Exception as e:
+        print(f"[grounding] retry error {job_id}: {e}", flush=True)
+    return None
+
+
 def _generation_worker(job_id: str, agent_id: int, prompt: str,
                        duration: int, category: str, title: str, start_image=None):
     """Background worker that generates the video and inserts the DB record.
@@ -1013,6 +1092,15 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
             if not _ffmpeg_title_card(prompt, duration, final_path):
                 _update_job(job_id, status="failed", error="Video generation failed (all backends)")
                 return
+
+        # --- Grounding proof: verify the output matches the prompt; retry once if drifted ---
+        if GROUNDING_CHECK and gen_method in _GROUNDING_REAL and final_path.exists():
+            try:
+                _gm = _grounding_verify(job_id, prompt, duration, final_path, start_image)
+                if _gm:
+                    gen_method = _gm
+            except Exception as _ge:
+                print(f"[grounding] {job_id} error: {_ge}", flush=True)
 
         # Get video metadata
         from bottube_server import get_video_metadata, generate_thumbnail
