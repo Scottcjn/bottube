@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 BoTTube - Video Sharing Platform for AI Agents
 Companion to Moltbook (AI social network)
@@ -26,6 +27,7 @@ import urllib.parse
 import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, parsedate_to_datetime
 from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -37,6 +39,7 @@ from flask import (
     flash,
     g,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -101,6 +104,10 @@ def _get_ab_manager():
 
 AVATAR_DIR = BASE_DIR / "avatars"
 TEMPLATE_DIR = BASE_DIR / "bottube_templates"
+
+# Largest value SQLite can store in an INTEGER column / accept as a bound
+# parameter. Larger Python ints raise OverflowError in the driver.
+_SQLITE_MAX_INT64 = (1 << 63) - 1
 
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB upload limit
 MAX_VIDEO_DURATION = 8  # seconds - default for short-form content
@@ -1339,6 +1346,13 @@ def _translate(key, **kwargs):
     return text
 
 
+def _language_switch_href(locale_code: str) -> str:
+    """Return a query-only language link while preserving current filters."""
+    args = request.args.to_dict(flat=True)
+    args["lang"] = locale_code
+    return "?" + urllib.parse.urlencode(args)
+
+
 _load_translations()
 
 # ---------------------------------------------------------------------------
@@ -1384,6 +1398,7 @@ app.jinja_env.globals["P"] = IP_PREFIX  # default fallback
 app.jinja_env.globals["MAX_DURATION"] = MAX_VIDEO_DURATION
 app.jinja_env.globals["_"] = _translate
 app.jinja_env.globals["SUPPORTED_LOCALES"] = SUPPORTED_LOCALES
+app.jinja_env.globals["language_switch_href"] = _language_switch_href
 
 
 def _build_recovery_notice(db=None):
@@ -1427,7 +1442,7 @@ def set_url_prefix():
     host = request.host.split(":")[0].lower()
     canonical_host = os.getenv("BOTTUBE_CANONICAL_HOST", "bottube.ai").strip().lower()
     if os.getenv("BOTTUBE_WWW_REDIRECT", "1").strip().lower() not in {"0", "false", "no"}:
-        if host == f"www.{canonical_host}":
+        if host == f"www.{canonical_host}" and not request.path.endswith("/validation-key.txt"):
             scheme = (
                 "https"
                 if (request.is_secure or request.headers.get("X-Forwarded-Proto") == "https")
@@ -1490,7 +1505,12 @@ def set_security_headers(response):
     # Embed route allows framing from any origin; all other routes restrict it
     is_embed = request.path.startswith("/embed/")
     if not is_embed and not is_api:
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        # Pi Network: bottube.ai must be embeddable by Pi Browser / Pi App Studio, so
+        # framing is governed by CSP frame-ancestors (below), NOT X-Frame-Options
+        # (which has no allow-list and would block Pi). Pi App Studio's preview is
+        # cross-origin isolated, so it also needs CORP + COEP to load bottube.ai.
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "cross-origin")
+        response.headers.setdefault("Cross-Origin-Embedder-Policy", "credentialless")
         # NOTE: 'unsafe-inline' is required for script-src and style-src because
         # legacy templates use inline <script> blocks (JSON-LD, GA gtag) and
         # inline <style> blocks throughout.  Migrating to nonce-based CSP
@@ -1498,16 +1518,17 @@ def set_security_headers(response):
         # mitigated by safe_jsonld() / jsonld_safe which escape </ sequences.
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://cdn.jsdelivr.net https://unpkg.com; "
+            "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://www.gstatic.com https://imasdk.googleapis.com https://sdk.minepi.com; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "media-src 'self'; "
             "font-src 'self'; "
-            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com; "
+            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net https://www.googletagmanager.com https://www.google.com https://api.minepi.com https://sdk.minepi.com https://*.minepi.com; "
             "object-src 'none'; "
             "base-uri 'self'; "
             "form-action 'self'; "
-            "frame-ancestors 'self'"
+            "frame-src 'self' https://*.minepi.com; "
+            "frame-ancestors 'self' https://*.minepi.com https://*.pi https://*.pinet.com"
         )
         response.headers.setdefault("Content-Security-Policy", csp)
     return response
@@ -1521,7 +1542,8 @@ def _verify_csrf():
     )
     if not token:
         data = request.get_json(silent=True) or {}
-        token = data.get("csrf_token", "")
+        if isinstance(data, dict):
+            token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
     if not expected or not token or not secrets.compare_digest(token, expected):
         # Return JSON for AJAX/API requests so JS can handle the error
@@ -1535,6 +1557,27 @@ def _verify_csrf():
             )
             abort(resp)
         abort(403)
+
+
+def _public_json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"ok": False, "error": "JSON body must be an object"}), 400)
+    return data, None
+
+
+def _public_string_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
 
 
 # ---------------------------------------------------------------------------
@@ -2354,10 +2397,20 @@ def init_db():
         "google_id": "ALTER TABLE agents ADD COLUMN google_id TEXT DEFAULT ''",
         "google_email": "ALTER TABLE agents ADD COLUMN google_email TEXT DEFAULT ''",
         "google_avatar": "ALTER TABLE agents ADD COLUMN google_avatar TEXT DEFAULT ''",
+        # Pi Network login: maps a Pi uid to a BoTTube agents account
+        "pi_uid": "ALTER TABLE agents ADD COLUMN pi_uid TEXT DEFAULT ''",
     }
     for col, sql in google_migrations.items():
         if col not in existing_cols:
             conn.execute(sql)
+    # Pi Network: one BoTTube account per Pi uid (empty uid allowed for every non-Pi account).
+    # Defensive: a hand-edited DB with duplicate pi_uid must not block startup.
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_pi_uid ON agents(pi_uid) WHERE pi_uid != ''"
+        )
+    except sqlite3.IntegrityError as e:
+        print(f"[WARN] could not create idx_agents_pi_uid (duplicate pi_uid?): {e}")
 
     # Migration: add is_removed to videos if missing
     video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
@@ -2412,6 +2465,11 @@ def init_db():
         conn.execute("ALTER TABLE videos ADD COLUMN response_to_video_id TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_response_to ON videos(response_to_video_id)")
 
+    # Migration: add collaborator_ids for co-upload (Bounty #2161)
+    video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
+    if "collaborator_ids" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN collaborator_ids TEXT DEFAULT '[]'")
+
     # Migration: create messages table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -2427,6 +2485,16 @@ def init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS message_reads (
+            message_id TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            read_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (message_id, agent_name),
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_reads_agent ON message_reads(agent_name)")
 
     # Migration: watch_history table (Phase 6)
     conn.execute("""
@@ -4186,6 +4254,11 @@ def video_to_dict(row):
     return d
 
 
+def _public_video_filter_sql() -> str:
+    """SQL predicate for public video surfaces."""
+    return "COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0"
+
+
 def agent_to_dict(row, include_private=False, *, badges=None):
     """Convert agent row to public-safe dict (allowlist only).
 
@@ -4611,6 +4684,25 @@ def api_docs_swagger_ui():
     # Self-hosted Swagger UI assets (no CDN dependency).
     return render_template("api_swagger.html")
 
+
+def _register_text_field(data, field, default=""):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    return value.strip(), None
+
+
+def _json_object_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
 @app.route("/api/register", methods=["POST"])
 def register_agent():
     """Register a new agent and return API key."""
@@ -4619,10 +4711,25 @@ def register_agent():
     if not _rate_limit(f"register:{ip}", 5, 3600):
         return jsonify({"error": "Too many registrations. Try again later."}), 429
 
-    data = request.get_json(silent=True) or {}
-    agent_name = data.get("agent_name", "").strip().lower()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    agent_name, error = _register_text_field(data, "agent_name")
+    if error:
+        return jsonify({"error": error}), 400
+    agent_name = agent_name.lower()
+
+    ref_code_raw, error = _register_text_field(data, "ref_code")
+    if error:
+        return jsonify({"error": error}), 400
+    ref_raw, error = _register_text_field(data, "ref")
+    if error:
+        return jsonify({"error": error}), 400
     ref_code = _normalize_ref_code(
-        data.get("ref_code", "") or data.get("ref", "") or request.args.get("ref", "")
+        ref_code_raw or ref_raw or request.args.get("ref", "")
     )
 
     if not agent_name:
@@ -4641,10 +4748,24 @@ def register_agent():
                 "allowed_track": _normalize_referral_track(ref["allowed_track"], "both"),
             }), 400
 
-    display_name = _strip_script_tags(data.get("display_name", agent_name).strip()[:MAX_DISPLAY_NAME_LENGTH])
-    bio = _strip_script_tags(data.get("bio", "").strip()[:MAX_BIO_LENGTH])
-    avatar_url = data.get("avatar_url", "").strip()
-    x_handle = data.get("x_handle", "").strip().lstrip("@")[:32]
+    display_name, error = _register_text_field(
+        data, "display_name", default=agent_name
+    )
+    if error:
+        return jsonify({"error": error}), 400
+    bio, error = _register_text_field(data, "bio")
+    if error:
+        return jsonify({"error": error}), 400
+    avatar_url, error = _register_text_field(data, "avatar_url")
+    if error:
+        return jsonify({"error": error}), 400
+    x_handle, error = _register_text_field(data, "x_handle")
+    if error:
+        return jsonify({"error": error}), 400
+
+    display_name = _strip_script_tags(display_name[:MAX_DISPLAY_NAME_LENGTH])
+    bio = _strip_script_tags(bio[:MAX_BIO_LENGTH])
+    x_handle = x_handle.lstrip("@")[:32]
 
     # Validate avatar_url if provided
     if avatar_url:
@@ -4720,8 +4841,18 @@ def verify_claim():
     X handle. The server (or a bridge bot) checks if the URL was posted.
     For now, manual/admin verification is supported.
     """
-    data = request.get_json(silent=True) or {}
-    x_handle = data.get("x_handle", "").strip().lstrip("@")
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    raw_x_handle = data.get("x_handle", "")
+    if raw_x_handle is None:
+        raw_x_handle = ""
+    if not isinstance(raw_x_handle, str):
+        return jsonify({"error": "x_handle must be a string"}), 400
+    x_handle = raw_x_handle.strip().lstrip("@")
 
     if not x_handle:
         return jsonify({"error": "x_handle is required"}), 400
@@ -4969,6 +5100,158 @@ def signup():
     return redirect(url_for("index"))
 
 
+@app.route("/validation-key.txt")
+@app.route("/pi/validation-key.txt")
+def pi_validation_key():
+    """Serve the Pi Network app validation key (proves bottube.ai ownership to the Pi
+    Developer Portal). Read from validation_key.txt at request time (paste a new key,
+    no restart). Served at BOTH /validation-key.txt and /pi/validation-key.txt because
+    the Pi App URL is bottube.ai/pi, so Pi may check the key relative to that path.
+    Pi does NOT follow redirects, so the www->apex redirect exempts these paths."""
+    from flask import Response
+    try:
+        with open(os.path.join(str(BASE_DIR), "validation_key.txt")) as fp:
+            key = fp.read().strip()
+    except OSError:
+        key = ""
+    return Response(key, mimetype="text/plain")
+
+
+@app.route("/pi")
+def pi_home():
+    """Pi-friendly BoTTube landing — the URL the Pi app should be registered to in
+    the Pi Developer Portal so Pioneers launch straight into the Pi experience
+    (Sign in with Pi + pay-in-Pi video generation). The standard site stays RTC.
+    Sets a pi_mode cookie so the server keeps Pi-launched users in Pi mode."""
+    from flask import make_response, redirect
+    # onpi.bottube.ai is the canonical Pi domain. If the Pi storefront is reached on any
+    # other host (e.g. legacy bottube.ai/pi), send it there. index() calls this for the
+    # onpi/4pi hosts (which pass), so those serve normally with no redirect loop.
+    _h = request.host.split(":")[0].lower()
+    _hb = _h[4:] if _h.startswith("www.") else _h
+    # Serve the storefront for onpi.*/4pi.* AND their www. variants (Pi opens the www
+    # host it verified). Any OTHER host (e.g. legacy bottube.ai/pi) -> canonical onpi.
+    if not (_hb.startswith("onpi.") or _hb.startswith("4pi.")):
+        return redirect("https://onpi.bottube.ai/", code=301)
+    # Prices come from pi_payments.PI_PRODUCTS (single source of truth; the server
+    # re-verifies amount on approve/complete). UI copy (name/desc/badge) lives here.
+    try:
+        from pi_payments import PI_PRODUCTS as _PIP
+    except Exception:
+        _PIP = {}
+    _ui = [
+        ("video_text_card", "Text Card", "Instant title-card video", "CHEAPEST"),
+        ("video_ken_burns", "Ken Burns", "Cinematic pan & zoom over images", "POPULAR"),
+        ("video_full_ai", "Full AI Video", "LTX-2 generated, with audio", "PREMIUM"),
+    ]
+    pi_tiers = [
+        {"key": k, "name": n, "desc": d, "badge": b,
+         "pi": _PIP.get(k, {}).get("pi", 0)}
+        for (k, n, d, b) in _ui
+    ]
+    resp = make_response(render_template("pi_home.html", pi_tiers=pi_tiers))
+    # 1 year; SameSite=Lax so it survives the Pi-app navigation.
+    resp.set_cookie("pi_mode", "1", max_age=31536000, samesite="Lax", secure=True)
+    return resp
+
+
+@app.route("/pi/diag")
+def pi_diag():
+    """Tiny telemetry beacon for the Pi auth flow (pi_auth.js GETs this with
+    ?stage=...). Returns a 1x1 gif; the value is the server access-log line."""
+    from flask import Response
+    gif = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
+    return Response(gif, mimetype="image/gif")
+
+
+@app.route("/pi/auth", methods=["POST"])
+def pi_auth():
+    """Pi Network login. Validate the Pi access token SERVER-SIDE via /v2/me, then
+    find-or-create a BoTTube agents account keyed on pi_uid and establish a session.
+    No Pi API key is required for this flow (mirrors /auth/google). Username scope
+    only -- this never initiates a Pi payment."""
+    data = request.get_json(silent=True) or {}
+    access_token = (data.get("access_token") or "").strip()
+    if not access_token:
+        return jsonify({"error": "access_token required"}), 400
+    try:
+        req = urllib.request.Request(
+            "https://api.minepi.com/v2/me",
+            headers={"Authorization": "Bearer " + access_token},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            me = json.loads(r.read())
+    except Exception as e:
+        code = getattr(e, "code", None)
+        if code in (400, 401, 403):
+            return jsonify({"error": "invalid or expired Pi access token"}), 401
+        return jsonify({"error": "could not reach Pi auth service"}), 502
+    user = me.get("user", me) if isinstance(me, dict) else {}
+    pi_uid = (user or {}).get("uid")
+    pi_username = (user or {}).get("username") or ""
+    if not pi_uid:
+        return jsonify({"error": "unexpected /me response"}), 502
+
+    db = get_db()
+    # Case 1: existing Pi user -> log in
+    existing = db.execute("SELECT * FROM agents WHERE pi_uid = ?", (pi_uid,)).fetchone()
+    if existing:
+        db.execute("UPDATE agents SET last_active = ? WHERE id = ?", (time.time(), existing["id"]))
+        db.commit()
+        session.clear()
+        session.permanent = True
+        session["user_id"] = existing["id"]
+        session["csrf_token"] = secrets.token_hex(32)
+        return jsonify({"ok": True, "username": existing["agent_name"], "linked": True})
+    # Case 2: currently logged in -> link Pi to this account (guard against double-link)
+    if g.user:
+        current = (g.user["pi_uid"] if "pi_uid" in g.user.keys() else "") or ""
+        if current and current != pi_uid:
+            return jsonify({"error": "This BoTTube account is already linked to a different Pi account"}), 409
+        other = db.execute(
+            "SELECT id FROM agents WHERE pi_uid = ? AND id != ?", (pi_uid, g.user["id"])
+        ).fetchone()
+        if other:
+            return jsonify({"error": "This Pi account is already linked to another BoTTube account"}), 409
+        db.execute("UPDATE agents SET pi_uid = ? WHERE id = ?", (pi_uid, g.user["id"]))
+        db.commit()
+        return jsonify({"ok": True, "username": g.user["agent_name"], "linked": True})
+    # Case 3: new user -> auto-create account
+    base_name = re.sub(r"[^a-z0-9_-]", "", (pi_username or "pi_user").lower())[:24] or "pi_user"
+    username = base_name
+    suffix = 1
+    while db.execute("SELECT 1 FROM agents WHERE agent_name = ?", (username,)).fetchone():
+        username = base_name + str(suffix)
+        suffix += 1
+    api_key = gen_api_key()
+    now = time.time()
+    try:
+        cur = db.execute(
+            "INSERT INTO agents (agent_name, display_name, api_key, is_human, pi_uid, avatar_url, created_at, last_active) "
+            "VALUES (?, ?, ?, 1, ?, '', ?, ?)",
+            (username, pi_username or username, api_key, pi_uid, now, now),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        # Concurrent first-time login for the same pi_uid lost the create race -> log in instead of 500.
+        db.rollback()
+        existing = db.execute("SELECT * FROM agents WHERE pi_uid = ?", (pi_uid,)).fetchone()
+        if not existing:
+            raise
+        db.execute("UPDATE agents SET last_active = ? WHERE id = ?", (time.time(), existing["id"]))
+        db.commit()
+        session.clear()
+        session.permanent = True
+        session["user_id"] = existing["id"]
+        session["csrf_token"] = secrets.token_hex(32)
+        return jsonify({"ok": True, "username": existing["agent_name"], "linked": True})
+    session.clear()
+    session.permanent = True
+    session["user_id"] = cur.lastrowid
+    session["csrf_token"] = secrets.token_hex(32)
+    return jsonify({"ok": True, "username": username, "created": True})
+
+
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
     """Log out the current user. POST preferred; GET checks referrer."""
@@ -5021,7 +5304,10 @@ def _referral_me_payload() -> Response:
     agent_id = int(g.agent["id"])
     data = {}
     if request.method == "POST":
-        data = request.get_json(silent=True) or request.form.to_dict() or {}
+        json_data = request.get_json(silent=True)
+        if json_data is not None and not isinstance(json_data, dict):
+            return jsonify({"error": "JSON body must be an object"}), 400
+        data = json_data or request.form.to_dict() or {}
     requested_track = _normalize_referral_track(data.get("allowed_track", data.get("track", "both")), "both")
     requested_code = _normalize_ref_code(data.get("code", ""))
     # Prefer an existing code for this agent.
@@ -5104,7 +5390,10 @@ def referral_me_user():
 
 def _referral_apply_payload(source: str):
     db = get_db()
-    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    json_data = request.get_json(silent=True)
+    if json_data is not None and not isinstance(json_data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+    data = json_data or request.form.to_dict() or {}
     ref_code = _normalize_ref_code(data.get("ref_code", "") or data.get("ref", ""))
     if not ref_code:
         return jsonify({"error": "ref_code is required"}), 400
@@ -5387,11 +5676,9 @@ def founding_page():
 @app.route("/api/referrals/leaderboard")
 def referrals_leaderboard_api():
     db = get_db()
-    limit = request.args.get("limit", "50")
-    try:
-        limit_i = int(limit)
-    except Exception:
-        limit_i = 50
+    limit_i, error = _parse_positive_int_query("limit", 50, max_value=200)
+    if error:
+        return error
     return jsonify({"ok": True, "leaderboard": _get_referral_leaderboard(db, limit=limit_i)})
 
 
@@ -5563,6 +5850,13 @@ def admin_review_referral(invite_id):
         return jsonify({"error": "Referral invite not found"}), 404
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    if not isinstance(data.get("action", "pending"), str):
+        return jsonify({"error": "action must be a string"}), 400
+    if data.get("note") is not None and not isinstance(data["note"], str):
+        return jsonify({"error": "note must be a string"}), 400
+
     action = (data.get("action", "pending") or "pending").strip().lower()
     if action not in {"pending", "approve", "approved", "reject", "rejected", "void"}:
         return jsonify({"error": "Invalid action. Use pending, approve, reject, or void."}), 400
@@ -5778,6 +6072,11 @@ def admin_assign_badge():
 
     db = get_db()
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    if not isinstance(data.get("badge_key", ""), str):
+        return jsonify({"error": "badge_key must be a string"}), 400
+
     badge_key = (data.get("badge_key", "") or "").strip()
     if badge_key not in BADGE_CATALOG:
         return jsonify({"error": "Unknown badge_key"}), 400
@@ -5897,6 +6196,11 @@ def admin_remove_badge(badge_id):
         return jsonify({"error": "Badge assignment not found"}), 404
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    if data.get("removed_by") is not None and not isinstance(data["removed_by"], str):
+        return jsonify({"error": "removed_by must be a string"}), 400
+
     removed_by = (data.get("removed_by", "") or "admin").strip()[:120]
     now = time.time()
     db.execute(
@@ -6209,6 +6513,7 @@ def upload_video():
     challenge_id = request.form.get("challenge_id", "").strip()
     gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
     response_to = request.form.get("response_to", "").strip()  # Video ID this is a response to (Issue #2282)
+    collaborator_ids_raw = request.form.get("collaborator_ids", "").strip()  # JSON array of agent_ids for co-upload (Bounty #2161)
 
     db = get_db()
     if revision_of:
@@ -6232,6 +6537,36 @@ def upload_video():
             return jsonify({"error": "response_to video not found"}), 404
         if original_video["is_removed"]:
             return jsonify({"error": "Cannot respond to a removed video"}), 400
+
+    # Parse + validate collaborator_ids (Bounty #2161 co-upload)
+    collaborator_ids_json = "[]"
+    if collaborator_ids_raw:
+        try:
+            parsed_collab = json.loads(collaborator_ids_raw)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid collaborator_ids: must be a JSON array of agent_ids"}), 400
+        if not isinstance(parsed_collab, list):
+            return jsonify({"error": "Invalid collaborator_ids: must be a JSON array"}), 400
+        if len(parsed_collab) > 5:
+            return jsonify({"error": "Too many collaborators: max 5 per video"}), 400
+        cleaned = []
+        for cid in parsed_collab:
+            if not isinstance(cid, int) or cid <= 0:
+                return jsonify({"error": "Invalid collaborator_id: must be a positive int"}), 400
+            if cid == g.agent["id"]:
+                return jsonify({"error": "Cannot add yourself as a collaborator"}), 400
+            cleaned.append(cid)
+        if cleaned:
+            placeholders = ",".join("?" * len(cleaned))
+            existing = db.execute(
+                f"SELECT id FROM agents WHERE id IN ({placeholders})", cleaned
+            ).fetchall()
+            existing_ids = {row["id"] for row in existing}
+            missing = set(cleaned) - existing_ids
+            if missing:
+                return jsonify({"error": f"Unknown collaborator agent_id(s): {sorted(missing)}"}), 400
+        collaborator_ids_json = json.dumps(cleaned)
+
     if challenge_id:
         ch = db.execute(
             "SELECT challenge_id, status, start_at, end_at FROM challenges WHERE challenge_id = ?",
@@ -6423,14 +6758,14 @@ def upload_video():
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
             duration_sec, width, height, tags, scene_description, category,
-            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, response_to_video_id, created_at,
+            novelty_score, novelty_flags, revision_of, revision_note, challenge_id, response_to_video_id, collaborator_ids, created_at,
             screening_status, screening_details, is_removed, removed_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             video_id, g.agent["id"], title, description, filename,
             thumb_filename, duration, width, height, json.dumps(tags),
             scene_description, category, novelty_score, novelty_flags,
-            revision_of, revision_note, challenge_id, response_to, time.time(),
+            revision_of, revision_note, challenge_id, response_to, collaborator_ids_json, time.time(),
             screening_status, screening_details,
             1 if screening_status == "failed" else 0,
             ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
@@ -6589,14 +6924,164 @@ def update_video(video_id):
 # Video listing / detail
 # ---------------------------------------------------------------------------
 
+def _video_list_etag(
+    *,
+    page: int,
+    per_page: int,
+    sort: str,
+    agent_name: str,
+    total: int,
+    latest_ts: float,
+    engagement_revision: int,
+) -> str:
+    cache_key = json.dumps(
+        {
+            "agent": agent_name,
+            "latest_ts": latest_ts,
+            "page": page,
+            "per_page": per_page,
+            "engagement_revision": engagement_revision,
+            "sort": sort,
+            "total": total,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24]
+    return f'W/"videos-{digest}"'
+
+
+def _client_has_video_list_etag(etag: str) -> bool:
+    raw_header = request.headers.get("If-None-Match", "")
+    if not raw_header:
+        return False
+    candidates = {part.strip() for part in raw_header.split(",")}
+    return "*" in candidates or etag in candidates
+
+
+def _make_param_conflict_error(canonical_name, alias_name):
+    """Return a 400 tuple explaining that two mutually exclusive params were supplied.
+
+    Used when an endpoint accepts either ``canonical_name`` or an ``alias_name``
+    but not both; silent precedence would mask client bugs and lead to
+    undocumented behaviour. Bottube issue #1414.
+    """
+    return (
+        jsonify({
+            "error": (
+                f"parameters '{canonical_name}' and '{alias_name}' are mutually "
+                f"exclusive; supply exactly one"
+            )
+        }),
+        400,
+    )
+
+
+# SQLite stores integers as signed 64-bit values. A query OFFSET/LIMIT larger
+# than this raises OperationalError ("Python int too large to convert to SQLite
+# INTEGER"), so pagination math must stay within this bound.
+_SQLITE_MAX_SIGNED_INT = 2 ** 63 - 1
+
+
+def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, clamp_bounds=False):
+    """Return (value, None) or (None, (json_response, status_code)).
+
+    Rejects malformed or out-of-range integers with HTTP 400 instead of
+    silently coercing invalid input to the default (which would mask
+    client bugs and could lead to surprising pagination/sort results).
+    """
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        return default, None
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, (
+            jsonify({"error": f"{name} must be an integer"}),
+            400,
+        )
+    if clamp_bounds:
+        if value < min_value:
+            value = min_value
+        if max_value is not None and value > max_value:
+            value = max_value
+        return value, None
+    if value < min_value:
+        return None, (
+            jsonify({"error": f"{name} must be >= {min_value}"}),
+            400,
+        )
+    if max_value is not None and value > max_value:
+        return None, (
+            jsonify({"error": f"{name} must be <= {max_value}"}),
+            400,
+        )
+    return value, None
+
+
+def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
+    raw_header = request.headers.get("If-Modified-Since", "")
+    if not raw_header:
+        return False
+    try:
+        modified_since = parsedate_to_datetime(raw_header)
+    except (TypeError, ValueError):
+        return False
+    if modified_since is None:
+        return False
+    return int(latest_ts or 0) <= int(modified_since.timestamp())
+
+
+def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: float) -> Response:
+    response.headers["ETag"] = etag
+    response.headers["Last-Modified"] = formatdate(int(latest_ts or 0), usegmt=True)
+    response.headers["Cache-Control"] = "public, max-age=30"
+    return response
+
+@app.route("/api/v1/videos")
+def list_videos_v1_alias():
+    """Canonical alias for /api/videos, used by telegram bot + debate bots + algolia scanner (Bottube #1383)."""
+    return list_videos()
+
+
 @app.route("/api/videos")
 def list_videos():
-    """List videos with pagination and sorting."""
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    """List videos with pagination and sorting.
+
+    Accepts ``per_page`` (canonical) and ``limit`` (alias used by some
+    third-party bot clients). If both are supplied, ``per_page`` wins and
+    the duplicate ``limit`` is rejected with HTTP 400 so the client sees
+    the conflict instead of getting an undocumented precedence. Bottube
+    issue #1414.
+    """
+    # `page` is bounded at 10000 so malicious or buggy clients cannot ask
+    # for an arbitrarily deep offset that would still translate into a
+    # full-table `OFFSET` scan in SQLite. 10000 pages of `per_page<=50`
+    # is ~500k rows, already well past Bottube's whole-video catalogue
+    # (the production count is currently ~1860), so the cap does not
+    # affect any legitimate use case. Bottube issue #1414 (page-bound
+    # follow-up; the live `bottube.ai` binary is v1.2.0 and still lets
+    # `page=99999` through with `videos=[]`).
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+
+    # `limit` is an undocumented alias some bot clients send instead of
+    # `per_page`. Accept it when no canonical `per_page` is provided, and
+    # reject the request when both are supplied so the precedence is
+    # explicit.
+    has_per_page = "per_page" in request.args
+    has_limit = "limit" in request.args
+    if has_per_page and has_limit:
+        return _make_param_conflict_error("per_page", "limit")
+    if has_per_page:
+        per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    else:
+        per_page, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
     sort = request.args.get("sort", "newest")
     agent_name = request.args.get("agent", "")
-    offset = (page - 1) * per_page
 
     sort_map = {
         "newest": "v.created_at DESC",
@@ -6615,10 +7100,45 @@ def list_videos():
         params.append(agent_name)
     where = "WHERE " + " AND ".join(where_clauses)
 
-    total = db.execute(
-        f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id {where}",
+    stats = db.execute(
+        f"""SELECT
+                COUNT(*) AS total,
+                COALESCE(MAX(v.created_at), 0) AS latest_ts,
+                COALESCE(MAX(
+                    MAX(
+                        COALESCE((SELECT MAX(vw.created_at) FROM views vw WHERE vw.video_id = v.video_id), 0),
+                        COALESCE((SELECT MAX(vt.created_at) FROM votes vt WHERE vt.video_id = v.video_id), 0)
+                    )
+                ), 0) AS latest_engagement_ts,
+                COALESCE(SUM(v.views + v.likes + v.dislikes), 0) AS engagement_revision
+            FROM videos v JOIN agents a ON v.agent_id = a.id {where}""",
         params,
-    ).fetchone()[0]
+    ).fetchone()
+    total = int(stats["total"] or 0)
+    latest_ts = max(float(stats["latest_ts"] or 0), float(stats["latest_engagement_ts"] or 0))
+    engagement_revision = int(stats["engagement_revision"] or 0)
+    pages = math.ceil(total / per_page) if total else 0
+    if pages:
+        page = min(page, pages)
+    else:
+        page = 1
+    offset = (page - 1) * per_page
+    etag = _video_list_etag(
+        page=page,
+        per_page=per_page,
+        sort=sort,
+        agent_name=agent_name,
+        total=total,
+        latest_ts=latest_ts,
+        engagement_revision=engagement_revision,
+    )
+
+    if request.headers.get("If-None-Match"):
+        is_fresh = _client_has_video_list_etag(etag)
+    else:
+        is_fresh = _client_has_fresh_video_list_date(latest_ts)
+    if is_fresh:
+        return _add_video_list_cache_headers(make_response("", 304), etag=etag, latest_ts=latest_ts)
 
     rows = db.execute(
         f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
@@ -6635,13 +7155,14 @@ def list_videos():
         d["avatar_url"] = row["avatar_url"]
         videos.append(d)
 
-    return jsonify({
+    response = jsonify({
         "videos": videos,
         "page": page,
         "per_page": per_page,
         "total": total,
-        "pages": math.ceil(total / per_page) if total else 0,
+        "pages": pages,
     })
+    return _add_video_list_cache_headers(response, etag=etag, latest_ts=latest_ts)
 
 
 @app.route("/api/videos/<video_id>")
@@ -6649,9 +7170,9 @@ def get_video(video_id):
     """Get video metadata."""
     db = get_db()
     row = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -6664,9 +7185,9 @@ def get_video(video_id):
     d["avatar_url"] = row["avatar_url"]
     if "revision_of" in row.keys() and row["revision_of"]:
         original = db.execute(
-            """SELECT v.video_id, v.title, a.agent_name, a.display_name
+            f"""SELECT v.video_id, v.title, a.agent_name, a.display_name
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (row["revision_of"],),
         ).fetchone()
         if original:
@@ -6677,9 +7198,9 @@ def get_video(video_id):
                 "display_name": original["display_name"],
             }
     revisions = db.execute(
-        """SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
+        f"""SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.revision_of = ?
+           WHERE v.revision_of = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 10""",
         (video_id,),
     ).fetchall()
@@ -6696,9 +7217,9 @@ def get_video(video_id):
     # Response video handling (Issue #2282 - Agent Collab System)
     if "response_to_video_id" in row.keys() and row["response_to_video_id"]:
         original_video = db.execute(
-            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+            f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (row["response_to_video_id"],),
         ).fetchone()
         if original_video:
@@ -6713,9 +7234,9 @@ def get_video(video_id):
             }
     # Get response videos to this video
     response_videos = db.execute(
-        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           WHERE v.response_to_video_id = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 10""",
         (video_id,),
     ).fetchall()
@@ -6923,7 +7444,12 @@ def get_mood_history(agent_name):
 def stream_video(video_id):
     """Stream video file with range request support."""
     db = get_db()
-    row = db.execute("SELECT filename FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    row = db.execute(
+        f"""SELECT v.filename
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not row:
         abort(404)
 
@@ -6994,9 +7520,9 @@ def record_view(video_id):
     """Record a view and return video metadata."""
     db = get_db()
     row = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -7045,6 +7571,7 @@ def record_view(video_id):
         db.commit()
     else:
         reward_result = {"awarded": False, "held": False, "risk_score": 0, "reasons": ["deduplicated recent view"]}
+        new_views = row["views"] or 0
 
     # CTR: Record click (video opened/watched)
     try:
@@ -7055,7 +7582,7 @@ def record_view(video_id):
     d = video_to_dict(row)
     d["agent_name"] = row["agent_name"]
     d["display_name"] = row["display_name"]
-    d["views"] = row["views"] + 1
+    d["views"] = new_views
     d["reward"] = reward_result
     return jsonify(d)
 
@@ -7071,9 +7598,9 @@ def describe_video(video_id):
     agent needs to understand and engage with the content."""
     db = get_db()
     row = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name
+        f"""SELECT v.*, a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -7143,8 +7670,16 @@ def add_comment(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    raw_content = data.get("content")
+    if raw_content is None or not isinstance(raw_content, str):
+        return jsonify({"error": "content is required and must be a string"}), 400
+    content = raw_content.strip()
+    raw_comment_type = data.get("comment_type")
+    if raw_comment_type is not None and not isinstance(raw_comment_type, str):
+        return jsonify({"error": "comment_type must be a string"}), 400
+    comment_type = (raw_comment_type or "comment").strip().lower()
     if not content:
         return jsonify({"error": "content is required"}), 400
     if comment_type not in COMMENT_TYPES:
@@ -7152,7 +7687,9 @@ def add_comment(video_id):
     if len(content) > 5000:
         return jsonify({"error": "Comment too long (max 5000 chars)"}), 400
 
-    parent_id = data.get("parent_id")
+    parent_id, parent_error = _parse_optional_comment_parent_id(data.get("parent_id"))
+    if parent_error:
+        return jsonify({"error": parent_error}), 400
     if parent_id is not None:
         parent = db.execute(
             "SELECT id FROM comments WHERE id = ? AND video_id = ?",
@@ -7217,6 +7754,26 @@ def add_comment(video_id):
     }), 201
 
 
+def _parse_optional_comment_parent_id(raw_parent_id):
+    if raw_parent_id is None:
+        return None, None
+    if isinstance(raw_parent_id, str):
+        raw_parent_id = raw_parent_id.strip()
+        if not raw_parent_id:
+            return None, None
+    if isinstance(raw_parent_id, bool):
+        return None, "parent_id must be an integer"
+    if isinstance(raw_parent_id, float) and not raw_parent_id.is_integer():
+        return None, "parent_id must be an integer"
+    try:
+        parent_id = int(raw_parent_id)
+    except (TypeError, ValueError):
+        return None, "parent_id must be an integer"
+    if parent_id < 1:
+        return None, "parent_id must be a positive integer"
+    return parent_id, None
+
+
 @app.route("/api/videos/<video_id>/web-comment", methods=["POST"])
 def web_add_comment(video_id):
     """Add a comment from the web UI (requires login session)."""
@@ -7233,8 +7790,16 @@ def web_add_comment(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    content = data.get("content", "").strip()
-    comment_type = (data.get("comment_type") or "comment").strip().lower()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    raw_content = data.get("content")
+    if raw_content is None or not isinstance(raw_content, str):
+        return jsonify({"error": "content is required and must be a string"}), 400
+    content = raw_content.strip()
+    raw_comment_type = data.get("comment_type")
+    if raw_comment_type is not None and not isinstance(raw_comment_type, str):
+        return jsonify({"error": "comment_type must be a string"}), 400
+    comment_type = (raw_comment_type or "comment").strip().lower()
     if not content:
         return jsonify({"error": "content is required"}), 400
     if comment_type not in COMMENT_TYPES:
@@ -7250,9 +7815,10 @@ def web_add_comment(video_id):
     if existing:
         return jsonify({"error": "Duplicate comment"}), 409
 
-    parent_id = data.get("parent_id")
+    parent_id, parent_error = _parse_optional_comment_parent_id(data.get("parent_id"))
+    if parent_error:
+        return jsonify({"error": parent_error}), 400
     if parent_id is not None:
-        parent_id = int(parent_id)
         parent = db.execute(
             "SELECT id FROM comments WHERE id = ? AND video_id = ?", (parent_id, video_id)
         ).fetchone()
@@ -7360,13 +7926,20 @@ def _compute_agent_interaction_context(db, video_agent_id, commenting_agent_id):
 def get_comments(video_id):
     """Get comments for a video with agent interaction context."""
     db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    v = db.execute(
+        f"""SELECT 1
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not v:
         return jsonify({"error": "Video not found"}), 404
     
     # Get video owner info for interaction context
     video_owner = db.execute(
-        "SELECT agent_id FROM videos WHERE video_id = ?",
+        f"""SELECT v.agent_id
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
     if not video_owner:
@@ -7408,11 +7981,46 @@ def get_comments(video_id):
     return jsonify({"comments": comments, "count": len(comments)})
 
 
+def _parse_recent_comments_limit():
+    raw_value = request.args.get("limit")
+    if raw_value in (None, ""):
+        return 50, None
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    if limit < 1:
+        return None, "limit must be >= 1"
+    if limit > 100:
+        return None, "limit must be <= 100"
+    return limit, None
+
+
+def _parse_recent_comments_since():
+    raw_value = request.args.get("since")
+    if raw_value in (None, ""):
+        return 0, None
+    try:
+        since = float(raw_value)
+    except (TypeError, ValueError):
+        return None, "since must be a number"
+    if not math.isfinite(since):
+        return None, "since must be a finite number"
+    return since, None
+
+
+@app.route("/api/v1/comments")
+@app.route("/api/v2/comments")
 @app.route("/api/comments/recent")
 def recent_comments():
     """Get recent comments across all videos since a timestamp."""
-    since = request.args.get("since", 0, type=float)
-    limit = min(100, max(1, request.args.get("limit", 50, type=int)))
+    since, error = _parse_recent_comments_since()
+    if error:
+        return jsonify({"error": error}), 400
+    limit, error = _parse_recent_comments_limit()
+    if error:
+        return jsonify({"error": error}), 400
+
     db = get_db()
     rows = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url
@@ -7778,10 +8386,15 @@ def web_subscribe(agent_name):
     """Toggle subscription from the web UI (requires login session)."""
     if not g.user:
         return jsonify({"error": "You must be signed in to follow.", "login_required": True}), 401
+    if g.user["is_banned"]:
+        return jsonify({"error": "Account banned", "reason": g.user["ban_reason"] or ""}), 403
     _verify_csrf()
 
     db = get_db()
-    target = db.execute("SELECT id, agent_name FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    target = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
+    ).fetchone()
     if not target:
         return jsonify({"error": "Agent not found"}), 404
     if target["id"] == g.user["id"]:
@@ -7811,7 +8424,10 @@ def web_subscribe(agent_name):
         following = True
 
     count = db.execute(
-        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (target["id"],)
+        """SELECT COUNT(*)
+           FROM subscriptions s JOIN agents a ON s.follower_id = a.id
+           WHERE s.following_id = ? AND COALESCE(a.is_banned, 0) = 0""",
+        (target["id"],),
     ).fetchone()[0]
 
     return jsonify({"ok": True, "following": following, "subscriber_count": count})
@@ -7821,6 +8437,13 @@ def web_subscribe(agent_name):
 # Search
 # ---------------------------------------------------------------------------
 
+@app.route("/api/v1/search")
+def search_videos_v1_alias():
+    """Canonical alias for /api/search, used by telegram bot + debate bots + algolia scanner (Bottube #1383)."""
+    return search_videos()
+
+
+@app.route("/api/v2/search")
 @app.route("/api/search")
 def search_videos():
     """Search videos by title, description, tags, or agent.
@@ -7840,9 +8463,18 @@ def search_videos():
     if not q:
         return jsonify({"error": "q parameter required"}), 400
 
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     offset = (page - 1) * per_page
+    # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
+    # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
+    # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     db = get_db()
     like_q = f"%{q}%"
@@ -7904,7 +8536,9 @@ def search_videos():
         params.append(before_ts)
 
     # Engagement threshold
-    min_views = request.args.get("min_views", 0, type=int)
+    min_views, error = _parse_positive_int_query("min_views", 0, min_value=0)
+    if error:
+        return error
     if min_views > 0:
         conditions.append("v.views >= ?")
         params.append(min_views)
@@ -7969,7 +8603,8 @@ def get_agent(agent_name):
     """Get agent profile and their videos."""
     db = get_db()
     agent = db.execute(
-        "SELECT * FROM agents WHERE agent_name = ?", (agent_name,)
+        "SELECT * FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
     ).fetchone()
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
@@ -7977,7 +8612,7 @@ def get_agent(agent_name):
     videos = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id = ?
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
            ORDER BY v.created_at DESC""",
         (agent["id"],),
     ).fetchall()
@@ -8002,6 +8637,8 @@ def get_agent(agent_name):
            FROM comments c JOIN videos v ON c.video_id = v.video_id
            JOIN agents a2 ON c.agent_id = a2.id
            WHERE v.agent_id = ? AND c.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_likers = db.execute(
@@ -8009,20 +8646,22 @@ def get_agent(agent_name):
            FROM votes vt JOIN videos v ON vt.video_id = v.video_id
            JOIN agents a2 ON vt.agent_id = a2.id
            WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_outgoing = db.execute(
         """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) AS comments_given,
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS comments_given,
                (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) AS likes_given
+                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS likes_given
            FROM agents a2
-           WHERE a2.id != ? AND (
+           WHERE a2.id != ? AND COALESCE(a2.is_banned, 0) = 0 AND (
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) > 0
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0
                OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) > 0)
+                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0)
            ORDER BY comments_given + likes_given DESC LIMIT 8""",
         (aid, aid, aid, aid, aid)).fetchall()
     return jsonify({
@@ -8039,16 +8678,21 @@ def get_agent(agent_name):
 @app.route("/api/agents/<agent_name>/analytics")
 def get_agent_analytics(agent_name):
     """Time-series analytics for a creator: views, engagement, subscribers."""
+    days, error = _parse_positive_int_query("days", 30, max_value=90)
+    if error:
+        return error
+
     db = get_db()
     agent = db.execute(
-        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        """SELECT id, agent_name, display_name
+           FROM agents
+           WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0""",
         (agent_name,),
     ).fetchone()
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
     aid = agent["id"]
-    days = min(90, max(1, request.args.get("days", 30, type=int)))
     now = time.time()
     cutoff = now - days * 86400
 
@@ -8057,7 +8701,9 @@ def get_agent_analytics(agent_name):
         """SELECT date(vw.created_at, 'unixepoch') AS day, COUNT(*) AS cnt
            FROM views vw
            JOIN videos v ON vw.video_id = v.video_id
-           WHERE v.agent_id = ? AND vw.created_at >= ?
+           WHERE v.agent_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND vw.created_at >= ?
            GROUP BY day ORDER BY day""",
         (aid, cutoff),
     ).fetchall()
@@ -8068,7 +8714,8 @@ def get_agent_analytics(agent_name):
                   COALESCE(SUM(v.views), 0) AS total_views,
                   COALESCE(SUM(v.likes), 0) AS total_likes,
                   COALESCE(SUM(v.dislikes), 0) AS total_dislikes
-           FROM videos v WHERE v.agent_id = ? AND v.is_removed = 0""",
+           FROM videos v
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0""",
         (aid,),
     ).fetchone()
 
@@ -8088,7 +8735,9 @@ def get_agent_analytics(agent_name):
     comment_count = db.execute(
         """SELECT COUNT(*) FROM comments c
            JOIN videos v ON c.video_id = v.video_id
-           WHERE v.agent_id = ? AND c.created_at >= ?""",
+           WHERE v.agent_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND c.created_at >= ?""",
         (aid, cutoff),
     ).fetchone()[0]
 
@@ -8097,7 +8746,8 @@ def get_agent_analytics(agent_name):
         """SELECT v.video_id, v.title, v.views, v.likes,
                   (SELECT COUNT(*) FROM views vw
                    WHERE vw.video_id = v.video_id AND vw.created_at >= ?) AS recent_views
-           FROM videos v WHERE v.agent_id = ? AND v.is_removed = 0
+           FROM videos v
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
            ORDER BY recent_views DESC LIMIT 5""",
         (cutoff, aid),
     ).fetchall()
@@ -8134,14 +8784,22 @@ def get_agent_analytics(agent_name):
 @app.route("/api/videos/<video_id>/analytics")
 def get_video_analytics(video_id):
     """Per-video analytics: daily views, engagement breakdown."""
+    days, error = _parse_positive_int_query("days", 30, max_value=90)
+    if error:
+        return error
+
     db = get_db()
     video = db.execute(
-        "SELECT * FROM videos WHERE video_id = ? AND is_removed = 0", (video_id,)
+        """SELECT v.*
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
+        (video_id,),
     ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    days = min(90, max(1, request.args.get("days", 30, type=int)))
     now = time.time()
     cutoff = now - days * 86400
 
@@ -8209,14 +8867,18 @@ def get_agent_interactions(agent_name):
     """Who interacted with this agent and how (comments, likes, subscriptions)."""
     db = get_db()
     agent = db.execute(
-        "SELECT id, agent_name, display_name FROM agents WHERE agent_name = ?",
+        """SELECT id, agent_name, display_name
+           FROM agents
+           WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0""",
         (agent_name,),
     ).fetchone()
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
     aid = agent["id"]
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
 
     # Agents who commented on this agent's videos
     commenters = db.execute(
@@ -8227,6 +8889,8 @@ def get_agent_interactions(agent_name):
            JOIN videos v ON c.video_id = v.video_id
            JOIN agents a2 ON c.agent_id = a2.id
            WHERE v.agent_id = ? AND c.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY comment_count DESC LIMIT ?""",
         (aid, aid, limit),
     ).fetchall()
@@ -8240,6 +8904,8 @@ def get_agent_interactions(agent_name):
            JOIN videos v ON vt.video_id = v.video_id
            JOIN agents a2 ON vt.agent_id = a2.id
            WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY like_count DESC LIMIT ?""",
         (aid, aid, limit),
     ).fetchall()
@@ -8251,6 +8917,7 @@ def get_agent_interactions(agent_name):
            FROM subscriptions s
            JOIN agents a2 ON s.follower_id = a2.id
            WHERE s.following_id = ?
+            AND COALESCE(a2.is_banned, 0) = 0
            ORDER BY s.created_at DESC LIMIT ?""",
         (aid, limit),
     ).fetchall()
@@ -8265,16 +8932,23 @@ def get_agent_interactions(agent_name):
            LEFT JOIN (
                SELECT v.agent_id AS target, COUNT(*) AS cnt
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents target_agent ON v.agent_id = target_agent.id
                WHERE c.agent_id = ? AND v.agent_id != ?
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(target_agent.is_banned, 0) = 0
                GROUP BY v.agent_id
            ) cm ON a2.id = cm.target
            LEFT JOIN (
                SELECT v.agent_id AS target, COUNT(*) AS cnt
                FROM votes vt JOIN videos v ON vt.video_id = v.video_id
+               JOIN agents target_agent ON v.agent_id = target_agent.id
                WHERE vt.agent_id = ? AND vt.vote = 1 AND v.agent_id != ?
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(target_agent.is_banned, 0) = 0
                GROUP BY v.agent_id
            ) lk ON a2.id = lk.target
            WHERE COALESCE(cm.cnt, 0) + COALESCE(lk.cnt, 0) > 0
+             AND COALESCE(a2.is_banned, 0) = 0
            ORDER BY total DESC LIMIT ?""",
         (aid, aid, aid, aid, limit),
     ).fetchall()
@@ -8304,7 +8978,9 @@ def get_agent_interactions(agent_name):
 def social_graph():
     """Platform-wide social graph: top interacting pairs and network density."""
     db = get_db()
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
 
     # Top interacting pairs (bidirectional: comments + likes between agents)
     pairs = db.execute(
@@ -8317,13 +8993,23 @@ def social_graph():
            FROM (
                SELECT c.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents src_agent ON c.agent_id = src_agent.id
+               JOIN agents dst_agent ON v.agent_id = dst_agent.id
                WHERE c.agent_id != v.agent_id
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(src_agent.is_banned, 0) = 0
+                 AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY c.agent_id, v.agent_id
            ) cm
            LEFT JOIN (
                SELECT vt.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
                FROM votes vt JOIN videos v ON vt.video_id = v.video_id
+               JOIN agents src_agent ON vt.agent_id = src_agent.id
+               JOIN agents dst_agent ON v.agent_id = dst_agent.id
                WHERE vt.agent_id != v.agent_id AND vt.vote = 1
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(src_agent.is_banned, 0) = 0
+                 AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY vt.agent_id, v.agent_id
            ) lk ON cm.src = lk.src AND cm.dst = lk.dst
            JOIN agents a1 ON cm.src = a1.id
@@ -8333,13 +9019,37 @@ def social_graph():
     ).fetchall()
 
     # Network stats
-    total_agents = db.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
-    total_subs = db.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0]
+    total_agents = db.execute(
+        "SELECT COUNT(*) FROM agents WHERE COALESCE(is_banned, 0) = 0"
+    ).fetchone()[0]
+    total_subs = db.execute(
+        """SELECT COUNT(*)
+           FROM subscriptions s
+           JOIN agents follower ON s.follower_id = follower.id
+           JOIN agents following ON s.following_id = following.id
+           WHERE COALESCE(follower.is_banned, 0) = 0
+             AND COALESCE(following.is_banned, 0) = 0"""
+    ).fetchone()[0]
     active_commenters = db.execute(
-        "SELECT COUNT(DISTINCT agent_id) FROM comments"
+        """SELECT COUNT(DISTINCT c.agent_id)
+           FROM comments c
+           JOIN videos v ON c.video_id = v.video_id
+           JOIN agents commenter ON c.agent_id = commenter.id
+           JOIN agents owner ON v.agent_id = owner.id
+           WHERE COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(commenter.is_banned, 0) = 0
+             AND COALESCE(owner.is_banned, 0) = 0"""
     ).fetchone()[0]
     active_likers = db.execute(
-        "SELECT COUNT(DISTINCT agent_id) FROM votes WHERE vote = 1"
+        """SELECT COUNT(DISTINCT vt.agent_id)
+           FROM votes vt
+           JOIN videos v ON vt.video_id = v.video_id
+           JOIN agents liker ON vt.agent_id = liker.id
+           JOIN agents owner ON v.agent_id = owner.id
+           WHERE vt.vote = 1
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(liker.is_banned, 0) = 0
+             AND COALESCE(owner.is_banned, 0) = 0"""
     ).fetchone()[0]
 
     # Most connected agents (by unique interaction partners)
@@ -8349,17 +9059,38 @@ def social_graph():
            FROM (
                SELECT c.agent_id AS self, v.agent_id AS partner
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents self_agent ON c.agent_id = self_agent.id
+               JOIN agents partner_agent ON v.agent_id = partner_agent.id
                WHERE c.agent_id != v.agent_id
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(self_agent.is_banned, 0) = 0
+                 AND COALESCE(partner_agent.is_banned, 0) = 0
                UNION
                SELECT v.agent_id AS self, c.agent_id AS partner
                FROM comments c JOIN videos v ON c.video_id = v.video_id
+               JOIN agents self_agent ON v.agent_id = self_agent.id
+               JOIN agents partner_agent ON c.agent_id = partner_agent.id
                WHERE c.agent_id != v.agent_id
+                 AND COALESCE(v.is_removed, 0) = 0
+                 AND COALESCE(self_agent.is_banned, 0) = 0
+                 AND COALESCE(partner_agent.is_banned, 0) = 0
                UNION
-               SELECT follower_id AS self, following_id AS partner FROM subscriptions
+               SELECT follower_id AS self, following_id AS partner
+               FROM subscriptions s
+               JOIN agents follower ON s.follower_id = follower.id
+               JOIN agents following ON s.following_id = following.id
+               WHERE COALESCE(follower.is_banned, 0) = 0
+                 AND COALESCE(following.is_banned, 0) = 0
                UNION
-               SELECT following_id AS self, follower_id AS partner FROM subscriptions
+               SELECT following_id AS self, follower_id AS partner
+               FROM subscriptions s
+               JOIN agents follower ON s.follower_id = follower.id
+               JOIN agents following ON s.following_id = following.id
+               WHERE COALESCE(follower.is_banned, 0) = 0
+                 AND COALESCE(following.is_banned, 0) = 0
            ) edges
            JOIN agents a ON edges.self = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id ORDER BY connections DESC LIMIT 10""",
     ).fetchall()
 
@@ -8394,31 +9125,34 @@ def _normalize_category_filter(category):
     return category if category in CATEGORY_MAP else None
 
 
-def _get_trending_videos(db, limit=20, category=None):
+def _get_trending_videos(db, limit=20, category=None, days_window=None, since_ts=None):
     """Compute trending videos with improved scoring.
 
-    Score = (recent_views_24h * 2) + (likes * 3) + (recent_comments_24h * 4)
+    Score = (recent_views * 2) + (likes * 3) + (recent_comments * 4)
             + recency_bonus + (novelty_score * NOVELTY_WEIGHT)
             + penalties (duplicate/low-info)
     recency_bonus: +10 if uploaded < 6h ago, +5 if < 24h ago
+
+    When days_window or since_ts is provided, the recent_views/recent_comments
+    subqueries use that cutoff instead of the default 24h window.
     """
     now = time.time()
-    cutoff_24h = now - 86400
+    window_cutoff = since_ts if since_ts else now - (days_window * 86400 if days_window else 86400)
     cutoff_6h = now - 21600
     query_limit = max(limit * 3, limit)
     category = _normalize_category_filter(category)
     category_clause = "AND v.category = ?" if category else ""
     params = [
         cutoff_6h,
-        cutoff_24h,
-        cutoff_24h,
-        cutoff_24h,
+        window_cutoff,
+        window_cutoff,
+        window_cutoff,
     ]
     if category:
         params.append(category)
     params.extend([
         cutoff_6h,
-        cutoff_24h,
+        window_cutoff,
         NOVELTY_WEIGHT,
         TRENDING_PENALTY_HIGH_SIMILARITY,
         TRENDING_PENALTY_LOW_INFO,
@@ -8489,9 +9223,29 @@ def _get_trending_videos(db, limit=20, category=None):
 @app.route("/api/trending")
 def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
+    limit, error = _parse_positive_int_query("limit", 20, max_value=100)
+    if error:
+        return error
+
+    days_window = None
+    if "days" in request.args:
+        days_window, error = _parse_positive_int_query("days", None, max_value=90)
+        if error:
+            return error
+
+    since_ts = None
+    if "since" in request.args:
+        since_val, error = _parse_positive_int_query("since", None)
+        if error:
+            return error
+        since_ts = time.time() - since_val
+
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=20, category=category)
+    rows = _get_trending_videos(
+        db, limit=limit, category=category,
+        days_window=days_window, since_ts=since_ts,
+    )
 
     videos = []
     for row in rows:
@@ -8509,6 +9263,13 @@ def trending():
 # --- Phase 7: bucketed feed (latest / heuristic / hybrid-v1) -------------
 
 _FEED_BUCKETS = ("latest", "heuristic", "hybrid-v1")
+_FEED_MODES = ("latest", "recommended")
+_FEED_CATEGORY_IDS = {c["id"] for c in VIDEO_CATEGORIES}
+
+
+def _feed_choice_error(name, allowed):
+    allowed_text = ", ".join(sorted(allowed))
+    return jsonify({"error": f"{name} must be one of: {allowed_text}"}), 400
 
 
 def _feed_bucket_for_visitor(visitor_id, override=""):
@@ -8947,14 +9708,35 @@ def _feed_imp_record(visitor_id, surface, bucket, videos):
     return ids
 
 
+def _feed_event_json_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"ok": False, "error": "JSON body must be an object"}), 400)
+    return data, None
+
+
+def _feed_event_impression_id(data):
+    raw_value = data.get("imp") or data.get("impression_id") or ""
+    if not isinstance(raw_value, str):
+        return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
+    imp_id = raw_value.strip()
+    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
+        return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
+    return imp_id, None
+
+
 @app.route("/api/feed/click", methods=["POST"])
 def api_feed_click():
     """Record a click on a feed impression."""
     _feed_imp_ensure_schema()
-    data = request.get_json(silent=True) or {}
-    imp_id = (data.get("imp") or data.get("impression_id") or "").strip()
-    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
-        return jsonify({"ok": False, "error": "invalid impression_id"}), 400
+    data, error = _feed_event_json_body()
+    if error:
+        return error
+    imp_id, error = _feed_event_impression_id(data)
+    if error:
+        return error
     try:
         conn = sqlite3.connect(str(DB_PATH))
         conn.execute(
@@ -8978,14 +9760,16 @@ def api_feed_click():
 def api_feed_watch():
     """Record a watch-seconds ping for a feed impression. Idempotent in MAX-direction."""
     _feed_imp_ensure_schema()
-    data = request.get_json(silent=True) or {}
-    imp_id = (data.get("imp") or data.get("impression_id") or "").strip()
+    data, error = _feed_event_json_body()
+    if error:
+        return error
+    imp_id, error = _feed_event_impression_id(data)
+    if error:
+        return error
     try:
         seconds = max(0.0, min(86400.0, float(data.get("seconds", 0))))
     except Exception:
         return jsonify({"ok": False, "error": "seconds must be a number"}), 400
-    if not re.fullmatch(r"imp_[a-f0-9]{8,32}", imp_id):
-        return jsonify({"ok": False, "error": "invalid impression_id"}), 400
     try:
         conn = sqlite3.connect(str(DB_PATH))
         conn.execute(
@@ -9040,6 +9824,8 @@ def _feed_imp_outcomes(window_hours=168):
     return out
 
 
+@app.route("/api/v1/feed")
+@app.route("/api/v2/feed")
 @app.route("/api/feed")
 def feed():
     """Get feed of recent videos with optional recommendation mode.
@@ -9055,11 +9841,35 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    # `page` is bounded at 10000 so a malformed or malicious client cannot
+    # request an arbitrarily deep page. Without an upper bound, a value such
+    # as `page=9223372036854775807` makes `offset = (page - 1) * per_page`
+    # exceed SQLite's signed 64-bit INTEGER range, which raises
+    # `OverflowError` when bound into `LIMIT ? OFFSET ?` and surfaces as an
+    # HTTP 500 instead of a clean 400. 10000 pages of `per_page<=50` is
+    # ~500k rows, already well past the whole feed catalogue, so the cap does
+    # not affect any legitimate use case. Mirrors the `/api/videos` bound
+    # (Bottube issue #1414).
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     mode = request.args.get("mode", "latest")
     category = request.args.get("category")
     bucket_override = (request.args.get("bucket") or "").strip().lower()
+    mode = (mode or "latest").strip().lower()
+    if mode not in _FEED_MODES:
+        return _feed_choice_error("mode", _FEED_MODES)
+    if category is not None:
+        category = category.strip()
+        if not category:
+            category = None
+        elif category not in _FEED_CATEGORY_IDS:
+            return _feed_choice_error("category", _FEED_CATEGORY_IDS)
+    if bucket_override and bucket_override not in _FEED_BUCKETS:
+        return _feed_choice_error("bucket", _FEED_BUCKETS)
 
     # Get optional API key for personalized recommendations
     api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
@@ -9398,10 +10208,24 @@ def my_quests():
     })
 
 
+def _parse_leaderboard_limit(default=25, max_value=100):
+    raw_value = request.args.get("limit")
+    if raw_value in (None, ""):
+        return default, None
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    return min(max_value, max(1, limit)), None
+
+
 @app.route("/api/quests/leaderboard")
 def quest_leaderboard():
     """Public leaderboard for completed quests and earned quest RTC."""
-    limit = min(100, max(1, request.args.get("limit", 25, type=int)))
+    limit, error = _parse_leaderboard_limit()
+    if error:
+        return jsonify({"error": error}), 400
+
     db = get_db()
     rows = db.execute(
         """
@@ -9483,10 +10307,15 @@ def agent_streak():
     })
 
 
+@app.route("/api/v1/leaderboard")
+@app.route("/api/v2/leaderboard")
 @app.route("/api/gamification/leaderboard")
 def gamification_leaderboard():
     """Combined leaderboard showing levels, XP, quest completion, and streaks."""
-    limit = min(100, max(1, request.args.get("limit", 25, type=int)))
+    limit, error = _parse_leaderboard_limit()
+    if error:
+        return jsonify({"error": error}), 400
+
     db = get_db()
     
     rows = db.execute(
@@ -9536,6 +10365,10 @@ def gamification_leaderboard():
 @app.route("/api/stats")
 def platform_stats():
     """Get public platform statistics."""
+    top_agents_limit, error = _parse_positive_int_query("limit", 5, max_value=100)
+    if error:
+        return error
+
     db = get_db()
     videos = db.execute("SELECT COUNT(*) FROM videos WHERE is_removed = 0").fetchone()[0]
     agents = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
@@ -9549,7 +10382,8 @@ def platform_stats():
                   COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
            FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
-           GROUP BY a.id ORDER BY total_views DESC LIMIT 5"""
+           GROUP BY a.id ORDER BY total_views DESC LIMIT ?""",
+        (top_agents_limit,),
     ).fetchall()
 
     return jsonify({
@@ -9580,11 +10414,19 @@ def platform_stats():
 @require_api_key
 def update_profile():
     """Update your agent profile (bio, display_name, avatar_url)."""
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
     ALLOWED = {"display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id"}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     # Fields that contain user-visible text and need script tag sanitization
     _TEXT_FIELDS = {"display_name", "bio"}
-    updates = {k: v for k, v in data.items() if k in ALLOWED and isinstance(v, str)}
+    invalid_fields = [k for k, v in data.items() if k in ALLOWED and not isinstance(v, str)]
+    if invalid_fields:
+        field = sorted(invalid_fields)[0]
+        return jsonify({"error": f"{field} must be a string"}), 400
+    updates = {k: v for k, v in data.items() if k in ALLOWED}
     if not updates:
         return jsonify({"error": "Provide at least one field: display_name, bio, avatar_url"}), 400
     for field in _TEXT_FIELDS:
@@ -9628,7 +10470,8 @@ def subscribe_agent(agent_name):
     """Follow another agent."""
     db = get_db()
     target = db.execute(
-        "SELECT id, agent_name FROM agents WHERE agent_name = ?", (agent_name,)
+        "SELECT id, agent_name FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
     ).fetchone()
     if not target:
         return jsonify({"error": "Agent not found"}), 404
@@ -9653,7 +10496,10 @@ def subscribe_agent(agent_name):
     db.commit()
 
     count = db.execute(
-        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (target["id"],)
+        """SELECT COUNT(*)
+           FROM subscriptions s JOIN agents a ON s.follower_id = a.id
+           WHERE s.following_id = ? AND COALESCE(a.is_banned, 0) = 0""",
+        (target["id"],),
     ).fetchone()[0]
     return jsonify({"ok": True, "following": True, "agent": agent_name, "follower_count": count})
 
@@ -9686,6 +10532,7 @@ def my_subscriptions():
         """SELECT a.agent_name, a.display_name, a.is_human, a.avatar_url, s.created_at
            FROM subscriptions s JOIN agents a ON s.following_id = a.id
            WHERE s.follower_id = ?
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY s.created_at DESC""",
         (g.agent["id"],),
     ).fetchall()
@@ -9704,7 +10551,10 @@ def my_subscriptions():
 def agent_subscribers(agent_name):
     """List followers of an agent (public)."""
     db = get_db()
-    target = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    target = db.execute(
+        "SELECT id FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
+    ).fetchone()
     if not target:
         return jsonify({"error": "Agent not found"}), 404
 
@@ -9712,6 +10562,7 @@ def agent_subscribers(agent_name):
         """SELECT a.agent_name, a.display_name, a.is_human, a.avatar_url
            FROM subscriptions s JOIN agents a ON s.follower_id = a.id
            WHERE s.following_id = ?
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY s.created_at DESC""",
         (target["id"],),
     ).fetchall()
@@ -9729,21 +10580,34 @@ def agent_subscribers(agent_name):
 @require_api_key
 def subscription_feed():
     """Get videos from agents you follow, newest first."""
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     offset = (page - 1) * per_page
 
     db = get_db()
     total = db.execute(
-        """SELECT COUNT(*) FROM videos v
-           WHERE v.agent_id IN (SELECT following_id FROM subscriptions WHERE follower_id = ?)""",
+        """SELECT COUNT(*)
+           FROM videos v
+           JOIN agents a ON v.agent_id = a.id
+           JOIN subscriptions s ON s.following_id = v.agent_id
+           WHERE s.follower_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
         (g.agent["id"],),
     ).fetchone()[0]
 
     rows = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.is_human
-           FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id IN (SELECT following_id FROM subscriptions WHERE follower_id = ?)
+           FROM videos v
+           JOIN agents a ON v.agent_id = a.id
+           JOIN subscriptions s ON s.following_id = v.agent_id
+           WHERE s.follower_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY v.created_at DESC LIMIT ? OFFSET ?""",
         (g.agent["id"], per_page, offset),
     ).fetchall()
@@ -9794,7 +10658,9 @@ def notification_count():
 def mark_notifications_read():
     """Mark notifications as read. Send {ids: [1,2,3]} or {all: true}."""
     db = get_db()
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     updated = _mark_notification_rows_read(
         db,
         int(g.agent["id"]),
@@ -9807,6 +10673,8 @@ def mark_notifications_read():
 
 # Web notification endpoints (session auth)
 
+@app.route("/api/v1/notifications")
+@app.route("/api/v2/notifications")
 @app.route("/api/notifications")
 @app.route("/api/notifications/web-list")
 def web_notification_list():
@@ -9852,7 +10720,9 @@ def web_mark_read():
         return jsonify({"error": "Login required"}), 401
     _verify_csrf()
     db = get_db()
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     updated = _mark_notification_rows_read(
         db,
         int(g.user["id"]),
@@ -9885,7 +10755,9 @@ def web_mark_single_notification_read(notification_id: int):
 @require_api_key
 def api_create_playlist():
     """Create a new playlist."""
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     title = str(data.get("title", "")).strip()[:200]
     if not title:
         return jsonify({"error": "title is required"}), 400
@@ -9912,7 +10784,7 @@ def api_get_playlist(playlist_id):
     pl = db.execute(
         """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
            FROM playlists p JOIN agents a ON p.agent_id = a.id
-           WHERE p.playlist_id = ?""",
+           WHERE p.playlist_id = ? AND COALESCE(a.is_banned, 0) = 0""",
         (playlist_id,),
     ).fetchone()
     if not pl:
@@ -9933,6 +10805,8 @@ def api_get_playlist(playlist_id):
            JOIN videos v ON pi.video_id = v.video_id
            JOIN agents a ON v.agent_id = a.id
            WHERE pi.playlist_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY pi.position ASC""",
         (pl["id"],),
     ).fetchall()
@@ -9974,7 +10848,9 @@ def api_update_playlist(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     sets, vals = [], []
     if "title" in data:
         title = str(data["title"]).strip()[:200]
@@ -10027,9 +10903,19 @@ def api_add_playlist_item(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     vid = data.get("video_id", "")
-    if not vid or not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (vid,)).fetchone():
+    visible_video = db.execute(
+        """SELECT 1
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
+        (vid,),
+    ).fetchone()
+    if not vid or not visible_video:
         return jsonify({"error": "Invalid video_id"}), 400
 
     # Check duplicate
@@ -10106,7 +10992,10 @@ def api_my_playlists():
 def api_agent_playlists(agent_name):
     """List an agent's public playlists."""
     db = get_db()
-    agent = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    agent = db.execute(
+        "SELECT id FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
+    ).fetchone()
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
@@ -10119,7 +11008,13 @@ def api_agent_playlists(agent_name):
 
     playlists = db.execute(
         f"""SELECT p.playlist_id, p.title, p.description, p.visibility, p.created_at, p.updated_at,
-                   (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) as item_count
+                   (SELECT COUNT(*)
+                      FROM playlist_items pi
+                      JOIN videos v ON pi.video_id = v.video_id
+                      JOIN agents va ON v.agent_id = va.id
+                     WHERE pi.playlist_id = p.id
+                       AND COALESCE(v.is_removed, 0) = 0
+                       AND COALESCE(va.is_banned, 0) = 0) as item_count
             FROM playlists p
             WHERE p.agent_id = ? {vis_filter}
             ORDER BY p.updated_at DESC""",
@@ -10151,7 +11046,7 @@ def playlist_page(playlist_id):
     pl = db.execute(
         """SELECT p.*, a.agent_name, a.display_name, a.avatar_url
            FROM playlists p JOIN agents a ON p.agent_id = a.id
-           WHERE p.playlist_id = ?""",
+           WHERE p.playlist_id = ? AND COALESCE(a.is_banned, 0) = 0""",
         (playlist_id,),
     ).fetchone()
     if not pl:
@@ -10170,6 +11065,8 @@ def playlist_page(playlist_id):
            JOIN videos v ON pi.video_id = v.video_id
            JOIN agents a ON v.agent_id = a.id
            WHERE pi.playlist_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY pi.position ASC""",
         (pl["id"],),
     ).fetchall()
@@ -10222,9 +11119,19 @@ def web_add_to_playlist(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     vid = data.get("video_id", "")
-    if not vid or not db.execute("SELECT 1 FROM videos WHERE video_id = ?", (vid,)).fetchone():
+    visible_video = db.execute(
+        """SELECT 1
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
+        (vid,),
+    ).fetchone()
+    if not vid or not visible_video:
         return jsonify({"error": "Invalid video"}), 400
 
     if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
@@ -10254,7 +11161,9 @@ def web_remove_from_playlist(playlist_id):
     if not pl:
         return jsonify({"error": "Playlist not found or not yours"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     vid = data.get("video_id", "")
     db.execute("DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid))
     db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
@@ -10305,7 +11214,9 @@ def create_webhook():
     if count >= 5:
         return jsonify({"error": "Maximum 5 webhooks per agent"}), 400
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     url = str(data.get("url", "")).strip()
     if not url or not url.startswith("https://"):
         return jsonify({"error": "url must be a valid HTTPS URL"}), 400
@@ -10471,7 +11382,9 @@ def manage_wallet():
         })
 
     # POST: Update wallet addresses
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     allowed_fields = {
         "rtc_wallet": "rtc_wallet",
         "rtc": "rtc_address",
@@ -10516,6 +11429,10 @@ def manage_wallet():
     })
 
 
+@app.route("/api/v1/wallet", methods=["GET", "POST"])
+@app.route("/api/v1/wallet/balance", methods=["GET"])
+@app.route("/api/v2/wallet", methods=["GET", "POST"])
+@app.route("/api/v2/wallet/balance", methods=["GET"])
 @app.route("/api/users/me/wallet", methods=["GET", "POST"])
 def manage_wallet_web():
     """Web/session version of /api/agents/me/wallet (for humans)."""
@@ -10605,7 +11522,8 @@ def tip_video(video_id):
 
     db = get_db()
     video = db.execute(
-        "SELECT v.agent_id, v.title, a.agent_name AS creator_name, "
+        "SELECT v.agent_id, v.title, v.collaborator_ids, "
+        "       a.agent_name AS creator_name, "
         "       a.rtc_wallet AS creator_rtc_wallet, a.rtc_address AS creator_rtc_address "
         "FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
         (video_id,),
@@ -10661,22 +11579,43 @@ def tip_video(video_id):
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
 
-    # Execute transfer
+    # Execute transfer — split the tip among collaborators (Bounty #2161)
+    collaborator_ids = []
+    try:
+        col_raw = video["collaborator_ids"] or "[]"
+        collaborator_ids = json.loads(col_raw) if col_raw else []
+    except (ValueError, TypeError):
+        collaborator_ids = []
+    # Filter out any collaborator that is the tipper themselves (no self-tip)
+    collaborator_ids = [cid for cid in collaborator_ids if cid != g.agent["id"] and isinstance(cid, int) and cid > 0]
+    # De-dupe while preserving order
+    seen = set()
+    collaborator_ids = [c for c in collaborator_ids if not (c in seen or seen.add(c))]
+    # Compute split — primary creator + each collaborator, evenly divided
+    recipients = [(video["agent_id"], "primary")] + [(cid, "collab") for cid in collaborator_ids]
+    if recipients:
+        per_recipient = round(amount / len(recipients), 6)
+        # Reconcile rounding so the sum equals the original amount
+        diff = round(amount - per_recipient * len(recipients), 6)
+    else:
+        per_recipient = amount
+        diff = 0
     db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
-    db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, video["agent_id"]))
+    for idx, (rid, role) in enumerate(recipients):
+        share = per_recipient + (diff if idx == 0 else 0)
+        db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (share, rid))
+        # Log per-recipient tip row
+        db.execute(
+            "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (g.agent["id"], rid, video_id, share, message, time.time()),
+        )
+        db.execute(
+            "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (rid, share, "tip_split_" + role, video_id, time.time()),
+        )
 
-    # Log tip
-    db.execute(
-        "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (g.agent["id"], video["agent_id"], video_id, amount, message, time.time()),
-    )
-
-    # Log earnings for recipient
-    db.execute(
-        "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, ?, ?, ?)",
-        (video["agent_id"], amount, "tip_received", video_id, time.time()),
-    )
+    # If no recipients (shouldn't happen since primary is always present), fall through to no-op
 
     # Notify recipient
     notify(db, video["agent_id"], "tip",
@@ -10969,6 +11908,11 @@ def get_video_tips(video_id):
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
     offset = (page - 1) * per_page
+    # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
+    # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
+    # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
+    if offset > 2 ** 63 - 1:
+        return jsonify({"error": "page out of range"}), 400
 
     tips = db.execute(
         """SELECT t.amount, t.message, t.created_at,
@@ -11033,7 +11977,9 @@ def tip_leaderboard():
     """Top tipped creators (by total tips received)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_tip_leaderboard_limit()
+    if error:
+        return error
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
@@ -11060,12 +12006,24 @@ def tip_leaderboard():
     })
 
 
+def _parse_tip_leaderboard_limit(default=20, max_value=50):
+    return _parse_positive_int_query(
+        "limit",
+        default,
+        min_value=1,
+        max_value=max_value,
+        clamp_bounds=True,
+    )
+
+
 @app.route("/api/tips/tippers")
 def tipper_leaderboard():
     """Top tippers (by total tips sent)."""
     db = get_db()
     _sync_pending_tips(db)
-    limit = min(50, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_tip_leaderboard_limit()
+    if error:
+        return error
 
     rows = db.execute(
         """SELECT a.agent_name, a.display_name, a.avatar_url, a.is_human,
@@ -11367,8 +12325,13 @@ def upload_avatar():
             g_val = min(255, g_val + 80)
             b = min(255, b + 80)
         bg_hex = f"{r:02x}{g_val:02x}{b:02x}"
-        initial = (name.replace("-", " ").replace("_", " ").split()[0][0]
-                   if name else "?").upper()
+        # Pick the first alphanumeric character for the avatar initial. Agent
+        # names made up solely of hyphens/underscores (allowed by the
+        # ^[a-z0-9_-]{2,32}$ registration rule) collapse to an empty word list
+        # after the replace()+split(), so guard against an empty result instead
+        # of indexing [0][0] and raising IndexError -> HTTP 500.
+        name_words = name.replace("-", " ").replace("_", " ").split() if name else []
+        initial = (name_words[0][0] if name_words else "?").upper()
         display = agent["display_name"] or name
         # Truncate display name for the bottom text, sanitize for ffmpeg drawtext
         bot_label = re.sub(r"[^a-zA-Z0-9 _-]", "", display)[:16]
@@ -11408,7 +12371,18 @@ def upload_avatar():
 
 @app.route("/")
 def index():
-    """Homepage with trending and recent videos."""
+    """Homepage with trending and recent videos.
+
+    On the dedicated Pi app host (4pi.bottube.ai) the ROOT is the Pi storefront
+    itself — no redirect (the Pi Developer Portal App URL points straight at the
+    subdomain). Same backend, different front door."""
+    _host = request.host.split(":")[0].lower()
+    # Pi may open the app at the www. variant it verified (www.onpi.bottube.ai), so
+    # match both onpi.* and www.onpi.* (and the 4pi.* alias).
+    _hbase = _host[4:] if _host.startswith("www.") else _host
+    if _hbase.startswith("onpi.") or _hbase.startswith("4pi."):
+        return pi_home()
+
     db = get_db()
 
     # Trending (improved algorithm: views + likes + comments + recency)
@@ -11491,11 +12465,11 @@ def watch(video_id):
     """Video player page."""
     db = get_db()
     video = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
                   a.rtc_address, a.rtc_wallet, a.btc_address, a.eth_address,
                   a.sol_address, a.ltc_address, a.erg_address, a.paypal_email
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id = ?""",
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -11566,16 +12540,16 @@ def watch(video_id):
     revision_of = None
     if "revision_of" in video.keys() and video["revision_of"]:
         revision_of = db.execute(
-            """SELECT v.video_id, v.title, a.agent_name, a.display_name
+            f"""SELECT v.video_id, v.title, a.agent_name, a.display_name
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (video["revision_of"],),
         ).fetchone()
 
     revisions = db.execute(
-        """SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
+        f"""SELECT v.video_id, v.title, v.created_at, a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.revision_of = ?
+           WHERE v.revision_of = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 8""",
         (video_id,),
     ).fetchall()
@@ -11585,17 +12559,17 @@ def watch(video_id):
     response_to_video = None
     if "response_to_video_id" in video.keys() and video["response_to_video_id"]:
         response_to_video = db.execute(
-            """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+            f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.video_id = ?""",
+               WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
             (video["response_to_video_id"],),
         ).fetchone()
 
     # Get all response videos to this video
     response_videos = db.execute(
-        """SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.video_id, v.title, v.views, v.created_at, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.response_to_video_id = ? AND v.is_removed = 0
+           WHERE v.response_to_video_id = ? AND {_public_video_filter_sql()}
            ORDER BY v.created_at DESC LIMIT 10""",
         (video_id,),
     ).fetchall()
@@ -11625,9 +12599,9 @@ def watch(video_id):
     _cur_cat = video["category"] or "other"
 
     _candidates = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id != ? AND v.is_removed = 0
+           WHERE v.video_id != ? AND {_public_video_filter_sql()}
            ORDER BY v.views DESC
            LIMIT 100""",
         (video_id,),
@@ -11792,17 +12766,35 @@ def embed(video_id):
     """Branded embed player for iframes and Twitter player cards."""
     db = get_db()
     video = db.execute(
-        "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        f"""SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
     if not video:
         abort(404)
 
     autoplay = request.args.get("autoplay", "0") == "1"
-    autoplay_attr = "autoplay " if autoplay else ""
+    loop = request.args.get("loop", "0") == "1"
+    muted = request.args.get("mute", "0") == "1"
+    video_attrs = " ".join(
+        attr for attr, enabled in (
+            ("autoplay", autoplay),
+            ("loop", loop),
+            ("muted", muted),
+        ) if enabled
+    )
+    if video_attrs:
+        video_attrs += " "
 
     title_esc = (video["title"] or "").replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     creator_esc = (video["display_name"] or video["agent_name"] or "").replace("&", "&amp;").replace("<", "&lt;")
+    embed_url = f"https://bottube.ai/embed/{video_id}"
+    embed_code = (
+        f'<iframe src="{embed_url}" width="560" height="315" '
+        'frameborder="0" allowfullscreen></iframe>'
+    )
+    embed_code_json = json.dumps(embed_code)
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -11822,18 +12814,46 @@ body:hover .overlay{{opacity:1}}
 .info{{color:#fff;min-width:0}}
 .title{{font:600 14px/1.3 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}}
 .creator{{font:12px -apple-system,sans-serif;color:#aaa;margin-top:2px}}
-.brand{{pointer-events:auto;text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
+.actions{{pointer-events:auto;display:flex;gap:8px;align-items:center;flex-shrink:0}}
+.brand,.copy{{text-decoration:none;background:#3ea6ff;color:#0f0f0f;padding:6px 14px;border-radius:4px;
  font:700 12px -apple-system,sans-serif;white-space:nowrap;flex-shrink:0}}
+.copy{{border:0;cursor:pointer;background:#222;color:#fff}}
 .brand:hover{{background:#65b8ff}}
+.copy:hover{{background:#333}}
 </style>
 </head><body>
-<video controls {autoplay_attr}playsinline>
+<video controls {video_attrs}playsinline>
 <source src="/api/videos/{video_id}/stream" type="video/mp4">
 </video>
 <div class="overlay">
 <div class="info"><div class="title">{title_esc}</div><div class="creator">{creator_esc}</div></div>
+<div class="actions">
+<button class="copy" type="button" onclick="copyEmbed(this)">Copy embed</button>
 <a class="brand" href="https://bottube.ai/watch/{video_id}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
+</div>
+<script>
+function copyEmbed(btn){{
+  var code = {embed_code_json};
+  function done(){{ btn.textContent = "Copied"; setTimeout(function(){{btn.textContent = "Copy embed";}}, 1400); }}
+  function fallback(){{
+    var ta = document.createElement("textarea");
+    ta.value = code;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try {{ document.execCommand("copy"); done(); }} catch(e) {{}}
+    document.body.removeChild(ta);
+  }}
+  if (navigator.clipboard && navigator.clipboard.writeText) {{
+    navigator.clipboard.writeText(code).then(done).catch(fallback);
+  }} else {{
+    fallback();
+  }}
+}}
+</script>
 </body></html>"""
     resp = Response(html, mimetype="text/html")
     # Allow embedding in any iframe
@@ -11851,15 +12871,15 @@ def oembed():
     if fmt not in ("json", "xml"):
         return jsonify({"error": "Unsupported format. Use json or xml."}), 501
 
-    # Extract video_id from URL
-    match = re.search(r"/watch/([A-Za-z0-9_-]{5,20})", url)
-    if not match:
+    video_id = _extract_oembed_video_id(url)
+    if not video_id:
         return jsonify({"error": "Invalid URL"}), 404
 
-    video_id = match.group(1)
     db = get_db()
     video = db.execute(
-        "SELECT v.*, a.agent_name, a.display_name FROM videos v JOIN agents a ON v.agent_id = a.id WHERE v.video_id = ?",
+        f"""SELECT v.*, a.agent_name, a.display_name
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
 
@@ -11868,11 +12888,19 @@ def oembed():
 
     video = dict(video)  # Convert sqlite3.Row to dict for .get() support
 
-    w = request.args.get("maxwidth", video["width"] or 512, type=int)
-    h = request.args.get("maxheight", video["height"] or 512, type=int)
-    # Clamp dimensions to 1..1920 width and 1..1080 height
-    w = max(1, min(w, 1920))
-    h = max(1, min(h, 1080))
+    source_w = max(1, int(video["width"] or 560))
+    source_h = max(1, int(video["height"] or 315))
+    max_w = request.args.get("maxwidth", type=int)
+    max_h = request.args.get("maxheight", type=int)
+    if max_w is None:
+        max_w = source_w
+    if max_h is None:
+        max_h = source_h
+    max_w = max(1, min(max_w, 1920))
+    max_h = max(1, min(max_h, 1080))
+    scale = min(max_w / source_w, max_h / source_h, 1)
+    w = max(1, int(round(source_w * scale)))
+    h = max(1, int(round(source_h * scale)))
 
     thumb_url = f"https://bottube.ai/thumbnails/{video['thumbnail']}" if video.get("thumbnail") else ""
     embed_html = f'<iframe src="https://bottube.ai/embed/{video_id}" width="{w}" height="{h}" frameborder="0" allowfullscreen></iframe>'
@@ -11905,6 +12933,20 @@ def oembed():
     return jsonify(data)
 
 
+def _extract_oembed_video_id(url):
+    """Return a BoTTube video id only for canonical watch URLs."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    host = (parsed.hostname or "").lower()
+    if host not in {"bottube.ai", "www.bottube.ai"}:
+        return None
+    match = re.fullmatch(r"/watch/([A-Za-z0-9_-]{5,20})/?", parsed.path)
+    if not match:
+        return None
+    return match.group(1)
+
+
 @app.route("/agents")
 def agents_page():
     """List all agents on the platform."""
@@ -11912,7 +12954,10 @@ def agents_page():
     agents = db.execute(
         """SELECT a.*, COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
-           FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
+           FROM agents a
+           LEFT JOIN videos v
+             ON a.id = v.agent_id AND COALESCE(v.is_removed, 0) = 0
+           WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id
            ORDER BY total_views DESC""",
     ).fetchall()
@@ -11929,11 +12974,13 @@ def get_agent_beacon(agent_name: str):
 
 
 @app.route("/agent/<agent_name>")
+@app.route("/channel/<agent_name>")  # canonical alias for /channel/<name> (Refs #1371)
 def channel(agent_name):
     """Agent channel page."""
     db = get_db()
     agent = db.execute(
-        "SELECT * FROM agents WHERE agent_name = ?", (agent_name,)
+        "SELECT * FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
     ).fetchone()
     if not agent:
         abort(404)
@@ -11941,13 +12988,14 @@ def channel(agent_name):
     videos = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id = ?
+           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
            ORDER BY v.created_at DESC""",
         (agent["id"],),
     ).fetchall()
 
     total_views = db.execute(
-        "SELECT COALESCE(SUM(views), 0) FROM videos WHERE agent_id = ?",
+        """SELECT COALESCE(SUM(views), 0) FROM videos
+           WHERE agent_id = ? AND COALESCE(is_removed, 0) = 0""",
         (agent["id"],),
     ).fetchone()[0]
 
@@ -12006,6 +13054,8 @@ def channel(agent_name):
            FROM comments c JOIN videos v ON c.video_id = v.video_id
            JOIN agents a2 ON c.agent_id = a2.id
            WHERE v.agent_id = ? AND c.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_likers = db.execute(
@@ -12013,20 +13063,22 @@ def channel(agent_name):
            FROM votes vt JOIN videos v ON vt.video_id = v.video_id
            JOIN agents a2 ON vt.agent_id = a2.id
            WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a2.is_banned, 0) = 0
            GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
         (aid, aid)).fetchall()
     interaction_outgoing = db.execute(
         """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) AS comments_given,
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS comments_given,
                (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) AS likes_given
+                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS likes_given
            FROM agents a2
-           WHERE a2.id != ? AND (
+           WHERE a2.id != ? AND COALESCE(a2.is_banned, 0) = 0 AND (
                (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id) > 0
+                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0
                OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id) > 0)
+                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0)
            ORDER BY comments_given + likes_given DESC LIMIT 8""",
         (aid, aid, aid, aid, aid)).fetchall()
 
@@ -12071,6 +13123,22 @@ def channel(agent_name):
 def developers_page():
     """Developer hub: OpenAPI, Swagger UI, llms.txt, embeds."""
     return render_template("developers.html")
+
+
+@app.route("/api")
+def api_redirect():
+    """Redirect /api to the API documentation page."""
+    return redirect(url_for("docs_page"))
+
+
+@app.route("/bridge")
+def bridge_page():
+    """wRTC bridge landing page with safe defaults for unauthenticated users."""
+    return render_template("bridge.html",
+        user_balance=0.0,
+        swap_url="https://jup.ag/",
+        reserve_wallet="Not connected — log in to view",
+        user_sol_address="")
 
 
 @app.route("/docs")
@@ -12424,11 +13492,9 @@ def dashboard_analytics_api():
     db = get_db()
     uid = g.user["id"]
 
-    try:
-        days = int(request.args.get("days", 30))
-    except Exception:
-        days = 30
-    days = max(7, min(days, 90))
+    days, error = _parse_positive_int_query("days", 30, min_value=7, max_value=90)
+    if error:
+        return error
 
     now = time.time()
     day_sec = 86400
@@ -12440,7 +13506,7 @@ def dashboard_analytics_api():
         base = int(now // day_sec) * day_sec
         for i in range(n - 1, -1, -1):
             ts = base - i * day_sec
-            out.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+            out.append(datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
         return out
 
     labels = _all_days(days)
@@ -12607,7 +13673,7 @@ def dashboard_export_csv():
             _csv_safe_cell(r["video_id"]),
             _csv_safe_cell(r["title"]),
             _csv_safe_cell(r["category"]),
-            datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
+            datetime.datetime.utcfromtimestamp(float(r["created_at"])).isoformat() + "Z" if r["created_at"] else "",
             int(r["views"] or 0),
             int(r["likes"] or 0),
             int(r["dislikes"] or 0),
@@ -12620,6 +13686,141 @@ def dashboard_export_csv():
     return resp
 
 
+# ---------------------------------------------------------------------------
+# Issue #1362: restore previously-orphaned HTML routes referenced by
+# base.html / nav / docs. Each handler returns a static template; data is
+# queried inline so the pages render the same content as the legacy URLs.
+# ---------------------------------------------------------------------------
+
+@app.route("/me")
+def me_page():
+    """Account home: links to dashboard, wallet, settings, and channel."""
+    if g.user:
+        return redirect(f"{g.prefix}/dashboard")
+    return render_template("me.html")
+
+
+@app.route("/wallet")
+def wallet_page():
+    """Wallet landing: shows balance for the logged-in user, info for guests."""
+    balance = 0.0
+    if g.user:
+        try:
+            db = get_db()
+            row = db.execute(
+                "SELECT rtc_balance FROM agents WHERE id = ?",
+                (g.user["id"],),
+            ).fetchone()
+            balance = float(row["rtc_balance"] or 0.0) if row else 0.0
+        except Exception:
+            balance = 0.0
+    return render_template("wallet.html", rtc_balance=balance)
+
+
+@app.route("/leaderboard")
+def leaderboard_page():
+    """Top creators, top earners, and most-followed channels."""
+    db = get_db()
+
+    top_creators = db.execute(
+        """SELECT a.agent_name, COALESCE(SUM(v.views), 0) AS total_views
+           FROM agents a
+           JOIN videos v ON v.agent_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
+             AND COALESCE(v.is_removed, 0) = 0
+           GROUP BY a.id
+           ORDER BY total_views DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    top_earners = db.execute(
+        """SELECT a.agent_name, COALESCE(SUM(t.amount), 0) AS total_tips
+           FROM agents a
+           LEFT JOIN tips t
+             ON t.to_agent_id = a.id
+            AND COALESCE(t.status, 'confirmed') = 'confirmed'
+           WHERE COALESCE(a.is_banned, 0) = 0
+           GROUP BY a.id
+           ORDER BY total_tips DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    top_followed = db.execute(
+        """SELECT a.agent_name, COUNT(s.follower_id) AS followers
+           FROM agents a
+           LEFT JOIN subscriptions s ON s.following_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
+           GROUP BY a.id
+           ORDER BY followers DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    return render_template(
+        "leaderboard.html",
+        top_creators=top_creators,
+        top_earners=top_earners,
+        top_followed=top_followed,
+    )
+
+
+@app.route("/premium")
+def premium_page():
+    """Premium plans landing page."""
+    return render_template("premium.html")
+
+
+@app.route("/settings")
+def settings_index_page():
+    """Account settings index — links to wallet, notifications, profile."""
+    return render_template("settings.html")
+
+
+@app.route("/channel/<int:channel_id>")
+def channel_by_id(channel_id):
+    """Channel page resolved by numeric agent id; redirects to /agent/<name>."""
+    db = get_db()
+    row = db.execute(
+        "SELECT agent_name FROM agents WHERE id = ? AND COALESCE(is_banned, 0) = 0",
+        (channel_id,),
+    ).fetchone()
+    if not row:
+        abort(404)
+    return redirect(f"{g.prefix}/agent/{row['agent_name']}", code=302)
+
+
+@app.route("/channel/0")
+def channel_zero_redirect():
+    """/channel/0 is invalid (no agent has id 0); show 404 explicitly."""
+    abort(404)
+
+
+@app.route("/explore")
+def explore_page():
+    """Discovery landing — trending, categories, top creators in one view."""
+    db = get_db()
+    trending = []
+    try:
+        trending = _get_trending_videos(db, limit=12, category=None)
+    except Exception:
+        trending = []
+    top_creators = db.execute(
+        """SELECT a.agent_name, COALESCE(SUM(v.views), 0) AS total_views
+           FROM agents a
+           JOIN videos v ON v.agent_id = a.id
+           WHERE COALESCE(a.is_banned, 0) = 0
+             AND COALESCE(v.is_removed, 0) = 0
+           GROUP BY a.id
+           ORDER BY total_views DESC
+           LIMIT 8"""
+    ).fetchall()
+    return render_template(
+        "explore.html",
+        trending=trending,
+        categories=VIDEO_CATEGORIES,
+        top_creators=top_creators,
+    )
+
+
 @app.route("/join")
 def join_page():
     """Instructions for agents and humans to join BoTTube."""
@@ -12628,24 +13829,63 @@ def join_page():
 
 @app.route("/search")
 def search_page():
-    """Search results page."""
-    q = request.args.get("q", "").strip()
-    videos = []
+    """Search results page (paginated, optional category filter).
 
+    search.html needs: query, videos, total, page, pages, categories,
+    selected_categories, categories_map, suggestions. Missing any of these
+    raised jinja2 UndefinedError -> HTTP 500 (e.g. categories_map).
+    """
+    q = request.args.get("q", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    per_page = 24
+    # Category checkboxes submit repeated ?cat=<id> params.
+    valid_cat_ids = {c["id"] for c in VIDEO_CATEGORIES}
+    selected_categories = [c for c in request.args.getlist("cat") if c in valid_cat_ids]
+    # id -> {name, icon} for the template's categories_map.get(...) lookups.
+    categories_map = {c["id"]: {"name": c["name"], "icon": c["icon"]} for c in VIDEO_CATEGORIES}
+
+    videos = []
+    total = 0
     if q:
         db = get_db()
         like_q = f"%{q}%"
+        params = [like_q, like_q, like_q, like_q]
+        where = (
+            "v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0 "
+            "AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)"
+        )
+        if selected_categories:
+            where += " AND v.category IN (%s)" % ",".join("?" * len(selected_categories))
+            params.extend(selected_categories)
+        total = db.execute(
+            f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id WHERE {where}",
+            params,
+        ).fetchone()[0]
         videos = db.execute(
-            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
+            f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
                FROM videos v JOIN agents a ON v.agent_id = a.id
-               WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
-               AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)
+               WHERE {where}
                ORDER BY v.views DESC, v.created_at DESC
-               LIMIT 50""",
-            (like_q, like_q, like_q, like_q),
+               LIMIT ? OFFSET ?""",
+            params + [per_page, (page - 1) * per_page],
         ).fetchall()
 
-    return render_template("search.html", query=q, videos=videos)
+    pages = max(1, (total + per_page - 1) // per_page)
+    return render_template(
+        "search.html",
+        query=q,
+        videos=videos,
+        total=total,
+        page=page,
+        pages=pages,
+        categories=VIDEO_CATEGORIES,
+        selected_categories=selected_categories,
+        categories_map=categories_map,
+        suggestions=[],
+    )
 
 
 @app.route("/trending")
@@ -12709,11 +13949,248 @@ def community_page():
 
 @app.route("/stars")
 def stars_page():
-    """Legacy star sprint landing page.
+    """Star sprint landing page."""
+    return render_template("stars.html")
 
-    Kept as a redirect so old links don't 404, but the campaign lives on GitHub.
+
+# -----------------------------------------------------------------------------
+# Bottube #1362 + #1371: user-facing HTML routes that return 404 in production.
+#
+# The Flask app registers /agents and /agent/<name> but does not register the
+# navigation/footer-facing surfaces /me, /wallet, /leaderboard, /premium,
+# /settings, /explore, /subscriptions, /playlists, /history, /contact.
+# Users following links from the footer, navigation, or external indexers land
+# on a 404 page.
+#
+# These routes are pure additive aliases / thin render wrappers that reuse
+# existing templates and handlers. No business logic changes.
+# -----------------------------------------------------------------------------
+
+
+# NOTE: /explore is defined earlier (explore_page, richer trending+creators view).
+# The duplicate alias that used to live here (Refs #1362) was removed — Flask
+# raises "View function mapping is overwriting an existing endpoint" at boot.
+
+
+# NOTE: /leaderboard (leaderboard_page) and /premium (premium_page) are defined
+# earlier; their duplicate aliases here (Refs #1362) were removed to fix the
+# boot-time "overwriting an existing endpoint" crash.
+
+
+@app.route("/contact")
+def contact_page():
+    """Public contact / support page (Refs #1371).
+
+    Re-uses the about.html template; the design system's contact form can be
+    added later without changing this route.
     """
-    return redirect("https://github.com/Scottcjn/Rustchain/issues/47", code=302)
+    return render_template("about.html", total_videos=0, total_agents=0)
+
+
+# NOTE: /me (me_page), /settings (settings_index_page), and /wallet (wallet_page)
+# are defined earlier; their duplicate aliases here (Refs #1362) were removed to
+# fix the boot-time "overwriting an existing endpoint" crash.
+
+
+@app.route("/subscriptions")
+def subscriptions_page():
+    """User subscriptions surface (Refs #1371).
+
+    For logged-in users, redirect to /dashboard (which renders the
+    subscriptions list). For signed-out users, redirect to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/subscriptions"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/playlists")
+def playlists_index_page():
+    """Playlist index surface (Refs #1371).
+
+    For logged-in users, render playlist_new.html with the user's existing
+    playlists loaded; for signed-out users, redirect to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/playlists"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/history")
+def history_page():
+    """Watch history surface (Refs #1371).
+
+    The watch-history surface is rendered inside the logged-in dashboard;
+    redirect signed-in users there. Anonymous users are sent to /login.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/history"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/settings/profile")
+def settings_profile_page():
+    """Account profile settings (Refs #1367).
+
+    Logical sub-route of /settings. For logged-in users, /settings/profile
+    delegates to wallet_settings_page() (the same handler the /settings parent
+    uses, since the profile form lives in the same template). For
+    signed-out users, redirect to /login with ?next=/settings/profile
+    preserved so the post-login redirect lands back here.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/settings/profile"))
+    return wallet_settings_page()
+
+
+@app.route("/agents/me")
+def agents_me_page():
+    """Canonical 'my agent' surface (Refs #1367).
+
+    Distinct from /api/agents/me (the PATCH/POST API which 401s for
+    unauthed users, expected). For logged-in users, /agents/me redirects
+    to /dashboard (where the user's own agent card is rendered). For
+    signed-out users, redirect to /login with ?next=/agents/me preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/agents/me"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/premium/plans")
+def premium_plans_page():
+    """Premium plan picker (Refs #1367).
+
+    For logged-in users, render the same premium_page() handler (which
+    renders premium.html with the plan picker). For signed-out users,
+    redirect to /login with ?next=/premium/plans preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/premium/plans"))
+    return premium_page()
+
+
+@app.route("/premium/upgrade")
+def premium_upgrade_page():
+    """Premium upgrade flow (Refs #1367).
+
+    For logged-in users, redirect to the premium page where the upgrade
+    CTA lives. For signed-out users, redirect to /login with
+    ?next=/premium/upgrade preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/premium/upgrade"))
+    return premium_page()
+
+
+@app.route("/account")
+def account_page():
+    """Canonical account surface (Refs #1367).
+
+    For logged-in users, /account -> /dashboard. For signed-out users,
+    redirect to /login with ?next=/account preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/account"))
+    return redirect(url_for("dashboard_page"))
+
+
+@app.route("/account/settings")
+def account_settings_page():
+    """Account sub-route pointing at /settings/wallet (Refs #1367).
+
+    For logged-in users, /account/settings -> /settings/wallet. For
+    signed-out users, redirect to /login with ?next=/account/settings.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/account/settings"))
+    return redirect(url_for("wallet_settings_page"))
+
+
+@app.route("/creator")
+def creator_page():
+    """Creator hub (Refs #1367).
+
+    Singular alias for the canonical creator directory at /agents.
+    For logged-in users, redirect to /agents (where the logged-in user
+    can see their own creator card). For signed-out users, redirect to
+    /login with ?next=/creator preserved.
+    """
+    if not g.user:
+        return redirect(url_for("login", next="/creator"))
+    return redirect(url_for("agents_page"))
+
+
+@app.route("/creators")
+def creators_page():
+    """Creator directory (Refs #1367).
+
+    Plural alias for /agents. /creators -> /agents for all users (it is
+    a public-facing directory, not user-scoped).
+    """
+    return redirect(url_for("agents_page"))
+
+
+@app.route("/live")
+def live_page():
+    """Live streams surface (Refs #1367).
+
+    /live is not yet a separate product surface; redirect to /trending
+    where live/popular streams are surfaced today.
+    """
+    return redirect(url_for("trending_page"))
+
+
+@app.route("/home")
+def home_page():
+    """Canonical home alias for / (Refs #1367).
+
+    /home -> / for all visitors (anonymous and logged-in). The home
+    surface is the root index, which already handles both states.
+    """
+    return redirect(url_for("index"))
+
+
+@app.route("/watch")
+def watch_index_page():
+    """Canonical watch alias (Refs #1367).
+
+    /watch -> /trending for all visitors. The /watch/<video_id> route
+    remains the canonical single-video surface; /watch without a video
+    id resolves to the trending feed where users pick a video to watch.
+    """
+    return redirect(url_for("trending_page"))
+
+
+@app.route("/tags")
+def tags_index_page():
+    """Tag index alias (Refs #1367).
+
+    /tags -> /trending. Tag-driven browsing is not yet a separate
+    surface; the trending feed is the canonical discovery surface.
+    """
+    return redirect(url_for("trending_page"))
+
+
+@app.route("/help")
+def help_page():
+    """Help page (Refs #1367).
+
+    /help -> /docs. The docs surface is the canonical help content;
+    /help is a friendlier URL.
+    """
+    return redirect(url_for("docs_page"))
+
+
+@app.route("/channels")
+def channels_index_page():
+    """Channel index alias (Refs #1367).
+
+    /channels -> /trending. A dedicated channel index is not yet a
+    separate surface; the trending feed is the canonical channel
+    discovery surface.
+    """
+    return redirect(url_for("trending_page"))
 
 
 @app.route("/upload", methods=["GET", "POST"])
@@ -12898,7 +14375,9 @@ def api_get_notification_preferences():
 @require_api_key
 def api_set_notification_preferences():
     """Update email notification preferences for the authenticated agent."""
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     db = get_db()
     allowed = {
         "comments": "email_notify_comments",
@@ -13052,9 +14531,15 @@ def notification_settings_save():
 @app.route("/api/track/miner-install", methods=["POST"])
 def api_track_miner_install():
     """Track miner install button clicks."""
-    data = request.get_json(silent=True) or {}
-    source = data.get("source", "unknown")  # pip or npm
-    page = data.get("page", "unknown")
+    data, error = _public_json_object_body()
+    if error:
+        return error
+    source, field_error = _public_string_field(data, "source", "unknown", 64)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
+    page, field_error = _public_string_field(data, "page", "unknown", 128)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     app.logger.info(f"[MINER-TRACK] source={source} page={page} ip={ip}")
 
@@ -13617,13 +15102,18 @@ def _cdata_safe(s: str) -> str:
 def agent_rss(agent_name):
     """RSS 2.0 feed for a channel's videos."""
     db = get_db()
-    agent = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
+    agent = db.execute(
+        "SELECT * FROM agents WHERE agent_name = ? AND COALESCE(is_banned, 0) = 0",
+        (agent_name,),
+    ).fetchone()
     if not agent:
         abort(404)
 
     videos = db.execute(
         """SELECT video_id, title, description, created_at, duration_sec, thumbnail, views
-           FROM videos WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50""",
+           FROM videos
+           WHERE agent_id = ? AND COALESCE(is_removed, 0) = 0
+           ORDER BY created_at DESC LIMIT 50""",
         (agent["id"],),
     ).fetchall()
 
@@ -13678,6 +15168,8 @@ def global_rss():
         """SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail,
                   a.agent_name, a.display_name
            FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0
            ORDER BY v.created_at DESC LIMIT 50""",
     ).fetchall()
 
@@ -13738,8 +15230,16 @@ app.register_blueprint(search_bp)
 # ---------------------------------------------------------------------------
 # Agent Interaction Visibility (Social Features - Issue #424)
 # ---------------------------------------------------------------------------
-from interactions_blueprint import interactions_bp
+from interactions_blueprint import api_activity_feed, interactions_bp
 app.register_blueprint(interactions_bp)
+
+
+@app.route("/api/v1/activity")
+@app.route("/api/v2/activity")
+def api_activity_alias():
+    """Canonical alias for the existing social activity feed JSON API."""
+    get_db()
+    return api_activity_feed()
 
 # ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
@@ -13806,6 +15306,15 @@ init_base_wrtc_tables(_base_wrtc_db)
 _base_wrtc_db.close()
 app.register_blueprint(base_wrtc_bp)
 
+# ERG Bridge Integration (Ergo)
+from ergo_bridge_blueprint import ergo_bp, init_ergo_tables
+import sqlite3 as _ergo_sqlite3
+_ergo_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_ergo_db = _ergo_sqlite3.connect(_ergo_db_path)
+init_ergo_tables(_ergo_db)
+_ergo_db.close()
+app.register_blueprint(ergo_bp)
+
 # ---------------------------------------------------------------------------
 # x402 Payment Protocol (HTTP 402 Standard for AI Agent Micropayments)
 # ---------------------------------------------------------------------------
@@ -13819,6 +15328,24 @@ try:
 except ImportError:
     # Optional module; keep core server + docs usable in minimal deployments.
     X402_ENABLED = False
+
+# ---------------------------------------------------------------------------
+# BoTTube x402 Premium API + Coinbase Agent Wallets
+# (bottube_x402.init_app registers /api/premium/*, /api/agents/me/coinbase-wallet,
+#  /api/x402/payments, and /api/x402/info on the Flask app.)
+# Fixes Bottube #1340 — Bounty #351 endpoints were not live because
+# init_app was never invoked from the main server module.
+# ---------------------------------------------------------------------------
+try:
+    import bottube_x402
+    bottube_x402.init_app(app, DB_PATH)
+    BOTTUBE_X402_ENABLED = True
+except ImportError:
+    BOTTUBE_X402_ENABLED = False
+    print("BoTTube x402 module not loaded")
+except Exception as e:
+    BOTTUBE_X402_ENABLED = False
+    print(f"BoTTube x402 module not loaded: {e}")
 
 # ---------------------------------------------------------------------------
 # RTC Service Gateway — Pay RTC for real services (utility before liquidity)
@@ -13895,6 +15422,25 @@ except ImportError:
     WHISPER_TRANSCRIPTS_ENABLED = False
 
 # ---------------------------------------------------------------------------
+# Gemini video/image generation API (Bounty #1102 fix for #1428)
+# ---------------------------------------------------------------------------
+# Exposes /api/gemini/status, /api/gemini/generate-video,
+# /api/gemini/generate-image, /api/gemini/job/<job_id>, /api/gemini/jobs,
+# and /api/gemini/image-to-video when the gemini_blueprint module is
+# importable. Previously the blueprint file existed on disk but was never
+# registered with the Flask app, so every /api/gemini/* request 404'd
+# in production. This block wires it in next to the other deferred
+# blueprints (whisper, scraper) and initializes the backing SQLite tables
+# so the status route reports real values.
+try:
+    from gemini_blueprint import gemini_bp, init_gemini_tables
+    init_gemini_tables()
+    app.register_blueprint(gemini_bp)
+    GEMINI_API_ENABLED = True
+except ImportError:
+    GEMINI_API_ENABLED = False
+
+# ---------------------------------------------------------------------------
 # Scraper Detective (real-time bot detection & dashboard)
 # ---------------------------------------------------------------------------
 try:
@@ -13928,6 +15474,56 @@ from agent_relationships import beef_bp, init_beef_tables
 init_beef_tables()
 app.register_blueprint(beef_bp)
 
+# --- AVAP (Agent Video Attestation Protocol) — additive, fail-safe ---
+try:
+    from avap_blueprint import avap_bp, init_avap_tables
+    init_avap_tables()
+    app.register_blueprint(avap_bp)
+    print('[avap] registered AVAP blueprint')
+except Exception as _avap_e:
+    print(f"[WARN] AVAP blueprint not loaded: {_avap_e}")
+
+# --- Pi Network PAYMENT routes (/pi/approve, /pi/complete, /pi/health) ---
+# Auth (/pi/auth) is in this file already; this module adds ONLY payment legs so it
+# cannot collide with /pi/auth. Dormant (503) until PI_API_KEY is set in the env.
+try:
+    from pi_payments import pi_pay_bp, init_pi_payment_tables
+    init_pi_payment_tables()
+    app.register_blueprint(pi_pay_bp)
+    print('[pi] registered Pi payment blueprint')
+except Exception as _pi_pay_e:
+    print(f"[WARN] Pi payment blueprint not loaded: {_pi_pay_e}")
+
+# --- Sophia router (/api/sophia) — agents + humans chat with Sophia Elya; she
+# converses or routes to video generation. Conversational backend = local
+# elyan-sophia model on .160 over Tailscale; generation reuses /api/generate-video. ---
+try:
+    from sophia_blueprint import sophia_bp, init_sophia_corpus
+    init_sophia_corpus()
+    app.register_blueprint(sophia_bp)
+    print('[sophia] registered Sophia router blueprint')
+except Exception as _sophia_e:
+    print(f"[WARN] Sophia router not loaded: {_sophia_e}")
+
+# --- BoTTube Studio (/studio) — pay RTC to generate video (demo of pay-to-generate on
+# our own token; generation layer pluggable, Alibaba API slots in later). ---
+try:
+    from studio_blueprint import studio_bp
+    app.register_blueprint(studio_bp)
+    print('[studio] registered Studio blueprint')
+except Exception as _studio_e:
+    print(f"[WARN] Studio blueprint not loaded: {_studio_e}")
+
+# --- Forge3D (/studio 3D mode) — pay RTC to generate 3D models; swappable backend
+# (Meshy wrap in Phase-0, local TRELLIS/Tripo later). Own per-type job + async refund. ---
+try:
+    from forge3d_blueprint import forge3d_bp, init_forge3d_tables
+    init_forge3d_tables()
+    app.register_blueprint(forge3d_bp)
+    print('[forge3d] registered Forge3D blueprint')
+except Exception as _forge3d_e:
+    print(f"[WARN] Forge3D blueprint not loaded: {_forge3d_e}")
+
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
 # ---------------------------------------------------------------------------
@@ -13957,8 +15553,12 @@ def push_subscribe():
 @app.route("/api/push/unsubscribe", methods=["POST"])
 def push_unsubscribe():
     """Remove a push notification subscription."""
-    data = request.get_json(silent=True) or {}
-    endpoint = data.get("endpoint", "")
+    data, error = _public_json_object_body()
+    if error:
+        return error
+    endpoint, field_error = _public_string_field(data, "endpoint", "", 2048)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
     if endpoint:
         db = get_db()
         db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
@@ -13987,6 +15587,27 @@ def _require_admin():
     return None
 
 
+def _admin_text_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
+
+def _admin_json_body():
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, "JSON body must be an object"
+    return data, None
+
+
 @app.route("/api/admin/ban", methods=["POST"])
 def admin_ban_agent():
     """Coach/review an agent by name. Force is required for an actual ban.
@@ -13997,9 +15618,15 @@ def admin_ban_agent():
     if err:
         return err
 
-    data = request.get_json(silent=True) or {}
-    agent_name = data.get("agent_name", "").strip()
-    reason = data.get("reason", "Needs moderation review").strip()
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    agent_name, error = _admin_text_field(data, "agent_name")
+    if error:
+        return jsonify({"error": error}), 400
+    reason, error = _admin_text_field(data, "reason", default="Needs moderation review")
+    if error:
+        return jsonify({"error": error}), 400
     force = bool(data.get("force", False))
 
     if not agent_name:
@@ -14062,8 +15689,12 @@ def admin_unban_agent():
     if err:
         return err
 
-    data = request.get_json(silent=True) or {}
-    agent_name = data.get("agent_name", "").strip()
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    agent_name, error = _admin_text_field(data, "agent_name")
+    if error:
+        return jsonify({"error": error}), 400
 
     if not agent_name:
         return jsonify({"error": "agent_name required"}), 400
@@ -14088,9 +15719,15 @@ def admin_nuke_agent():
     if err:
         return err
 
-    data = request.get_json(silent=True) or {}
-    agent_name = data.get("agent_name", "").strip()
-    reason = data.get("reason", "Escalated moderation review").strip()
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    agent_name, error = _admin_text_field(data, "agent_name")
+    if error:
+        return jsonify({"error": error}), 400
+    reason, error = _admin_text_field(data, "reason", default="Escalated moderation review")
+    if error:
+        return jsonify({"error": error}), 400
     force = bool(data.get("force", False))
 
     if not agent_name:
@@ -14198,9 +15835,15 @@ def admin_remove_video():
     if err:
         return err
 
-    data = request.get_json(silent=True) or {}
-    video_id = data.get("video_id", "").strip()
-    reason = data.get("reason", "Held for moderation review").strip()
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    video_id, error = _admin_text_field(data, "video_id")
+    if error:
+        return jsonify({"error": error}), 400
+    reason, error = _admin_text_field(data, "reason", default="Held for moderation review")
+    if error:
+        return jsonify({"error": error}), 400
     force = bool(data.get("force", False))
 
     if not video_id:
@@ -15035,10 +16678,16 @@ def admin_bulk_remove():
     if err:
         return err
 
-    data = request.get_json(silent=True) or {}
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
     video_ids = data.get("video_ids", [])
-    agent_name = data.get("agent_name", "").strip()
-    reason = data.get("reason", "Bulk moderation review").strip()
+    agent_name, error = _admin_text_field(data, "agent_name")
+    if error:
+        return jsonify({"error": error}), 400
+    reason, error = _admin_text_field(data, "reason", default="Bulk moderation review")
+    if error:
+        return jsonify({"error": error}), 400
     force = bool(data.get("force", False))
 
     db = get_db()
@@ -15129,6 +16778,18 @@ def _gen_message_id():
     return f"msg_{secrets.token_hex(12)}"
 
 
+def _message_text_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
+
 def _send_system_message(db, to_agent: str, subject: str, body: str,
                          msg_type: str = "system"):
     """Send a system-generated message to an agent."""
@@ -15153,11 +16814,28 @@ def send_message():
         "message_type": "general"  (general, system, moderation, alert)
     }
     """
-    data = request.get_json(silent=True) or {}
-    to_agent = data.get("to", "").strip() or None
-    subject = data.get("subject", "").strip()[:200]
-    body = data.get("body", "").strip()[:5000]
-    msg_type = data.get("message_type", "general").strip()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    to_agent, error = _message_text_field(data, "to")
+    if error:
+        return jsonify({"error": error}), 400
+    to_agent = to_agent or None
+
+    subject, error = _message_text_field(data, "subject", max_length=200)
+    if error:
+        return jsonify({"error": error}), 400
+
+    body, error = _message_text_field(data, "body", max_length=5000)
+    if error:
+        return jsonify({"error": error}), 400
+
+    msg_type, error = _message_text_field(data, "message_type", default="general")
+    if error:
+        return jsonify({"error": error}), 400
 
     if not body:
         return jsonify({"error": "body is required"}), 400
@@ -15201,17 +16879,29 @@ def message_inbox():
     db = get_db()
     agent_name = g.agent["agent_name"]
 
+    read_join = (
+        "LEFT JOIN message_reads mr "
+        "ON m.id = mr.message_id AND mr.agent_name = ?"
+    )
     where = "WHERE (m.to_agent = ? OR m.to_agent IS NULL)"
-    params = [agent_name]
+    params = [agent_name, agent_name]
     if unread_only:
-        where += " AND m.read_at IS NULL"
+        where += (
+            " AND ((m.to_agent IS NULL AND mr.read_at IS NULL) "
+            "OR (m.to_agent IS NOT NULL AND m.read_at IS NULL))"
+        )
 
     total = db.execute(
-        f"SELECT COUNT(*) FROM messages m {where}", params
+        f"SELECT COUNT(*) FROM messages m {read_join} {where}", params
     ).fetchone()[0]
 
     rows = db.execute(
-        f"""SELECT m.* FROM messages m {where}
+        f"""SELECT m.*,
+                   CASE
+                     WHEN m.to_agent IS NULL THEN mr.read_at
+                     ELSE m.read_at
+                   END AS effective_read_at
+            FROM messages m {read_join} {where}
             ORDER BY m.created_at DESC LIMIT ? OFFSET ?""",
         params + [per_page, offset],
     ).fetchall()
@@ -15225,7 +16915,7 @@ def message_inbox():
             "subject": r["subject"],
             "body": r["body"],
             "message_type": r["message_type"],
-            "read_at": r["read_at"],
+            "read_at": r["effective_read_at"],
             "created_at": r["created_at"],
         })
 
@@ -15255,10 +16945,19 @@ def mark_message_read(msg_id):
     if msg["to_agent"] and msg["to_agent"] != agent_name:
         return jsonify({"error": "Not your message"}), 403
 
-    db.execute(
-        "UPDATE messages SET read_at = datetime('now') WHERE id = ? AND read_at IS NULL",
-        (msg_id,),
-    )
+    if msg["to_agent"] is None:
+        db.execute(
+            """INSERT INTO message_reads (message_id, agent_name, read_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(message_id, agent_name)
+               DO UPDATE SET read_at = excluded.read_at""",
+            (msg_id, agent_name),
+        )
+    else:
+        db.execute(
+            "UPDATE messages SET read_at = datetime('now') WHERE id = ? AND read_at IS NULL",
+            (msg_id,),
+        )
     db.commit()
     return jsonify({"ok": True})
 
@@ -15271,10 +16970,14 @@ def message_unread_count():
     agent_name = g.agent["agent_name"]
 
     count = db.execute(
-        """SELECT COUNT(*) FROM messages
-           WHERE (to_agent = ? OR to_agent IS NULL)
-           AND read_at IS NULL""",
-        (agent_name,),
+        """SELECT COUNT(*)
+           FROM messages m
+           LEFT JOIN message_reads mr
+             ON m.id = mr.message_id AND mr.agent_name = ?
+           WHERE (m.to_agent = ? OR m.to_agent IS NULL)
+             AND ((m.to_agent IS NULL AND mr.read_at IS NULL)
+                  OR (m.to_agent IS NOT NULL AND m.read_at IS NULL))""",
+        (agent_name, agent_name),
     ).fetchone()[0]
 
     return jsonify({"ok": True, "unread": count})
@@ -15295,7 +16998,9 @@ def tag_page(tag_name):
     videos = db.execute(
         """SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.is_removed = 0 AND LOWER(v.tags) LIKE LOWER(?)
+           WHERE v.is_removed = 0
+             AND COALESCE(a.is_banned, 0) = 0
+             AND LOWER(v.tags) LIKE LOWER(?)
            ORDER BY v.views DESC, v.created_at DESC
            LIMIT 100""",
         (like_tag,),
@@ -15308,7 +17013,11 @@ def api_tags():
     """Return popular tags with video counts."""
     db = get_db()
     rows = db.execute(
-        "SELECT tags FROM videos WHERE is_removed = 0 AND tags != '[]'"
+        """SELECT v.tags
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.is_removed = 0
+             AND COALESCE(a.is_banned, 0) = 0
+             AND v.tags != '[]'"""
     ).fetchall()
     tag_counts = {}
     for row in rows:
@@ -15345,13 +17054,21 @@ def api_history():
            JOIN videos v ON wh.video_id = v.video_id
            JOIN agents a ON v.agent_id = a.id
            WHERE wh.agent_id = ?
+            AND COALESCE(v.is_removed, 0) = 0
+            AND COALESCE(a.is_banned, 0) = 0
            ORDER BY wh.watched_at DESC
            LIMIT ? OFFSET ?""",
         (g.agent["id"], per_page, offset),
     ).fetchall()
 
     total = db.execute(
-        "SELECT COUNT(*) FROM watch_history WHERE agent_id = ?",
+        """SELECT COUNT(*)
+           FROM watch_history wh
+           JOIN videos v ON wh.video_id = v.video_id
+           JOIN agents a ON v.agent_id = a.id
+           WHERE wh.agent_id = ?
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(a.is_banned, 0) = 0""",
         (g.agent["id"],),
     ).fetchone()[0]
 
@@ -15392,7 +17109,10 @@ def api_related_videos(video_id):
     """Get related videos for a given video ID."""
     db = get_db()
     video = db.execute(
-        "SELECT * FROM videos WHERE video_id = ?", (video_id,)
+        f"""SELECT v.*
+           FROM videos v JOIN agents a ON v.agent_id = a.id
+           WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
     ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
@@ -15405,9 +17125,9 @@ def api_related_videos(video_id):
     cur_cat = video["category"] or "other"
 
     candidates = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url
            FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.video_id != ? AND v.is_removed = 0
+           WHERE v.video_id != ? AND {_public_video_filter_sql()}
            ORDER BY v.views DESC
            LIMIT 100""",
         (video_id,),
@@ -15427,7 +17147,18 @@ def api_related_videos(video_id):
         return s
 
     scored = sorted(candidates, key=score, reverse=True)
-    limit = min(20, max(1, request.args.get("limit", 8, type=int)))
+    raw_limit = request.args.get("limit")
+    if raw_limit is None or raw_limit == "":
+        limit = 8
+    else:
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return jsonify({"error": "limit must be an integer"}), 400
+        if limit < 1:
+            return jsonify({"error": "limit must be >= 1"}), 400
+        if limit > 20:
+            return jsonify({"error": "limit must be <= 20"}), 400
 
     return jsonify({
         "ok": True,
@@ -15452,6 +17183,19 @@ def api_related_videos(video_id):
 # ---------------------------------------------------------------------------
 
 REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleading", "other"}
+
+
+def _report_text_field(data, field, default="", max_length=None):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()
+    if max_length is not None:
+        value = value[:max_length]
+    return value, None
+
 
 def _get_reporter_id():
     """Get reporter agent ID from either API key auth or browser session."""
@@ -15482,9 +17226,19 @@ def report_video(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    reason = data.get("reason", "").strip().lower()
-    details = data.get("details", "").strip()[:1000]
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    reason, error = _report_text_field(data, "reason")
+    if error:
+        return jsonify({"error": error}), 400
+    reason = reason.lower()
+    details, error = _report_text_field(data, "details", max_length=1000)
+    if error:
+        return jsonify({"error": error}), 400
 
     if reason not in REPORT_REASONS:
         return jsonify({"error": f"Invalid reason. Must be one of: {', '.join(sorted(REPORT_REASONS))}"}), 400
@@ -15551,9 +17305,19 @@ def report_comment(comment_id):
     if not comment:
         return jsonify({"error": "Comment not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    reason = data.get("reason", "").strip().lower()
-    details = data.get("details", "").strip()[:1000]
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    reason, error = _report_text_field(data, "reason")
+    if error:
+        return jsonify({"error": error}), 400
+    reason = reason.lower()
+    details, error = _report_text_field(data, "details", max_length=1000)
+    if error:
+        return jsonify({"error": error}), 400
 
     if reason not in REPORT_REASONS:
         return jsonify({"error": f"Invalid reason. Must be one of: {', '.join(sorted(REPORT_REASONS))}"}), 400
@@ -15694,9 +17458,15 @@ def admin_resolve_reward_hold(hold_id):
     if not hold:
         return jsonify({"error": "Reward hold not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    action = data.get("action", "dismiss")
-    reviewer_note = data.get("note", "").strip()[:2000]
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    action, error = _admin_text_field(data, "action", default="dismiss")
+    if error:
+        return jsonify({"error": error}), 400
+    reviewer_note, error = _admin_text_field(data, "note", max_length=2000)
+    if error:
+        return jsonify({"error": error}), 400
     now = time.time()
 
     if action == "credit":
@@ -15792,10 +17562,19 @@ def admin_resolve_moderation_hold(hold_id):
     if not hold:
         return jsonify({"error": "Moderation hold not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    action = data.get("action", "dismiss")
-    reviewer_note = data.get("note", "").strip()[:2000]
-    coach_note = data.get("coach_note", "").strip()[:5000] or hold["coach_note"] or reviewer_note
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    action, error = _admin_text_field(data, "action", default="dismiss")
+    if error:
+        return jsonify({"error": error}), 400
+    reviewer_note, error = _admin_text_field(data, "note", max_length=2000)
+    if error:
+        return jsonify({"error": error}), 400
+    coach_note, error = _admin_text_field(data, "coach_note", max_length=5000)
+    if error:
+        return jsonify({"error": error}), 400
+    coach_note = coach_note or hold["coach_note"] or reviewer_note
     now = time.time()
 
     status = "dismissed"
@@ -16386,8 +18165,16 @@ def ctr_global_stats():
 @app.route("/api/ctr/top")
 def ctr_top_videos():
     """Get top videos by CTR."""
-    limit = max(1, min(50, request.args.get("limit", 20, type=int)))
-    min_imp = request.args.get("min_impressions", 10, type=int)
+    limit, error = _parse_positive_int_query("limit", 20, max_value=50)
+    if error:
+        return error
+    min_imp, error = _parse_positive_int_query(
+        "min_impressions",
+        10,
+        min_value=0,
+    )
+    if error:
+        return error
     try:
         top = _get_ctr_tracker().get_top_by_ctr(limit=limit, min_impressions=min_imp)
         return jsonify({"ok": True, "videos": top})
@@ -16428,9 +18215,35 @@ def record_watch_time(video_id):
 
     Body: {"seconds": 12.5}
     """
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+
+    raw_seconds = data.get("seconds", 0)
+    if raw_seconds is None or raw_seconds == "":
+        seconds = 0.0
+    else:
+        try:
+            seconds = float(raw_seconds)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "seconds must be a number"}), 400
+
+    if not math.isfinite(seconds):
+        return jsonify({"ok": False, "error": "seconds must be finite"}), 400
+    if seconds < 0:
+        return jsonify({"ok": False, "error": "seconds must be non-negative"}), 400
+
+    db = get_db()
+    video = db.execute(
+        "SELECT 1 FROM videos WHERE video_id = ? AND COALESCE(is_removed, 0) = 0",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
     try:
-        data = request.get_json(silent=True) or {}
-        seconds = float(data.get("seconds", 0))
         if seconds > 0:
             _get_ctr_tracker().record_watch_time(video_id, seconds)
         return jsonify({"ok": True, "video_id": video_id, "seconds_recorded": seconds})
@@ -17501,10 +19314,9 @@ def xrpc_feed_firehose():
     stable even as new uploads arrive.
     """
     cursor = (request.args.get("cursor") or "").strip()
-    try:
-        limit = max(1, min(200, int(request.args.get("limit", 100))))
-    except Exception:
-        limit = 100
+    limit, error = _parse_positive_int_query("limit", 100, max_value=200)
+    if error:
+        return error
     ip = _get_client_ip()
     if not _rate_limit(f"firehose:{ip}", 30, 60):
         return jsonify({"ok": False, "error": "rate limited"}), 429
@@ -17516,6 +19328,12 @@ def xrpc_feed_firehose():
             return jsonify({"ok": False, "error": "invalid cursor"}), 400
         after_ms = int(m.group(1))
         after_rowid = int(m.group(2))
+        # Cursor segments are bound directly as SQLite INTEGER parameters
+        # (v.id > ?). A value above the signed 64-bit ceiling raises
+        # OverflowError inside the driver -> 500. Reject it the same way as
+        # a structurally invalid cursor instead of crashing.
+        if after_ms > _SQLITE_MAX_INT64 or after_rowid > _SQLITE_MAX_INT64:
+            return jsonify({"ok": False, "error": "invalid cursor"}), 400
 
     db = get_db()
     after_secs = after_ms / 1000.0
@@ -17823,9 +19641,20 @@ def mcp_bridge():
     if request.method == "GET":
         return jsonify(_mcp_descriptor())
 
-    data = request.get_json(silent=True) or {}
-    tool_name = (data.get("tool") or data.get("method") or "").strip()
-    args = data.get("args") or data.get("params") or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+
+    raw_tool_name = data.get("tool") or data.get("method") or ""
+    if not isinstance(raw_tool_name, str):
+        return jsonify({"ok": False, "error": "tool must be a string"}), 400
+    tool_name = raw_tool_name.strip()
+
+    args = data["args"] if "args" in data else data.get("params", {})
+    if args is None:
+        args = {}
     if not isinstance(args, dict):
         return jsonify({"ok": False, "error": "args must be an object"}), 400
 
@@ -18371,6 +20200,15 @@ def agent_accept_terms():
 
 # --- Public report endpoint -----------------------------------------------
 
+def _public_report_text_field(data, field, max_length):
+    value = data.get(field, "")
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    return value.strip()[:max_length], None
+
+
 @app.route("/api/report", methods=["POST"])
 def submit_report():
     """User-facing report submission. Anonymous accepted, rate-limited per IP."""
@@ -18379,11 +20217,25 @@ def submit_report():
     if not _rate_limit(f"report:{ip}", 10, 3600):
         return jsonify({"ok": False, "error": "Too many reports from this IP. Try again later."}), 429
 
-    data = request.get_json(silent=True) or {}
-    category = (data.get("category") or "").strip().lower()[:32]
-    target = (data.get("target") or "").strip()[:512]
-    detail = (data.get("detail") or "").strip()[:4000]
-    email = (data.get("email") or "").strip()[:200]
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+
+    category, error = _public_report_text_field(data, "category", 32)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    category = category.lower()
+    target, error = _public_report_text_field(data, "target", 512)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    detail, error = _public_report_text_field(data, "detail", 4000)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    email, error = _public_report_text_field(data, "email", 200)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
 
     valid_cats = {"csam", "illegal", "ncii", "ip", "harassment",
                   "impersonation", "malware", "spam", "minor", "other"}
@@ -19258,15 +21110,26 @@ def _ue_top_k_for_video(video_id, k=10, exclude_self=True):
 @app.route("/api/videos/<video_id>/similar")
 def api_videos_similar(video_id):
     """Top-K cosine-similar videos based on text embedding."""
-    try:
-        k = max(1, min(50, int(request.args.get("k", 10))))
-    except Exception:
-        k = 10
+    k, error = _parse_positive_int_query("k", 10, max_value=50)
+    if error:
+        return error
+    db = get_db()
+    video = db.execute(
+        """SELECT 1 FROM videos
+           WHERE video_id = ? AND COALESCE(is_removed, 0) = 0""",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({
+            "ok": False,
+            "error": "video not found",
+            "video_id": video_id,
+        }), 404
+
     pairs = _ue_top_k_for_video(video_id, k=k, exclude_self=True)
     if not pairs:
         return jsonify({"ok": False, "error": "no_embeddings_yet", "video_id": video_id}), 404
 
-    db = get_db()
     placeholders = ",".join("?" for _ in pairs)
     rows = db.execute(
         f"""SELECT v.video_id, v.title, v.thumbnail, v.duration_sec, v.views,
@@ -22111,7 +23974,7 @@ def _build_receipt_for_video(video_id, db):
         "video": {
             "video_id": target["video_id"],
             "title": title,
-            "url": f"https://bottube.ai/v/{target['video_id']}",
+            "url": f"https://bottube.ai/watch/{target['video_id']}",
             "canonical_asset_url":
                 f"https://bottube.ai/api/videos/{target['video_id']}/stream",
         },
@@ -22780,6 +24643,41 @@ def admin_moderation_reports():
         "created_at": r["created_at"],
     } for r in rows]
     return jsonify({"ok": True, "count": len(out), "reports": out})
+
+
+# ---------------------------------------------------------------------------
+# Route aliases — fix 404s from deployment drift (issues #1471, #1472)
+# ---------------------------------------------------------------------------
+# These aliases ensure documented endpoints resolve even when the canonical
+# route was registered under a slightly different URL pattern.
+
+app.add_url_rule(
+    "/api/videos/<video_id>/anchor",
+    endpoint="api_video_anchor_alias",
+    view_func=api_video_anchor_proof,
+)
+
+app.add_url_rule(
+    "/api/videos/<video_id>/anchor_proof",
+    endpoint="api_video_anchor_underscore_alias",
+    view_func=api_video_anchor_proof,
+)
+
+app.add_url_rule(
+    "/api/transparency/v2",
+    endpoint="api_transparency_v2",
+    view_func=api_transparency,
+)
+
+
+@app.route("/api/embed")
+def api_embed_discovery():
+    """JSON oEmbed discovery endpoint for external link previews.
+
+    Wraps the existing ``/oembed`` handler so consumers that expect the
+    conventional ``/api/embed`` path still receive a valid oEmbed response.
+    """
+    return oembed()
 
 
 if __name__ == "__main__":
