@@ -9125,31 +9125,37 @@ def _normalize_category_filter(category):
     return category if category in CATEGORY_MAP else None
 
 
-def _get_trending_videos(db, limit=20, category=None):
+def _get_trending_videos(db, limit=20, category=None, days_window=None, since_ts=None):
     """Compute trending videos with improved scoring.
 
-    Score = (recent_views_24h * 2) + (likes * 3) + (recent_comments_24h * 4)
+    Score = (recent_views * 2) + (likes * 3) + (recent_comments * 4)
             + recency_bonus + (novelty_score * NOVELTY_WEIGHT)
             + penalties (duplicate/low-info)
     recency_bonus: +10 if uploaded < 6h ago, +5 if < 24h ago
     """
     now = time.time()
-    cutoff_24h = now - 86400
+    if days_window is not None:
+        window_cutoff = now - (days_window * 86400)
+    else:
+        window_cutoff = now - 86400
     cutoff_6h = now - 21600
     query_limit = max(limit * 3, limit)
     category = _normalize_category_filter(category)
     category_clause = "AND v.category = ?" if category else ""
+    since_clause = "AND v.created_at >= ?" if since_ts is not None else ""
     params = [
         cutoff_6h,
-        cutoff_24h,
-        cutoff_24h,
-        cutoff_24h,
+        window_cutoff,
+        window_cutoff,
+        window_cutoff,
     ]
+    if since_ts is not None:
+        params.append(since_ts)
     if category:
         params.append(category)
     params.extend([
         cutoff_6h,
-        cutoff_24h,
+        window_cutoff,
         NOVELTY_WEIGHT,
         TRENDING_PENALTY_HIGH_SIMILARITY,
         TRENDING_PENALTY_LOW_INFO,
@@ -9178,6 +9184,7 @@ def _get_trending_videos(db, limit=20, category=None):
                GROUP BY video_id
            ) rc ON rc.video_id = v.video_id
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+             {since_clause}
              {category_clause}
            ORDER BY (
                COALESCE(rv.recent_views, 0) * 2
@@ -9222,7 +9229,23 @@ def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency)."""
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=20, category=category)
+
+    limit, error = _parse_positive_int_query("limit", 20, max_value=200)
+    if error:
+        return error
+
+    days_window, error = _parse_positive_int_query("days", None, min_value=1, max_value=90)
+    if error:
+        return error
+
+    since_ts, error = _parse_positive_int_query("since", None, min_value=0)
+    if error:
+        return error
+
+    rows = _get_trending_videos(
+        db, limit=limit, category=category,
+        days_window=days_window, since_ts=since_ts,
+    )
 
     videos = []
     for row in rows:
