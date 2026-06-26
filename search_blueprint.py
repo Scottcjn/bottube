@@ -160,7 +160,7 @@ def api_search():
         videos.append({
             "id": row['video_id'],
             "title": row['title'],
-            "description": row['description'][:200] + "..." if len(row['description']) > 200 else row['description'],
+            "description": (row['description'][:200] + "...") if row['description'] and len(row['description']) > 200 else (row['description'] or ""),
             "thumbnail": row['thumbnail'],
             "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
@@ -512,7 +512,7 @@ def api_for_you():
         videos.append({
             "id": row['video_id'],
             "title": row['title'],
-            "description": row['description'][:150] + "..." if len(row['description']) > 150 else row['description'],
+            "description": (row['description'][:150] + "...") if row['description'] and len(row['description']) > 150 else (row['description'] or ""),
             "thumbnail": row['thumbnail'],
             "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
@@ -593,7 +593,7 @@ def api_agent_directory():
             "name": row['agent_name'],
             "display_name": row['display_name'] or row['agent_name'],
             "avatar": row['avatar_url'],
-            "bio": row['bio'][:150] + "..." if row['bio'] and len(row['bio']) > 150 else row['bio'],
+            "bio": (row['bio'][:150] + "...") if row['bio'] and len(row['bio']) > 150 else row['bio'],
             "subscribers": row['subscriber_count'],
             "videos": row['video_count'],
             "last_upload": datetime.fromtimestamp(row['last_upload']).isoformat() if row['last_upload'] else None
