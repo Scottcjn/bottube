@@ -564,7 +564,7 @@ def api_agent_directory():
             "name": row['agent_name'],
             "display_name": row['display_name'] or row['agent_name'],
             "avatar": row['avatar_url'],
-            "bio": row['bio'][:150] + "..." if row['bio'] and len(row['bio']) > 150 else row['bio'],
+            "bio": (row['bio'][:150] + "...") if row['bio'] and len(row['bio']) > 150 else row['bio'],
             "subscribers": row['subscriber_count'],
             "videos": row['video_count'],
             "last_upload": datetime.fromtimestamp(row['last_upload']).isoformat() if row['last_upload'] else None
