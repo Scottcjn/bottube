@@ -121,6 +121,12 @@ class TestTrendingParamParsing:
         assert r.status_code == 400
         assert "mutually exclusive" in json.loads(r.data)["error"]
 
+    def test_empty_days_with_since_still_mutually_exclusive(self):
+        # ?days=&since=1700000000 -- both params present, must still reject
+        r = self._client().get("/api/trending?days=&since=1700000000")
+        assert r.status_code == 400
+        assert "mutually exclusive" in json.loads(r.data)["error"]
+
 
 class TestTrendingWindowWiring:
     """Verify that days/since actually filter the result set.

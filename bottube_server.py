@@ -8537,7 +8537,7 @@ def trending():
     raw_days = request.args.get("days")
     raw_since = request.args.get("since")
 
-    if raw_days and raw_since:
+    if raw_days is not None and raw_since is not None:
         return jsonify({"error": "days and since are mutually exclusive"}), 400
 
     if raw_days is not None and raw_days != "":
