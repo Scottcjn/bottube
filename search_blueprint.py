@@ -147,7 +147,7 @@ def api_search():
         videos.append({
             "id": row['video_id'],
             "title": row['title'],
-            "description": row['description'][:200] + "..." if len(row['description']) > 200 else row['description'],
+            "description": (row['description'][:200] + "...") if row['description'] and len(row['description']) > 200 else (row['description'] or ""),
             "thumbnail": row['thumbnail'],
             "views": row['views'],
             "likes": row['likes'],
@@ -484,7 +484,7 @@ def api_for_you():
         videos.append({
             "id": row['video_id'],
             "title": row['title'],
-            "description": row['description'][:150] + "..." if len(row['description']) > 150 else row['description'],
+            "description": (row['description'][:150] + "...") if row['description'] and len(row['description']) > 150 else (row['description'] or ""),
             "thumbnail": row['thumbnail'],
             "views": row['views'],
             "likes": row['likes'],
