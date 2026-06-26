@@ -25,12 +25,13 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from generation.models import GenerationRequest, JobStatus
 from generation.quality_gate import check_quality, QualityGateResult
 from generation.router import GenerationRouter
 from generation.provider import ProviderRegistry
+from generation.reliability import classify_error, provider_metrics_snapshot, run_with_retries
 
 log = logging.getLogger("generation.worker")
 
@@ -52,6 +53,17 @@ for _d in (_VIDEO_DIR, _THUMB_DIR, _GEN_WORK_DIR):
 
 _POLL_INTERVAL = 3        # seconds between async polls
 _POLL_TIMEOUT = 300       # 5 minutes max wait per provider
+
+
+def _submit_succeeded(result: object) -> bool:
+    return isinstance(result, tuple) and len(result) == 2 and bool(result[0])
+
+
+def _as_submit_result(result: object) -> Optional[Tuple[bool, object]]:
+    if isinstance(result, tuple) and len(result) == 2:
+        return bool(result[0]), result[1]
+    return None
+
 
 # ---------------------------------------------------------------------------
 # In-memory job store (small -- jobs expire after 2 hours)
@@ -222,6 +234,7 @@ def _run_pipeline(
         if not provider:
             log.warning("Provider %s not found, skipping", provider_name)
             continue
+        assert provider is not None
 
         update_job(
             job_id,
@@ -237,18 +250,35 @@ def _run_pipeline(
             _record_attempt(job_id, provider_name, attempt_num, False, reason)
             continue
 
-        # Submit
+        # Submit with transient retry/backoff.  Auth/permanent errors fail fast;
+        # transient/throttled provider errors get bounded retries before the
+        # deterministic fallback chain advances to the next provider.
         update_job(job_id, status=JobStatus.generating.value, progress=30)
-        try:
-            success, external_id = provider.submit(req, work_dir)
-        except Exception as exc:
-            log.error("Provider %s submit error: %s", provider_name, exc)
-            _record_attempt(job_id, provider_name, attempt_num, False, str(exc))
+        ok, submit_result, category, latency_s, tries = run_with_retries(
+            provider_name,
+            "submit",
+            lambda: provider.submit(req, work_dir),
+            success_predicate=_submit_succeeded,
+        )
+        if submit_result is None:
+            detail = f"submit {category} after {tries} attempt(s) in {latency_s:.2f}s"
+            log.error("Provider %s %s", provider_name, detail)
+            _record_attempt(job_id, provider_name, attempt_num, False, detail, category, latency_s)
             continue
 
-        if not success:
-            log.warning("Provider %s failed: %s", provider_name, external_id)
-            _record_attempt(job_id, provider_name, attempt_num, False, external_id)
+        normalized_submit = _as_submit_result(submit_result)
+        if normalized_submit is None:
+            detail = f"submit returned invalid result shape after {tries} attempt(s) in {latency_s:.2f}s"
+            log.error("Provider %s %s: %r", provider_name, detail, submit_result)
+            _record_attempt(job_id, provider_name, attempt_num, False, detail, category, latency_s)
+            continue
+
+        success, external_id = normalized_submit
+
+        if not ok or not success:
+            category = category if category != "ok" else classify_error(external_id)
+            log.warning("Provider %s failed: %s (%s)", provider_name, external_id, category)
+            _record_attempt(job_id, provider_name, attempt_num, False, external_id, category, latency_s)
             continue
 
         # Determine result path
@@ -262,10 +292,10 @@ def _run_pipeline(
             result_path = _poll_provider(job_id, provider, external_id, work_dir)
 
         if not result_path or not result_path.exists():
-            _record_attempt(job_id, provider_name, attempt_num, False, "no output file")
+            _record_attempt(job_id, provider_name, attempt_num, False, "no output file", "permanent", latency_s)
             continue
 
-        _record_attempt(job_id, provider_name, attempt_num, True, "ok")
+        _record_attempt(job_id, provider_name, attempt_num, True, "ok", "ok", latency_s)
         update_job(job_id, progress=70)
 
         # --- Step 3: Transcode ---
@@ -280,7 +310,7 @@ def _run_pipeline(
             else:
                 log.warning("Transcode failed for provider %s", provider_name)
                 final_path.unlink(missing_ok=True)
-                _record_attempt(job_id, provider_name, attempt_num, False, "transcode failed")
+                _record_attempt(job_id, provider_name, attempt_num, False, "transcode failed", "permanent", 0.0)
                 continue
 
         update_job(job_id, video_path=str(final_path), video_id=video_id)
@@ -371,16 +401,19 @@ def _run_pipeline(
 # ---------------------------------------------------------------------------
 
 def _record_attempt(job_id: str, provider: str, attempt: int,
-                    success: bool, detail: str):
+                    success: bool, detail: str, category: str = "", latency_s: float = 0.0):
     with _jobs_lock:
         if job_id in _jobs:
             _jobs[job_id].setdefault("attempts", []).append({
                 "provider": provider,
                 "attempt": attempt,
                 "success": success,
+                "category": category,
+                "latency_s": round(max(0.0, latency_s), 3),
                 "detail": detail[:500],
                 "timestamp": time.time(),
             })
+            _jobs[job_id]["provider_metrics"] = provider_metrics_snapshot()
 
 
 def _poll_provider(job_id, provider, external_id, work_dir) -> Optional[Path]:
@@ -393,11 +426,32 @@ def _poll_provider(job_id, provider, external_id, work_dir) -> Optional[Path]:
             provider.cancel(external_id)
             return None
 
-        status_str, progress = provider.get_status(external_id)
+        ok, status_result, category, latency_s, tries = run_with_retries(
+            provider.get_name(),
+            "status",
+            lambda: provider.get_status(external_id),
+        )
+        if not ok or status_result is None:
+            log.warning(
+                "Provider %s status failed: category=%s attempts=%d latency_s=%.2f",
+                provider.get_name(), category, tries, latency_s,
+            )
+            return None
+        status_str, progress = status_result
         update_job(job_id, progress=int(30 + progress * 40))
 
         if status_str == "completed":
-            result_path = provider.get_result(external_id, work_dir)
+            ok, result_path, category, latency_s, tries = run_with_retries(
+                provider.get_name(),
+                "result",
+                lambda: provider.get_result(external_id, work_dir),
+            )
+            if not ok:
+                log.warning(
+                    "Provider %s result failed: category=%s attempts=%d latency_s=%.2f",
+                    provider.get_name(), category, tries, latency_s,
+                )
+                return None
             if result_path and result_path.exists():
                 return result_path
             return None
