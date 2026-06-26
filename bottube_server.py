@@ -8394,31 +8394,60 @@ def _normalize_category_filter(category):
     return category if category in CATEGORY_MAP else None
 
 
-def _get_trending_videos(db, limit=20, category=None):
+def _get_trending_videos(db, limit=20, category=None, days=None, since=None):
     """Compute trending videos with improved scoring.
 
-    Score = (recent_views_24h * 2) + (likes * 3) + (recent_comments_24h * 4)
+    Score = (recent_views * 2) + (likes * 3) + (recent_comments * 4)
             + recency_bonus + (novelty_score * NOVELTY_WEIGHT)
             + penalties (duplicate/low-info)
+
     recency_bonus: +10 if uploaded < 6h ago, +5 if < 24h ago
+                   (these tiers are always anchored to 24h/6h, independent
+                   of the optional days/since activity window)
+
+    Optional params:
+      days  – widen the activity window (recent_views/recent_comments) from
+              the default 24h to N days (max 90). Also filters results to
+              videos created within that window.
+      since – absolute epoch timestamp; overrides days if both given (caller
+              enforces mutual exclusivity). Filters results to videos created
+              on or after this timestamp.
     """
     now = time.time()
     cutoff_24h = now - 86400
     cutoff_6h = now - 21600
+
+    # Determine the activity-counting window
+    if since is not None:
+        window_cutoff = since
+    elif days is not None:
+        window_cutoff = now - (days * 86400)
+    else:
+        window_cutoff = cutoff_24h
+
+    # The created_at filter for restricting which videos appear.
+    # Both days and since constrain the result set to videos created
+    # within the window — this makes days and since symmetric.
+    created_filter = ""
+    if since is not None or days is not None:
+        created_filter = "AND v.created_at >= ?"
+
     query_limit = max(limit * 3, limit)
     category = _normalize_category_filter(category)
     category_clause = "AND v.category = ?" if category else ""
     params = [
-        cutoff_6h,
-        cutoff_24h,
-        cutoff_24h,
-        cutoff_24h,
+        cutoff_6h,       # recency_bonus +10 tier (always 6h)
+        cutoff_24h,      # recency_bonus +5 tier (always 24h)
+        window_cutoff,   # recent_views subquery
+        window_cutoff,   # recent_comments subquery
     ]
+    if created_filter:
+        params.append(window_cutoff)
     if category:
         params.append(category)
     params.extend([
-        cutoff_6h,
-        cutoff_24h,
+        cutoff_6h,       # ORDER BY recency_bonus +10 tier
+        cutoff_24h,      # ORDER BY recency_bonus +5 tier
         NOVELTY_WEIGHT,
         TRENDING_PENALTY_HIGH_SIMILARITY,
         TRENDING_PENALTY_LOW_INFO,
@@ -8447,6 +8476,7 @@ def _get_trending_videos(db, limit=20, category=None):
                GROUP BY video_id
            ) rc ON rc.video_id = v.video_id
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0
+             {created_filter}
              {category_clause}
            ORDER BY (
                COALESCE(rv.recent_views, 0) * 2
@@ -8488,10 +8518,42 @@ def _get_trending_videos(db, limit=20, category=None):
 
 @app.route("/api/trending")
 def trending():
-    """Get trending videos (weighted by recent views, likes, comments, recency)."""
+    """Get trending videos (weighted by recent views, likes, comments, recency).
+
+    Query params:
+      limit    – number of results (1-50, default 20)
+      days     – widen the activity window to N days (1-90, default 1)
+      since    – absolute epoch timestamp; filters to videos created on or
+                 after this time. Mutually exclusive with days.
+      category – filter by video category
+    """
+    limit, err = _parse_positive_int_query("limit", 20, max_value=50)
+    if err:
+        return err
+
+    days = None
+    since = None
+
+    raw_days = request.args.get("days")
+    raw_since = request.args.get("since")
+
+    if raw_days is not None and raw_since is not None:
+        return jsonify({"error": "days and since are mutually exclusive"}), 400
+
+    if raw_days is not None and raw_days != "":
+        days, err = _parse_positive_int_query("days", 1, max_value=90)
+        if err:
+            return err
+
+    if raw_since is not None and raw_since != "":
+        since, err = _parse_positive_int_query("since", 0, min_value=0)
+        if err:
+            return err
+
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
-    rows = _get_trending_videos(db, limit=20, category=category)
+    rows = _get_trending_videos(db, limit=limit, category=category,
+                                days=days, since=since)
 
     videos = []
     for row in rows:
