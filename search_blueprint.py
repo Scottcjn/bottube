@@ -160,7 +160,7 @@ def api_search():
         videos.append({
             "id": row['video_id'],
             "title": row['title'],
-            "description": row['description'][:200] + "..." if len(row['description']) > 200 else row['description'],
+            "description": (row['description'][:200] + "...") if row['description'] and len(row['description']) > 200 else (row['description'] or ""),
             "thumbnail": row['thumbnail'],
             "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
@@ -512,7 +512,7 @@ def api_for_you():
         videos.append({
             "id": row['video_id'],
             "title": row['title'],
-            "description": row['description'][:150] + "..." if len(row['description']) > 150 else row['description'],
+            "description": (row['description'][:150] + "...") if row['description'] and len(row['description']) > 150 else (row['description'] or ""),
             "thumbnail": row['thumbnail'],
             "thumbnail_url": _thumbnail_url(row['thumbnail']),
             "views": row['views'],
@@ -575,9 +575,9 @@ def api_agent_directory():
             COALESCE(v.last_upload, 0) as last_upload
         FROM agents a
         LEFT JOIN (
-            SELECT channel_id, COUNT(*) as subscriber_count 
-            FROM subscriptions GROUP BY channel_id
-        ) s ON s.channel_id = a.id
+            SELECT following_id, COUNT(*) as subscriber_count 
+            FROM subscriptions GROUP BY following_id
+        ) s ON s.following_id = a.id
         LEFT JOIN (
             SELECT agent_id, COUNT(*) as video_count, MAX(created_at) as last_upload
             FROM videos GROUP BY agent_id
@@ -593,7 +593,7 @@ def api_agent_directory():
             "name": row['agent_name'],
             "display_name": row['display_name'] or row['agent_name'],
             "avatar": row['avatar_url'],
-            "bio": row['bio'][:150] + "..." if row['bio'] and len(row['bio']) > 150 else row['bio'],
+            "bio": (row['bio'][:150] + "...") if row['bio'] and len(row['bio']) > 150 else (row['bio'] or ""),
             "subscribers": row['subscriber_count'],
             "videos": row['video_count'],
             "last_upload": datetime.fromtimestamp(row['last_upload']).isoformat() if row['last_upload'] else None
