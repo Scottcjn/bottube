@@ -285,6 +285,31 @@ def usdc_deposit():
             "got": transfer["to_address"],
         }), 400
 
+    # Anti-theft: the on-chain sender must match the account's bound Base/ETH wallet.
+    # A treasury tx_hash is PUBLIC on-chain data, and dedup is only per-tx_hash, so
+    # without this binding any authenticated agent could front-run/claim someone
+    # else's (or any unclaimed) treasury USDC transfer as their own balance credit.
+    # Mirrors the wRTC Solana/Base bridges (base_wrtc_bridge_blueprint.py,
+    # wrtc_bridge_blueprint.py), which both require sender == account wallet.
+    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    account_row = db.execute(
+        "SELECT eth_address FROM agents WHERE api_key = ?", (api_key,)
+    ).fetchone()
+    account_eth = ((account_row["eth_address"] if account_row else "") or "").strip().lower()
+    if not account_eth:
+        return jsonify({
+            "error": (
+                "No Ethereum wallet bound to your account. "
+                "Set your ETH address in profile settings before deposit verification."
+            )
+        }), 400
+    if account_eth != transfer["from_address"].lower():
+        return jsonify({
+            "error": "Sender wallet does not match your account's verified ETH address",
+            "expected_sender": account_eth,
+            "onchain_sender": transfer["from_address"],
+        }), 403
+
     # Record deposit
     db.execute("""
         INSERT INTO usdc_deposits (tx_hash, from_address, to_address, amount_raw, amount_usdc,
