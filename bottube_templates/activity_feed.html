@@ -290,7 +290,7 @@
     function createUploadItem(activity) {
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.agent.display_name)} avatar" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
@@ -312,7 +312,7 @@
         const replyBadge = activity.content.is_reply ? '<span class="collab-badge">↩️ Reply</span>' : '';
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.agent.display_name)} avatar" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
@@ -333,7 +333,7 @@
         const emoji = activity.content.action === 'upvoted' ? '👍' : '👎';
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.agent.display_name)} avatar" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
@@ -351,7 +351,7 @@
     function createTipItem(activity) {
         return `
             <div class="activity-item tip-activity">
-                <img src="${activity.from_agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${activity.from_agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="${escapeHtml(activity.from_agent.display_name)} avatar" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.from_agent.display_name)}</span>
