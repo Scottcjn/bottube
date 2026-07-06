@@ -3117,12 +3117,15 @@ function adjustVolume(video, delta) {
     }
     var volumePercent = Math.round(video.volume * 100);
     announcePlayerState('Volume ' + volumePercent + '%');
+    var dir = delta > 0 ? '↑' : '↓';
+    showShortcutIndicator(dir, 'Volume ' + volumePercent + '%');
 }
 
 function toggleMute(video) {
     if (!video) return;
     video.muted = !video.muted;
     announcePlayerState(video.muted ? 'Muted' : 'Unmuted');
+    showShortcutIndicator('M', video.muted ? 'Muted' : 'Unmuted');
 }
 
 function toggleCaptions(video) {
@@ -3150,6 +3153,7 @@ function toggleCaptions(video) {
 function toggleFullscreen() {
     var player = document.getElementById('video-player-region');
     if (!player) return;
+    var entering = !document.fullscreenElement;
     if (document.fullscreenElement) {
         document.exitFullscreen();
         announcePlayerState('Exited fullscreen');
@@ -3157,6 +3161,7 @@ function toggleFullscreen() {
         player.requestFullscreen();
         announcePlayerState('Entered fullscreen');
     }
+    showShortcutIndicator('F', entering ? 'Fullscreen' : 'Exit Fullscreen');
 }
 
 // Keyboard shortcut indicator - Issue #2140
@@ -3248,12 +3253,10 @@ document.addEventListener('keydown', function(event) {
         case 'arrowup':
             event.preventDefault();
             adjustVolume(video, 0.05);
-            showShortcutIndicator('↑', 'Volume +');
             return;
         case 'arrowdown':
             event.preventDefault();
             adjustVolume(video, -0.05);
-            showShortcutIndicator('↓', 'Volume -');
             return;
         case 'arrowleft':
             event.preventDefault();
