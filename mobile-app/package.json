@@ -18,7 +18,7 @@
     "@react-navigation/native-stack": "^7.14.4",
     "expo": "~56.0.4",
     "expo-av": "~13.10.0",
-    "expo-document-picker": "~56.0.4",
+    "expo-document-picker": "~57.0.0",
     "expo-image-picker": "~56.0.13",
     "expo-secure-store": "~56.0.4",
     "expo-status-bar": "~56.0.4",
