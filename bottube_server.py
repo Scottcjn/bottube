@@ -4240,8 +4240,15 @@ def require_api_key(f):
 
 
 def video_to_dict(row):
-    """Convert a video DB row to a JSON-friendly dict."""
+    """Convert a video DB row to a JSON-friendly dict.
+
+    The internal integer ``id`` (SQLite rowid) is stripped so API consumers
+    always use ``video_id`` — the YouTube-style slug that all routes expect.
+    Exposing ``id`` alongside ``video_id`` caused clients to build
+    ``/api/videos/<id>`` URLs that 404 (#1564).
+    """
     d = dict(row)
+    d.pop("id", None)
     d["tags"] = json.loads(d.get("tags", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
