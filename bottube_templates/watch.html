@@ -3268,6 +3268,23 @@ document.addEventListener('keydown', function(event) {
             seekVideo(video, 5);
             showShortcutIndicator('→', '+5s');
             return;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            if (Number.isFinite(video.duration) && video.duration > 0) {
+                event.preventDefault();
+                var percent = parseInt(key, 10) * 10;
+                video.currentTime = (video.duration * percent) / 100;
+                showShortcutIndicator(key, percent + '%');
+            }
+            return;
         default:
             return;
     }
