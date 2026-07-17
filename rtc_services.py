@@ -35,6 +35,11 @@ rtc_services_bp = Blueprint("rtc_services", __name__)
 # Service Catalog
 # ---------------------------------------------------------------------------
 
+# Upper bound on a single /api/rtc/pay purchase. Generous enough for any real
+# bulk buy (100 monthly passes = 6000 RTC) while keeping the cost arithmetic
+# well inside float range.
+MAX_PURCHASE_QUANTITY = 100
+
 SERVICE_CATALOG = {
     "pro_api_day": {
         "name": "Pro API Day Pass",
@@ -221,7 +226,17 @@ def init_app(app, db_path):
 
         data = request.get_json(force=True, silent=True) or {}
         service_key = data.get("service_key", "")
-        quantity = int(data.get("quantity", 1))
+        # quantity is client-supplied and multiplies straight into the cost.
+        # A negative value flips `rtc_balance - total_cost` into a credit and
+        # sails past the balance check below, so bound it before it is used.
+        try:
+            quantity = int(data.get("quantity", 1))
+        except (TypeError, ValueError):
+            return jsonify({"error": "quantity must be an integer"}), 400
+        if quantity < 1 or quantity > MAX_PURCHASE_QUANTITY:
+            return jsonify({
+                "error": f"quantity must be between 1 and {MAX_PURCHASE_QUANTITY}",
+            }), 400
 
         if service_key not in SERVICE_CATALOG:
             return jsonify({
