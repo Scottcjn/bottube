@@ -48,6 +48,12 @@ from flask import (
     url_for,
 )
 from markupsafe import Markup, escape
+from query_param_validation import (
+    MAX_QUERY_TIMESTAMP,
+    parse_enum_param,
+    parse_int_param,
+    parse_ts_param,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # Mood Engine for Agent Mood System (Bounty #2283)
@@ -6997,33 +7003,13 @@ def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, cla
     silently coercing invalid input to the default (which would mask
     client bugs and could lead to surprising pagination/sort results).
     """
-    raw_value = request.args.get(name)
-    if raw_value is None or raw_value == "":
-        return default, None
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError):
-        return None, (
-            jsonify({"error": f"{name} must be an integer"}),
-            400,
-        )
-    if clamp_bounds:
-        if value < min_value:
-            value = min_value
-        if max_value is not None and value > max_value:
-            value = max_value
-        return value, None
-    if value < min_value:
-        return None, (
-            jsonify({"error": f"{name} must be >= {min_value}"}),
-            400,
-        )
-    if max_value is not None and value > max_value:
-        return None, (
-            jsonify({"error": f"{name} must be <= {max_value}"}),
-            400,
-        )
-    return value, None
+    return parse_int_param(
+        name,
+        default,
+        min_value=min_value,
+        max_value=max_value,
+        clamp_bounds=clamp_bounds,
+    )
 
 
 def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
@@ -7069,7 +7055,7 @@ def list_videos():
     # affect any legitimate use case. Bottube issue #1414 (page-bound
     # follow-up; the live `bottube.ai` binary is v1.2.0 and still lets
     # `page=99999` through with `videos=[]`).
-    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    page, error = parse_int_param("page", 1, min_value=1, max_value=10000)
     if error:
         return error
 
@@ -9265,7 +9251,7 @@ def trending():
                  after this time. Mutually exclusive with days.
       category – filter by video category
     """
-    limit, err = _parse_positive_int_query("limit", 20, max_value=50)
+    limit, err = parse_int_param("limit", 20, min_value=1, max_value=50)
     if err:
         return err
 
@@ -9279,12 +9265,12 @@ def trending():
         return jsonify({"error": "days and since are mutually exclusive"}), 400
 
     if raw_days is not None and raw_days != "":
-        days, err = _parse_positive_int_query("days", 1, max_value=90)
+        days, err = parse_int_param("days", 1, min_value=1, max_value=90)
         if err:
             return err
 
     if raw_since is not None and raw_since != "":
-        since, err = _parse_positive_int_query("since", 0, min_value=0)
+        since, err = parse_ts_param("since", 0)
         if err:
             return err
 
@@ -9310,12 +9296,18 @@ def trending():
 
 _FEED_BUCKETS = ("latest", "heuristic", "hybrid-v1")
 _FEED_MODES = ("latest", "recommended")
+_FEED_SORTS = (
+    "latest",
+    "newest",
+    "oldest",
+    "popular",
+    "trending",
+    "views",
+    "likes",
+    "title",
+)
 _FEED_CATEGORY_IDS = {c["id"] for c in VIDEO_CATEGORIES}
-
-
-def _feed_choice_error(name, allowed):
-    allowed_text = ", ".join(sorted(allowed))
-    return jsonify({"error": f"{name} must be one of: {allowed_text}"}), 400
+_FEED_MAX_OFFSET = 500_000
 
 
 def _feed_bucket_for_visitor(visitor_id, override=""):
@@ -9887,6 +9879,31 @@ def feed():
     Returns:
         JSON with videos list, page info, mode used, and the active bucket.
     """
+    # Validate compatibility parameters reported in #1456 even though the
+    # current feed implementation still pages with `page`/`per_page`.  Valid
+    # compatibility values remain no-ops, preserving the current response,
+    # while malformed values can no longer be silently ignored.
+    _, error = parse_int_param("limit", None, min_value=1, max_value=50)
+    if error:
+        return error
+    _, error = parse_int_param("offset", None, min_value=0, max_value=_FEED_MAX_OFFSET)
+    if error:
+        return error
+    _, error = parse_ts_param("since", None, max_value=MAX_QUERY_TIMESTAMP)
+    if error:
+        return error
+    _, error = parse_ts_param("before", None, max_value=MAX_QUERY_TIMESTAMP)
+    if error:
+        return error
+    _, error = parse_enum_param(
+        "sort",
+        None,
+        _FEED_SORTS,
+        case_sensitive=False,
+    )
+    if error:
+        return error
+
     # `page` is bounded at 10000 so a malformed or malicious client cannot
     # request an arbitrarily deep page. Without an upper bound, a value such
     # as `page=9223372036854775807` makes `offset = (page - 1) * per_page`
@@ -9896,26 +9913,35 @@ def feed():
     # ~500k rows, already well past the whole feed catalogue, so the cap does
     # not affect any legitimate use case. Mirrors the `/api/videos` bound
     # (Bottube issue #1414).
-    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    page, error = parse_int_param("page", 1, min_value=1, max_value=10000)
     if error:
         return error
-    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    per_page, error = parse_int_param("per_page", 20, min_value=1, max_value=50)
     if error:
         return error
-    mode = request.args.get("mode", "latest")
-    category = request.args.get("category")
-    bucket_override = (request.args.get("bucket") or "").strip().lower()
-    mode = (mode or "latest").strip().lower()
-    if mode not in _FEED_MODES:
-        return _feed_choice_error("mode", _FEED_MODES)
-    if category is not None:
-        category = category.strip()
-        if not category:
-            category = None
-        elif category not in _FEED_CATEGORY_IDS:
-            return _feed_choice_error("category", _FEED_CATEGORY_IDS)
-    if bucket_override and bucket_override not in _FEED_BUCKETS:
-        return _feed_choice_error("bucket", _FEED_BUCKETS)
+    mode, error = parse_enum_param(
+        "mode",
+        "latest",
+        _FEED_MODES,
+        case_sensitive=False,
+    )
+    if error:
+        return error
+    category, error = parse_enum_param(
+        "category",
+        None,
+        _FEED_CATEGORY_IDS,
+    )
+    if error:
+        return error
+    bucket_override, error = parse_enum_param(
+        "bucket",
+        "",
+        _FEED_BUCKETS,
+        case_sensitive=False,
+    )
+    if error:
+        return error
 
     # Get optional API key for personalized recommendations
     api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
@@ -17153,6 +17179,10 @@ def api_history_clear():
 @app.route("/api/videos/<video_id>/related")
 def api_related_videos(video_id):
     """Get related videos for a given video ID."""
+    limit, error = parse_int_param("limit", 8, min_value=1, max_value=20)
+    if error:
+        return error
+
     db = get_db()
     video = db.execute(
         f"""SELECT v.*
@@ -17193,19 +17223,6 @@ def api_related_videos(video_id):
         return s
 
     scored = sorted(candidates, key=score, reverse=True)
-    raw_limit = request.args.get("limit")
-    if raw_limit is None or raw_limit == "":
-        limit = 8
-    else:
-        try:
-            limit = int(raw_limit)
-        except (TypeError, ValueError):
-            return jsonify({"error": "limit must be an integer"}), 400
-        if limit < 1:
-            return jsonify({"error": "limit must be >= 1"}), 400
-        if limit > 20:
-            return jsonify({"error": "limit must be <= 20"}), 400
-
     return jsonify({
         "ok": True,
         "related": [
