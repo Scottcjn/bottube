@@ -48,6 +48,7 @@ from flask import (
     url_for,
 )
 from markupsafe import Markup, escape
+from shared_query_validator import parse_int_param, parse_enum_param, parse_ts_param
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # Mood Engine for Agent Mood System (Bounty #2283)
@@ -9265,7 +9266,7 @@ def trending():
                  after this time. Mutually exclusive with days.
       category – filter by video category
     """
-    limit, err = _parse_positive_int_query("limit", 20, max_value=50)
+    limit, err = parse_int_param("limit", default=20, max_value=50)
     if err:
         return err
 
@@ -9279,12 +9280,12 @@ def trending():
         return jsonify({"error": "days and since are mutually exclusive"}), 400
 
     if raw_days is not None and raw_days != "":
-        days, err = _parse_positive_int_query("days", 1, max_value=90)
+        days, err = parse_int_param("days", default=1, max_value=90)
         if err:
             return err
 
     if raw_since is not None and raw_since != "":
-        since, err = _parse_positive_int_query("since", 0, min_value=0)
+        since, err = parse_ts_param("since", default=0, min_value=0)
         if err:
             return err
 
@@ -9896,26 +9897,29 @@ def feed():
     # ~500k rows, already well past the whole feed catalogue, so the cap does
     # not affect any legitimate use case. Mirrors the `/api/videos` bound
     # (Bottube issue #1414).
-    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    page, error = parse_int_param("page", default=1, max_value=10000)
     if error:
         return error
-    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    per_page, error = parse_int_param("per_page", default=20, max_value=50)
     if error:
         return error
     mode = request.args.get("mode", "latest")
     category = request.args.get("category")
     bucket_override = (request.args.get("bucket") or "").strip().lower()
-    mode = (mode or "latest").strip().lower()
-    if mode not in _FEED_MODES:
-        return _feed_choice_error("mode", _FEED_MODES)
+    mode, err = parse_enum_param("mode", _FEED_MODES, default="latest")
+    if err:
+        return err
     if category is not None:
         category = category.strip()
         if not category:
             category = None
         elif category not in _FEED_CATEGORY_IDS:
-            return _feed_choice_error("category", _FEED_CATEGORY_IDS)
-    if bucket_override and bucket_override not in _FEED_BUCKETS:
-        return _feed_choice_error("bucket", _FEED_BUCKETS)
+            allowed_text = ", ".join(sorted(_FEED_CATEGORY_IDS))
+            return jsonify({"error": f"category must be one of: {allowed_text}"}), 400
+    if bucket_override:
+        bucket_override, err = parse_enum_param("bucket", _FEED_BUCKETS)
+        if err:
+            return err
 
     # Get optional API key for personalized recommendations
     api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
@@ -17193,18 +17197,9 @@ def api_related_videos(video_id):
         return s
 
     scored = sorted(candidates, key=score, reverse=True)
-    raw_limit = request.args.get("limit")
-    if raw_limit is None or raw_limit == "":
-        limit = 8
-    else:
-        try:
-            limit = int(raw_limit)
-        except (TypeError, ValueError):
-            return jsonify({"error": "limit must be an integer"}), 400
-        if limit < 1:
-            return jsonify({"error": "limit must be >= 1"}), 400
-        if limit > 20:
-            return jsonify({"error": "limit must be <= 20"}), 400
+    limit, err = parse_int_param("limit", default=8, min_value=1, max_value=20)
+    if err:
+        return err
 
     return jsonify({
         "ok": True,
