@@ -4255,6 +4255,7 @@ def video_to_dict(row):
     """
     d = dict(row)
     d.pop("id", None)
+    d.pop("screening_details", None)  # internal, not for public API (#1587)
     d["tags"] = json.loads(d.get("tags", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
