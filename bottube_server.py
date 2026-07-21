@@ -28,6 +28,8 @@ import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, parsedate_to_datetime
+
+from bottube.param_validators import parse_int_param, parse_enum_param, parse_ts_param
 from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -17152,7 +17154,11 @@ def api_history_clear():
 
 @app.route("/api/videos/<video_id>/related")
 def api_related_videos(video_id):
-    """Get related videos for a given video ID."""
+    """Get related videos for a given video ID.
+
+    Query params:
+      limit - max related videos to return (1-50, default 20, max 50)
+    """
     db = get_db()
     video = db.execute(
         f"""SELECT v.*
@@ -17193,18 +17199,9 @@ def api_related_videos(video_id):
         return s
 
     scored = sorted(candidates, key=score, reverse=True)
-    raw_limit = request.args.get("limit")
-    if raw_limit is None or raw_limit == "":
-        limit = 8
-    else:
-        try:
-            limit = int(raw_limit)
-        except (TypeError, ValueError):
-            return jsonify({"error": "limit must be an integer"}), 400
-        if limit < 1:
-            return jsonify({"error": "limit must be >= 1"}), 400
-        if limit > 20:
-            return jsonify({"error": "limit must be <= 20"}), 400
+    limit, err = parse_int_param("limit", 8, min_value=1, max_value=50)
+    if err:
+        return err
 
     return jsonify({
         "ok": True,
