@@ -4174,6 +4174,9 @@ def require_api_key(f):
 def video_to_dict(row):
     """Convert a video DB row to a JSON-friendly dict."""
     d = dict(row)
+    d.pop("id", None)
+    d.pop("screening_details", None)
+    d.pop("removed_reason", None)
     d["tags"] = json.loads(d.get("tags", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
