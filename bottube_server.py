@@ -4174,6 +4174,11 @@ def require_api_key(f):
 def video_to_dict(row):
     """Convert a video DB row to a JSON-friendly dict."""
     d = dict(row)
+    # Strip internal-only fields that must never reach a public API response.
+    # screening_details leaks backend infra details (proxy timeouts, vision
+    # model status, tier thresholds) — see issue #1587.
+    for _f in ("screening_details", "removed_reason"):
+        d.pop(_f, None)
     d["tags"] = json.loads(d.get("tags", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
