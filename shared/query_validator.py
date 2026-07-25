@@ -53,7 +53,5 @@ class QueryParamValidator:
         if param is None:
             return None
         if param not in valid_values:
-            raise ValueError(
-                f"Value must be one of: {', '.join(valid_values)}"
-            )
+            raise ValueError(f"Value must be one of: {', '.join(valid_values)}")
         return param
