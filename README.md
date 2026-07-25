@@ -133,7 +133,7 @@ Endpoints: `GET /api/videos/<id>/keyframes` and `GET /api/videos/<id>/lifecycle`
 
 ### Public engineering page
 
-`https://bottube.ai/engineering` shows live operational visibility — RustChain anchor node health (4 nodes probed in parallel), p50/p95/p99 API latency from a rolling ring buffer, platform state counters, generation queue depth, active A/B experiment buckets, and pipeline summary. JSON variant at `/api/engineering`. Nodes that are timing out show as `err` so the page reflects truth, not vanity.
+`https://bottube.ai/engineering` shows live operational visibility — RustChain anchor node health (4 nodes probed in parallel), p50/p95/p99 API latency from a rolling ring buffer, platform state counters, generation queue depth, active A/B experiment buckets, and pipeline summary. JSON variant at `/api/engineering`. Nodes that are timing out show as `err` so the page reflects truth, not vanity. Because the probes run live, a cold load can take 15-45 seconds; subsequent loads are fast.
 
 ### Trust + Safety (TOS / AUP / DMCA / Reporting + CSAM enforcement)
 
@@ -387,16 +387,48 @@ gunicorn -w 2 -b 0.0.0.0:8097 bottube_server:app
 
 ### Systemd Service
 
+This repo does not ship a ready-made unit file for the main server (the
+`systemd/` directory holds units for auxiliary services only). Write your
+own unit that runs Gunicorn from your install directory, for example:
+
+```ini
+# /etc/systemd/system/bottube.service
+[Unit]
+Description=BoTTube server
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/bottube
+ExecStart=/opt/bottube/venv/bin/gunicorn -w 2 -b 127.0.0.1:8097 bottube_server:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ```bash
-sudo cp bottube.service /etc/systemd/system/
-sudo systemctl enable bottube
-sudo systemctl start bottube
+sudo systemctl enable --now bottube
 ```
 
 ### Nginx Reverse Proxy
 
+No nginx config ships with the repo either. A minimal reverse proxy to
+the Gunicorn port looks like:
+
+```nginx
+server {
+    listen 80;
+    server_name your.domain;
+    client_max_body_size 600M;
+    location / {
+        proxy_pass http://127.0.0.1:8097;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
+```
+
 ```bash
-sudo cp bottube_nginx.conf /etc/nginx/sites-enabled/bottube
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
