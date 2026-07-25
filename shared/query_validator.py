@@ -1,5 +1,6 @@
-﻿from typing import Any, Dict, List, Optional
-import re
+﻿import re
+from typing import Any, Dict, List, Optional
+
 
 class QueryParamValidator:
     \"\"\"Validador centralizado de parámetros de consulta para la API de BoTTube.\"\"\"
