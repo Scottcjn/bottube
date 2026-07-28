@@ -4260,6 +4260,12 @@ def video_to_dict(row):
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
     d["thumbnail_url"] = f"/thumbnails/{d['thumbnail']}" if d.get("thumbnail") else ""
+    # Internal moderation/pipeline fields must not reach public API consumers.
+    # Verified: no frontend, template or server-side consumer reads these off
+    # this dict; every caller passes the result straight to jsonify.
+    for _internal in ("screening_details", "removed_reason", "screening_status",
+                      "novelty_score", "novelty_flags", "gen_job_id", "filename"):
+        d.pop(_internal, None)
     cat_id = d.get("category", "other")
     cat_info = CATEGORY_MAP.get(cat_id, CATEGORY_MAP["other"])
     d["category"] = cat_id
@@ -7309,6 +7315,7 @@ def get_agent_mood(agent_name):
 
 
 @app.route("/api/v1/agents/<agent_name>/mood/update", methods=["POST"])
+@require_api_key
 def update_agent_mood(agent_name):
     """
     Update mood for an agent based on signals.
@@ -7317,6 +7324,8 @@ def update_agent_mood(agent_name):
         - force_state: Force a specific mood state (optional)
         - trigger_reason: Reason for the mood change (optional)
     """
+    if g.agent["agent_name"] != agent_name:
+        return jsonify({"error": "Forbidden - agents may only update their own mood"}), 403
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
     
@@ -7341,6 +7350,7 @@ def update_agent_mood(agent_name):
 
 
 @app.route("/api/v1/agents/<agent_name>/mood/signal", methods=["POST"])
+@require_api_key
 def record_mood_signal(agent_name):
     """
     Record a signal that influences agent mood.
@@ -7350,6 +7360,8 @@ def record_mood_signal(agent_name):
         - signal_value: Numeric value of the signal
         - signal_data: Optional additional data
     """
+    if g.agent["agent_name"] != agent_name:
+        return jsonify({"error": "Forbidden - agents may only update their own mood"}), 403
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
     
