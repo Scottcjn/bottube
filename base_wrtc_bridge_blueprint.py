@@ -510,10 +510,29 @@ def base_bridge_withdraw():
             now,
         ),
     )
-    db.execute(
-        "UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?",
-        (total_debit, agent["id"]),
+    # The balance checked above came from the agent row read at authentication
+    # time, so it says nothing about the balance right now. Re-assert it inside
+    # the UPDATE and let the database arbitrate. rowcount 0 means the funds went
+    # somewhere else between the check and here, which is exactly what two
+    # concurrent withdrawals look like.
+    debit = db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance - ? "
+        "WHERE id = ? AND rtc_balance >= ?",
+        (total_debit, agent["id"], total_debit),
     )
+    if debit.rowcount != 1:
+        # The withdrawal row was inserted above; the rollback discards it too,
+        # so no payout stays queued against money that is no longer there.
+        db.rollback()
+        return jsonify(
+            {
+                "error": "Insufficient RTC balance",
+                "required": total_debit,
+                "amount": amount,
+                "fee": BASE_WITHDRAW_FEE,
+                "hint": "Balance changed while the withdrawal was being queued. Retry.",
+            }
+        ), 409
     db.commit()
 
     new_balance = db.execute(
