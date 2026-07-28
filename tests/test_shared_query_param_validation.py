@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from flask import Flask
 
-from bottube.validators import (
+from bottube_validators.validators import (
     MAX_QUERY_TIMESTAMP,
     parse_enum,
     parse_positive_int,

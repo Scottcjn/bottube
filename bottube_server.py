@@ -48,7 +48,7 @@ from flask import (
     url_for,
 )
 from markupsafe import Markup, escape
-from bottube.validators import (
+from bottube_validators.validators import (
     MAX_QUERY_TIMESTAMP,
     parse_enum as parse_enum_param,
     parse_positive_int as parse_int_param,
