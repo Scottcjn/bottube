@@ -247,6 +247,13 @@ def init_app(app, db_path):
         svc = SERVICE_CATALOG[service_key]
         total_cost = svc["price_rtc"] * quantity
 
+        # Belt and braces: the bounds above already keep quantity positive, but
+        # the balance check below is only a real check while total_cost is
+        # positive. A non-positive cost turns it into a no-op, so refuse the
+        # purchase outright rather than let the debit run.
+        if total_cost <= 0:
+            return jsonify({"error": "Invalid purchase amount"}), 400
+
         # Check balance
         balance = agent["rtc_balance"]
         if balance < total_cost:
@@ -266,10 +273,19 @@ def init_app(app, db_path):
 
         # Atomic debit + purchase record
         try:
-            db.execute(
-                "UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?",
-                (total_cost, agent["id"])
+            # The balance above was read at authentication time. Re-assert it in
+            # the UPDATE so the database, not a stale read, decides whether the
+            # funds are there. rowcount 0 means another request spent them first.
+            cur = db.execute(
+                "UPDATE agents SET rtc_balance = rtc_balance - ? "
+                "WHERE id = ? AND rtc_balance >= ?",
+                (total_cost, agent["id"], total_cost)
             )
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    f"debit did not apply for agent={agent['id']} "
+                    f"cost={total_cost} (rowcount={cur.rowcount})"
+                )
             db.execute("""INSERT INTO service_purchases
                 (agent_id, service_key, quantity, amount_rtc, token_hash,
                  status, scope_json, uses_total, uses_remaining,
