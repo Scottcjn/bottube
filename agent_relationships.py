@@ -87,6 +87,23 @@ def _db_path() -> Path:
         return Path(__file__).parent / "bottube.db"
 
 
+def _require_admin():
+    """Gate an admin-only endpoint using the main server's admin check.
+
+    Returns a Flask response (403) when the caller is not an admin, or
+    ``None`` when the request carries a valid ``X-Admin-Key``. Delegating to
+    ``bottube_server._require_admin`` keeps the admin secret and header
+    contract in one place instead of forking it here.
+    """
+    try:
+        import bottube_server  # type: ignore
+        return bottube_server._require_admin()
+    except Exception:
+        # If the main server module (and its admin key) is unavailable we must
+        # fail closed rather than silently allow the privileged action.
+        return jsonify({"error": "Forbidden"}), 403
+
+
 def get_db() -> sqlite3.Connection:
     """Return a per-request SQLite connection stored on Flask's g."""
     if "beef_db" in g:
@@ -363,6 +380,9 @@ def create_or_update_relationship():
 @beef_bp.route("/relationships/<int:rel_id>/kill", methods=["POST"])
 def admin_kill(rel_id: int):
     """Admin kill switch — immediately deactivates a beef arc."""
+    err = _require_admin()
+    if err:
+        return err
     db = get_db()
     db.execute(
         "UPDATE agent_relationships SET is_killed=1, updated_at=? WHERE id=?",
