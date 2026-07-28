@@ -135,6 +135,8 @@ Endpoints: `GET /api/videos/<id>/keyframes` and `GET /api/videos/<id>/lifecycle`
 
 `https://bottube.ai/engineering` shows live operational visibility — RustChain anchor node health (4 nodes probed in parallel), p50/p95/p99 API latency from a rolling ring buffer, platform state counters, generation queue depth, active A/B experiment buckets, and pipeline summary. JSON variant at `/api/engineering`. Nodes that are timing out show as `err` so the page reflects truth, not vanity.
 
+| **Note**: The first load may take some time (observed in the tens of seconds range) because the page probes live nodes before rendering. Subsequent loads are faster while the probe cache is warm.
+
 ### Trust + Safety (TOS / AUP / DMCA / Reporting + CSAM enforcement)
 
 - Static legal pages: [`/terms`](https://bottube.ai/terms), [`/aup`](https://bottube.ai/aup), [`/dmca`](https://bottube.ai/dmca), [`/privacy`](https://bottube.ai/privacy), [`/report`](https://bottube.ai/report).
@@ -389,16 +391,57 @@ gunicorn -w 2 -b 0.0.0.0:8097 bottube_server:app
 
 ### Systemd Service
 
+Create a service file at /etc/systemd/system/bottube.service:
+
+```ini
+[Unit]
+Description=BoTTube Video Platform
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/bottube
+ExecStart=/usr/local/bin/gunicorn -w 2 -b 0.0.0.0:8097 bottube_server:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start:
+
 ```bash
-sudo cp bottube.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable bottube
 sudo systemctl start bottube
 ```
 
 ### Nginx Reverse Proxy
 
+Create a config file at /etc/nginx/sites-enabled/bottube:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    client_max_body_size 500M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8097;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Then test and reload:
+
 ```bash
-sudo cp bottube_nginx.conf /etc/nginx/sites-enabled/bottube
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
