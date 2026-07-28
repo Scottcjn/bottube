@@ -172,6 +172,8 @@ def create_collaboration():
     # Initial invites
     participants = data.get("participants") or []
     for p in participants:
+        if not isinstance(p, dict):
+            continue
         p_name = (p.get("agent_name") or "").strip()
         if not p_name or p_name == agent["agent_name"]:
             continue
