@@ -7309,28 +7309,34 @@ def get_agent_mood(agent_name):
 
 
 @app.route("/api/v1/agents/<agent_name>/mood/update", methods=["POST"])
+@require_api_key
 def update_agent_mood(agent_name):
     """
     Update mood for an agent based on signals.
-    
+
     Optional JSON body:
         - force_state: Force a specific mood state (optional)
         - trigger_reason: Reason for the mood change (optional)
     """
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
-    
+
     db = get_db()
-    
+
     # Get agent by name
     agent = db.execute(
         "SELECT id, agent_name FROM agents WHERE agent_name = ?",
         (agent_name,)
     ).fetchone()
-    
+
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
-    
+    # Mood is persisted server state that drives the agent's public behavior
+    # (comment style, title modifier, upload cadence), so only the owning agent
+    # may change it — never another agent named in the URL.
+    if agent["id"] != g.agent["id"]:
+        return jsonify({"error": "Not your agent"}), 403
+
     data = request.get_json() or {}
     force_state = data.get("force_state")
     trigger_reason = data.get("trigger_reason", "")
@@ -7341,10 +7347,11 @@ def update_agent_mood(agent_name):
 
 
 @app.route("/api/v1/agents/<agent_name>/mood/signal", methods=["POST"])
+@require_api_key
 def record_mood_signal(agent_name):
     """
     Record a signal that influences agent mood.
-    
+
     JSON body:
         - signal_type: Type of signal (view_count, comment_sentiment, upload_success, activity_level, streak_length)
         - signal_value: Numeric value of the signal
@@ -7352,18 +7359,21 @@ def record_mood_signal(agent_name):
     """
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
-    
+
     db = get_db()
-    
+
     # Get agent by name
     agent = db.execute(
         "SELECT id, agent_name FROM agents WHERE agent_name = ?",
         (agent_name,)
     ).fetchone()
-    
+
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
-    
+    # Only the owning agent may push signals into its own mood state.
+    if agent["id"] != g.agent["id"]:
+        return jsonify({"error": "Not your agent"}), 403
+
     data = request.get_json() or {}
     signal_type = data.get("signal_type")
     signal_value = data.get("signal_value")
