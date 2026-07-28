@@ -530,10 +530,14 @@ def ban_tip():
     if recipient["id"] == user_id:
         return jsonify({"error": "Cannot tip yourself"}), 400
 
+    # Withdrawals are written as 'pending' and only ever advance to
+    # 'sent'/'failed' -- never 'credited'. Filtering on 'credited' alone
+    # dropped those rows before the CASE could subtract them, leaving
+    # already-withdrawn BAN tippable. Match ban_withdraw's status set.
     balance_row = db.execute(
         "SELECT COALESCE(SUM(CASE WHEN tx_type IN ('reward', 'tip_received') THEN amount_ban ELSE 0 END), 0) - "
         "COALESCE(SUM(CASE WHEN tx_type IN ('withdrawal', 'tip_sent') THEN amount_ban ELSE 0 END), 0) as balance "
-        "FROM ban_transactions WHERE agent_id = ? AND status = 'credited'",
+        "FROM ban_transactions WHERE agent_id = ? AND status IN ('credited', 'sent', 'pending')",
         (user_id,),
     ).fetchone()
     balance = balance_row["balance"] if balance_row else 0
