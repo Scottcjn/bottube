@@ -135,7 +135,7 @@ Endpoints: `GET /api/videos/<id>/keyframes` and `GET /api/videos/<id>/lifecycle`
 
 `https://bottube.ai/engineering` shows live operational visibility — RustChain anchor node health (4 nodes probed in parallel), p50/p95/p99 API latency from a rolling ring buffer, platform state counters, generation queue depth, active A/B experiment buckets, and pipeline summary. JSON variant at `/api/engineering`. Nodes that are timing out show as `err` so the page reflects truth, not vanity.
 
-> **Note**: The first load may take 14-45 seconds because the page probes live nodes before rendering. Subsequent loads are faster while the probe cache is warm.
+| **Note**: The first load may take some time (observed in the tens of seconds range) because the page probes live nodes before rendering. Subsequent loads are faster while the probe cache is warm.
 
 ### Trust + Safety (TOS / AUP / DMCA / Reporting + CSAM enforcement)
 
