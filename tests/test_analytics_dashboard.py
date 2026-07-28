@@ -309,15 +309,26 @@ class TestAnalyticsApiCoreMetrics:
         _insert_earning(owner_id, 0.25, "tip_received", video_id, created_at=now)
         _insert_earning(unrelated_id, 9.0, "tip_received", video_id, created_at=now)
 
-        views = client.get(f"/analytics/api/views?agent_id={owner_id}&period=7d")
+        # These endpoints report the caller's own earnings, so they need real
+        # credentials. Naming agent_id in the query string proves nothing.
+        auth = {"X-API-Key": "test-key-blueprint-owner"}
+
+        views = client.get(f"/analytics/api/views?agent_id={owner_id}&period=7d", headers=auth)
         filtered_views = client.get(
-            f"/analytics/api/views?agent_id={owner_id}&video_id={video_id}&period=7d"
+            f"/analytics/api/views?agent_id={owner_id}&video_id={video_id}&period=7d",
+            headers=auth,
         )
-        engagement = client.get(f"/analytics/api/engagement?agent_id={owner_id}&period=7d")
-        top = client.get(f"/analytics/api/top-videos?agent_id={owner_id}&metric=engagement")
-        audience = client.get(f"/analytics/api/audience?agent_id={owner_id}")
-        summary = client.get(f"/analytics/api/summary?agent_id={owner_id}")
-        export = client.get(f"/analytics/api/export/csv?agent_id={owner_id}&type=videos")
+        engagement = client.get(
+            f"/analytics/api/engagement?agent_id={owner_id}&period=7d", headers=auth
+        )
+        top = client.get(
+            f"/analytics/api/top-videos?agent_id={owner_id}&metric=engagement", headers=auth
+        )
+        audience = client.get(f"/analytics/api/audience?agent_id={owner_id}", headers=auth)
+        summary = client.get(f"/analytics/api/summary?agent_id={owner_id}", headers=auth)
+        export = client.get(
+            f"/analytics/api/export/csv?agent_id={owner_id}&type=videos", headers=auth
+        )
 
         assert views.status_code == 200
         assert views.get_json()["total_views"] == 2
@@ -408,9 +419,13 @@ class TestAnalyticsApiTopVideos:
     @pytest.mark.parametrize("limit", ["0", "-1", "51"])
     def test_analytics_api_top_videos_rejects_out_of_range_limit(self, client, limit):
         """Top videos API should reject limits outside the supported 1..50 range."""
-        aid = _insert_agent("toplimit" + limit.replace("-", "neg"), "test-key-top-limit-" + limit)
+        api_key = "test-key-top-limit-" + limit
+        aid = _insert_agent("toplimit" + limit.replace("-", "neg"), api_key)
 
-        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&limit={limit}")
+        response = client.get(
+            f"/analytics/api/top-videos?agent_id={aid}&limit={limit}",
+            headers={"X-API-Key": api_key},
+        )
 
         assert response.status_code == 400
         assert "limit" in response.get_json()["error"]
@@ -419,7 +434,10 @@ class TestAnalyticsApiTopVideos:
         """Top videos API should reject malformed limit values."""
         aid = _insert_agent("toplimitbad", "test-key-top-limit-bad")
 
-        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&limit=abc")
+        response = client.get(
+            f"/analytics/api/top-videos?agent_id={aid}&limit=abc",
+            headers={"X-API-Key": "test-key-top-limit-bad"},
+        )
 
         assert response.status_code == 400
         assert "limit" in response.get_json()["error"]
@@ -427,9 +445,13 @@ class TestAnalyticsApiTopVideos:
     @pytest.mark.parametrize("limit", ["1", "50"])
     def test_analytics_api_top_videos_accepts_boundary_limits(self, client, limit):
         """Top videos API should accept the documented 1..50 boundary values."""
-        aid = _insert_agent("toplimitvalid" + limit, "test-key-top-limit-valid-" + limit)
+        api_key = "test-key-top-limit-valid-" + limit
+        aid = _insert_agent("toplimitvalid" + limit, api_key)
 
-        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&limit={limit}")
+        response = client.get(
+            f"/analytics/api/top-videos?agent_id={aid}&limit={limit}",
+            headers={"X-API-Key": api_key},
+        )
 
         assert response.status_code == 200
         assert response.get_json()["videos"] == []
