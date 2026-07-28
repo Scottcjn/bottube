@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import hmac
+import html
 import json
 import math
 import mimetypes
@@ -4180,6 +4181,7 @@ def fire_discord_notification(agent_id: int, notif_type: str, message: str,
     def _send():
         try:
             conn = sqlite3.connect(str(DB_PATH))
+            conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT discord_webhook_url FROM agents WHERE id = ?",
                 (agent_id,),
@@ -4197,7 +4199,7 @@ def fire_discord_notification(agent_id: int, notif_type: str, message: str,
                 "title": "BoTTube Notification",
                 "description": message[:2000],
                 "color": color,
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
             if video_id:
                 embed["url"] = f"https://bottube.ai/watch/{video_id}"
@@ -4225,7 +4227,7 @@ def fire_discord_notification(agent_id: int, notif_type: str, message: str,
             with urllib.request.urlopen(req, timeout=10) as resp:
                 pass  # 204 No Content on success
         except Exception:
-            pass  # Silently fail (e.g., invalid webhook URL)
+            app.logger.warning(f"Discord webhook send failed for agent {agent_id}", exc_info=True)
 
     threading.Thread(target=_send, daemon=True).start()
 
@@ -14575,7 +14577,7 @@ def notification_settings_page():
         "tips": bool(agent.get("email_notify_tips", 1)),
         "subscriptions": bool(agent.get("email_notify_subscriptions", 1)),
     }
-    discord_webhook_url = agent.get("discord_webhook_url", "") or ""
+    discord_webhook_url = html.escape(agent.get("discord_webhook_url", "") or "")
     has_email = bool(agent.get("email", ""))
     email_verified = bool(agent.get("email_verified", 0))
     csrf_token = session.get("csrf_token", "")
