@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 from flask import Flask
 
-from query_param_validation import (
+from bottube_validators.validators import (
     MAX_QUERY_TIMESTAMP,
-    parse_enum_param,
-    parse_int_param,
-    parse_ts_param,
+    parse_enum,
+    parse_positive_int,
+    parse_timestamp_iso,
 )
 
 
@@ -209,32 +209,32 @@ def test_shared_int_parser_covers_default_type_and_bounds():
     app = Flask(__name__)
 
     with app.test_request_context("/?limit="):
-        assert parse_int_param("limit", 20, min_value=1, max_value=50) == (20, None)
+        assert parse_positive_int("limit", 20, min_value=1, max_value=50) == (20, None)
     with app.test_request_context("/?limit=5"):
-        assert parse_int_param("limit", 20, min_value=1, max_value=50) == (5, None)
+        assert parse_positive_int("limit", 20, min_value=1, max_value=50) == (5, None)
     with app.test_request_context("/?limit=abc"):
-        value, error = parse_int_param("limit", 20, min_value=1, max_value=50)
+        value, error = parse_positive_int("limit", 20, min_value=1, max_value=50)
         assert value is None
         assert error[1] == 400
         assert error[0].get_json()["param"] == "limit"
     with app.test_request_context("/?limit=0"):
-        assert parse_int_param("limit", 20, min_value=1, max_value=50)[1][1] == 400
+        assert parse_positive_int("limit", 20, min_value=1, max_value=50)[1][1] == 400
     with app.test_request_context("/?limit=51"):
-        assert parse_int_param("limit", 20, min_value=1, max_value=50)[1][1] == 400
+        assert parse_positive_int("limit", 20, min_value=1, max_value=50)[1][1] == 400
 
 
 def test_shared_enum_parser_normalizes_and_names_bad_parameter():
     app = Flask(__name__)
 
     with app.test_request_context("/?sort=LATEST"):
-        assert parse_enum_param(
+        assert parse_enum(
             "sort",
             "latest",
             ("latest", "popular"),
             case_sensitive=False,
         ) == ("latest", None)
     with app.test_request_context("/?sort=sideways"):
-        value, error = parse_enum_param("sort", "latest", ("latest", "popular"))
+        value, error = parse_enum("sort", "latest", ("latest", "popular"))
         assert value is None
         assert error[1] == 400
         assert error[0].get_json()["param"] == "sort"
@@ -244,16 +244,16 @@ def test_shared_timestamp_parser_accepts_unix_and_iso_and_rejects_bounds():
     app = Flask(__name__)
 
     with app.test_request_context("/?since=1700000000"):
-        assert parse_ts_param("since")[0] == 1_700_000_000
+        assert parse_timestamp_iso("since")[0] == 1_700_000_000
     with app.test_request_context("/?since=2026-01-01T00:00:00Z"):
-        value, error = parse_ts_param("since")
+        value, error = parse_timestamp_iso("since")
         assert error is None
         assert value == 1_767_225_600
     with app.test_request_context("/?since=not-a-date"):
-        value, error = parse_ts_param("since")
+        value, error = parse_timestamp_iso("since")
         assert value is None
         assert error[0].get_json()["param"] == "since"
     with app.test_request_context("/?since=-1"):
-        assert parse_ts_param("since")[1][1] == 400
+        assert parse_timestamp_iso("since")[1][1] == 400
     with app.test_request_context(f"/?since={MAX_QUERY_TIMESTAMP + 1}"):
-        assert parse_ts_param("since")[1][1] == 400
+        assert parse_timestamp_iso("since")[1][1] == 400

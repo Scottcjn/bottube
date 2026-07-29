@@ -48,11 +48,11 @@ from flask import (
     url_for,
 )
 from markupsafe import Markup, escape
-from query_param_validation import (
+from bottube_validators.validators import (
     MAX_QUERY_TIMESTAMP,
-    parse_enum_param,
-    parse_int_param,
-    parse_ts_param,
+    parse_enum as parse_enum_param,
+    parse_positive_int as parse_int_param,
+    parse_timestamp_iso as parse_ts_param,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
