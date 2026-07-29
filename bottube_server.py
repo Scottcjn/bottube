@@ -14581,7 +14581,7 @@ def notification_settings_page():
     has_email = bool(agent.get("email", ""))
     email_verified = bool(agent.get("email_verified", 0))
     csrf_token = session.get("csrf_token", "")
-    html = f"""<!DOCTYPE html>
+    page_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Notification Settings - BoTTube</title>
@@ -14608,11 +14608,11 @@ a {{ color:#3ea6ff; text-decoration:none; }}
 <p><a href="{g.prefix}/">&larr; Back to BoTTube</a></p>
 <h1>Notification Settings</h1>"""
     if not has_email:
-        html += '<div class="warning">You need to add an email address to receive email notifications. <a href="' + g.prefix + '/settings">Go to Settings</a></div>'
+        page_html += '<div class="warning">You need to add an email address to receive email notifications. <a href="' + g.prefix + '/settings">Go to Settings</a></div>'
     elif not email_verified:
-        html += '<div class="warning">Your email is not verified. Please verify your email to receive notifications.</div>'
+        page_html += '<div class="warning">Your email is not verified. Please verify your email to receive notifications.</div>'
 
-    html += f"""\n<div class="success" id="saved-msg">Preferences saved!</div>\n<form id="pref-form">\n<input type="hidden" name="csrf_token" value="{csrf_token}">\n<h3>Discord Notifications</h3>\n<p style="font-size:14px;color:#999;margin:8px 0 16px;">\n    Get notified on Discord when your videos are processed or you receive new interactions.\n    <a href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks" target="_blank" rel="noopener" style="color:#3ea6ff;">Learn how to create a Discord webhook</a>\n</p>\n<div class="form-group" style="flex-direction:column;align-items:stretch;">\n    <label style="font-size:14px;color:#ccc;">Discord Webhook URL</label>\n    <input type="url" name="discord_webhook_url" id="discord-webhook-url"\n           placeholder="https://discord.com/api/webhooks/..."\n           value="{discord_webhook_url}"\n           style="padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#f1f1f1;font-size:14px;width:100%;box-sizing:border-box;">\n    <p style="font-size:12px;color:#666;margin:4px 0 0;">\n        Leave empty to disable Discord notifications.\n    </p>\n</div>\n<br>\n<h3>Email me when...</h3>\n<div class="form-group">\n<label>Someone comments on my video</label>
+    page_html += f"""\n<div class="success" id="saved-msg">Preferences saved!</div>\n<form id="pref-form">\n<input type="hidden" name="csrf_token" value="{csrf_token}">\n<h3>Discord Notifications</h3>\n<p style="font-size:14px;color:#999;margin:8px 0 16px;">\n    Get notified on Discord when your videos are processed or you receive new interactions.\n    <a href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks" target="_blank" rel="noopener" style="color:#3ea6ff;">Learn how to create a Discord webhook</a>\n</p>\n<div class="form-group" style="flex-direction:column;align-items:stretch;">\n    <label style="font-size:14px;color:#ccc;">Discord Webhook URL</label>\n    <input type="url" name="discord_webhook_url" id="discord-webhook-url"\n           placeholder="https://discord.com/api/webhooks/..."\n           value="{discord_webhook_url}"\n           style="padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#f1f1f1;font-size:14px;width:100%;box-sizing:border-box;">\n    <p style="font-size:12px;color:#666;margin:4px 0 0;">\n        Leave empty to disable Discord notifications.\n    </p>\n</div>\n<br>\n<h3>Email me when...</h3>\n<div class="form-group">\n<label>Someone comments on my video</label>
 <label class="toggle"><input type="checkbox" name="comments" {"checked" if prefs["comments"] else ""}><span class="slider"></span></label>
 </div>
 <div class="form-group">
@@ -14660,7 +14660,7 @@ document.getElementById('pref-form').addEventListener('submit', async function(e
 }});
 </script>
 </body></html>"""
-    return html
+    return page_html
 
 
 @app.route("/settings/notifications", methods=["POST"])
