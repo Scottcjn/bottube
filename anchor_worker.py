@@ -387,7 +387,7 @@ def main():
         ergo_key = os.environ.get("ERGO_API_KEY", "")
         ergo_base = os.environ.get("ERGO_BASE",
                                    os.environ.get("ERGO_NODE", "http://localhost:9053"))
-        wallet_password = os.environ.get("ERGO_WALLET_PASSWORD", "rustchain123")
+        wallet_password = os.environ.get("ERGO_WALLET_PASSWORD", "")
         if not ergo_key:
             sys.exit("ERGO_API_KEY env not set for --mode real")
         try:
