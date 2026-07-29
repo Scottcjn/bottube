@@ -32,13 +32,51 @@ def get_db():
     return db
 
 
+def _authed_agent_id():
+    """Resolve the caller's own agent id from credentials.
+
+    Identity comes from something the caller has to prove: an X-API-Key that
+    exists in the agents table, or a logged in web session. A bare X-Agent-ID
+    header or ?agent_id= param proves nothing, so it is never used as identity.
+    It is still accepted as a filter, but only when it matches the caller.
+
+    Returns (agent_id, None) when authenticated, or (None, response) to return.
+    """
+    db = get_db()
+
+    api_key = request.headers.get('X-API-Key', '')
+    if api_key:
+        row = db.execute(
+            "SELECT id FROM agents WHERE api_key = ?", (api_key,)
+        ).fetchone()
+        if row is None:
+            return None, (jsonify({"error": "Invalid API key"}), 401)
+        agent_id = row[0]
+    elif session.get('user_id'):
+        agent_id = session['user_id']
+    else:
+        return None, (jsonify({
+            "error": "Authentication required",
+            "hint": "Send X-API-Key, or sign in first"
+        }), 401)
+
+    # A caller may name an agent explicitly, but only their own.
+    requested = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
+    if requested and str(requested) != str(agent_id):
+        return None, (jsonify({
+            "error": "Forbidden: analytics are limited to your own account"
+        }), 403)
+
+    return agent_id, None
+
+
 def login_required(f):
-    """Decorator to require login for analytics routes."""
+    """Decorator to require an authenticated caller on analytics routes."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-        if not agent_id and 'agent_id' not in session:
-            return jsonify({"error": "Authentication required"}), 401
+        _, auth_error = _authed_agent_id()
+        if auth_error:
+            return auth_error
         return f(*args, **kwargs)
     return decorated_function
 
@@ -57,9 +95,9 @@ def api_views():
     - period: '7d', '30d', '90d' (default: 30d)
     - video_id: specific video filter (optional)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id, auth_error = _authed_agent_id()
+    if auth_error:
+        return auth_error
     
     period = request.args.get('period', '30d')
     video_id = request.args.get('video_id')
@@ -145,9 +183,9 @@ def api_engagement():
     Query params:
     - period: '7d', '30d', '90d' (default: 30d)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id, auth_error = _authed_agent_id()
+    if auth_error:
+        return auth_error
     
     period = request.args.get('period', '30d')
     try:
@@ -260,9 +298,9 @@ def api_top_videos():
     - metric: 'views', 'engagement', 'tips' (default: views)
     - limit: number of videos (default: 10)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id, auth_error = _authed_agent_id()
+    if auth_error:
+        return auth_error
     
     metric = request.args.get('metric', 'views')
     try:
@@ -334,9 +372,9 @@ def api_audience():
     """
     Get audience breakdown: Human vs AI viewer ratio.
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id, auth_error = _authed_agent_id()
+    if auth_error:
+        return auth_error
     
     db = get_db()
     
@@ -392,9 +430,9 @@ def api_export_csv():
     Query params:
     - type: 'views', 'engagement', 'videos' (default: videos)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id, auth_error = _authed_agent_id()
+    if auth_error:
+        return auth_error
     
     export_type = request.args.get('type', 'videos')
     
@@ -489,9 +527,9 @@ def api_summary():
     """
     Get quick summary stats for the dashboard header.
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id, auth_error = _authed_agent_id()
+    if auth_error:
+        return auth_error
     
     db = get_db()
     
