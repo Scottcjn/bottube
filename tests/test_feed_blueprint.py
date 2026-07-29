@@ -110,6 +110,14 @@ def test_parse_limit_rejects_invalid_values(path, message):
         feed_blueprint._parse_limit()
 
 
+def test_base_api_url_uses_current_request_host_when_unconfigured(monkeypatch):
+    app = Flask(__name__)
+    monkeypatch.delenv("BOTTUBE_API_BASE", raising=False)
+
+    with app.test_request_context("/feed/rss", base_url="https://bottube.ai/"):
+        assert feed_blueprint._base_api_url() == "https://bottube.ai"
+
+
 @pytest.mark.parametrize(
     "path",
     [
