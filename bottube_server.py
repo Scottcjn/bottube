@@ -2146,6 +2146,80 @@ CREATE TABLE IF NOT EXISTS agent_badges (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_badges_agent ON agent_badges(agent_id, is_active, awarded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_badges_key ON agent_badges(badge_key, is_active, awarded_at DESC);
+
+-- Creator Collaboration playlist collaborator mapping (Issue #427 / Issue #1607)
+    CREATE TABLE IF NOT EXISTS playlist_collaborators (
+        playlist_id TEXT    NOT NULL,
+        agent_id    INTEGER NOT NULL,
+        role        TEXT    NOT NULL DEFAULT 'editor',
+        added_at    REAL    NOT NULL,
+        PRIMARY KEY (playlist_id, agent_id)
+    );
+-- Creator Collaboration (Issue #427 / Issue #1607)
+    CREATE TABLE IF NOT EXISTS collaborations (
+        id          TEXT PRIMARY KEY,
+        owner_id    INTEGER NOT NULL,
+        title       TEXT    NOT NULL,
+        description TEXT    DEFAULT '',
+        type        TEXT    NOT NULL DEFAULT 'duet',
+        status      TEXT    NOT NULL DEFAULT 'active',
+        created_at  REAL    NOT NULL,
+        updated_at  REAL    NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS collaboration_invites (
+        id              TEXT PRIMARY KEY,
+        collaboration_id TEXT NOT NULL,
+        invitee_agent_id INTEGER NOT NULL,
+        message         TEXT    DEFAULT '',
+        status          TEXT    NOT NULL DEFAULT 'pending',
+        created_at      REAL    NOT NULL,
+        FOREIGN KEY (collaboration_id) REFERENCES collaborations(id)
+    );
+    CREATE TABLE IF NOT EXISTS collaboration_participants (
+        id              TEXT PRIMARY KEY,
+        collaboration_id TEXT NOT NULL,
+        agent_id        INTEGER NOT NULL,
+        role            TEXT    NOT NULL DEFAULT 'member',
+        status          TEXT    NOT NULL DEFAULT 'active',
+        joined_at       REAL    NOT NULL,
+        FOREIGN KEY (collaboration_id) REFERENCES collaborations(id)
+    );
+    CREATE TABLE IF NOT EXISTS collaboration_videos (
+        id              TEXT PRIMARY KEY,
+        collaboration_id TEXT NOT NULL,
+        video_id        TEXT    NOT NULL,
+        agent_id        INTEGER NOT NULL,
+        added_at        REAL    NOT NULL,
+        FOREIGN KEY (collaboration_id) REFERENCES collaborations(id)
+    );
+    CREATE TABLE IF NOT EXISTS collab_playlists (
+        id              TEXT PRIMARY KEY,
+        owner_id        INTEGER NOT NULL,
+        collaboration_id TEXT,
+        title           TEXT    NOT NULL,
+        description     TEXT    DEFAULT '',
+        visibility      TEXT    NOT NULL DEFAULT 'public',
+        created_at      REAL    NOT NULL,
+        FOREIGN KEY (collaboration_id) REFERENCES collaborations(id)
+    );
+    CREATE TABLE IF NOT EXISTS collab_playlist_items (
+        id          TEXT PRIMARY KEY,
+        playlist_id TEXT    NOT NULL,
+        video_id    TEXT    NOT NULL,
+        position    INTEGER NOT NULL,
+        added_at    REAL    NOT NULL,
+        FOREIGN KEY (playlist_id) REFERENCES collab_playlists(id)
+    );
+    CREATE TABLE IF NOT EXISTS collaboration_notifications (
+        id              TEXT PRIMARY KEY,
+        agent_id        INTEGER NOT NULL,
+        collaboration_id TEXT,
+        notification_type TEXT NOT NULL,
+        message         TEXT    DEFAULT '',
+        read_at         REAL,
+        created_at      REAL    NOT NULL,
+        data            TEXT    DEFAULT '{}'
+    );
 """
 
 
@@ -15596,6 +15670,30 @@ try:
     print('[forge3d] registered Forge3D blueprint')
 except Exception as _forge3d_e:
     print(f"[WARN] Forge3D blueprint not loaded: {_forge3d_e}")
+
+# ---------------------------------------------------------------------------
+# Creator Collaboration API (Issue #427 / Issue #1607)
+# Restores the 19 collaboration routes documented in the OpenAPI contract
+# (duets/co-uploads/remixes, invites, participants, videos, collaborative
+# playlists, and notifications) whose handlers were removed while the spec
+# remained intact. Additive-only, fail-safe.
+# ---------------------------------------------------------------------------
+try:
+    import sqlite3 as _collab_sqlite3
+    from collaboration_blueprint import (
+        collab_bp,
+        init_collab_tables,
+        playlist_bp,
+    )
+    _collab_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+    _collab_db = _collab_sqlite3.connect(_collab_db_path)
+    init_collab_tables(_collab_db)
+    _collab_db.close()
+    app.register_blueprint(collab_bp)
+    app.register_blueprint(playlist_bp)
+    print('[collab] registered collaboration + collaborative-playlist blueprints')
+except Exception as _collab_e:
+    print(f"[WARN] Collaboration blueprint not loaded: {_collab_e}")
 
 # ---------------------------------------------------------------------------
 # Push Notification Subscriptions (FCM / Web Push)
