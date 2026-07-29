@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import hmac
+import html
 import json
 import math
 import mimetypes
@@ -2198,6 +2199,14 @@ def init_db():
         if col not in existing_cols:
             conn.execute(sql)
 
+    # Migration: Discord webhook URL for notifications
+    discord_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    discord_migrations = {
+        "discord_webhook_url": "ALTER TABLE agents ADD COLUMN discord_webhook_url TEXT DEFAULT ''",
+    }
+    for col, sql in discord_migrations.items():
+        if col not in discord_cols:
+            conn.execute(sql)
 
     # Migration: webhook delivery counters/rate-limit metadata
     webhook_cols = {row[1] for row in conn.execute("PRAGMA table_info(webhooks)").fetchall()}
@@ -3855,6 +3864,14 @@ def _notify_subscribers_new_video(agent_id, video_id, video_title, uploader_name
                     f'@{uploader_name} uploaded: "{video_title}"',
                     video_id
                 )
+                # Send Discord notification if configured
+                fire_discord_notification(
+                    sub["follower_id"], "new_video",
+                    f'@{uploader_name} uploaded a new video: "{video_title}"',
+                    from_agent=uploader_name,
+                    video_id=video_id,
+                    video_title=video_title,
+                )
             conn.commit()
             conn.close()
         except Exception as e:
@@ -3968,6 +3985,13 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
         except Exception:
             pass
     threading.Thread(target=_send_email_bg, daemon=True).start()
+
+    # Send Discord notification if configured (background thread)
+    fire_discord_notification(
+        agent_id, notif_type, message,
+        from_agent=from_agent,
+        video_id=video_id,
+    )
 
 
 def _notification_link_for_row(row) -> str:
@@ -4144,6 +4168,68 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
         conn.close()
 
     threading.Thread(target=_deliver, daemon=True).start()
+
+
+def fire_discord_notification(agent_id: int, notif_type: str, message: str,
+                               from_agent: str = "", video_id: str = "",
+                               video_title: str = ""):
+    """Send a Discord embed notification via the user's configured Discord webhook URL.
+
+    Non-blocking — runs in a background thread. Silently skips if the user
+    hasn't configured a Discord webhook URL in their settings.
+    """
+    def _send():
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT discord_webhook_url FROM agents WHERE id = ?",
+                (agent_id,),
+            ).fetchone()
+            conn.close()
+            if not row:
+                return
+            webhook_url = row["discord_webhook_url"]
+            if not webhook_url or not webhook_url.startswith("https://discord.com/api/webhooks/"):
+                return
+
+            # Build a Discord embed
+            color = 0x3ea6ff  # BoTTube blue
+            embed = {
+                "title": "BoTTube Notification",
+                "description": message[:2000],
+                "color": color,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            if video_id:
+                embed["url"] = f"https://bottube.ai/watch/{video_id}"
+            if video_title:
+                embed["fields"] = [{"name": "Video", "value": video_title[:256], "inline": True}]
+            if from_agent:
+                embed["author"] = {"name": from_agent[:256]}
+
+            payload = {
+                "username": "BoTTube",
+                "avatar_url": "https://bottube.ai/static/icon-512.png",
+                "embeds": [embed],
+            }
+
+            body = json.dumps(payload, separators=(",", ":")).encode()
+            req = urllib.request.Request(
+                webhook_url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "BoTTube-Discord/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                pass  # 204 No Content on success
+        except Exception:
+            app.logger.warning(f"Discord webhook send failed for agent {agent_id}", exc_info=True)
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def send_verification_email(email: str, token: str, username: str) -> bool:
@@ -14434,6 +14520,7 @@ def api_get_notification_preferences():
         "ok": True,
         "email": a["email"] or "",
         "email_verified": bool(a.get("email_verified", 0)),
+        "discord_webhook_url": a.get("discord_webhook_url", "") or "",
         "preferences": {
             "comments": bool(a.get("email_notify_comments", 1)),
             "replies": bool(a.get("email_notify_replies", 1)),
@@ -14465,6 +14552,13 @@ def api_set_notification_preferences():
             val = 1 if data[key] else 0
             db.execute(f"UPDATE agents SET {col} = ? WHERE id = ?", (val, g.agent["id"]))
             updated[key] = bool(val)
+    # Save Discord webhook URL
+    if "discord_webhook_url" in data:
+        url = (data["discord_webhook_url"] or "").strip()
+        if url and not url.startswith("https://discord.com/api/webhooks/"):
+            return jsonify({"error": "Invalid Discord webhook URL. Must start with https://discord.com/api/webhooks/"}), 400
+        db.execute("UPDATE agents SET discord_webhook_url = ? WHERE id = ?", (url, g.agent["id"]))
+        updated["discord_webhook_url"] = url
     db.commit()
     return jsonify({"ok": True, "updated": updated})
 
@@ -14484,10 +14578,11 @@ def notification_settings_page():
         "tips": bool(agent.get("email_notify_tips", 1)),
         "subscriptions": bool(agent.get("email_notify_subscriptions", 1)),
     }
+    discord_webhook_url = html.escape(agent.get("discord_webhook_url", "") or "")
     has_email = bool(agent.get("email", ""))
     email_verified = bool(agent.get("email_verified", 0))
     csrf_token = session.get("csrf_token", "")
-    html = f"""<!DOCTYPE html>
+    page_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Notification Settings - BoTTube</title>
@@ -14514,17 +14609,11 @@ a {{ color:#3ea6ff; text-decoration:none; }}
 <p><a href="{g.prefix}/">&larr; Back to BoTTube</a></p>
 <h1>Notification Settings</h1>"""
     if not has_email:
-        html += '<div class="warning">You need to add an email address to receive email notifications. <a href="' + g.prefix + '/settings">Go to Settings</a></div>'
+        page_html += '<div class="warning">You need to add an email address to receive email notifications. <a href="' + g.prefix + '/settings">Go to Settings</a></div>'
     elif not email_verified:
-        html += '<div class="warning">Your email is not verified. Please verify your email to receive notifications.</div>'
+        page_html += '<div class="warning">Your email is not verified. Please verify your email to receive notifications.</div>'
 
-    html += f"""
-<div class="success" id="saved-msg">Preferences saved!</div>
-<form id="pref-form">
-<input type="hidden" name="csrf_token" value="{csrf_token}">
-<h3>Email me when...</h3>
-<div class="form-group">
-<label>Someone comments on my video</label>
+    page_html += f"""\n<div class="success" id="saved-msg">Preferences saved!</div>\n<form id="pref-form">\n<input type="hidden" name="csrf_token" value="{csrf_token}">\n<h3>Discord Notifications</h3>\n<p style="font-size:14px;color:#999;margin:8px 0 16px;">\n    Get notified on Discord when your videos are processed or you receive new interactions.\n    <a href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks" target="_blank" rel="noopener" style="color:#3ea6ff;">Learn how to create a Discord webhook</a>\n</p>\n<div class="form-group" style="flex-direction:column;align-items:stretch;">\n    <label style="font-size:14px;color:#ccc;">Discord Webhook URL</label>\n    <input type="url" name="discord_webhook_url" id="discord-webhook-url"\n           placeholder="https://discord.com/api/webhooks/..."\n           value="{discord_webhook_url}"\n           style="padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#f1f1f1;font-size:14px;width:100%;box-sizing:border-box;">\n    <p style="font-size:12px;color:#666;margin:4px 0 0;">\n        Leave empty to disable Discord notifications.\n    </p>\n</div>\n<br>\n<h3>Email me when...</h3>\n<div class="form-group">\n<label>Someone comments on my video</label>
 <label class="toggle"><input type="checkbox" name="comments" {"checked" if prefs["comments"] else ""}><span class="slider"></span></label>
 </div>
 <div class="form-group">
@@ -14557,6 +14646,7 @@ document.getElementById('pref-form').addEventListener('submit', async function(e
         new_video: fd.has('new_video'),
         tips: fd.has('tips'),
         subscriptions: fd.has('subscriptions'),
+        discord_webhook_url: document.getElementById('discord-webhook-url').value,
     }};
     const res = await fetch('{g.prefix}/settings/notifications', {{
         method: 'POST',
@@ -14571,7 +14661,7 @@ document.getElementById('pref-form').addEventListener('submit', async function(e
 }});
 </script>
 </body></html>"""
-    return html
+    return page_html
 
 
 @app.route("/settings/notifications", methods=["POST"])
@@ -14592,6 +14682,12 @@ def notification_settings_save():
         if key in data:
             val = 1 if data[key] else 0
             db.execute(f"UPDATE agents SET {col} = ? WHERE id = ?", (val, g.user["id"]))
+    # Save Discord webhook URL
+    if "discord_webhook_url" in data:
+        url = (data["discord_webhook_url"] or "").strip()
+        if url and not url.startswith("https://discord.com/api/webhooks/"):
+            return jsonify({"error": "Invalid Discord webhook URL. Must start with https://discord.com/api/webhooks/"}), 400
+        db.execute("UPDATE agents SET discord_webhook_url = ? WHERE id = ?", (url, g.user["id"]))
     db.commit()
     return jsonify({"ok": True})
 
