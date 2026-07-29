@@ -11,13 +11,35 @@ leaving the OpenAPI contract intact (PR #441 added these; a later
 reconciliation commit removed the route handlers).
 """
 
+import os
 import sqlite3
 import json
 import uuid
 import time
+from pathlib import Path
 from flask import Blueprint, jsonify, request, g
 
 collab_bp = Blueprint("collaborations", __name__, url_prefix="/api/collaborations")
+
+
+def get_db():
+    """Get database connection — prefers Flask app context, then bottube_server's get_db(), then direct connection.
+
+    This lazy import pattern works correctly when the test app fixture
+    deletes ``bottube_server`` from ``sys.modules`` and re-imports it
+    fresh inside a ``TemporaryDirectory`` (the shared conftest pattern).
+    """
+    if "db" in g:
+        return g.db
+    try:
+        from bottube_server import get_db as _app_get_db
+        return _app_get_db()
+    except (ImportError, AttributeError):
+        pass
+    db = sqlite3.connect(str(Path(__file__).resolve().parent / "bottube.db"))
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    return db
 
 COLLAB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS collaborations (
@@ -99,7 +121,6 @@ def _current_agent():
     if not api_key:
         return jsonify({"error": "Missing X-API-Key header"}), 401
     try:
-        from bottube_server import get_db
         db = get_db()
     except Exception:
         return jsonify({"error": "Internal server error"}), 500
@@ -154,7 +175,6 @@ def create_collaboration():
     now = time.time()
     collab_id = "collab_" + uuid.uuid4().hex[:12]
     try:
-        from bottube_server import get_db
         db = get_db()
     except Exception:
         return jsonify({"error": "Internal server error"}), 500
@@ -201,7 +221,6 @@ def get_collaboration(collab_id):
     agent = _current_agent()
     if isinstance(agent, tuple):
         return agent
-    from bottube_server import get_db
     db = get_db()
     collab = db.execute("SELECT * FROM collaborations WHERE id = ?", (collab_id,)).fetchone()
     if collab is None:
@@ -252,7 +271,6 @@ def update_collaboration(collab_id):
     if status and status not in ("active", "closed"):
         status = None
     now = time.time()
-    from bottube_server import get_db
     db = get_db()
     parts = []
     vals = []
@@ -279,7 +297,6 @@ def delete_collaboration(collab_id):
     ok, err = _owner_check(_get_collab(collab_id), agent)
     if not ok:
         return err
-    from bottube_server import get_db
     db = get_db()
     db.execute("DELETE FROM collaboration_invites WHERE collaboration_id = ?", (collab_id,))
     db.execute("DELETE FROM collaboration_participants WHERE collaboration_id = ?", (collab_id,))
@@ -305,7 +322,6 @@ def invite_to_collaboration(collab_id):
         return jsonify({"error": "agent_name is required"}), 400
     if invitee_name == agent["agent_name"]:
         return jsonify({"error": "Cannot invite yourself"}), 400
-    from bottube_server import get_db
     db = get_db()
     target = db.execute("SELECT id FROM agents WHERE agent_name = ?", (invitee_name,)).fetchone()
     if not target:
@@ -338,7 +354,6 @@ def get_my_invites():
     agent = _current_agent()
     if isinstance(agent, tuple):
         return agent
-    from bottube_server import get_db
     db = get_db()
     invites = db.execute(
         "SELECT ci.id AS invite_id, ci.collaboration_id, c.title AS collab_title, c.owner_id, "
@@ -371,7 +386,6 @@ def respond_to_invite(invite_id):
     action = (data.get("action") or "").strip()
     if action not in ("accept", "decline"):
         return jsonify({"error": "action must be accept or decline"}), 400
-    from bottube_server import get_db
     db = get_db()
     invite = db.execute(
         "SELECT id, collaboration_id, invitee_agent_id, status FROM collaboration_invites WHERE id = ?",
@@ -404,7 +418,6 @@ def remove_participant(collab_id, agent_name):
     ok, err = _owner_check(_get_collab(collab_id), agent)
     if not ok:
         return err
-    from bottube_server import get_db
     db = get_db()
     target = db.execute("SELECT id FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
     if not target:
@@ -428,7 +441,6 @@ def leave_collaboration(collab_id):
         return jsonify({"error": "Not found"}), 404
     if int(collab["owner_id"]) == int(agent["id"]):
         return jsonify({"error": "Owner cannot leave"}), 400
-    from bottube_server import get_db
     db = get_db()
     db.execute(
         "DELETE FROM collaboration_participants WHERE collaboration_id = ? AND agent_id = ?",
@@ -448,7 +460,6 @@ def add_video_to_collaboration(collab_id):
     video_id = (data.get("video_id") or "").strip()
     if not video_id:
         return jsonify({"error": "video_id is required"}), 400
-    from bottube_server import get_db
     db = get_db()
     participant = _participant_check(collab_id, agent, db)
     if not participant:
@@ -477,7 +488,6 @@ def remove_video_from_collaboration(collab_id, video_id):
     agent = _current_agent()
     if isinstance(agent, tuple):
         return agent
-    from bottube_server import get_db
     db = get_db()
     if not _participant_check(collab_id, agent, db):
         return jsonify({"error": "Not a participant"}), 404
@@ -495,7 +505,6 @@ def get_my_collaborations():
     agent = _current_agent()
     if isinstance(agent, tuple):
         return agent
-    from bottube_server import get_db
     db = get_db()
     rows = db.execute(
         "SELECT c.id AS collaboration_id, c.title, c.type, c.status, c.owner_id, c.created_at "
@@ -523,7 +532,6 @@ def get_notifications():
     agent = _current_agent()
     if isinstance(agent, tuple):
         return agent
-    from bottube_server import get_db
     db = get_db()
     rows = db.execute(
         "SELECT * FROM collaboration_notifications WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50",
@@ -551,7 +559,6 @@ def mark_notifications_read():
     if isinstance(agent, tuple):
         return agent
     now = time.time()
-    from bottube_server import get_db
     db = get_db()
     db.execute("UPDATE collaboration_notifications SET read_at = ? WHERE agent_id = ? AND read_at IS NULL", (now, agent["id"]))
     db.commit()
@@ -774,13 +781,11 @@ def get_my_collaborative_playlists():
 
 
 def _db():
-    from bottube_server import get_db
     return get_db()
 
 
 def _get_collab(collab_id):
     try:
-        from bottube_server import get_db
         db = get_db()
         return db.execute("SELECT * FROM collaborations WHERE id = ?", (collab_id,)).fetchone()
     except Exception:
