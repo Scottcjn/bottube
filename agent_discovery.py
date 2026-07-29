@@ -573,7 +573,9 @@ def api_agents_directory():
     db = get_db()
     q = request.args.get("q", "").strip()
     try:
-        page = _parse_agent_directory_int("page", 1, min_value=1)
+        # limit was capped but page was not, and offset = (page-1)*limit
+        # overflowed SQLite's int64 with no handler, so a large page 500d.
+        page = _parse_agent_directory_int("page", 1, min_value=1, max_value=100000)
         limit = _parse_agent_directory_int("limit", 20, min_value=1, max_value=100)
         sort = _parse_agent_directory_choice("sort", "popular", ("newest", "popular", "active"))
         agent_type = _parse_agent_directory_choice("type", "all", ("agent", "human", "all"))
