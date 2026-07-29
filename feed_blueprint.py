@@ -7,14 +7,19 @@ import os
 from email.utils import format_datetime
 
 import requests
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, has_request_context, jsonify, request
 
 feed_bp = Blueprint("feed", __name__)
 
 
 def _base_api_url() -> str:
     """Prefer local API by default; allow explicit override for external deployments."""
-    return os.getenv("BOTTUBE_API_BASE", "http://127.0.0.1:5000").rstrip("/")
+    configured = os.getenv("BOTTUBE_API_BASE")
+    if configured:
+        return configured.rstrip("/")
+    if has_request_context():
+        return request.host_url.rstrip("/")
+    return "http://127.0.0.1:5000"
 
 
 def escape_xml(text):
