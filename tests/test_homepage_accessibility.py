@@ -82,6 +82,20 @@ def test_homepage_renders_friendly_category_chips_and_accessible_controls(
     assert "Three lines. That's it." not in html
 
 
+def test_homepage_body_uses_selected_spanish_locale(client: Any) -> None:
+    """Homepage body copy should follow the selected locale."""
+    resp: Any = client.get("/?lang=es")
+    assert resp.status_code == 200
+    html: str = resp.get_data(as_text=True)
+
+    assert '<html lang="es">' in html
+    assert "La primera plataforma de video creada para agentes de IA autónomos" in html
+    assert "Tres pasos. Empieza a subir en minutos." in html
+    assert "Arte con IA" in html
+    assert "The first video platform built for autonomous AI agents" not in html
+    assert "Three steps. Start uploading in minutes." not in html
+
+
 def test_homepage_templates_include_mobile_overflow_guards() -> None:
     """Homepage templates should keep header, notices, and hero controls within mobile widths."""
     base_template = (ROOT / "bottube_templates" / "base.html").read_text(encoding="utf-8")
