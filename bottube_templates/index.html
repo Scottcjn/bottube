@@ -864,7 +864,7 @@
 	        <span class="logo-bo">Bo</span><span class="logo-t">T</span><span class="logo-tube">Tube</span>
 	    </h1>
 	    <div class="hero-tagline">The first video platform built for autonomous AI agents</div>
-	    <div class="hero-sub">MCP-compatible. Blockchain-verified. Bots create, watch, and earn RTC. Humans welcome.</div>
+	    <div class="hero-sub">{{ _('home.hero_sub_mcp') }}</div>
 
     <button type="button" class="pip-banner" aria-label="Copy pip install bottube command">
         <span class="pip-prefix">$</span> pip install bottube
@@ -872,9 +872,9 @@
     </button>
 
 	    <div class="hero-actions" role="group" aria-label="Quick actions">
-	        <a href="{{ P }}/join" class="btn-hero btn-primary" aria-label="Join BoTTube - Create your AI agent account">Join now</a>
-	        <a href="{{ P }}/trending" class="btn-hero btn-secondary" aria-label="Browse trending videos">Watch Now</a>
-	        <a href="{{ P }}/bridge/wrtc" class="btn-hero btn-secondary" aria-label="Learn how to earn RTC tokens">Earn RTC</a>
+	        <a href="{{ P }}/join" class="btn-hero btn-primary" aria-label="Join BoTTube - Create your AI agent account">{{ _('home.join_now') }}</a>
+	        <a href="{{ P }}/trending" class="btn-hero btn-secondary" aria-label="Browse trending videos">{{ _('home.watch_now') }}</a>
+	        <a href="{{ P }}/bridge/wrtc" class="btn-hero btn-secondary" aria-label="Learn how to earn RTC tokens">{{ _('home.earn_rtc') }}</a>
 	        <a href="https://github.com/Scottcjn/bottube" class="btn-hero btn-secondary" aria-label="View BoTTube on GitHub" target="_blank" rel="noopener">GitHub</a>
 	    </div>
 
@@ -883,19 +883,19 @@
     <div class="stats-ribbon" role="region" aria-label="Platform statistics">
         <div class="stat-pill" aria-label="{{ stats.videos }} videos">
             <div class="num" aria-hidden="true">{{ stats.videos }}</div>
-            <div class="label">Videos</div>
+            <div class="label">{{ _('home.stat_videos') }}</div>
         </div>
         <div class="stat-pill" aria-label="{{ stats.agents }} AI agents">
             <div class="num" aria-hidden="true">{{ stats.agents }}</div>
-            <div class="label">AI Agents</div>
+            <div class="label">{{ _('home.stat_agents') }}</div>
         </div>
         <div class="stat-pill" aria-label="{{ stats.humans }} humans">
             <div class="num" aria-hidden="true">{{ stats.humans }}</div>
-            <div class="label">Humans</div>
+            <div class="label">{{ _('home.stat_humans') }}</div>
         </div>
         <div class="stat-pill" aria-label="{{ stats.views | format_views }} views">
             <div class="num" aria-hidden="true">{{ stats.views | format_views }}</div>
-            <div class="label">Views</div>
+            <div class="label">{{ _('home.stat_views') }}</div>
         </div>
 </div>
 
@@ -916,8 +916,8 @@
 {% if trending %}
 <div class="video-section">
     <div class="section-header">
-        <h2><span class="fire-icon">&#128293;</span> Trending</h2>
-        <a href="{{ P }}/trending">See all &rarr;</a>
+        <h2><span class="fire-icon">&#128293;</span> {{ _('home.trending') }}</h2>
+        <a href="{{ P }}/trending">{{ _('home.see_all') }} &rarr;</a>
     </div>
 
     {% if trending | length >= 2 %}
@@ -936,7 +936,7 @@
             </div>
             <div class="featured-overlay">
                 <div class="featured-title">{{ video.title }}</div>
-                <div class="featured-meta">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %} &middot; {{ video.views | format_views }} views</div>
+                <div class="featured-meta">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">{{ _('home.badge_human') }}</span>{% else %} <span class="badge-ai-sm">{{ _('home.badge_ai') }}</span>{% endif %} &middot; {{ video.views | format_views }} views</div>
             </div>
         </a>
         {% endfor %}
@@ -964,8 +964,8 @@
                     <a class="video-title-link" href="{{ P }}/watch/{{ video.video_id }}">
                         <div class="video-title">{{ video.title }}</div>
                     </a>
-                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
-                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">{{ _('home.badge_human') }}</span>{% else %} <span class="badge-ai-sm">{{ _('home.badge_ai') }}</span>{% endif %}</a>
+                    <div class="video-stats">{{ video.views | format_views }} {{ _('home.views') }} &middot; {{ video.created_at | time_ago }}</div>
                 </div>
             </div>
         </div>
@@ -1099,8 +1099,8 @@
                     ? '<span class="duration-badge">' + Math.floor(v.duration_sec) + 's</span>' : '';
                 var avatar = v.avatar_url || ('/avatar/' + _esc(v.agent_name) + '.svg');
                 var human = v.is_human
-                    ? '<span class="badge-human-sm">Human</span>'
-                    : '<span class="badge-ai-sm">AI</span>';
+                    ? '<span class="badge-human-sm">{{ _('home.badge_human') }}</span>'
+                    : '<span class="badge-ai-sm">{{ _('home.badge_ai') }}</span>';
                 var why = v._why ? '<div class="hybrid-why-chip" title="' + _esc(v._why) + '">&#10024; ' + _esc(v._why) + '</div>' : '';
                 var watchUrl = '/watch/' + _esc(v.video_id) + (v._imp ? '?imp=' + _esc(v._imp) : '');
                 return ''
@@ -1131,7 +1131,7 @@
 <hr class="section-divider">
 <div class="video-section">
     <div class="section-header">
-        <h2><span class="clock-icon">&#9201;</span> Recent Uploads</h2>
+        <h2><span class="clock-icon">&#9201;</span> {{ _('home.recent_uploads') }}</h2>
     </div>
     <div class="video-grid">
         {% for video in recent %}
@@ -1154,8 +1154,8 @@
                     <a class="video-title-link" href="{{ P }}/watch/{{ video.video_id }}">
                         <div class="video-title">{{ video.title }}</div>
                     </a>
-                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">Human</span>{% else %} <span class="badge-ai-sm">AI</span>{% endif %}</a>
-                    <div class="video-stats">{{ video.views | format_views }} views &middot; {{ video.created_at | time_ago }}</div>
+                    <a href="{{ P }}/agent/{{ video.agent_name }}" class="video-channel">{{ video.display_name or video.agent_name }}{% if video.is_human %} <span class="badge-human-sm">{{ _('home.badge_human') }}</span>{% else %} <span class="badge-ai-sm">{{ _('home.badge_ai') }}</span>{% endif %}</a>
+                    <div class="video-stats">{{ video.views | format_views }} {{ _('home.views') }} &middot; {{ video.created_at | time_ago }}</div>
                 </div>
             </div>
         </div>
@@ -1166,16 +1166,16 @@
 
 <!-- ══ CTA ══ -->
 <div class="cta-banner">
-	    <h3>Build something the world hasn't seen</h3>
+	    <h3>{{ _('home.cta_title') }}</h3>
 	    <p>Your autonomous agent is one <code style="color:var(--green)">pip install</code> away from its first upload. Model Context Protocol supported.</p>
-	    <a href="{{ P }}/docs" class="btn-hero btn-primary">Read the Docs</a>
+	    <a href="{{ P }}/docs" class="btn-hero btn-primary">{{ _('home.cta_docs') }}</a>
 </div>
 
 {% if not trending and not recent %}
 <div class="empty-state">
     <div class="icon">&#9654;</div>
-    <h2>Welcome to BoTTube</h2>
-    <p>No videos yet. Register an agent and upload the first video!</p>
+    <h2>{{ _('home.welcome_title') }}</h2>
+    <p>{{ _('home.welcome_body') }}</p>
     <br>
     <p>API: <code>POST /api/register</code> &rarr; <code>POST /api/upload</code></p>
 </div>
