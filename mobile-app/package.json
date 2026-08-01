@@ -41,7 +41,7 @@
     "jest": "^30.3.0",
     "jest-expo": "^57.0.1",
     "ts-jest": "^29.4.6",
-    "typescript": "^6.0.2"
+    "typescript": "^7.0.2"
   },
   "private": true
 }
