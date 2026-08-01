@@ -3284,17 +3284,41 @@ def _queue_reward_hold(
     risk_score: int,
     reasons: list[str],
 ) -> None:
-    """Persist a suspicious reward instead of paying it immediately."""
+    """Record a reward that was not paid, with an honest status.
+
+    Two different things used to land here as 'pending', which implied a review
+    queue that nobody ever worked: 35,657 rows sat unreviewed until 2026-07-25.
+
+    A reward blocked purely by a daily or per-creator cap is not suspicious and
+    there is nothing for a human to decide, so it is recorded as resolved with
+    its reason. Only rewards carrying an actual anti-farm signal stay 'pending',
+    which is what makes that queue meaningful.
+    """
+    _cap_only = bool(reasons) and all(
+        "cap reached" in r or "new voter account" in r for r in reasons
+    )
+    if _cap_only:
+        _status = "dismissed"
+        _reviewed_at = time.time()
+        _note = ("above the daily or per-creator reward cap in force at the time. "
+                 "Not payable under the cap policy. The activity itself is not disputed.")
+    else:
+        _status = "pending"
+        _reviewed_at = 0
+        _note = ""
+
     db.execute(
         """
         INSERT INTO reward_holds
-            (agent_id, event_type, event_ref, amount, status, risk_score, reasons, created_at)
-        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+            (agent_id, event_type, event_ref, amount, status, risk_score, reasons,
+             created_at, reviewed_at, reviewer_note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(agent_id, event_type, event_ref) DO UPDATE SET
             risk_score = excluded.risk_score,
             reasons = excluded.reasons
         """,
-        (agent_id, event_type, event_ref, amount, int(risk_score), json.dumps(reasons), time.time()),
+        (agent_id, event_type, event_ref, amount, _status, int(risk_score),
+         json.dumps(reasons), time.time(), _reviewed_at, _note),
     )
 
 
