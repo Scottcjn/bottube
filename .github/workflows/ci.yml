@@ -59,6 +59,27 @@ jobs:
       uses: codecov/codecov-action@v4
       if: always()
 
+  deployment-drift:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install drift check dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest PyYAML
+
+    - name: Test deployment drift sentinel
+      run: python -m pytest tests/test_deployment_drift.py -q
+
+    - name: Check OpenAPI and Flask route drift
+      run: python deployment_drift.py --config deployment-drift.json
+
   security:
     runs-on: ubuntu-latest
     steps:
