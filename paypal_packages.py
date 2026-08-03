@@ -281,6 +281,7 @@ def generate_order_id() -> str:
 
 
 def _request_json_object():
+    """Parse and validate a JSON object from the request body. Returns: Parsed dict or error tuple."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -290,6 +291,7 @@ def _request_json_object():
 
 
 def _optional_string_field(data: dict, field_name: str):
+    """Extract an optional string field from JSON body. Args: data: Dict to extract from. key: Field name. Returns: String value or None."""
     value = data.get(field_name)
     if value is None:
         return "", None
@@ -299,6 +301,7 @@ def _optional_string_field(data: dict, field_name: str):
 
 
 def _optional_int_field(data: dict, field_name: str):
+    """Extract an optional integer field from JSON body. Args: data: Dict to extract from. key: Field name. Returns: Integer value or None."""
     value = data.get(field_name)
     if value is None:
         return None, None
@@ -310,10 +313,12 @@ def _optional_int_field(data: dict, field_name: str):
 
 
 def _to_usd(value) -> Decimal:
+    """Convert an RTC amount to USD equivalent. Args: rtc_amount: Amount in RTC. Returns: USD value."""
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _to_rtc(value) -> Decimal:
+    """Convert a USD amount to RTC equivalent. Args: usd_amount: Amount in USD. Returns: RTC value."""
     return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 

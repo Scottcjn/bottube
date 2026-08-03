@@ -51,6 +51,7 @@ _model_lock = threading.Lock()
 
 
 def _get_db_path() -> str:
+    """Get the database path for whisper transcriptions. Returns: Path string."""
     return os.environ.get(
         "BOTTUBE_DB_PATH",
         str(Path(__file__).resolve().parent / "bottube.db"),
@@ -58,6 +59,7 @@ def _get_db_path() -> str:
 
 
 def _connect_db() -> sqlite3.Connection:
+    """Connect to the whisper transcription database. Returns: sqlite3.Connection."""
     db = sqlite3.connect(_get_db_path())
     db.row_factory = sqlite3.Row
     return db
@@ -227,6 +229,7 @@ def _extract_audio(video_path: str) -> Tuple[Optional[str], float]:
 # ---------------------------------------------------------------------------
 
 def _fmt_vtt(seconds: float) -> str:
+    """Format transcription segments as WebVTT subtitle text. Args: segments: List of segment dicts. Returns: VTT formatted string."""
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = seconds % 60
@@ -234,6 +237,7 @@ def _fmt_vtt(seconds: float) -> str:
 
 
 def _fmt_srt(seconds: float) -> str:
+    """Format transcription segments as SRT subtitle text. Args: segments: List of segment dicts. Returns: SRT formatted string."""
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
@@ -242,6 +246,7 @@ def _fmt_srt(seconds: float) -> str:
 
 
 def _segments_to_vtt(segments: list) -> str:
+    """Convert whisper segments to WebVTT format. Args: segments: List of segment dicts. Returns: VTT formatted string."""
     lines = ["WEBVTT", ""]
     for idx, seg in enumerate(segments, 1):
         text = str(seg.text).strip()

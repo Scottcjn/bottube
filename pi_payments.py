@@ -52,18 +52,21 @@ IMPLEMENTED_GRANTS = {"test_payment"}
 
 
 def _db_path() -> str:
+    """Get the database path for Pi payments. Returns: Path string."""
     # Default matches bottube_server.py (BASE_DIR/bottube.db); env can override.
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     return os.environ.get("BOTTUBE_DB_PATH", str(Path(base) / "bottube.db"))
 
 
 def _conn():
+    """Get a database connection for Pi payments. Returns: sqlite3.Connection."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.execute("PRAGMA busy_timeout=30000")
     return c
 
 
 def init_pi_payment_tables(db_path: str = None):
+    """Initialize Pi payment database tables. Creates tables if they do not exist."""
     path = db_path or _db_path()
     conn = sqlite3.connect(path, timeout=30)
     try:
@@ -86,10 +89,12 @@ def init_pi_payment_tables(db_path: str = None):
 
 
 def _pi_headers():
+    """Get HTTP headers for Pi Network API requests. Returns: Dict of headers with access token."""
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 
 def _pi_get_payment(payment_id: str):
+    """Fetch payment data from Pi Network API. Args: payment_id: Pi payment identifier. Returns: Payment data dict."""
     r = requests.get(f"{PI_API_BASE}/payments/{payment_id}",
                      headers=_pi_headers(), timeout=PI_TIMEOUT)
     r.raise_for_status()
