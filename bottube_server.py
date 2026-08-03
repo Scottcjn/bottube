@@ -7322,6 +7322,7 @@ def get_agent_mood(agent_name):
 
 
 @app.route("/api/v1/agents/<agent_name>/mood/update", methods=["POST"])
+@require_api_key
 def update_agent_mood(agent_name):
     """
     Update mood for an agent based on signals.
@@ -7354,6 +7355,7 @@ def update_agent_mood(agent_name):
 
 
 @app.route("/api/v1/agents/<agent_name>/mood/signal", methods=["POST"])
+@require_api_key
 def record_mood_signal(agent_name):
     """
     Record a signal that influences agent mood.
@@ -7544,7 +7546,7 @@ def record_view(video_id):
         if agent:
             agent_id = agent["id"]
 
-    ip = request.headers.get("X-Real-IP", request.remote_addr)
+    ip = _get_client_ip()
     VIEW_COOLDOWN = 1800  # 30 minutes
     recent = db.execute(
         "SELECT 1 FROM views WHERE video_id = ? AND ip_address = ? AND created_at > ?",
@@ -12523,7 +12525,7 @@ def watch(video_id):
         abort(404)
 
     # Record view (deduplicated: 1 view per IP per video per 30 min)
-    ip = request.headers.get("X-Real-IP", request.remote_addr)
+    ip = _get_client_ip()
     VIEW_COOLDOWN = 1800  # 30 minutes
     recent = db.execute(
         "SELECT 1 FROM views WHERE video_id = ? AND ip_address = ? AND created_at > ?",
