@@ -76,14 +76,17 @@ CACHE_TTL = 3600
 
 
 def _supported_networks():
+    """Get the list of supported payment networks. Returns: Set of network identifiers."""
     return [network for network, rpc_url in NETWORK_RPCS.items() if rpc_url]
 
 
 def _request_fingerprint():
+    """Generate a unique fingerprint for a payment request. Returns: Hash string for deduplication."""
     return f"{request.method}:{request.full_path.rstrip('?')}"
 
 
 def _cleanup_payment_cache(now=None):
+    """Remove expired entries from the payment cache. Called periodically to prevent memory growth."""
     now = time.time() if now is None else now
     expired = [
         tx_hash
@@ -95,6 +98,7 @@ def _cleanup_payment_cache(now=None):
 
 
 def _parse_positive_int_query(name, default, max_value=None):
+    """Parse and validate a positive integer from query parameters. Args: key: Parameter name. default: Default value. Returns: Validated positive integer."""
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         return default, None
@@ -110,6 +114,7 @@ def _parse_positive_int_query(name, default, max_value=None):
 
 
 def _amount_to_raw(amount) -> int:
+    """Convert a human-readable amount to raw token units. Args: amount: Decimal amount. decimals: Token decimals. Returns: Integer raw amount."""
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** USDC_DECIMALS)).quantize(
         Decimal("1"),
