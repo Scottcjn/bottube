@@ -61,6 +61,7 @@ _ALLOWED_ORIGINS = set(
 
 
 def _client_ip():
+    """Extract the client IP address from the request. Returns: IP string."""
     xff = request.headers.get("X-Forwarded-For", "")
     return (xff.split(",")[0].strip() if xff else request.remote_addr) or "?"
 
@@ -72,6 +73,7 @@ SOPHIA_CORPUS = os.environ.get("SOPHIA_CORPUS", "1") != "0"
 
 
 def init_sophia_corpus():
+    """Initialize the Sophia corpus database tables. Creates tables if needed."""
     if not SOPHIA_CORPUS:
         return
     c = sqlite3.connect(SOPHIA_CORPUS_DB, timeout=30)
@@ -112,6 +114,7 @@ def _site_from_request():
 
 
 def _log_corpus(site, origin, caller, is_anon, message, reply, gen_started):
+    """Log a corpus interaction to the database. Args: agent_id: Agent ID. query: Query text. response: Response text."""
     if not SOPHIA_CORPUS:
         return
     try:
@@ -156,6 +159,7 @@ _GEN_INTENT = re.compile(
 
 
 def _db_path() -> str:
+    """Get the database path for Sophia corpus storage. Returns: Path string."""
     # Same DB the app uses; own connection (mirrors pi_payments) so we never re-import
     # bottube_server (which runs as __main__ in prod -> a second import re-executes it).
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
@@ -163,6 +167,7 @@ def _db_path() -> str:
 
 
 def _conn():
+    """Get a database connection for Sophia corpus. Returns: sqlite3.Connection."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
