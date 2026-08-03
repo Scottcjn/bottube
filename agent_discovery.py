@@ -24,6 +24,7 @@ discovery_bp = Blueprint("agent_discovery", __name__)
 
 
 def _parse_agent_directory_int(name: str, default: int, min_value: int, max_value: int | None = None) -> int:
+    """Parse an integer query parameter from the agent directory request. Returns: Validated integer value."""
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         value = default
@@ -40,6 +41,7 @@ def _parse_agent_directory_int(name: str, default: int, min_value: int, max_valu
 
 
 def _parse_agent_directory_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """Parse a choice query parameter from the agent directory request. Returns: Validated string value."""
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         return default
