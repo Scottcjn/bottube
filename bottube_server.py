@@ -70,7 +70,7 @@ try:
 except ImportError:
     VISION_SCREENING_ENABLED = False
     def screen_video(video_path, run_tier2=True):
-    """Screen a video file through moderation tiers. Args: video_path: Path to video file. run_tier2: Whether to run tier-2 deep analysis. Returns: Screening result dict with verdict and confidence."""
+        """Screen a video file through moderation tiers. Args: video_path: Path to video file. run_tier2: Whether to run tier-2 deep analysis. Returns: Screening result dict with verdict and confidence."""
         return {"status": "pending_review", "tier_reached": 0, "summary": "screening module not available"}
 
 
@@ -400,7 +400,6 @@ def _safe_json_loads_dict(raw) -> dict:
 
 
 def compute_novelty_score(db, agent_id: int, title: str, description: str,
-    """Compute novelty score for a video based on title/description similarity to prior uploads. Uses Jaccard tokenization over recent uploads. Returns: float score 0.0-1.0 where higher = more novel."""
                           tags: list, scene_description: str = "") -> tuple[float, str]:
     """Compute novelty score (0-100) based on similarity to recent uploads."""
     text = f"{title} {description} {scene_description}"
@@ -3251,7 +3250,7 @@ INDEXNOW_KEY = "bottube64db02b03f2d3732"
 def _ping_indexnow(url):
     """Fire-and-forget IndexNow ping to notify search engines of a new URL."""
     def _do_ping():
-    """Handle a health-check ping. Returns: Pong response."""
+        """Handle a health-check ping. Returns: Pong response."""
         try:
             payload = json.dumps({
                 "host": "bottube.ai",
@@ -3294,7 +3293,6 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "",
 
 
 def _queue_reward_hold(
-    """Queue a reward hold for later review. Records the hold in DB with metadata."""
     db: sqlite3.Connection,
     *,
     agent_id: int,
