@@ -70,6 +70,7 @@ try:
 except ImportError:
     VISION_SCREENING_ENABLED = False
     def screen_video(video_path, run_tier2=True):
+        """Screen a video file through moderation tiers. Args: video_path: Path to video file. run_tier2: Whether to run tier-2 deep analysis. Returns: Screening result dict with verdict and confidence."""
         return {"status": "pending_review", "tier_reached": 0, "summary": "screening module not available"}
 
 
@@ -93,6 +94,7 @@ _ctr_tracker = None
 _ab_manager = None
 
 def _get_ctr_tracker():
+    """Get or lazily initialize the CTR tracking singleton. Returns: CTR tracker instance."""
     global _ctr_tracker
     if _ctr_tracker is None:
         from thumbnails.ctr_tracker import CTRTracker
@@ -101,6 +103,7 @@ def _get_ctr_tracker():
     return _ctr_tracker
 
 def _get_ab_manager():
+    """Get or lazily initialize the A/B test manager singleton. Returns: AB manager instance."""
     global _ab_manager
     if _ab_manager is None:
         from thumbnails.ab_test import ABTestManager
@@ -358,11 +361,13 @@ def _content_check(title: str, description: str, tags: list) -> str:
 
 
 def _tokenize_text(text: str) -> set:
+    """Tokenize text into a set of lowercase words. Args: text: Input string. Returns: Set of token strings."""
     tokens = _re_mod.findall(r"[a-z0-9]{3,}", (text or "").lower())
     return set(tokens)
 
 
 def _jaccard(a: set, b: set) -> float:
+    """Compute Jaccard similarity between two sets. Args: a: First set. b: Second set. Returns: Similarity score 0.0-1.0."""
     if not a and not b:
         return 0.0
     return len(a & b) / max(1, len(a | b))
@@ -514,6 +519,7 @@ def _normalize_ref_code(raw: str) -> str:
 
 
 def _normalize_referral_track(raw: str, default: str = "both") -> str:
+    """Normalize a referral track string to a known value. Args: raw: Input track string. default: Fallback if unrecognized. Returns: Normalized track string."""
     track = (raw or "").strip().lower()
     if track in REFERRAL_TRACKS:
         return track
@@ -521,12 +527,14 @@ def _normalize_referral_track(raw: str, default: str = "both") -> str:
 
 
 def _referral_track_for_agent(row: sqlite3.Row | dict | None) -> str:
+    """Extract referral track for an agent from a database row or dict. Returns: Track string or default."""
     if not row:
         return "agent"
     return "human" if int(row["is_human"] or 0) else "agent"
 
 
 def _referral_track_allowed(allowed_track: str, invitee_track: str) -> bool:
+    """Check if an invitee track is allowed by the referrer track policy. Returns: True if allowed."""
     allowed = _normalize_referral_track(allowed_track, "both")
     if allowed == "both":
         return True
@@ -534,6 +542,7 @@ def _referral_track_allowed(allowed_track: str, invitee_track: str) -> bool:
 
 
 def _referral_request_hashes() -> tuple[str, str]:
+    """Extract referral code and invite hash from the current request. Returns: Tuple of (code, hash) strings."""
     try:
         ip = _get_client_ip()
         fp = _fingerprint_ua(
@@ -550,6 +559,7 @@ def _referral_request_hashes() -> tuple[str, str]:
 
 
 def _referral_get_code_row(db: sqlite3.Connection, code: str):
+    """Look up a referral code in the database. Returns: Row if found, None otherwise."""
     ref_code = _normalize_ref_code(code)
     if not ref_code:
         return None
@@ -990,6 +1000,7 @@ def _referral_mark_first_upload(db, agent_id: int):
     except Exception:
         pass
 def _badge_catalog_entry(badge_key: str) -> dict:
+    """Get a badge catalog entry by key. Returns: Dict with badge metadata."""
     meta = dict(BADGE_CATALOG.get(badge_key, {}))
     label = meta.get("label") or badge_key.replace("_", " ").title()
     context_label = meta.get("context_label") or "Founding"
@@ -1007,6 +1018,7 @@ def _badge_catalog_entry(badge_key: str) -> dict:
 
 
 def _default_badge_source_campaign(badge_key: str) -> str:
+    """Get default campaign name for a badge key. Returns: Campaign string."""
     if "_human_" in badge_key or badge_key.endswith("_human"):
         return "rustchain-bounties#1584"
     if "_agent_" in badge_key or badge_key.endswith("_agent"):
@@ -1015,6 +1027,7 @@ def _default_badge_source_campaign(badge_key: str) -> str:
 
 
 def _badge_assignment_payload(row) -> dict:
+    """Build the API payload for a badge assignment from a database row. Returns: Dict with badge assignment data."""
     meta = _badge_catalog_entry((row["badge_key"] or "").strip())
     payload = {
         "id": int(row["id"]),
@@ -1047,6 +1060,7 @@ def _badge_assignment_payload(row) -> dict:
 
 
 def _badge_payload_sort_key(badge: dict) -> tuple:
+    """Sort key function for badges by rarity then date. Returns: Sortable tuple."""
     cohort = int(badge.get("cohort_number") or 0)
     cohort_sort = cohort if cohort > 0 else 9999
     return (
@@ -1408,6 +1422,7 @@ app.jinja_env.globals["language_switch_href"] = _language_switch_href
 
 
 def _build_recovery_notice(db=None):
+    """Build a recovery notice message for display. Args: db: Optional DB connection. Returns: Notice dict or None."""
     if not RECOVERY_RECLAIM_ENABLED:
         return None
     restored_views = RECOVERY_RESTORED_VIEWS_FALLBACK
@@ -1433,6 +1448,7 @@ def _build_recovery_notice(db=None):
 
 @app.context_processor
 def inject_recovery_notice():
+    """Inject a recovery notice into the template context if one exists."""
     notice = None
     if RECOVERY_RECLAIM_ENABLED:
         try:
@@ -2162,6 +2178,7 @@ def get_db():
 
 @app.teardown_appcontext
 def close_db(exc):
+    """Close the database connection on app teardown. Args: exc: Exception from teardown context."""
     db = g.pop("db", None)
     if db is not None:
         db.close()
@@ -3233,6 +3250,7 @@ INDEXNOW_KEY = "bottube64db02b03f2d3732"
 def _ping_indexnow(url):
     """Fire-and-forget IndexNow ping to notify search engines of a new URL."""
     def _do_ping():
+        """Handle a health-check ping. Returns: Pong response."""
         try:
             payload = json.dumps({
                 "host": "bottube.ai",
