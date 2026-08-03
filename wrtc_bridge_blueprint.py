@@ -40,6 +40,7 @@ _SOLANA_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 def _request_json_object():
+    """Parse and validate a JSON object from the request body. Returns: Parsed dict or raises error."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -49,6 +50,7 @@ def _request_json_object():
 
 
 def _string_field(data: dict, field_name: str):
+    """Extract and validate a string field from JSON body. Args: data: Dict to extract from. key: Field name. required: Whether field is mandatory."""
     value = data.get(field_name, "")
     if not isinstance(value, str):
         return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
@@ -56,6 +58,7 @@ def _string_field(data: dict, field_name: str):
 
 
 def _finite_amount(data: dict, field_name: str = "amount"):
+    """Validate that an amount is a finite positive number. Args: amount: Value to validate. Returns: Validated float."""
     value = data.get(field_name, 0)
     if isinstance(value, bool):
         return None, (jsonify({"error": f"{field_name} must be a finite number"}), 400)
@@ -69,6 +72,7 @@ def _finite_amount(data: dict, field_name: str = "amount"):
 
 
 def _parse_history_limit(default: int = 50, max_value: int = 200):
+    """Parse the history limit query parameter. Returns: Validated integer within allowed range."""
     raw_value = request.args.get("limit")
     if raw_value is None or raw_value == "":
         return default, None
@@ -135,6 +139,7 @@ def init_wrtc_tables(db):
 
 
 def _rpc_call(method, params):
+    """Make an RPC call to the wRTC bridge backend. Args: method: RPC method name. params: Method parameters. Returns: RPC response."""
     payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode("utf-8")
     req = urllib.request.Request(
         SOLANA_RPC_URL,

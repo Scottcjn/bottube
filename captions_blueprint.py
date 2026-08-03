@@ -41,6 +41,7 @@ WHISPER_MODEL = os.environ.get("BOTTUBE_WHISPER_MODEL", "whisper-1")
 
 
 def _db_path() -> str:
+    """Get the database path for captions storage. Returns: Path string."""
     from pathlib import Path
     if "DB_PATH" in globals():
         return str(globals()["DB_PATH"])
@@ -53,12 +54,14 @@ def _db_path() -> str:
 
 
 def _connect_db() -> sqlite3.Connection:
+    """Connect to the captions database. Returns: sqlite3.Connection."""
     db = sqlite3.connect(_db_path())
     db.row_factory = sqlite3.Row
     return db
 
 
 def _table_exists(db: sqlite3.Connection, name: str) -> bool:
+    """Check if a table exists in the database. Args: table_name: Name of table to check. Returns: True if exists."""
     row = db.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
         (name,),
@@ -67,10 +70,12 @@ def _table_exists(db: sqlite3.Connection, name: str) -> bool:
 
 
 def _normalized_sql(sql: str) -> str:
+    """Normalize a SQL statement by collapsing whitespace. Returns: Normalized SQL string."""
     return re.sub(r"\s+", "", (sql or "").lower())
 
 
 def _migrate_captions_table(db: sqlite3.Connection) -> None:
+    """Migrate the captions table schema to the latest version. Handles column additions and renames."""
     target_sql = """
         CREATE TABLE IF NOT EXISTS video_captions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
