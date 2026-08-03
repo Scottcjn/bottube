@@ -240,6 +240,7 @@ class HumanScheduler:
     # ------------------------------------------------------------------
 
     def _ensure_today_schedule(self, now: datetime):
+        """Ensure a schedule exists for today. Generates one if missing."""
         key = now.strftime("%Y-%m-%d")
         if self._today_key == key:
             return
@@ -251,6 +252,7 @@ class HumanScheduler:
         self._persist_schedule(key, self._today_slots)
 
     def _generate_day(self, date, rng: random.Random) -> List[datetime]:
+        """Generate a content schedule for a single day. Returns: List of scheduled items."""
         p = self.profile
         weekday = date.weekday()
 
@@ -345,6 +347,7 @@ class HumanScheduler:
 
     @staticmethod
     def _deduplicate(slots: List[datetime], min_gap_minutes: int = 3) -> List[datetime]:
+        """Remove duplicate entries from a schedule list. Returns: Deduplicated list."""
         if not slots:
             return []
         result = [slots[0]]
@@ -368,6 +371,7 @@ class HumanScheduler:
                 return k - 1
 
     def _agent_seed(self) -> int:
+        """Get or create a deterministic seed for an agent. Returns: Seed integer."""
         return int(hashlib.sha256(self.agent.encode()).hexdigest()[:8], 16)
 
     def _day_seed(self, day_key: str) -> int:
