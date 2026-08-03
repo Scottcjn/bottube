@@ -781,13 +781,13 @@ def _referral_refresh_invite_state(db: sqlite3.Connection, invitee_agent_id: int
 
 
 def _referral_mark_rtc_native_action(
-    """Mark a referral RTC native action as completed for an invitee. Records the action in the referral tracking system."""
     db: sqlite3.Connection,
     agent_id: int,
     *,
     evidence_ref: str,
     occurred_at: float | None = None,
 ) -> None:
+    """Mark a referral RTC native action as completed for an invitee. Records the action in the referral tracking system."""
     invite = db.execute(
         "SELECT first_rtc_native_action_at FROM referral_invites WHERE invitee_agent_id = ?",
         (agent_id,),
@@ -1061,12 +1061,12 @@ def _badge_payload_sort_key(badge: dict) -> tuple:
 
 
 def _list_agent_badges(
-    """List all badges assigned to an agent. Args: db: DB connection. Returns: List of badge dicts sorted by rarity."""
     db: sqlite3.Connection,
     agent_id: int,
     *,
     include_inactive: bool = False,
 ) -> list[dict]:
+    """List all badges assigned to an agent. Args: db: DB connection. Returns: List of badge dicts sorted by rarity."""
     where = "" if include_inactive else "AND COALESCE(is_active, 1) = 1"
     rows = db.execute(
         f"""
@@ -3000,11 +3000,11 @@ def _quest_progress_count(db: sqlite3.Connection, agent_id: int, metric_key: str
 
 
 def _refresh_agent_quests(
-    """Refresh quest progress for an agent. Checks all active quests and updates completion state."""
     db: sqlite3.Connection,
     agent_id: int,
     quest_keys: Optional[List[str]] = None,
 ) -> List[Dict]:
+    """Refresh quest progress for an agent. Checks all active quests and updates completion state."""
     """Refresh quest progress, award one-time RTC, and return quest snapshots."""
     params: list = []
     where = "WHERE is_active = 1"
@@ -3114,7 +3114,6 @@ def _derive_rtc_address_from_pubkey(public_key_hex: str) -> str:
 
 
 def _handle_onchain_tip(
-    """Handle an on-chain tip transaction. Records the tip and triggers any associated reward logic."""
     db: sqlite3.Connection,
     *,
     sender_id: int,
@@ -3128,6 +3127,7 @@ def _handle_onchain_tip(
     video_id: str = "",
     video_title: str = "",
 ):
+    """Handle an on-chain tip transaction. Records the tip and triggers any associated reward logic."""
     """Validate + forward a RustChain signed transfer, then record as a pending tip."""
     required = ["from_address", "to_address", "nonce", "signature", "public_key", "memo"]
     missing = [k for k in required if not (data or {}).get(k)]
@@ -3285,7 +3285,6 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "",
 
 
 def _queue_reward_hold(
-    """Queue a reward hold for later review. Stores the hold with metadata for manual or automated review."""
     db: sqlite3.Connection,
     *,
     agent_id: int,
@@ -3295,6 +3294,7 @@ def _queue_reward_hold(
     risk_score: int,
     reasons: list[str],
 ) -> None:
+    """Queue a reward hold for later review. Stores the hold with metadata for manual or automated review."""
     """Persist a suspicious reward instead of paying it immediately."""
     db.execute(
         """
