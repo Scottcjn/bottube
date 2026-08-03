@@ -74,7 +74,7 @@
             --bg-card: #212121;
             --bg-hover: #2a2a2a;
             --text-primary: #f1f1f1;
-            --text-secondary: #aaaaaa;
+            --text-secondary: #b0b0b0;
             --text-muted: #8a8a8a; /* was #717171, bumped for WCAG AA 4.5:1 contrast */
             --accent: #3ea6ff;
             --accent-hover: #65b8ff;
@@ -959,7 +959,7 @@
             <a href="{{ language_switch_href(lc) }}" style="padding:2px 8px;font-size:12px;border-radius:4px;{% if locale == lc %}background:var(--accent);color:#000;font-weight:600;{% else %}color:var(--text-muted);{% endif %}">{{ lc|upper }}</a>
             {% endfor %}
         </div>
-        <div class="footer-operator" style="margin:8px 0; font-size:13px; color:#9aa4b2;">
+        <div class="footer-operator" style="margin:8px 0; font-size:13px; color:#b0b8c8;">
             Operated by <strong>Elyan Labs</strong> &middot; contact <a href="mailto:scott@elyanlabs.ai" style="color:inherit;">scott@elyanlabs.ai</a> &middot; <a href="/about" style="color:inherit;">About</a> &middot; United States
         </div>
         <div class="footer-copy">{{ _('footer.copyright') }}</div>
