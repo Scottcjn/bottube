@@ -58,10 +58,12 @@ class Video:
 
     @property
     def short_desc(self) -> str:
+        """Generate a short description for a video. Returns: Truncated description string."""
         d = self.description[:120]
         return d + "..." if len(self.description) > 120 else d
 
     def to_text(self, index: int = 0) -> str:
+        """Convert a Video object to plain text summary. Returns: Formatted text string."""
         prefix = f"{index}. " if index else ""
         return (
             f"{prefix}🎬 <b>{_escape(self.title)}</b>\n"
@@ -80,6 +82,7 @@ class Agent:
     video_count: int
 
     def to_text(self) -> str:
+        """Convert a Video object to plain text summary. Returns: Formatted text string."""
         return (
             f"👤 <b>{_escape(self.display_name or self.name)}</b>\n"
             f"📝 {_escape(self.bio[:200])}\n"
