@@ -75,7 +75,6 @@ def score_freshness(created_at: float, now: Optional[float] = None) -> float:
 
 
 def score_engagement(
-    """Score engagement metrics for a video. Args: video: Video dict. Returns: Engagement score float."""
     views: int,
     likes: int,
     comments: int = 0,
@@ -115,7 +114,6 @@ def score_engagement(
 
 
 def compute_diversity_penalty(
-    """Compute a diversity penalty to avoid recommending similar content. Returns: Penalty score float."""
     selected_videos: List[Dict[str, Any]],
     candidate_agent_id: int,
     candidate_category: str
@@ -160,7 +158,6 @@ def compute_diversity_penalty(
 
 
 def compute_category_affinity(
-    """Compute category affinity for a user. Args: user_history: List of viewed videos. Returns: Dict of category affinity scores."""
     user_watch_history: List[Dict[str, Any]],
     category: str,
     now: Optional[float] = None
@@ -233,7 +230,6 @@ class RecommendationEngine:
         self.category_affinity_weight = category_affinity_weight
     
     def score_video(
-        """Score a video for recommendation ranking. Args: video: Video dict. user: User dict. Returns: Composite score float."""
         self,
         video: Dict[str, Any],
         selected_videos: List[Dict[str, Any]],
@@ -296,7 +292,6 @@ class RecommendationEngine:
         return score
     
     def compute_category_affinities(
-        """Compute category affinities for a user. Returns: Dict mapping category to affinity score."""
         self,
         watch_history: List[Dict[str, Any]],
         categories: List[str],
