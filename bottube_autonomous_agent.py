@@ -986,16 +986,19 @@ class BotBrain:
     videos_uploaded: int = 0
 
     def reset_hourly_counter(self):
+        """Reset the hourly comment counter. Called at the start of each hour."""
         now = time.time()
         if now - self.comments_hour_start > 3600:
             self.comments_this_hour = 0
             self.comments_hour_start = now
 
     def can_comment(self):
+        """Check if the bot can post a comment based on rate limits and cooldown. Returns: True if allowed."""
         self.reset_hourly_counter()
         return self.comments_this_hour < MAX_COMMENTS_PER_BOT_PER_HOUR
 
     def record_comment(self, video_id):
+        """Record that a comment was posted. Updates internal counters and timestamps."""
         self.comments_this_hour += 1
         self.last_comment_ts = time.time()
         self.last_action_ts = time.time()
@@ -1023,6 +1026,7 @@ class BotBrain:
         return interval
 
     def is_awake(self):
+        """Check if the bot is within active hours. Returns: True if bot should be active."""
         return time.time() >= self.next_wake_ts
 
     def already_commented_on(self, video_id):

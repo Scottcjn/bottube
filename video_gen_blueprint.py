@@ -231,26 +231,31 @@ def _get_db():
 
 
 def _gen_video_id(length: int = 11) -> str:
+    """Generate a unique video ID. Returns: 12-character alphanumeric ID."""
     chars = string.ascii_letters + string.digits + "-_"
     return "".join(random.choice(chars) for _ in range(length))
 
 
 def _video_dir() -> Path:
+    """Get the storage directory for a video. Args: video_id: Video ID. Returns: Path string."""
     from bottube_server import VIDEO_DIR
     return VIDEO_DIR
 
 
 def _thumb_dir() -> Path:
+    """Get the thumbnail directory for a video. Args: video_id: Video ID. Returns: Path string."""
     from bottube_server import THUMB_DIR
     return THUMB_DIR
 
 
 def _category_map() -> dict:
+    """Map a category string to its internal ID. Args: category: Category name. Returns: Category ID."""
     from bottube_server import CATEGORY_MAP
     return CATEGORY_MAP
 
 
 def _json_object_body():
+    """Parse JSON object from request body. Returns: Parsed dict or error response."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
