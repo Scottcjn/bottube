@@ -5403,6 +5403,7 @@ def referral_me_user():
 
 
 def _referral_apply_payload(source: str):
+    """Apply a referral code from the request body. Args: source: Signup source label. Returns: JSON response."""
     db = get_db()
     json_data = request.get_json(silent=True)
     if json_data is not None and not isinstance(json_data, dict):
@@ -5434,6 +5435,7 @@ def referral_apply_user():
 
 
 def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
+    """Get the referral leaderboard ranked by successful referrals. Args: limit: Max entries. Returns: List of agent referral stats."""
     limit = max(1, min(int(limit or 50), 200))
     rows = db.execute(
         """
@@ -5689,6 +5691,7 @@ def founding_page():
 
 @app.route("/api/referrals/leaderboard")
 def referrals_leaderboard_api():
+    """API endpoint for referral leaderboard data. Returns: JSON list of top referrers."""
     db = get_db()
     limit_i, error = _parse_positive_int_query("limit", 50, max_value=200)
     if error:
@@ -5703,6 +5706,7 @@ def founding_leaderboard_api():
 
 
 def _referral_admin_notes(db: sqlite3.Connection, row: sqlite3.Row) -> list[str]:
+    """Build admin notes for a referral record. Returns: List of note strings for admin review."""
     notes: list[str] = []
     signup_ip_hash = (row["signup_ip_hash"] or "").strip()
     signup_fp_hash = (row["signup_fp_hash"] or "").strip()
@@ -5738,6 +5742,7 @@ def _referral_admin_notes(db: sqlite3.Connection, row: sqlite3.Row) -> list[str]
 
 
 def _referral_admin_payload(db: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    """Build the admin payload for a referral record. Returns: Dict with referral details for admin UI."""
     invitee_created_at = float(row["invitee_created_at"] or 0)
     return {
         "id": int(row["id"]),
