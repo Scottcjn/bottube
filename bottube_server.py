@@ -560,6 +560,7 @@ def _referral_get_code_row(db: sqlite3.Connection, code: str):
 
 
 def _referral_build_summary(db: sqlite3.Connection, agent_id: int, *, include_recent: bool = True) -> dict | None:
+    """Build a summary of referral activity for an agent. Args: db: DB connection. agent_id: Agent ID. Returns: Dict with referral stats."""
     row = db.execute(
         """
         SELECT code, hits, signups, first_uploads, created_at, COALESCE(allowed_track, 'both') AS allowed_track
@@ -699,6 +700,7 @@ def _referral_build_summary(db: sqlite3.Connection, agent_id: int, *, include_re
 
 
 def _referral_refresh_invite_state(db: sqlite3.Connection, invitee_agent_id: int) -> None:
+    """Refresh the invite state for a referral invitee. Checks if invitee has met requirements and updates status."""
     invite = db.execute(
         """
         SELECT
@@ -785,6 +787,7 @@ def _referral_mark_rtc_native_action(
     evidence_ref: str,
     occurred_at: float | None = None,
 ) -> None:
+    """Mark a referral RTC native action as completed for an invitee. Records the action in the referral tracking system."""
     invite = db.execute(
         "SELECT first_rtc_native_action_at FROM referral_invites WHERE invitee_agent_id = ?",
         (agent_id,),
@@ -1063,6 +1066,7 @@ def _list_agent_badges(
     *,
     include_inactive: bool = False,
 ) -> list[dict]:
+    """List all badges assigned to an agent. Args: db: DB connection. Returns: List of badge dicts sorted by rarity."""
     where = "" if include_inactive else "AND COALESCE(is_active, 1) = 1"
     rows = db.execute(
         f"""
@@ -1079,12 +1083,14 @@ def _list_agent_badges(
 
 
 def _badge_assignment_keyset(db: sqlite3.Connection, *, active_only: bool = True) -> set[tuple[int, str]]:
+    """Get the set of badge assignment keys for deduplication. Args: active_only: If True, only return active badges. Returns: Set of assignment key strings."""
     where = "WHERE COALESCE(is_active, 1) = 1" if active_only else ""
     rows = db.execute(f"SELECT agent_id, badge_key FROM agent_badges {where}").fetchall()
     return {(int(row["agent_id"]), row["badge_key"]) for row in rows}
 
 
 def _build_badge_candidates(db: sqlite3.Connection) -> list[dict]:
+    """Build the list of badge candidates eligible for assignment. Returns: List of badge candidate dicts."""
     assigned = _badge_assignment_keyset(db, active_only=True)
     candidates: list[dict] = []
 
@@ -1566,6 +1572,7 @@ def _verify_csrf():
 
 
 def _public_json_object_body():
+    """Parse and validate the JSON request body as a dict. Returns: Tuple of (data_dict, error_response)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -1575,6 +1582,7 @@ def _public_json_object_body():
 
 
 def _public_string_field(data, field, default="", max_length=None):
+    """Extract and validate a string field from JSON data. Args: data: Dict to extract from. field: Key name. default: Fallback value. max_length: Optional length cap. Returns: Tuple of (value, error_string)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -2996,6 +3004,7 @@ def _refresh_agent_quests(
     agent_id: int,
     quest_keys: Optional[List[str]] = None,
 ) -> List[Dict]:
+    """Refresh quest progress for an agent. Checks all active quests and updates completion state."""
     """Refresh quest progress, award one-time RTC, and return quest snapshots."""
     params: list = []
     where = "WHERE is_active = 1"
@@ -3118,6 +3127,7 @@ def _handle_onchain_tip(
     video_id: str = "",
     video_title: str = "",
 ):
+    """Handle an on-chain tip transaction. Records the tip and triggers any associated reward logic."""
     """Validate + forward a RustChain signed transfer, then record as a pending tip."""
     required = ["from_address", "to_address", "nonce", "signature", "public_key", "memo"]
     missing = [k for k in required if not (data or {}).get(k)]
@@ -3284,6 +3294,7 @@ def _queue_reward_hold(
     risk_score: int,
     reasons: list[str],
 ) -> None:
+    """Queue a reward hold for later review. Stores the hold with metadata for manual or automated review."""
     """Persist a suspicious reward instead of paying it immediately."""
     db.execute(
         """
@@ -20400,6 +20411,7 @@ def submit_report():
 # --- Admin endpoints ------------------------------------------------------
 
 def _ts_admin_ok():
+    """Check if the current request has admin privileges for trust-and-safety endpoints. Returns: True if admin."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
     expected = os.environ.get("BOTTUBE_ADMIN_KEY", "") or os.environ.get("RC_ADMIN_KEY", "")
     return bool(expected) and (key == expected)
