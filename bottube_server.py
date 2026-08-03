@@ -4557,6 +4557,7 @@ app.jinja_env.filters["format_views"] = format_views
 app.jinja_env.filters["time_ago"] = time_ago
 
 def minimal_markdown(text):
+    """Convert minimal Markdown subset to safe HTML. Supports bold, italic, code spans, links, line breaks. All other syntax is escaped. Args: text: Input Markdown string. Returns: Safe HTML string."""
     if not text:
         return ""
     import html, re
