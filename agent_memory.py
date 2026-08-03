@@ -53,11 +53,13 @@ class TfIdfStore:
         self._dirty = True
 
     def add(self, doc_id: str, text: str):
+    """Add a document to the memory index. Args: doc_id: Unique document ID. text: Document text content."""
         tokens = self._tokenize(text)
         self._docs[doc_id] = tokens
         self._dirty = True
 
     def remove(self, doc_id: str):
+    """Remove a document from the memory index. Args: doc_id: Document ID to remove."""
         self._docs.pop(doc_id, None)
         self._dirty = True
 
@@ -82,11 +84,13 @@ class TfIdfStore:
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
+    """Tokenize text into lowercase word tokens. Returns: List of token strings."""
         text = text.lower()
         text = re.sub(r"[^a-z0-9\s]", " ", text)
         return [w for w in text.split() if len(w) > 2]
 
     def _rebuild_idf(self):
+    """Rebuild the inverse document frequency index after document changes."""
         n = len(self._docs)
         if n == 0:
             self._idf = {}
@@ -102,6 +106,7 @@ class TfIdfStore:
         self._dirty = False
 
     def _tfidf_vec(self, tokens: List[str]) -> Dict[str, float]:
+    """Compute TF-IDF vector for a list of tokens. Returns: Dict mapping terms to TF-IDF weights."""
         tf: Counter = Counter(tokens)
         total = len(tokens) or 1
         vec = {}
@@ -112,6 +117,7 @@ class TfIdfStore:
 
     @staticmethod
     def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Compute cosine similarity between two TF-IDF vectors. Returns: Similarity score 0.0-1.0."""
         keys = set(a) & set(b)
         if not keys:
             return 0.0
@@ -203,6 +209,7 @@ class AgentMemory:
     # ------------------------------------------------------------------
 
     def ingest_video(
+    """Ingest a video into agent memory for future reference. Extracts metadata and content for indexing."""
         self,
         video_id: str,
         title: str,
@@ -250,6 +257,7 @@ class AgentMemory:
         return bool(results and results[0][1] >= threshold)
 
     def suggest_reference(
+    """Suggest relevant reference videos for a given context. Returns: List of suggested reference dicts."""
         self,
         new_title: str,
         new_description: str = "",
@@ -381,6 +389,7 @@ class AgentMemory:
     # ------------------------------------------------------------------
 
     def _check_milestone(self, stats: AgentStats) -> Optional[SelfReference]:
+    """Check if agent stats indicate a self-reference milestone. Returns: SelfReference if milestone reached."""
         milestones = [10, 25, 50, 100, 200, 500, 1000]
         for m in milestones:
             if stats.total_videos == m:

@@ -80,6 +80,7 @@ DRAMA_ARC_TEMPLATES = {
 # ---------------------------------------------------------------------------
 
 def _db_path() -> Path:
+    """Get the database path for agent relationships. Returns: Path object."""
     try:
         import bottube_server  # type: ignore
         return Path(bottube_server.DB_PATH)
@@ -231,6 +232,7 @@ def _get_or_create_relationship(db: sqlite3.Connection, a_id: int, b_id: int) ->
 
 
 def _apply_event(
+    """Apply a relationship event to update the relationship state machine."""
     db: sqlite3.Connection,
     relationship_id: int,
     event_type: str,
@@ -306,6 +308,7 @@ def list_relationships():
 
 @beef_bp.route("/relationships/<int:rel_id>", methods=["GET"])
 def get_relationship(rel_id: int):
+    """Get a relationship by ID. Args: rel_id: Relationship ID. Returns: Relationship dict or None."""
     db = get_db()
     row = db.execute(
         "SELECT * FROM agent_relationships WHERE id=?", (rel_id,)
@@ -378,6 +381,7 @@ def admin_kill(rel_id: int):
 
 @beef_bp.route("/relationships/<int:rel_id>/events", methods=["GET"])
 def get_events(rel_id: int):
+    """Get all events for a relationship. Args: rel_id: Relationship ID. Returns: List of event dicts."""
     db = get_db()
     rows = db.execute(
         "SELECT * FROM relationship_events WHERE relationship_id=? ORDER BY created_at DESC",
@@ -393,6 +397,7 @@ def get_events(rel_id: int):
 
 @beef_bp.route("/arcs", methods=["GET"])
 def list_arcs():
+    """List all available relationship arc templates. Returns: List of arc dicts."""
     db = get_db()
     status = request.args.get("status", "active")
     rows = db.execute(
@@ -404,6 +409,7 @@ def list_arcs():
 
 @beef_bp.route("/arcs/templates", methods=["GET"])
 def arc_templates():
+    """Get predefined relationship arc templates. Returns: Dict of template definitions."""
     return jsonify(DRAMA_ARC_TEMPLATES)
 
 

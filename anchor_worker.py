@@ -42,6 +42,7 @@ import urllib.error
 
 
 def _hex(b):
+    """Convert bytes to a hex string. Args: b: Bytes object. Returns: Hex string."""
     return b.hex() if isinstance(b, (bytes, bytearray)) else str(b)
 
 
@@ -157,6 +158,7 @@ def manifest_leaf(m):
 
 
 def _ergo_get(base, path, key, timeout=20):
+    """Make a GET request to an Ergo node API. Args: base: Base URL. path: API path. key: API key. Returns: Response JSON."""
     s, body = _http("GET", base + path, headers={"api_key": key}, timeout=timeout)
     if s != 200:
         raise RuntimeError(f"GET {path} -> {s}: {str(body)[:200]}")
@@ -164,6 +166,7 @@ def _ergo_get(base, path, key, timeout=20):
 
 
 def _ergo_post(base, path, key, payload, timeout=30):
+    """Make a POST request to an Ergo node API. Args: base: Base URL. path: API path. key: API key. payload: Request body. Returns: Response JSON."""
     s, body = _http("POST", base + path, headers={"api_key": key}, body=payload, timeout=timeout)
     if s != 200:
         raise RuntimeError(f"POST {path} -> {s}: {str(body)[:200]}")
@@ -171,6 +174,7 @@ def _ergo_post(base, path, key, payload, timeout=30):
 
 
 def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
+    """Anchor a merkle root to the Ergo blockchain. Args: merkle_root_hex: Merkle root hex string. member_count: Number of members. Returns: Anchor transaction result."""
                 wallet_password=None, anchor_value=1_000_000, max_tx_wait=180):
     """Anchor merkle_root_hex in an Ergo box's R4 register on the private chain.
 
@@ -236,6 +240,7 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
     # 4-byte VarInt that the Ergo deserializer interpreted as 0 (the
     # leading "0" zero-byte stops the VarInt scan). Fixed below.
     def _zigzag_varint_hex(n):
+    """Encode an integer as a zigzag varint hex string. Args: n: Integer to encode. Returns: Hex string."""
         # ZigZag encode signed int: (n << 1) ^ (n >> 63) (assume 64-bit
         # but truncate the result to fit Int = 32-bit; member_count is
         # always positive and small).
@@ -315,6 +320,7 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
 
 
 def main():
+    """Main entry point for the anchor worker. Runs the anchoring loop."""
     ap = argparse.ArgumentParser(description="BoTTube provenance anchor worker")
     ap.add_argument("--mode", choices=("dry", "stub", "real"), default="dry",
                     help="dry = compute only; stub = stub tx_hash callback; real = anchor on Ergo")
