@@ -9767,6 +9767,7 @@ def _feed_event_impression_id(data):
 
 
 @app.route("/api/feed/click", methods=["POST"])
+@require_api_key
 def api_feed_click():
     """Record a click on a feed impression."""
     _feed_imp_ensure_schema()
@@ -18274,6 +18275,7 @@ def video_ctr_stats(video_id):
 
 
 @app.route("/api/videos/<video_id>/watch_time", methods=["POST"])
+@require_api_key
 def record_watch_time(video_id):
     """Record watch time for a video (called by player on pause/close).
 
