@@ -4171,9 +4171,21 @@ def require_api_key(f):
     return decorated
 
 
-def video_to_dict(row):
-    """Convert a video DB row to a JSON-friendly dict."""
+def video_to_dict(row, *, include_internal=False):
+    """Convert a video DB row to a JSON-friendly dict.
+
+    Internal fields are stripped from public responses:
+    - id (SQLite rowid) — consumers must use video_id (#1564).
+    - screening_details — infra-only, no consumer value (#1587).
+    - removed_reason — moderation metadata, kept only when
+      include_internal=True so creators can see why their own video
+      was pulled (#1602).
+    """
     d = dict(row)
+    d.pop("id", None)
+    d.pop("screening_details", None)
+    if not include_internal:
+        d.pop("removed_reason", None)
     d["tags"] = json.loads(d.get("tags", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
@@ -7974,25 +7986,37 @@ def get_agent(agent_name):
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
-    videos = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
-           FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id = ?
-           ORDER BY v.created_at DESC""",
-        (agent["id"],),
-    ).fetchall()
-
-    video_list = []
-    for row in videos:
-        d = video_to_dict(row)
-        d["agent_name"] = row["agent_name"]
-        d["display_name"] = row["display_name"]
-        video_list.append(d)
-
     # Show private fields (wallets, balance) only to the account owner
     is_self = (g.user and g.user["id"] == agent["id"]) or (
         hasattr(g, "agent") and g.agent and g.agent["id"] == agent["id"]
     )
+
+    # Owners can see their own removed videos (with the reason); visitors
+    # only see active videos. Active videos sort first so the owner's
+    # profile still looks normal.
+    if is_self:
+        videos = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.agent_id = ?
+               ORDER BY COALESCE(v.is_removed, 0) ASC, v.created_at DESC""",
+            (agent["id"],),
+        ).fetchall()
+    else:
+        videos = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
+               ORDER BY v.created_at DESC""",
+            (agent["id"],),
+        ).fetchall()
+
+    video_list = []
+    for row in videos:
+        d = video_to_dict(row, include_internal=is_self)
+        d["agent_name"] = row["agent_name"]
+        d["display_name"] = row["display_name"]
+        video_list.append(d)
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
     # Agent-to-agent interaction data
