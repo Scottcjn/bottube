@@ -4245,17 +4245,22 @@ def require_api_key(f):
     return decorated
 
 
-def video_to_dict(row):
+def video_to_dict(row, *, include_internal=False):
     """Convert a video DB row to a JSON-friendly dict.
 
     The internal integer ``id`` (SQLite rowid) is stripped so API consumers
     always use ``video_id`` — the YouTube-style slug that all routes expect.
     Exposing ``id`` alongside ``video_id`` caused clients to build
     ``/api/videos/<id>`` URLs that 404 (#1564).
+
+    If include_internal=False (default), ``removed_reason`` is stripped from public
+    API responses; only channel owners see why their content was removed (#1587).
     """
     d = dict(row)
     d.pop("id", None)
     d.pop("screening_details", None)  # internal, not for public API (#1587)
+    if not include_internal:
+        d.pop("removed_reason", None)  # internal moderation metadata, owner-only (#1587)
     d["tags"] = json.loads(d.get("tags", "[]"))
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
@@ -8603,25 +8608,36 @@ def get_agent(agent_name):
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
-    videos = db.execute(
-        """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
-           FROM videos v JOIN agents a ON v.agent_id = a.id
-           WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
-           ORDER BY v.created_at DESC""",
-        (agent["id"],),
-    ).fetchall()
-
-    video_list = []
-    for row in videos:
-        d = video_to_dict(row)
-        d["agent_name"] = row["agent_name"]
-        d["display_name"] = row["display_name"]
-        video_list.append(d)
-
     # Show private fields (wallets, balance) only to the account owner
     is_self = (g.user and g.user["id"] == agent["id"]) or (
         hasattr(g, "agent") and g.agent and g.agent["id"] == agent["id"]
     )
+
+    # Owner sees removed videos with reason; public only sees active ones
+    if is_self:
+        videos = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.agent_id = ?
+               ORDER BY COALESCE(v.is_removed, 0) ASC, v.created_at DESC""",
+            (agent["id"],),
+        ).fetchall()
+    else:
+        videos = db.execute(
+            """SELECT v.*, a.agent_name, a.display_name, a.avatar_url
+               FROM videos v JOIN agents a ON v.agent_id = a.id
+               WHERE v.agent_id = ? AND COALESCE(v.is_removed, 0) = 0
+               ORDER BY v.created_at DESC""",
+            (agent["id"],),
+        ).fetchall()
+
+    video_list = []
+    for row in videos:
+        d = video_to_dict(row, include_internal=is_self)
+        d["agent_name"] = row["agent_name"]
+        d["display_name"] = row["display_name"]
+        video_list.append(d)
+
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
     # Agent-to-agent interaction data
@@ -9767,6 +9783,7 @@ def _feed_event_impression_id(data):
 
 
 @app.route("/api/feed/click", methods=["POST"])
+@require_api_key
 def api_feed_click():
     """Record a click on a feed impression."""
     _feed_imp_ensure_schema()
@@ -18274,6 +18291,7 @@ def video_ctr_stats(video_id):
 
 
 @app.route("/api/videos/<video_id>/watch_time", methods=["POST"])
+@require_api_key
 def record_watch_time(video_id):
     """Record watch time for a video (called by player on pause/close).
 

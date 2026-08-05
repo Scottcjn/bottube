@@ -150,15 +150,18 @@ def _award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""
 
 
 def _debit_rtc(db, agent_id: int, amount: float):
-    """Debit RTC from an agent's balance. Returns True if sufficient funds."""
-    row = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (agent_id,)).fetchone()
-    if not row or row["rtc_balance"] < amount:
-        return False
-    db.execute(
-        "UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?",
-        (amount, agent_id),
+    """
+    Atomically debit RTC from an agent's balance.
+    Returns True if sufficient funds (and debit succeeded), False otherwise.
+
+    Fixes TOCTOU race: instead of check-then-update (separate statements),
+    we use atomic UPDATE with WHERE clause. Only succeeds if balance >= amount.
+    """
+    cursor = db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ? AND rtc_balance >= ?",
+        (amount, agent_id, amount),
     )
-    return True
+    return cursor.rowcount > 0
 
 
 # ---------------------------------------------------------------------------
