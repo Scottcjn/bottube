@@ -197,3 +197,30 @@ def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
         response = client.get(path)
         assert response.status_code == 200
         ET.fromstring(response.get_data(as_text=True))
+
+
+def test_base_api_url_uses_request_host_when_env_unset():
+    """Test that _base_api_url falls back to request.host when BOTTUBE_API_BASE is unset."""
+    import os
+    from unittest import mock
+
+    # Ensure BOTTUBE_API_BASE is not set for this test
+    with mock.patch.dict(os.environ, {}, clear=True):
+        # Test with a provided host
+        assert feed_blueprint._base_api_url(host="example.com") == "https://example.com"
+        assert feed_blueprint._base_api_url(host="api.test.local:8080") == "https://api.test.local:8080"
+
+        # Test fallback to localhost when no host provided
+        assert feed_blueprint._base_api_url() == "http://127.0.0.1:5000"
+
+
+def test_base_api_url_respects_env_override():
+    """Test that BOTTUBE_API_BASE environment variable overrides all defaults."""
+    import os
+    from unittest import mock
+
+    # Test that explicit env var takes precedence
+    with mock.patch.dict(os.environ, {"BOTTUBE_API_BASE": "https://custom.api.com"}):
+        assert feed_blueprint._base_api_url() == "https://custom.api.com"
+        # Even with a host parameter, env should win
+        assert feed_blueprint._base_api_url(host="other.com") == "https://custom.api.com"
