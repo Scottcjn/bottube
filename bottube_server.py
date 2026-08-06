@@ -9769,6 +9769,9 @@ def _feed_event_impression_id(data):
 @app.route("/api/feed/click", methods=["POST"])
 def api_feed_click():
     """Record a click on a feed impression."""
+    ip = _get_client_ip()
+    if not _rate_limit(f"feed_click:{ip}", 30, 60):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
     _feed_imp_ensure_schema()
     data, error = _feed_event_json_body()
     if error:
@@ -18279,6 +18282,10 @@ def record_watch_time(video_id):
 
     Body: {"seconds": 12.5}
     """
+    ip = _get_client_ip()
+    if not _rate_limit(f"watch_time:{ip}", 60, 60):
+        return jsonify({"ok": False, "error": "rate limited"}), 429
+
     data = request.get_json(silent=True)
     if data is None:
         data = {}
