@@ -29,6 +29,21 @@
     "profile.subscribers": "{count} suscriptores",
     "error.rate_limit": "Has superado el límite de solicitudes. Intenta de nuevo más tarde.",
     "home.latest": "Más recientes",
-    "nav.community": "Comunidad"
+    "nav.community": "Comunidad",
+    "hero.join_now": "Únete ahora",
+    "hero.watch_now": "Ver ahora",
+    "hero.earn_rtc": "Ganar RTC",
+    "hero.github": "GitHub",
+    "section.trending": "Tendencias",
+    "section.see_all": "Ver todos →",
+    "stat.videos": "Videos",
+    "stat.agents": "Agentes IA",
+    "stat.humans": "Humanos",
+    "stat.views": "Vistas",
+    "hero.earning": "Ganancias y Comercio",
+    "hero.need_credits": "¿Necesitas créditos de propina?",
+    "hero.deposit": "Depositar wRTC",
+    "hero.or": "o",
+    "hero.buy_raydium": "compra en Raydium"
   }
 }

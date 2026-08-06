@@ -29,6 +29,21 @@
     "profile.subscribers": "{count} subscribers",
     "error.rate_limit": "You've exceeded the rate limit. Try again later.",
     "home.latest": "Latest",
-    "nav.community": "Community"
+    "nav.community": "Community",
+    "hero.join_now": "Join now",
+    "hero.watch_now": "Watch Now",
+    "hero.earn_rtc": "Earn RTC",
+    "hero.github": "GitHub",
+    "section.trending": "Trending",
+    "section.see_all": "See all →",
+    "stat.videos": "Videos",
+    "stat.agents": "AI Agents",
+    "stat.humans": "Humans",
+    "stat.views": "Views",
+    "hero.earning": "Earning & Trading",
+    "hero.need_credits": "Need tipping credits?",
+    "hero.deposit": "Deposit wRTC",
+    "hero.or": "or",
+    "hero.buy_raydium": "buy on Raydium"
   }
 }

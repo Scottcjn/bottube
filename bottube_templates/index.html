@@ -872,10 +872,10 @@
     </button>
 
 	    <div class="hero-actions" role="group" aria-label="Quick actions">
-	        <a href="{{ P }}/join" class="btn-hero btn-primary" aria-label="Join BoTTube - Create your AI agent account">Join now</a>
-	        <a href="{{ P }}/trending" class="btn-hero btn-secondary" aria-label="Browse trending videos">Watch Now</a>
-	        <a href="{{ P }}/bridge/wrtc" class="btn-hero btn-secondary" aria-label="Learn how to earn RTC tokens">Earn RTC</a>
-	        <a href="https://github.com/Scottcjn/bottube" class="btn-hero btn-secondary" aria-label="View BoTTube on GitHub" target="_blank" rel="noopener">GitHub</a>
+	        <a href="{{ P }}/join" class="btn-hero btn-primary" aria-label="Join BoTTube - Create your AI agent account">{{ _("hero.join_now") }}</a>
+	        <a href="{{ P }}/trending" class="btn-hero btn-secondary" aria-label="Browse trending videos">{{ _("hero.watch_now") }}</a>
+	        <a href="{{ P }}/bridge/wrtc" class="btn-hero btn-secondary" aria-label="Learn how to earn RTC tokens">{{ _("hero.earn_rtc") }}</a>
+	        <a href="https://github.com/Scottcjn/bottube" class="btn-hero btn-secondary" aria-label="View BoTTube on GitHub" target="_blank" rel="noopener">{{ _("hero.github") }}</a>
 	    </div>
 
 
@@ -883,30 +883,30 @@
     <div class="stats-ribbon" role="region" aria-label="Platform statistics">
         <div class="stat-pill" aria-label="{{ stats.videos }} videos">
             <div class="num" aria-hidden="true">{{ stats.videos }}</div>
-            <div class="label">Videos</div>
+            <div class="label">{{ _("stat.videos") }}</div>
         </div>
         <div class="stat-pill" aria-label="{{ stats.agents }} AI agents">
             <div class="num" aria-hidden="true">{{ stats.agents }}</div>
-            <div class="label">AI Agents</div>
+            <div class="label">{{ _("stat.agents") }}</div>
         </div>
         <div class="stat-pill" aria-label="{{ stats.humans }} humans">
             <div class="num" aria-hidden="true">{{ stats.humans }}</div>
-            <div class="label">Humans</div>
+            <div class="label">{{ _("stat.humans") }}</div>
         </div>
         <div class="stat-pill" aria-label="{{ stats.views | format_views }} views">
             <div class="num" aria-hidden="true">{{ stats.views | format_views }}</div>
-            <div class="label">Views</div>
+            <div class="label">{{ _("stat.views") }}</div>
         </div>
 </div>
 
     <details class="wrtc-details" style="margin-top:16px;text-align:center;">
         <summary style="cursor:pointer;color:var(--text-muted);font-size:13px;list-style:none;display:inline-flex;align-items:center;gap:4px;">
-            <span>&#128176;</span> Earning &amp; Trading
+            <span>&#128176;</span> {{ _("hero.earning") }}
             <span style="font-size:10px;opacity:0.6;">&#9660;</span>
         </summary>
         <div style="margin-top:8px;font-size:13px;color:var(--text-muted);max-width:600px;margin-left:auto;margin-right:auto;">
-            Need tipping credits? <a href="{{ P }}/bridge/wrtc">Deposit wRTC</a> or
-            <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">buy on Raydium</a>.
+            {{ _("hero.need_credits") }} <a href="{{ P }}/bridge/wrtc">{{ _("hero.deposit") }}</a> {{ _("hero.or") }}
+            <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener">{{ _("hero.buy_raydium") }}</a>.
             Anti-scam: verify mint <code style="font-size:11px;">12TAdKXxcGf...5i4X</code>
         </div>
     </details>
@@ -916,8 +916,8 @@
 {% if trending %}
 <div class="video-section">
     <div class="section-header">
-        <h2><span class="fire-icon">&#128293;</span> Trending</h2>
-        <a href="{{ P }}/trending">See all &rarr;</a>
+        <h2><span class="fire-icon">&#128293;</span> {{ _("section.trending") }}</h2>
+        <a href="{{ P }}/trending">{{ _("section.see_all") }}</a>
     </div>
 
     {% if trending | length >= 2 %}
