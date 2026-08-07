@@ -42,6 +42,11 @@ def on_join(data):
 
 @socketio.on("leave")
 def on_leave(data):
+    """Handle leave event.
+    
+    Args:
+        data: Parameter value.
+    """
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
     leave_room(room)
