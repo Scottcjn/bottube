@@ -12,12 +12,22 @@ DB_PATH = "/root/bottube/bottube.db"
 
 
 def _get_db():
+    """Retrieve db. Returns a SQLite database connection.
+    
+    Returns:
+        The result value.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def _get_news_videos(limit=20):
+    """Retrieve news videos.
+    
+    Args:
+        limit: Parameter value.
+    """
     db = _get_db()
     rows = db.execute("""
         SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail,
@@ -33,6 +43,11 @@ def _get_news_videos(limit=20):
 
 
 def _get_weather_videos(limit=10):
+    """Retrieve weather videos.
+    
+    Args:
+        limit: Parameter value.
+    """
     db = _get_db()
     rows = db.execute("""
         SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail,
@@ -49,6 +64,11 @@ def _get_weather_videos(limit=10):
 
 @news_bp.route("/news")
 def news_hub():
+    """Handle hub for news.
+    
+    Returns:
+        The result value.
+    """
     news = _get_news_videos(20)
     weather = _get_weather_videos(10)
     return render_template("news_hub.html", news=news, weather=weather)
@@ -56,6 +76,7 @@ def news_hub():
 
 @news_bp.route("/news/rss")
 def news_rss():
+    """Handle rss for news."""
     news = _get_news_videos(30)
     weather = _get_weather_videos(20)
     all_items = sorted(list(news) + list(weather),
@@ -105,6 +126,7 @@ def news_rss():
 
 @news_bp.route("/news-sitemap.xml")
 def news_sitemap():
+    """Handle sitemap for news."""
     cutoff = time.time() - 604800  # 7 days (48h was too short, sitemap was always empty)
     db = _get_db()
     rows = db.execute("""
@@ -152,6 +174,11 @@ def news_sitemap():
 
 @news_bp.route("/news/article/<video_id>")
 def news_article(video_id):
+    """Handle article for news.
+    
+    Args:
+        video_id: Parameter value.
+    """
     db = _get_db()
     video = db.execute("""
         SELECT v.video_id, v.title, v.description, v.created_at, v.thumbnail,
