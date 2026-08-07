@@ -83,6 +83,7 @@ class BehaviorWindow:
                  "api_count", "referrers", "user_agents", "last_seen", "created")
 
     def __init__(self):
+        """Initialize the instance with default values."""
         self.timestamps: deque = deque(maxlen=500)
         self.paths: deque = deque(maxlen=200)
         self.asset_count: int = 0
@@ -94,6 +95,14 @@ class BehaviorWindow:
         self.created: float = time.time()
 
     def is_expired(self, ttl: float) -> bool:
+        """Return whether expired.
+        
+        Args:
+            ttl: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         return (time.time() - self.last_seen) > ttl if self.last_seen else True
 
 
@@ -105,6 +114,11 @@ class ScraperDetective:
     """Real-time scraper detection engine with 3-layer analysis."""
 
     def __init__(self, hmac_secret: str = ""):
+        """Initialize the instance with default values.
+        
+        Args:
+            hmac_secret: Parameter value.
+        """
         self._hmac_secret = (hmac_secret or os.environ.get(
             "BOTTUBE_PROOF_SECRET", "bt_proof_default_2026"
         )).encode()
@@ -247,6 +261,7 @@ class ScraperDetective:
             self._asn_pending.add(ip)
 
         def _do():
+            """Execute the specified action."""
             try:
                 asn_num, asn_name, is_hosting = self._lookup_asn(ip)
                 with self._asn_cache_lock:
@@ -330,12 +345,30 @@ class ScraperDetective:
     # ------------------------------------------------------------------
 
     def is_blocked(self, ip: str) -> bool:
+        """Return whether blocked.
+        
+        Args:
+            ip: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         return ip in self._blocked_ips
 
     def block_ip(self, ip: str):
+        """Block ip.
+        
+        Args:
+            ip: Parameter value.
+        """
         self._blocked_ips.add(ip)
 
     def unblock_ip(self, ip: str):
+        """Unblock ip.
+        
+        Args:
+            ip: Parameter value.
+        """
         self._blocked_ips.discard(ip)
 
     # ------------------------------------------------------------------

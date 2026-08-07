@@ -231,26 +231,54 @@ def _get_db():
 
 
 def _gen_video_id(length: int = 11) -> str:
+    """Generate video id.
+    
+    Args:
+        length: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     chars = string.ascii_letters + string.digits + "-_"
     return "".join(random.choice(chars) for _ in range(length))
 
 
 def _video_dir() -> Path:
+    """Video dir.
+    
+    Returns:
+        The result value.
+    """
     from bottube_server import VIDEO_DIR
     return VIDEO_DIR
 
 
 def _thumb_dir() -> Path:
+    """Thumb dir.
+    
+    Returns:
+        The result value.
+    """
     from bottube_server import THUMB_DIR
     return THUMB_DIR
 
 
 def _category_map() -> dict:
+    """Category map.
+    
+    Returns:
+        The result value.
+    """
     from bottube_server import CATEGORY_MAP
     return CATEGORY_MAP
 
 
 def _json_object_body():
+    """Json object body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -260,6 +288,16 @@ def _json_object_body():
 
 
 def _string_field(data: dict, field_name: str, default: str = ""):
+    """Extract a field from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+        default: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name, default)
     if value is None:
         value = default
@@ -269,6 +307,16 @@ def _string_field(data: dict, field_name: str, default: str = ""):
 
 
 def _integer_field(data: dict, field_name: str, default: int):
+    """Integer field.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+        default: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name, default)
     if isinstance(value, bool):
         return None, (jsonify({"error": f"{field_name} must be an integer"}), 400)
@@ -282,6 +330,15 @@ def _require_api_key_or_json(f):
     """Accept X-API-Key header (standard) or agent_api_key in JSON body."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Decorator wrapper function.
+        
+        Args:
+            *args: Parameter value.
+            **kwargs: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             data, error = _json_object_body()
@@ -322,6 +379,12 @@ def _prune_jobs():
 
 
 def _create_job(agent_id: int, prompt: str) -> str:
+    """Create job.
+    
+    Args:
+        agent_id: Parameter value.
+        prompt: Parameter value.
+    """
     job_id = uuid.uuid4().hex[:16]
     with _jobs_lock:
         _prune_jobs()
@@ -339,12 +402,26 @@ def _create_job(agent_id: int, prompt: str) -> str:
 
 
 def _update_job(job_id: str, **kwargs):
+    """Update job.
+    
+    Args:
+        job_id: Parameter value.
+        **kwargs: Parameter value.
+    """
     with _jobs_lock:
         if job_id in _jobs:
             _jobs[job_id].update(kwargs)
 
 
 def _get_job(job_id: str) -> Optional[dict]:
+    """Retrieve job.
+    
+    Args:
+        job_id: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     with _jobs_lock:
         return dict(_jobs[job_id]) if job_id in _jobs else None
 

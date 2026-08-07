@@ -281,6 +281,11 @@ def generate_order_id() -> str:
 
 
 def _request_json_object():
+    """Parse and return a JSON object from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -290,6 +295,15 @@ def _request_json_object():
 
 
 def _optional_string_field(data: dict, field_name: str):
+    """Extract a field from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name)
     if value is None:
         return "", None
@@ -299,6 +313,15 @@ def _optional_string_field(data: dict, field_name: str):
 
 
 def _optional_int_field(data: dict, field_name: str):
+    """Extract a field from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name)
     if value is None:
         return None, None
@@ -310,14 +333,35 @@ def _optional_int_field(data: dict, field_name: str):
 
 
 def _to_usd(value) -> Decimal:
+    """Convert to usd.
+    
+    Args:
+        value: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _to_rtc(value) -> Decimal:
+    """Convert to rtc.
+    
+    Args:
+        value: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
 def _extract_capture_details(payload: dict):
+    """Extract capture details.
+    
+    Args:
+        payload: Parameter value.
+    """
     capture_id = ""
     amount_usd = None
     for purchase_unit in payload.get("purchase_units", []):
@@ -347,6 +391,20 @@ def _record_store_transaction(
     external_id: str = "",
     note: str = "",
 ) -> bool:
+    """Record store transaction.
+    
+    Args:
+        db: Parameter value.
+        *: Parameter value.
+        order_id: Parameter value.
+        agent_id: Parameter value.
+        package_id: Parameter value.
+        amount_usd: Parameter value.
+        rtc_credited: Parameter value.
+        transaction_type: Parameter value.
+        external_id: Parameter value.
+        note: Parameter value.
+    """
     if external_id:
         existing = db.execute(
             """
@@ -411,6 +469,18 @@ def debit_rtc_from_agent(db, agent_id: int, amount: Decimal, reason: str) -> Non
 
 
 def _complete_order(db, order, *, capture_id: str, capture_amount_usd=None):
+    """Complete order.
+    
+    Args:
+        db: Parameter value.
+        order: Parameter value.
+        *: Parameter value.
+        capture_id: Parameter value.
+        capture_amount_usd: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     order_amount = _to_usd(order["amount_usd"])
     rtc_amount = _to_rtc(order["rtc_amount"])
     if capture_amount_usd is not None and capture_amount_usd != order_amount:
@@ -470,6 +540,16 @@ def _refund_order(
     refund_amount_usd: Decimal,
     note: str = "",
 ):
+    """Refund order.
+    
+    Args:
+        db: Parameter value.
+        order: Parameter value.
+        *: Parameter value.
+        refund_id: Parameter value.
+        refund_amount_usd: Parameter value.
+        note: Parameter value.
+    """
     if refund_id:
         existing = db.execute(
             """

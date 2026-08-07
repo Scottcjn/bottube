@@ -162,6 +162,15 @@ class HumanScheduler:
         rng_seed: int | None = None,
         now_fn=None,
     ):
+        """Initialize the instance with default values.
+        
+        Args:
+            profile: Parameter value.
+            agent: Parameter value.
+            db_path: Parameter value.
+            rng_seed: Parameter value.
+            now_fn: Parameter value.
+        """
         if isinstance(profile, str):
             profile = PROFILES[ProfileType(profile)]
         self.profile: UploadProfile = profile
@@ -240,6 +249,11 @@ class HumanScheduler:
     # ------------------------------------------------------------------
 
     def _ensure_today_schedule(self, now: datetime):
+        """Ensure today schedule exists.
+        
+        Args:
+            now: Parameter value.
+        """
         key = now.strftime("%Y-%m-%d")
         if self._today_key == key:
             return
@@ -251,6 +265,12 @@ class HumanScheduler:
         self._persist_schedule(key, self._today_slots)
 
     def _generate_day(self, date, rng: random.Random) -> List[datetime]:
+        """Generate day.
+        
+        Args:
+            date: Parameter value.
+            rng: Parameter value.
+        """
         p = self.profile
         weekday = date.weekday()
 
@@ -345,6 +365,15 @@ class HumanScheduler:
 
     @staticmethod
     def _deduplicate(slots: List[datetime], min_gap_minutes: int = 3) -> List[datetime]:
+        """Deduplicate.
+        
+        Args:
+            slots: Parameter value.
+            min_gap_minutes: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         if not slots:
             return []
         result = [slots[0]]
@@ -368,9 +397,22 @@ class HumanScheduler:
                 return k - 1
 
     def _agent_seed(self) -> int:
+        """Agent seed.
+        
+        Returns:
+            The result value.
+        """
         return int(hashlib.sha256(self.agent.encode()).hexdigest()[:8], 16)
 
     def _day_seed(self, day_key: str) -> int:
+        """Day seed.
+        
+        Args:
+            day_key: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         data = f"{self.agent}:{day_key}"
         return int(hashlib.sha256(data.encode()).hexdigest()[:8], 16)
 
@@ -379,6 +421,7 @@ class HumanScheduler:
     # ------------------------------------------------------------------
 
     def _init_db(self):
+        """Initialize db."""
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS scheduler_posts (
@@ -398,6 +441,14 @@ class HumanScheduler:
             """)
 
     def _was_already_posted(self, slot: datetime) -> bool:
+        """Was already posted. Returns a SQLite database connection.
+        
+        Args:
+            slot: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         with sqlite3.connect(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT 1 FROM scheduler_posts WHERE agent=? AND slot_time=?",
@@ -406,6 +457,12 @@ class HumanScheduler:
             return row is not None
 
     def _record_post(self, slot: datetime, actual: datetime):
+        """Record post.
+        
+        Args:
+            slot: Parameter value.
+            actual: Parameter value.
+        """
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO scheduler_posts (agent, slot_time, actual_time) VALUES (?, ?, ?)",
@@ -413,6 +470,12 @@ class HumanScheduler:
             )
 
     def _persist_schedule(self, day_key: str, slots: List[datetime]):
+        """Persist schedule.
+        
+        Args:
+            day_key: Parameter value.
+            slots: Parameter value.
+        """
         data = json.dumps([s.isoformat() for s in slots])
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(

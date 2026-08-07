@@ -41,19 +41,51 @@ ANCHOR_PREFIX = "rc2"  # RustChain Node 2 (.153) anchor record
 # crypto (identical scheme to the avap reference package)
 # --------------------------------------------------------------------------- #
 def _canonical(obj) -> bytes:
+    """Return the canonical form.
+    
+    Args:
+        obj: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return json.dumps(obj, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False).encode("utf-8")
 
 
 def _signed_core(env: dict) -> dict:
+    """Return the signed form.
+    
+    Args:
+        env: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return {k: v for k, v in env.items() if k not in ("sig", "anchor")}
 
 
 def _sha256_hex(b: bytes) -> str:
+    """Compute the SHA-256 hash.
+    
+    Args:
+        b: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return hashlib.sha256(b).hexdigest()
 
 
 def _address_from_pub(pub_hex: str) -> str:
+    """Derive an address from a public key.
+    
+    Args:
+        pub_hex: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return "RTC" + hashlib.sha256(bytes.fromhex(pub_hex)).hexdigest()[:40]
 
 
@@ -89,6 +121,11 @@ def verify_envelope(env: dict) -> dict:
 # schema
 # --------------------------------------------------------------------------- #
 def init_avap_tables(db_path: str = None):
+    """Initialize avap tables.
+    
+    Args:
+        db_path: Parameter value.
+    """
     conn = sqlite3.connect(str(db_path or DB_PATH))
     try:
         conn.execute("""
@@ -119,6 +156,11 @@ def init_avap_tables(db_path: str = None):
 
 
 def _conn():
+    """Conn. Returns a SQLite database connection.
+    
+    Returns:
+        The result value.
+    """
     return sqlite3.connect(str(DB_PATH))
 
 
@@ -127,6 +169,11 @@ def _conn():
 # --------------------------------------------------------------------------- #
 @avap_bp.route("/avap/anchor", methods=["POST"])
 def avap_anchor():
+    """Avap anchor.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True) or {}
     commitment = (data.get("commitment") or "").strip().lower()
     if len(commitment) != 64 or any(c not in "0123456789abcdef" for c in commitment):
@@ -155,6 +202,11 @@ def avap_anchor():
 
 @avap_bp.route("/avap/anchor/<commitment>", methods=["GET"])
 def avap_anchor_get(commitment):
+    """Avap anchor get.
+    
+    Args:
+        commitment: Parameter value.
+    """
     commitment = (commitment or "").strip().lower()
     conn = _conn()
     try:
@@ -174,6 +226,14 @@ def avap_anchor_get(commitment):
 # --------------------------------------------------------------------------- #
 @avap_bp.route("/api/video/<video_id>/avap", methods=["POST"])
 def avap_attach(video_id):
+    """Avap attach.
+    
+    Args:
+        video_id: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     env = request.get_json(silent=True)
     if not isinstance(env, dict):
         return jsonify({"error": "body must be an AVAP envelope (JSON object)"}), 400
@@ -201,6 +261,11 @@ def avap_attach(video_id):
 
 @avap_bp.route("/api/video/<video_id>/avap", methods=["GET"])
 def avap_get(video_id):
+    """Avap get.
+    
+    Args:
+        video_id: Parameter value.
+    """
     conn = _conn()
     try:
         row = conn.execute(
@@ -222,6 +287,11 @@ def app_response_json(raw: str):
 
 @avap_bp.route("/avap/health", methods=["GET"])
 def avap_health():
+    """Avap health.
+    
+    Returns:
+        The result value.
+    """
     conn = _conn()
     try:
         envs = conn.execute("SELECT COUNT(*) FROM avap_envelopes").fetchone()[0]

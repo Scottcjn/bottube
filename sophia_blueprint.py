@@ -61,6 +61,11 @@ _ALLOWED_ORIGINS = set(
 
 
 def _client_ip():
+    """Extract the client IP address from the request.
+    
+    Returns:
+        The result value.
+    """
     xff = request.headers.get("X-Forwarded-For", "")
     return (xff.split(",")[0].strip() if xff else request.remote_addr) or "?"
 
@@ -72,6 +77,7 @@ SOPHIA_CORPUS = os.environ.get("SOPHIA_CORPUS", "1") != "0"
 
 
 def init_sophia_corpus():
+    """Initialize sophia corpus. Returns a SQLite database connection."""
     if not SOPHIA_CORPUS:
         return
     c = sqlite3.connect(SOPHIA_CORPUS_DB, timeout=30)
@@ -112,6 +118,17 @@ def _site_from_request():
 
 
 def _log_corpus(site, origin, caller, is_anon, message, reply, gen_started):
+    """Log corpus. Returns a SQLite database connection.
+    
+    Args:
+        site: Parameter value.
+        origin: Parameter value.
+        caller: Parameter value.
+        is_anon: Parameter value.
+        message: Parameter value.
+        reply: Parameter value.
+        gen_started: Parameter value.
+    """
     if not SOPHIA_CORPUS:
         return
     try:
@@ -156,6 +173,11 @@ _GEN_INTENT = re.compile(
 
 
 def _db_path() -> str:
+    """Db path.
+    
+    Returns:
+        The result value.
+    """
     # Same DB the app uses; own connection (mirrors pi_payments) so we never re-import
     # bottube_server (which runs as __main__ in prod -> a second import re-executes it).
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
@@ -163,6 +185,11 @@ def _db_path() -> str:
 
 
 def _conn():
+    """Conn. Returns a SQLite database connection.
+    
+    Returns:
+        The result value.
+    """
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
@@ -253,6 +280,14 @@ def _kick_generation(api_key: str, prompt: str):
 
 
 def _origin_allowed(origin):
+    """Origin allowed.
+    
+    Args:
+        origin: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     if not origin:
         return False
     if origin in _ALLOWED_ORIGINS:
@@ -278,12 +313,22 @@ def _sophia_cors(resp):
 
 @sophia_bp.route("/api/sophia/health", methods=["GET"])
 def sophia_health():
+    """Sophia health.
+    
+    Returns:
+        The result value.
+    """
     # Do NOT expose llm_url (internal Tailscale topology).
     return jsonify({"ok": True, "model": SOPHIA_MODEL})
 
 
 @sophia_bp.route("/api/sophia", methods=["POST", "OPTIONS"])
 def sophia_chat():
+    """Sophia chat.
+    
+    Returns:
+        The result value.
+    """
     if request.method == "OPTIONS":
         return ("", 204)  # CORS preflight (headers added in after_request)
 
