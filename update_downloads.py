@@ -269,6 +269,11 @@ def get_beacon_pypi():
 # ── Helpers ──────────────────────────────────────────────────
 
 def load_cache():
+    """Load cache from storage.
+    
+    Returns:
+        The result value.
+    """
     try:
         if Path(CACHE_FILE).exists():
             with open(CACHE_FILE) as f:
@@ -278,6 +283,11 @@ def load_cache():
     return {}
 
 def save_cache(data):
+    """Save cache to storage.
+    
+    Args:
+        data: Parameter value.
+    """
     try:
         with open(CACHE_FILE, "w") as f:
             json.dump(data, f, indent=2)
