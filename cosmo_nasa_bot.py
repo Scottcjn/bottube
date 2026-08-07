@@ -705,6 +705,7 @@ def run_daemon():
 # ---------------------------------------------------------------------------
 
 def build_parser():
+    """Build parser."""
     parser = argparse.ArgumentParser(
         description="Generate NASA-themed short videos and upload them to a BoTTube agent account.",
     )
@@ -752,6 +753,11 @@ def build_parser():
 
 
 def configure_runtime(args):
+    """Configure runtime.
+    
+    Args:
+        args: Parameter value.
+    """
     global BOTTUBE_URL, BOTTUBE_API_KEY, NASA_API_KEY, VERIFY_SSL
     global DRY_RUN, ENABLE_SOCIAL, BROWSE_COUNT, WORK_DIR, UPLOAD_CATEGORY
 
@@ -769,6 +775,14 @@ def configure_runtime(args):
 
 
 def main(argv=None):
+    """Run the main entry point.
+    
+    Args:
+        argv: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
