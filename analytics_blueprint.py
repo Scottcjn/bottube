@@ -36,6 +36,15 @@ def login_required(f):
     """Decorator to require login for analytics routes."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        """Decorator wrapper function.
+        
+        Args:
+            *args: Parameter value.
+            **kwargs: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
         if not agent_id and 'agent_id' not in session:
             return jsonify({"error": "Authentication required"}), 401
