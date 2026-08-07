@@ -46,6 +46,7 @@ BEACON_BADGE = '''
 '''
 
 def main():
+    """Run the main entry point."""
     with open(TEMPLATE_FILE, 'r') as f:
         lines = f.readlines()
 
