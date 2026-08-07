@@ -16,6 +16,7 @@ interactions_bp = Blueprint('interactions', __name__, url_prefix='/social')
 
 
 def _parse_int_query_arg(name, default, max_value):
+    """Read an integer query param, defaulting and capping it at ``max_value``."""
     raw_value = request.args.get(name, default)
     try:
         parsed = int(raw_value)
@@ -25,6 +26,7 @@ def _parse_int_query_arg(name, default, max_value):
 
 
 def _parse_optional_float_query_arg(name):
+    """Read an optional float query param; returns (None, None) if absent."""
     raw_value = request.args.get(name)
     if not raw_value:
         return None, None

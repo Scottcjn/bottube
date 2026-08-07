@@ -8,6 +8,7 @@ translation_bp = Blueprint('translation', __name__)
 
 
 def _request_json_object():
+    """Parse the request body as a JSON object, or return a 400 error response."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -18,6 +19,7 @@ def _request_json_object():
 
 @translation_bp.route('/translations')
 def translations_page():
+    """Render the translations overview page (available languages + recent entries)."""
     db = get_db()
     
     # Get all available languages
@@ -42,6 +44,7 @@ def translations_page():
 
 @translation_bp.route('/api/translations/<int:video_id>')
 def get_translations(video_id):
+    """Return all translations for a video, newest first."""
     db = get_db()
     
     translations = db.execute('''
@@ -55,6 +58,7 @@ def get_translations(video_id):
 
 @translation_bp.route('/api/translations/<int:video_id>/<language>')
 def get_translation_by_language(video_id, language):
+    """Return the most recent translation of a video in a given language."""
     db = get_db()
     
     translation = db.execute('''
@@ -71,6 +75,7 @@ def get_translation_by_language(video_id, language):
 @translation_bp.route('/api/translations', methods=['POST'])
 @require_auth
 def add_translation():
+    """Create or update the current user's translation of a video into a language."""
     data, error = _request_json_object()
     if error:
         return error
@@ -105,6 +110,7 @@ def add_translation():
 
 @translation_bp.route('/api/videos/translated/<language>')
 def get_videos_by_language(language):
+    """List videos that have a translation available in the given language."""
     db = get_db()
     
     videos = db.execute('''
@@ -119,6 +125,7 @@ def get_videos_by_language(language):
 
 @translation_bp.route('/api/languages')
 def get_supported_languages():
+    """Return the fixed list of languages the platform accepts translations in."""
     languages = [
         'Chinese', 'Spanish', 'Portuguese', 'French', 'Japanese', 
         'Korean', 'German', 'Russian', 'Arabic', 'Hindi'
