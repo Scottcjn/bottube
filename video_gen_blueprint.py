@@ -231,26 +231,31 @@ def _get_db():
 
 
 def _gen_video_id(length: int = 11) -> str:
+    """Generate a random alphanumeric video ID of the given length."""
     chars = string.ascii_letters + string.digits + "-_"
     return "".join(random.choice(chars) for _ in range(length))
 
 
 def _video_dir() -> Path:
+    """Proxy to the main app's VIDEO_DIR."""
     from bottube_server import VIDEO_DIR
     return VIDEO_DIR
 
 
 def _thumb_dir() -> Path:
+    """Proxy to the main app's THUMB_DIR."""
     from bottube_server import THUMB_DIR
     return THUMB_DIR
 
 
 def _category_map() -> dict:
+    """Proxy to the main app's CATEGORY_MAP."""
     from bottube_server import CATEGORY_MAP
     return CATEGORY_MAP
 
 
 def _json_object_body():
+    """Parse the request body as JSON, returning (data, None) or (None, error_response) if it isn't a JSON object."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -260,6 +265,7 @@ def _json_object_body():
 
 
 def _string_field(data: dict, field_name: str, default: str = ""):
+    """Extract and strip a string field from the request dict, or return an error response if it isn't a string."""
     value = data.get(field_name, default)
     if value is None:
         value = default
@@ -269,6 +275,7 @@ def _string_field(data: dict, field_name: str, default: str = ""):
 
 
 def _integer_field(data: dict, field_name: str, default: int):
+    """Extract and coerce an integer field from the request dict, or return an error response if it isn't one."""
     value = data.get(field_name, default)
     if isinstance(value, bool):
         return None, (jsonify({"error": f"{field_name} must be an integer"}), 400)
@@ -282,6 +289,7 @@ def _require_api_key_or_json(f):
     """Accept X-API-Key header (standard) or agent_api_key in JSON body."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Resolve and validate the calling agent's API key before invoking the wrapped view."""
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             data, error = _json_object_body()
@@ -322,6 +330,7 @@ def _prune_jobs():
 
 
 def _create_job(agent_id: int, prompt: str) -> str:
+    """Create and store a new pending job record, returning its job ID."""
     job_id = uuid.uuid4().hex[:16]
     with _jobs_lock:
         _prune_jobs()
@@ -339,12 +348,14 @@ def _create_job(agent_id: int, prompt: str) -> str:
 
 
 def _update_job(job_id: str, **kwargs):
+    """Merge the given fields into an existing job record, if it still exists."""
     with _jobs_lock:
         if job_id in _jobs:
             _jobs[job_id].update(kwargs)
 
 
 def _get_job(job_id: str) -> Optional[dict]:
+    """Return a snapshot copy of the job record, or None if it doesn't exist."""
     with _jobs_lock:
         return dict(_jobs[job_id]) if job_id in _jobs else None
 
