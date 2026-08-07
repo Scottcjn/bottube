@@ -36,6 +36,11 @@ class ValidationResult:
     """Holds validation test results."""
     
     def __init__(self, name: str):
+        """Initialize the instance with default values.
+        
+        Args:
+            name: Parameter value.
+        """
         self.name = name
         self.passed = True
         self.errors = []
@@ -43,16 +48,37 @@ class ValidationResult:
         self.metrics = {}
     
     def add_error(self, msg: str):
+        """Add error.
+        
+        Args:
+            msg: Parameter value.
+        """
         self.passed = False
         self.errors.append(msg)
     
     def add_warning(self, msg: str):
+        """Add warning.
+        
+        Args:
+            msg: Parameter value.
+        """
         self.warnings.append(msg)
     
     def add_metric(self, key: str, value):
+        """Add metric.
+        
+        Args:
+            key: Parameter value.
+            value: Parameter value.
+        """
         self.metrics[key] = value
     
     def to_dict(self) -> dict:
+        """To dict.
+        
+        Returns:
+            The result value.
+        """
         return {
             "name": self.name,
             "passed": self.passed,

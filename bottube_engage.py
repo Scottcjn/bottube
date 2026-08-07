@@ -382,6 +382,7 @@ def welcome_new_creators(db, dry_run=False):
 
 
 def main():
+    """Run the main entry point."""
     parser = argparse.ArgumentParser(description="BoTTube Engagement Script")
     parser.add_argument("--replies", action="store_true", help="Only reply to unreplied comments")
     parser.add_argument("--welcome", action="store_true", help="Only comment on new external videos")

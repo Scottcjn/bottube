@@ -69,6 +69,11 @@ def _is_admin_request() -> bool:
 
 
 def _json_object_body():
+    """Extract a JSON field from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json()
     if data is None:
         return {}, None
@@ -78,6 +83,15 @@ def _json_object_body():
 
 
 def _integer_query_arg(name, default):
+    """Parse integer query arg parameter.
+    
+    Args:
+        name: Parameter value.
+        default: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     raw_value = request.args.get(name)
     if raw_value is None:
         return default, None
@@ -88,6 +102,14 @@ def _integer_query_arg(name, default):
 
 
 def _date_query_arg(name):
+    """Date query arg.
+    
+    Args:
+        name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = request.args.get(name)
     if value is None:
         return None, None
@@ -102,6 +124,15 @@ def require_api_key(f):
     """Decorator to require API key authentication."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Decorator wrapper function.
+        
+        Args:
+            *args: Parameter value.
+            **kwargs: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         api_key = request.headers.get("X-API-Key")
         if not api_key:
             return jsonify({"error": "Missing X-API-Key header"}), 401

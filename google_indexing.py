@@ -124,6 +124,7 @@ def ping_google_indexing(url: str, action: str = "URL_UPDATED"):
         action: "URL_UPDATED" or "URL_DELETED".
     """
     def _do_ping():
+        """Execute the specified action."""
         try:
             token = _get_access_token()
             if not token:

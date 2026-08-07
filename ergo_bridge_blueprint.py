@@ -244,6 +244,11 @@ def _debit_rtc(db, agent_id, amount):
 # ---------------------------------------------------------------------------
 
 def _request_json_object():
+    """Parse and return a JSON object from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         data = {}
@@ -253,6 +258,15 @@ def _request_json_object():
 
 
 def _string_field(data, field_name):
+    """Extract a field from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name, "")
     if not isinstance(value, str):
         return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
@@ -260,6 +274,14 @@ def _string_field(data, field_name):
 
 
 def _positive_finite_amount(value):
+    """Parse and validate a positive finite amount from the request.
+    
+    Args:
+        value: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     if isinstance(value, bool):
         return None
     try:

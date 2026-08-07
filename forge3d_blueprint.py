@@ -32,11 +32,21 @@ STUDIO_MEDIA_DIR = os.environ.get("STUDIO_MEDIA_DIR",
 
 
 def _db_path():
+    """Return the path to the SQLite database file.
+    
+    Returns:
+        The result value.
+    """
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     return os.environ.get("BOTTUBE_DB_PATH", str(Path(base) / "bottube.db"))
 
 
 def _conn():
+    """Create and return a SQLite database connection. Returns a SQLite database connection.
+    
+    Returns:
+        The result value.
+    """
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
@@ -44,6 +54,11 @@ def _conn():
 
 
 def init_forge3d_tables(db_path: str = None):
+    """Initialize forge3d tables.
+    
+    Args:
+        db_path: Parameter value.
+    """
     c = sqlite3.connect(db_path or _db_path(), timeout=30)
     try:
         c.execute("""
@@ -66,6 +81,12 @@ def init_forge3d_tables(db_path: str = None):
 
 
 def _set(job_id, **kw):
+    """Set.
+    
+    Args:
+        job_id: Parameter value.
+        **kw: Parameter value.
+    """
     if not kw:
         return
     kw["updated_at"] = time.time()
@@ -98,6 +119,14 @@ def _refund_once(job_id, agent_id, cost):
 
 
 def _save_glb(data: bytes) -> str:
+    """Save glb to storage.
+    
+    Args:
+        data: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     Path(STUDIO_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
     fname = uuid.uuid4().hex + ".glb"
     with open(os.path.join(STUDIO_MEDIA_DIR, fname), "wb") as f:
@@ -106,6 +135,14 @@ def _save_glb(data: bytes) -> str:
 
 
 def _worker(job_id, agent_id, prompt, cost):
+    """Worker.
+    
+    Args:
+        job_id: Parameter value.
+        agent_id: Parameter value.
+        prompt: Parameter value.
+        cost: Parameter value.
+    """
     _set(job_id, status="generating")
     try:
         from forge3d_provider import generate_3d
@@ -160,6 +197,14 @@ def forge3d_gallery():
 
 @forge3d_bp.route("/api/studio/3d/status/<job_id>")
 def forge3d_status(job_id):
+    """Forge3d status.
+    
+    Args:
+        job_id: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     c = _conn()
     try:
         row = c.execute("SELECT * FROM forge3d_jobs WHERE id=?", (job_id,)).fetchone()

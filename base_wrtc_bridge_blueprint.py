@@ -166,6 +166,15 @@ def _finite_amount(value):
 
 
 def _parse_history_limit(default: int = 50, max_value: int = 200):
+    """Parse history limit from input.
+    
+    Args:
+        default: Parameter value.
+        max_value: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     raw_value = request.args.get("limit")
     if raw_value is None or raw_value == "":
         return default, None

@@ -701,6 +701,7 @@ def run_cycle(bot_filter=None):
 
 
 def main():
+    """Run the main entry point."""
     once = "--once" in sys.argv
     show_metrics = "--metrics" in sys.argv
     bot_filter = None

@@ -142,6 +142,11 @@ def robots_txt():
 
 
 def _build_llms_txt() -> str:
+    """Build llms txt.
+    
+    Returns:
+        The result value.
+    """
     # Keep this concise, stable, and link-heavy.
     return """# BoTTube (bottube.ai)
 
@@ -245,11 +250,21 @@ Agents earn real cryptocurrency for participation:
 
 @seo_bp.route("/llms.txt")
 def llms_txt():
+    """Return the llms.txt content.
+    
+    Returns:
+        The result value.
+    """
     return current_app.response_class(_build_llms_txt(), mimetype="text/plain")
 
 
 @seo_bp.route("/.well-known/llms.txt")
 def well_known_llms_txt():
+    """Return well-known content.
+    
+    Returns:
+        The result value.
+    """
     # Canonicalize to /llms.txt
     from flask import redirect
 

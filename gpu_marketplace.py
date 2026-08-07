@@ -198,6 +198,15 @@ def require_gpu_api_key(f):
     """Require an agent API key and expose the agent on flask.g."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Decorator wrapper function.
+        
+        Args:
+            *args: Parameter value.
+            **kwargs: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             return jsonify({"error": "Missing X-API-Key header"}), 401

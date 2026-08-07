@@ -52,6 +52,11 @@ def get_db():
 
 
 def _request_json_object():
+    """Parse and return a JSON object from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -61,6 +66,14 @@ def _request_json_object():
 
 
 def _parse_finite_usdc_amount(data):
+    """Parse finite usdc amount from input.
+    
+    Args:
+        data: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     raw_amount = data.get("amount_usdc", 0)
     if isinstance(raw_amount, bool):
         return None, (jsonify({"error": "amount_usdc must be a finite number"}), 400)
@@ -74,6 +87,15 @@ def _parse_finite_usdc_amount(data):
 
 
 def _optional_string_field(data, field_name):
+    """Extract a field from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name)
     if value is None:
         return "", None

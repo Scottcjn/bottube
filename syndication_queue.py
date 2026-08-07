@@ -102,6 +102,11 @@ class SyndicationQueue:
     """
 
     def __init__(self, db_path: str):
+        """Initialize the instance with default values.
+        
+        Args:
+            db_path: Parameter value.
+        """
         self.db_path = db_path
         self._init_schema()
 

@@ -39,6 +39,11 @@ def init_app(app, db_path):
     db_path_str = str(db_path)
 
     def _get_db():
+        """Retrieve db. Returns a SQLite database connection.
+        
+        Returns:
+            The result value.
+        """
         conn = sqlite3.connect(db_path_str)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=5000")

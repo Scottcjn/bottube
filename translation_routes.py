@@ -8,6 +8,11 @@ translation_bp = Blueprint('translation', __name__)
 
 
 def _request_json_object():
+    """Parse and return a JSON object from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -18,6 +23,7 @@ def _request_json_object():
 
 @translation_bp.route('/translations')
 def translations_page():
+    """Handle page for translations."""
     db = get_db()
     
     # Get all available languages
@@ -42,6 +48,14 @@ def translations_page():
 
 @translation_bp.route('/api/translations/<int:video_id>')
 def get_translations(video_id):
+    """Retrieve translations.
+    
+    Args:
+        video_id: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     db = get_db()
     
     translations = db.execute('''
@@ -55,6 +69,12 @@ def get_translations(video_id):
 
 @translation_bp.route('/api/translations/<int:video_id>/<language>')
 def get_translation_by_language(video_id, language):
+    """Retrieve translation by language.
+    
+    Args:
+        video_id: Parameter value.
+        language: Parameter value.
+    """
     db = get_db()
     
     translation = db.execute('''
@@ -71,6 +91,11 @@ def get_translation_by_language(video_id, language):
 @translation_bp.route('/api/translations', methods=['POST'])
 @require_auth
 def add_translation():
+    """Add translation.
+    
+    Returns:
+        The result value.
+    """
     data, error = _request_json_object()
     if error:
         return error
@@ -105,6 +130,11 @@ def add_translation():
 
 @translation_bp.route('/api/videos/translated/<language>')
 def get_videos_by_language(language):
+    """Retrieve videos by language.
+    
+    Args:
+        language: Parameter value.
+    """
     db = get_db()
     
     videos = db.execute('''
@@ -119,6 +149,11 @@ def get_videos_by_language(language):
 
 @translation_bp.route('/api/languages')
 def get_supported_languages():
+    """Retrieve supported languages.
+    
+    Returns:
+        The result value.
+    """
     languages = [
         'Chinese', 'Spanish', 'Portuguese', 'French', 'Japanese', 
         'Korean', 'German', 'Russian', 'Arabic', 'Hindi'
