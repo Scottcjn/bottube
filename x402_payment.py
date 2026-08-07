@@ -76,14 +76,25 @@ CACHE_TTL = 3600
 
 
 def _supported_networks():
+    """Return list of supported blockchain networks with configured RPC URLs."""
     return [network for network, rpc_url in NETWORK_RPCS.items() if rpc_url]
 
 
 def _request_fingerprint():
+    """Generate a unique fingerprint for the current request to prevent payment replay.
+
+    Returns:
+        String combining HTTP method and full path.
+    """
     return f"{request.method}:{request.full_path.rstrip('?')}"
 
 
 def _cleanup_payment_cache(now=None):
+    """Remove expired entries from the payment verification cache.
+
+    Args:
+        now: Optional current timestamp. Defaults to time.time().
+    """
     now = time.time() if now is None else now
     expired = [
         tx_hash
@@ -95,6 +106,16 @@ def _cleanup_payment_cache(now=None):
 
 
 def _parse_positive_int_query(name, default, max_value=None):
+    """Parse a positive integer query parameter with validation.
+
+    Args:
+        name: Query parameter name.
+        default: Default value if parameter is absent.
+        max_value: Optional maximum value (inclusive).
+
+    Returns:
+        Tuple of (value, error) where error is None on success.
+    """
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         return default, None
@@ -110,6 +131,14 @@ def _parse_positive_int_query(name, default, max_value=None):
 
 
 def _amount_to_raw(amount) -> int:
+    """Convert a USDC amount to its raw integer representation.
+
+    Args:
+        amount: USDC amount as a number or string.
+
+    Returns:
+        Raw integer amount accounting for USDC decimals (6).
+    """
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** USDC_DECIMALS)).quantize(
         Decimal("1"),
@@ -119,7 +148,18 @@ def _amount_to_raw(amount) -> int:
 
 
 def _parse_payment_receipt(payment_data):
-    if not payment_data or not payment_data.lstrip().startswith("{"):
+    """Parse and validate an x402 payment receipt from the X-PAYMENT header.
+
+    Args:
+        payment_data: JSON string containing tx_hash, network, recipient, and amount.
+
+    Returns:
+        Dict with parsed receipt fields.
+
+    Raises:
+        ValueError: If the receipt format or amount is invalid.
+    """
+    if not payment_data or not payment_data.lstrip().startswith("{")
         raise ValueError("invalid_payment_format")
     data = json.loads(payment_data)
     if not isinstance(data, dict):
@@ -145,6 +185,20 @@ def _parse_payment_receipt(payment_data):
 
 
 def _rpc_call(rpc_url, method, params, *, timeout=15):
+    """Send a JSON-RPC call to an EVM blockchain node.
+
+    Args:
+        rpc_url: RPC endpoint URL.
+        method: JSON-RPC method name (e.g. eth_getTransactionReceipt).
+        params: List of method parameters.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Parsed JSON result from the RPC response.
+
+    Raises:
+        RuntimeError: If the HTTP request fails or the RPC returns an error.
+    """
     payload = {
         "jsonrpc": "2.0",
         "method": method,
@@ -161,7 +215,19 @@ def _rpc_call(rpc_url, method, params, *, timeout=15):
 
 
 def _verify_evm_usdc_transfer(tx_hash, network, recipient):
-    if not _ETH_TX_RE.match(tx_hash or ""):
+    """Verify an on-chain USDC transfer transaction for x402 payment.
+
+    Args:
+        tx_hash: Ethereum transaction hash (0x-prefixed, 64 hex chars).
+        network: Blockchain network name (e.g. base, ethereum).
+        recipient: Expected recipient address.
+
+    Returns:
+        Tuple of (transfer_data, error) where transfer_data is a dict with
+        amount_raw, amount_usdc, block_number, etc. on success, and error
+        is a string on failure.
+    """
+    if not _ETH_TX_RE.match(tx_hash or "")
         return None, "invalid_tx_hash"
 
     rpc_url = NETWORK_RPCS.get(network, "")
