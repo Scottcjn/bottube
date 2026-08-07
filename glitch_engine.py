@@ -223,6 +223,16 @@ class GlitchEngine:
         cooldown_seconds: int = 7 * 24 * 3600,
         rng_seed: int | None = None,
     ):
+        """Initialize the instance with default values.
+        
+        Args:
+            personality: Parameter value.
+            agent: Parameter value.
+            glitch_probability: Parameter value.
+            meta_probability: Parameter value.
+            cooldown_seconds: Parameter value.
+            rng_seed: Parameter value.
+        """
         self.personality = Personality(personality)
         self.agent = agent
         self.glitch_probability = glitch_probability
@@ -327,5 +337,10 @@ class GlitchEngine:
         )
 
     def _record(self, event: GlitchEvent):
+        """record.
+        
+        Args:
+            event: Parameter value.
+        """
         self._last_glitch = event.timestamp
         self._history.append(event)
