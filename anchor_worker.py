@@ -42,6 +42,7 @@ import urllib.error
 
 
 def _hex(b):
+    """Convert bytes to hexadecimal string representation."""
     return b.hex() if isinstance(b, (bytes, bytearray)) else str(b)
 
 
@@ -157,6 +158,20 @@ def manifest_leaf(m):
 
 
 def _ergo_get(base, path, key, timeout=20):
+    """Send a GET request to the Ergo node API.
+
+    Args:
+        base: Ergo node base URL.
+        path: API endpoint path.
+        key: API key for authentication.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Parsed JSON response from the Ergo node.
+
+    Raises:
+        RuntimeError: If the request fails or returns non-200 status.
+    """
     s, body = _http("GET", base + path, headers={"api_key": key}, timeout=timeout)
     if s != 200:
         raise RuntimeError(f"GET {path} -> {s}: {str(body)[:200]}")
@@ -164,6 +179,21 @@ def _ergo_get(base, path, key, timeout=20):
 
 
 def _ergo_post(base, path, key, payload, timeout=30):
+    """Send a POST request to the Ergo node API.
+
+    Args:
+        base: Ergo node base URL.
+        path: API endpoint path.
+        key: API key for authentication.
+        payload: Request body as a dict.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Parsed JSON response from the Ergo node.
+
+    Raises:
+        RuntimeError: If the request fails or returns non-200 status.
+    """
     s, body = _http("POST", base + path, headers={"api_key": key}, body=payload, timeout=timeout)
     if s != 200:
         raise RuntimeError(f"POST {path} -> {s}: {str(body)[:200]}")
