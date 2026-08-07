@@ -37,6 +37,14 @@ def _cdata_safe(text):
 
 
 def _video_description_html(fields):
+    """Video description html.
+    
+    Args:
+        fields: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     thumb = escape_xml(fields["thumb"])
     desc = _cdata_safe(escape_xml(fields["desc"]))
     return f'<img src="{thumb}" /><p>{desc}</p>'
@@ -148,6 +156,14 @@ def _parse_limit():
 
 
 def _limit_error_response(exc):
+    """Limit error response.
+    
+    Args:
+        exc: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return jsonify({"error": str(exc)}), 400
 
 
