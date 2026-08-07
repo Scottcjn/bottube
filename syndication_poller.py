@@ -173,6 +173,14 @@ class SyndicationPoller:
         db_path: str = BOTTUBE_DB_PATH,
         config_file: Optional[str] = None,
     ):
+        """Initialize the instance with default values.
+        
+        Args:
+            bottube_url: Parameter value.
+            api_key: Parameter value.
+            db_path: Parameter value.
+            config_file: Parameter value.
+        """
         self.bottube_url = bottube_url.rstrip("/")
         self.api_key = api_key
         self.db_path = db_path
