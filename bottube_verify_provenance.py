@@ -47,6 +47,16 @@ import urllib.request
 
 
 def _http_json(url, headers=None, timeout=15):
+    """Fetch JSON data via HTTP.
+    
+    Args:
+        url: Parameter value.
+        headers: Parameter value.
+        timeout: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     req = urllib.request.Request(url, headers=dict(headers or {}))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -385,6 +395,7 @@ def verify_receipt_offline(receipt, platform_hmac_key=None):
 
 
 def main():
+    """Run the main entry point."""
     ap = argparse.ArgumentParser(
         description="Verify a BoTTube video's on-chain provenance",
         epilog="Source: https://github.com/Scottcjn/bottube",
@@ -702,6 +713,14 @@ def main():
     asset_extras = []  # list of (label, kind, actual_hex, total, expected) tuples
     if args.check_asset:
         def _abs(u):
+            """Abs.
+            
+            Args:
+                u: Parameter value.
+            
+            Returns:
+                The result value.
+            """
             if not u:
                 return ""
             return (bot + u) if u.startswith("/") else u
