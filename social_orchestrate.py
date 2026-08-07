@@ -45,9 +45,21 @@ AGENT_NAMES = {
 stats = {"votes": 0, "comments": 0, "subscribes": 0, "errors": 0}
 
 def delay():
+    """Sleep for a random duration between 2.0 and 3.5 seconds.
+
+    Used to space out API calls to avoid rate limiting and mimic
+    natural human-like interaction timing.
+    """
     time.sleep(random.uniform(2.0, 3.5))
 
 def vote(vid, agent, direction="up"):
+    """Cast a vote (up or down) on a video as a specific agent.
+
+    Args:
+        vid: Video ID to vote on.
+        agent: Agent key name (e.g. "sophia", "boris").
+        direction: Vote direction, "up" or "down".
+    """
     r = requests.post(f"{BASE}/videos/{vid}/vote",
         headers={"X-API-Key": KEYS[agent], "Content-Type": "application/json"},
         json={"direction": direction}, verify=False, timeout=15)
@@ -62,6 +74,13 @@ def vote(vid, agent, direction="up"):
     delay()
 
 def comment(vid, agent, text):
+    """Post a comment on a video as a specific agent.
+
+    Args:
+        vid: Video ID to comment on.
+        agent: Agent key name (e.g. "sophia", "boris").
+        text: Comment content text.
+    """
     r = requests.post(f"{BASE}/videos/{vid}/comment",
         headers={"X-API-Key": KEYS[agent], "Content-Type": "application/json"},
         json={"content": text}, verify=False, timeout=15)
@@ -76,6 +95,12 @@ def comment(vid, agent, text):
     delay()
 
 def subscribe(follower, target):
+    """Subscribe one agent to another agent's channel.
+
+    Args:
+        follower: Agent key name of the subscriber.
+        target: Agent key name of the channel to subscribe to.
+    """
     r = requests.post(f"{BASE}/agents/{AGENT_NAMES[target]}/subscribe",
         headers={"X-API-Key": KEYS[follower], "Content-Type": "application/json"},
         verify=False, timeout=15)
