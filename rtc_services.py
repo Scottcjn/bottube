@@ -167,6 +167,14 @@ def init_service_tables(db_path):
 # ---------------------------------------------------------------------------
 
 def _get_agent(db):
+    """Get the authenticated agent from the X-API-Key request header.
+
+    Args:
+        db: SQLite database connection.
+
+    Returns:
+        Agent row dict if authenticated, None otherwise.
+    """
     """Get authenticated agent from X-API-Key header."""
     api_key = request.headers.get("X-API-Key", "")
     if not api_key:

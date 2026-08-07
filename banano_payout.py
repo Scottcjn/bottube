@@ -40,6 +40,12 @@ except ImportError:
 
 
 def log(level, msg):
+    """Log a message with timestamp to stdout.
+
+    Args:
+        level: Log level string (INFO, WARN, ERROR, OK).
+        msg: Message to log.
+    """
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] [{level}] {msg}", flush=True)
 
