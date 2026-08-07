@@ -41,6 +41,7 @@ WHISPER_MODEL = os.environ.get("BOTTUBE_WHISPER_MODEL", "whisper-1")
 
 
 def _db_path() -> str:
+    """Resolve the captions SQLite DB path from globals, env var, or the module's base dir."""
     from pathlib import Path
     if "DB_PATH" in globals():
         return str(globals()["DB_PATH"])
@@ -53,12 +54,14 @@ def _db_path() -> str:
 
 
 def _connect_db() -> sqlite3.Connection:
+    """Open a row-factory-enabled SQLite connection to the captions DB."""
     db = sqlite3.connect(_db_path())
     db.row_factory = sqlite3.Row
     return db
 
 
 def _table_exists(db: sqlite3.Connection, name: str) -> bool:
+    """Return True if a table with the given name exists in the SQLite schema."""
     row = db.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
         (name,),
@@ -67,10 +70,12 @@ def _table_exists(db: sqlite3.Connection, name: str) -> bool:
 
 
 def _normalized_sql(sql: str) -> str:
+    """Strip whitespace and lowercase a SQL string for loose comparison."""
     return re.sub(r"\s+", "", (sql or "").lower())
 
 
 def _migrate_captions_table(db: sqlite3.Connection) -> None:
+    """Create the video_captions table, or migrate an old schema to the current unique-constraint one."""
     target_sql = """
         CREATE TABLE IF NOT EXISTS video_captions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +119,7 @@ def _migrate_captions_table(db: sqlite3.Connection) -> None:
 
 
 def _rebuild_caption_search_index(db: sqlite3.Connection) -> None:
+    """Recreate the FTS5 caption search index from scratch, one row per video."""
     try:
         db.execute(
             """
@@ -248,6 +254,7 @@ def _google_words_to_cues(words: list[dict]) -> list[dict]:
 
 
 def _whisper_segments_to_cues(segments: list[dict]) -> list[dict]:
+    """Convert Whisper API segments into subtitle cue dicts, dropping empty-text segments."""
     cues = []
     for segment in segments:
         text = str(segment.get("text", "")).strip()
@@ -264,6 +271,7 @@ def _whisper_segments_to_cues(segments: list[dict]) -> list[dict]:
 
 
 def _format_vtt_time(seconds: float) -> str:
+    """Format a seconds offset as a WebVTT timestamp (HH:MM:SS.mmm)."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
@@ -271,6 +279,7 @@ def _format_vtt_time(seconds: float) -> str:
 
 
 def _format_srt_time(seconds: float) -> str:
+    """Format a seconds offset as an SRT timestamp (HH:MM:SS,mmm)."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -279,6 +288,7 @@ def _format_srt_time(seconds: float) -> str:
 
 
 def _cues_to_vtt(cues: list[dict]) -> str:
+    """Render a list of subtitle cues as a WebVTT document string."""
     lines = ["WEBVTT", ""]
     for idx, cue in enumerate(cues, start=1):
         lines.append(str(idx))
@@ -289,6 +299,7 @@ def _cues_to_vtt(cues: list[dict]) -> str:
 
 
 def _cues_to_srt(cues: list[dict]) -> str:
+    """Render a list of subtitle cues as an SRT document string."""
     lines = []
     for idx, cue in enumerate(cues, start=1):
         lines.append(str(idx))
@@ -299,6 +310,7 @@ def _cues_to_srt(cues: list[dict]) -> str:
 
 
 def _speech_to_text_google(audio_path: str) -> list[dict]:
+    """Transcribe a WAV file via Google Cloud Speech-to-Text and return word-level timestamps."""
     token = _get_access_token()
     if not token:
         return []
@@ -365,6 +377,7 @@ def _speech_to_text_google(audio_path: str) -> list[dict]:
 
 
 def _speech_to_text_whisper(audio_path: str) -> dict:
+    """Transcribe a WAV file via the OpenAI Whisper API and return the verbose JSON result."""
     if not OPENAI_API_KEY:
         return {}
 
@@ -389,6 +402,7 @@ def _speech_to_text_whisper(audio_path: str) -> dict:
 
 
 def _refresh_caption_search_index(db: sqlite3.Connection, video_id: str, text: str) -> None:
+    """Replace a single video's entry in the caption FTS index with fresh text."""
     try:
         db.execute("DELETE FROM video_captions_fts WHERE video_id = ?", (video_id,))
         db.execute(
@@ -400,6 +414,7 @@ def _refresh_caption_search_index(db: sqlite3.Connection, video_id: str, text: s
 
 
 def _caption_provider():
+    """Return the active captions provider ('whisper' or 'google'), preferring Whisper, or None if neither is configured."""
     if OPENAI_API_KEY:
         return "whisper"
     if GOOGLE_CREDS:
@@ -477,6 +492,7 @@ def generate_captions_async(video_id: str, video_path: str) -> None:
 
 
 def _fts_query(raw_query: str) -> str:
+    """Tokenize a raw search string into a quoted FTS5 MATCH query (max 8 tokens)."""
     tokens = re.findall(r"[A-Za-z0-9_]+", raw_query.lower())
     if not tokens:
         return ""
@@ -484,6 +500,7 @@ def _fts_query(raw_query: str) -> str:
 
 
 def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
+    """Return distinct video ids whose captions match the FTS search query, up to limit."""
     fts_query = _fts_query(query)
     try:
         with _connect_db() as db:
@@ -505,6 +522,7 @@ def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
 
 
 def _parse_caption_limit(default: int = 50, max_value: int = 500) -> int:
+    """Parse and clamp the `limit` query arg for caption search, raising ValueError if invalid."""
     raw_value = request.args.get("limit")
     if raw_value is None or raw_value == "":
         return default
