@@ -54,14 +54,32 @@ class Video:
 
     @property
     def url(self) -> str:
+        """Return the URL for the resource.
+        
+        Returns:
+            The result value.
+        """
         return f"https://bottube.ai/watch/{self.id}"
 
     @property
     def short_desc(self) -> str:
+        """Return a short description.
+        
+        Returns:
+            The result value.
+        """
         d = self.description[:120]
         return d + "..." if len(self.description) > 120 else d
 
     def to_text(self, index: int = 0) -> str:
+        """Convert to text representation.
+        
+        Args:
+            index: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         prefix = f"{index}. " if index else ""
         return (
             f"{prefix}🎬 <b>{_escape(self.title)}</b>\n"
@@ -80,6 +98,11 @@ class Agent:
     video_count: int
 
     def to_text(self) -> str:
+        """Convert to text representation.
+        
+        Returns:
+            The result value.
+        """
         return (
             f"👤 <b>{_escape(self.display_name or self.name)}</b>\n"
             f"📝 {_escape(self.bio[:200])}\n"
@@ -101,12 +124,27 @@ class BoTTubeAPI:
     """REST client for BoTTube."""
 
     def __init__(self, base_url: str = BOTTUBE_BASE, timeout: int = 10):
+        """Initialize the instance with default values.
+        
+        Args:
+            base_url: Parameter value.
+            timeout: Parameter value.
+        """
         self.base = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.verify = False  # Self-signed cert
         self.timeout = timeout
 
     def _get(self, path: str, **params) -> Any:
+        """Get.
+        
+        Args:
+            path: Parameter value.
+            **params: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         resp = self.session.get(
             f"{self.base}{path}", params=params, timeout=self.timeout,
         )
@@ -114,18 +152,51 @@ class BoTTubeAPI:
         return resp.json()
 
     def latest(self, limit: int = 5) -> List[Video]:
+        """Latest.
+        
+        Args:
+            limit: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         data = self._get("/api/v1/videos", sort="newest", limit=limit)
         return [self._parse_video(v) for v in self._items(data)]
 
     def trending(self, limit: int = 5) -> List[Video]:
+        """Trending.
+        
+        Args:
+            limit: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         data = self._get("/api/v1/videos", sort="views", limit=limit)
         return [self._parse_video(v) for v in self._items(data)]
 
     def search(self, query: str, limit: int = 5) -> List[Video]:
+        """Search.
+        
+        Args:
+            query: Parameter value.
+            limit: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         data = self._get("/api/v1/videos", q=query, limit=limit)
         return [self._parse_video(v) for v in self._items(data)]
 
     def get_video(self, video_id: str) -> Optional[Video]:
+        """Retrieve video.
+        
+        Args:
+            video_id: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         try:
             data = self._get(f"/api/v1/videos/{video_id}")
             return self._parse_video(data)
@@ -133,6 +204,14 @@ class BoTTubeAPI:
             return None
 
     def get_agent(self, name: str) -> Optional[Agent]:
+        """Retrieve agent.
+        
+        Args:
+            name: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         try:
             data = self._get(f"/api/v1/agents/{quote(name)}")
             return Agent(
@@ -146,6 +225,15 @@ class BoTTubeAPI:
             return None
 
     def agent_videos(self, name: str, limit: int = 5) -> List[Video]:
+        """Agent videos.
+        
+        Args:
+            name: Parameter value.
+            limit: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         try:
             data = self._get(f"/api/v1/agents/{quote(name)}/videos", limit=limit)
             return [self._parse_video(v) for v in self._items(data)]
@@ -154,12 +242,28 @@ class BoTTubeAPI:
 
     @staticmethod
     def _items(data) -> list:
+        """Items.
+        
+        Args:
+            data: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         if isinstance(data, list):
             return data
         return data.get("videos", data.get("data", data.get("results", [])))
 
     @staticmethod
     def _parse_video(v: dict) -> Video:
+        """Parse video from input.
+        
+        Args:
+            v: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         return Video(
             id=str(v.get("video_id", v.get("id", ""))),
             title=v.get("title", "Untitled"),
