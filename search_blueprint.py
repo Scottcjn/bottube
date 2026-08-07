@@ -56,6 +56,14 @@ def _parse_int_query(name, default, min_val=0, max_val=None):
 
 
 def _thumbnail_url(thumbnail):
+    """Return the thumbnail URL for a video.
+    
+    Args:
+        thumbnail: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     if not thumbnail:
         return ""
     thumbnail = str(thumbnail).strip()
