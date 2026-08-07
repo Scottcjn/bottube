@@ -148,15 +148,33 @@ TRANSLATION_DATA = {
 }
 
 def get_all_translations():
+    """Retrieve all translations.
+    
+    Returns:
+        The result value.
+    """
     return TRANSLATION_DATA
 
 def get_video_translations(video_url):
+    """Retrieve video translations.
+    
+    Args:
+        video_url: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     for video in TRANSLATION_DATA["videos"]:
         if video["video_url"] == video_url:
             return video
     return None
 
 def get_translations_by_language(language):
+    """Retrieve translations by language.
+    
+    Args:
+        language: Parameter value.
+    """
     translations = []
     for video in TRANSLATION_DATA["videos"]:
         if language in video["translations"]:
@@ -169,4 +187,9 @@ def get_translations_by_language(language):
     return translations
 
 def get_supported_languages():
+    """Retrieve supported languages.
+    
+    Returns:
+        The result value.
+    """
     return TRANSLATION_DATA["metadata"]["languages"]
