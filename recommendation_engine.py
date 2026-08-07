@@ -224,6 +224,14 @@ class RecommendationEngine:
         diversity_weight: float = DIVERSITY_WEIGHT,
         category_affinity_weight: float = CATEGORY_AFFINITY_WEIGHT
     ):
+        """Initialize the instance with default values.
+        
+        Args:
+            freshness_weight: Parameter value.
+            engagement_weight: Parameter value.
+            diversity_weight: Parameter value.
+            category_affinity_weight: Parameter value.
+        """
         self.freshness_weight = freshness_weight
         self.engagement_weight = engagement_weight
         self.diversity_weight = diversity_weight
