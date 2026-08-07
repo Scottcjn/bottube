@@ -24,6 +24,20 @@ discovery_bp = Blueprint("agent_discovery", __name__)
 
 
 def _parse_agent_directory_int(name: str, default: int, min_value: int, max_value: int | None = None) -> int:
+    """Parse an integer query parameter with bounds checking.
+
+    Args:
+        name: Query parameter name.
+        default: Default value if parameter is absent.
+        min_value: Minimum allowed value (inclusive).
+        max_value: Maximum allowed value (inclusive), or None for no upper bound.
+
+    Returns:
+        The parsed and bounded integer value.
+
+    Raises:
+        ValueError: If the parameter cannot be parsed as an integer.
+    """
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         value = default
@@ -40,6 +54,19 @@ def _parse_agent_directory_int(name: str, default: int, min_value: int, max_valu
 
 
 def _parse_agent_directory_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """Parse a string query parameter with choice validation.
+
+    Args:
+        name: Query parameter name.
+        default: Default value if parameter is absent.
+        allowed: Tuple of allowed string values.
+
+    Returns:
+        The validated string value.
+
+    Raises:
+        ValueError: If the parameter value is not in the allowed set.
+    """
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         return default
