@@ -51,6 +51,11 @@ _model_lock = threading.Lock()
 
 
 def _get_db_path() -> str:
+    """Return the path to the BoTTube SQLite database.
+
+    Defaults to the directory containing this file plus bottube.db.
+    Can be overridden via BOTTUBE_DB_PATH env var.
+    """
     return os.environ.get(
         "BOTTUBE_DB_PATH",
         str(Path(__file__).resolve().parent / "bottube.db"),
@@ -58,6 +63,11 @@ def _get_db_path() -> str:
 
 
 def _connect_db() -> sqlite3.Connection:
+    """Create a SQLite database connection with row factory.
+
+    Returns:
+        sqlite3.Connection with row_factory set to sqlite3.Row.
+    """
     db = sqlite3.connect(_get_db_path())
     db.row_factory = sqlite3.Row
     return db
@@ -227,6 +237,14 @@ def _extract_audio(video_path: str) -> Tuple[Optional[str], float]:
 # ---------------------------------------------------------------------------
 
 def _fmt_vtt(seconds: float) -> str:
+    """Format seconds as a WebVTT timestamp (HH:MM:SS.mmm).
+
+    Args:
+        seconds: Time in seconds.
+
+    Returns:
+        Formatted timestamp string for VTT subtitles.
+    """
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = seconds % 60
@@ -234,6 +252,14 @@ def _fmt_vtt(seconds: float) -> str:
 
 
 def _fmt_srt(seconds: float) -> str:
+    """Format seconds as an SRT timestamp (HH:MM:SS,mmm).
+
+    Args:
+        seconds: Time in seconds.
+
+    Returns:
+        Formatted timestamp string for SRT subtitles.
+    """
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
@@ -242,6 +268,14 @@ def _fmt_srt(seconds: float) -> str:
 
 
 def _segments_to_vtt(segments: list) -> str:
+    """Convert Whisper transcript segments to WebVTT format.
+
+    Args:
+        segments: List of Whisper segment objects with .text, .start, .end.
+
+    Returns:
+        WebVTT formatted subtitle string.
+    """
     lines = ["WEBVTT", ""]
     for idx, seg in enumerate(segments, 1):
         text = str(seg.text).strip()
@@ -255,6 +289,14 @@ def _segments_to_vtt(segments: list) -> str:
 
 
 def _segments_to_srt(segments: list) -> str:
+    """Convert Whisper transcript segments to SRT format.
+
+    Args:
+        segments: List of Whisper segment objects with .text, .start, .end.
+
+    Returns:
+        SRT formatted subtitle string.
+    """
     lines = []
     idx = 1
     for seg in segments:
@@ -270,6 +312,14 @@ def _segments_to_srt(segments: list) -> str:
 
 
 def _segments_to_plain(segments: list) -> str:
+    """Convert Whisper transcript segments to plain text.
+
+    Args:
+        segments: List of Whisper segment objects with .text attribute.
+
+    Returns:
+        Space-separated plain text transcript.
+    """
     return " ".join(str(seg.text).strip() for seg in segments if str(seg.text).strip())
 
 
@@ -381,6 +431,20 @@ def _store_transcript(
     vtt_data: str,
     duration_sec: float,
 ) -> None:
+    """Store or update a video transcript in the database.
+
+    Uses UPSERT (INSERT ... ON CONFLICT DO UPDATE) for idempotency.
+    Also updates the full-text search index.
+
+    Args:
+        video_id: Video identifier.
+        language: Detected language code.
+        language_prob: Language detection confidence (0.0-1.0).
+        plain_text: Plain text transcript.
+        srt_data: SRT formatted subtitles.
+        vtt_data: WebVTT formatted subtitles.
+        duration_sec: Audio duration in seconds.
+    """
     now = time.time()
     with _connect_db() as db:
         db.execute(
