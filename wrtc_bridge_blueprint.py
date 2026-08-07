@@ -40,6 +40,11 @@ _SOLANA_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 def _request_json_object():
+    """Parse and return a JSON object from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -49,6 +54,15 @@ def _request_json_object():
 
 
 def _string_field(data: dict, field_name: str):
+    """Extract a string field from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name, "")
     if not isinstance(value, str):
         return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
@@ -56,6 +70,15 @@ def _string_field(data: dict, field_name: str):
 
 
 def _finite_amount(data: dict, field_name: str = "amount"):
+    """Parse and validate a positive finite amount from the request.
+    
+    Args:
+        data: Parameter value.
+        field_name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     value = data.get(field_name, 0)
     if isinstance(value, bool):
         return None, (jsonify({"error": f"{field_name} must be a finite number"}), 400)
@@ -69,6 +92,15 @@ def _finite_amount(data: dict, field_name: str = "amount"):
 
 
 def _parse_history_limit(default: int = 50, max_value: int = 200):
+    """Parse history limit from input.
+    
+    Args:
+        default: Parameter value.
+        max_value: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     raw_value = request.args.get("limit")
     if raw_value is None or raw_value == "":
         return default, None
@@ -135,6 +167,12 @@ def init_wrtc_tables(db):
 
 
 def _rpc_call(method, params):
+    """Execute an RPC call.
+    
+    Args:
+        method: Parameter value.
+        params: Parameter value.
+    """
     payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode("utf-8")
     req = urllib.request.Request(
         SOLANA_RPC_URL,
@@ -153,6 +191,14 @@ def _rpc_call(method, params):
 
 
 def _raw_amount(token_balance):
+    """Raw amount.
+    
+    Args:
+        token_balance: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     amt = (
         (token_balance or {})
         .get("uiTokenAmount", {})
@@ -246,6 +292,11 @@ def verify_wrtc_transfer(tx_signature):
 
 
 def _get_authenticated_agent():
+    """Retrieve authenticated agent.
+    
+    Returns:
+        The result value.
+    """
     api_key = (request.headers.get("X-API-Key") or "").strip()
     if not api_key:
         return None
@@ -258,6 +309,7 @@ def _get_authenticated_agent():
 
 @wrtc_bp.route("/api/wrtc-bridge/info", methods=["GET"])
 def wrtc_bridge_info():
+    """Wrtc bridge info."""
     db = get_db()
     init_wrtc_tables(db)
 
@@ -303,6 +355,11 @@ def wrtc_bridge_info():
 
 @wrtc_bp.route("/api/wrtc-bridge/deposit", methods=["POST"])
 def wrtc_bridge_deposit():
+    """Wrtc bridge deposit.
+    
+    Returns:
+        The result value.
+    """
     agent = _get_authenticated_agent()
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
@@ -404,6 +461,11 @@ def wrtc_bridge_deposit():
 
 @wrtc_bp.route("/api/wrtc-bridge/withdraw", methods=["POST"])
 def wrtc_bridge_withdraw():
+    """Wrtc bridge withdraw.
+    
+    Returns:
+        The result value.
+    """
     agent = _get_authenticated_agent()
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
@@ -477,6 +539,11 @@ def wrtc_bridge_withdraw():
 
 @wrtc_bp.route("/api/wrtc-bridge/history", methods=["GET"])
 def wrtc_bridge_history():
+    """Wrtc bridge history.
+    
+    Returns:
+        The result value.
+    """
     agent = _get_authenticated_agent()
     if not agent:
         return jsonify({"error": "Authentication required. Provide X-API-Key header."}), 401
@@ -537,6 +604,11 @@ def wrtc_bridge_history():
 
 @wrtc_bp.route("/bridge")
 def wrtc_bridge_landing():
+    """Wrtc bridge landing.
+    
+    Returns:
+        The result value.
+    """
     _user = getattr(g, "user", None)
     user_balance = _user["rtc_balance"] if _user else 0
     user_sol_address = (_user["sol_address"] or "") if _user else ""
@@ -554,6 +626,11 @@ def wrtc_bridge_landing():
 
 @wrtc_bp.route("/bridge/wrtc")
 def wrtc_bridge_page():
+    """Wrtc bridge page.
+    
+    Returns:
+        The result value.
+    """
     return render_template(
         "bridge_wrtc.html",
         wrtc_mint=WRTC_MINT,
@@ -569,4 +646,9 @@ def wrtc_bridge_page():
 @wrtc_bp.route("/wrtc/history")
 @wrtc_bp.route("/premium/wrtc")
 def wrtc_bridge_alias():
+    """Wrtc bridge alias.
+    
+    Returns:
+        The result value.
+    """
     return redirect(url_for("wrtc_bridge.wrtc_bridge_page"))
