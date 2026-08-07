@@ -22,6 +22,7 @@ class ProviderRegistry:
     COOLDOWN_SECS = 300  # 5 minutes
 
     def __init__(self):
+        """Initialize the instance with default values."""
         self._lock = threading.Lock()
         self._providers: Dict[str, dict] = {}
         # Insertion order for deterministic rotation
