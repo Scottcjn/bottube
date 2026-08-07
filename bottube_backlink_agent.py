@@ -565,6 +565,11 @@ class BacklinkAgent:
     """White-hat backlink agent for BoTTube SEO."""
 
     def __init__(self, db_path=None):
+        """Initialize the instance with default values.
+        
+        Args:
+            db_path: Parameter value.
+        """
         self.db_path = db_path or DB_PATH
         self.db = sqlite3.connect(self.db_path)
         self.db.row_factory = sqlite3.Row
@@ -574,6 +579,7 @@ class BacklinkAgent:
         self._seed_directories()
 
     def _init_db(self):
+        """Initialize db."""
         self.db.executescript(SCHEMA)
         self.db.commit()
 
@@ -595,6 +601,14 @@ class BacklinkAgent:
         self.db.commit()
 
     def _log_action(self, action, target=None, success=True, details=None):
+        """Log action.
+        
+        Args:
+            action: Parameter value.
+            target: Parameter value.
+            success: Parameter value.
+            details: Parameter value.
+        """
         self.db.execute(
             "INSERT INTO action_log (action, target, success, details) VALUES (?,?,?,?)",
             (action, target, 1 if success else 0, details))
@@ -1089,6 +1103,7 @@ class BacklinkAgent:
 # ── CLI ──────────────────────────────────────────────────────────────
 
 def main():
+    """Run the main entry point."""
     parser = argparse.ArgumentParser(description="BoTTube Backlink Agent")
     parser.add_argument("--submit", action="store_true",
                         help="Show next directory to submit to")
