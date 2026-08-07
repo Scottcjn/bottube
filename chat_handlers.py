@@ -59,6 +59,11 @@ def init_chat_tables(db):
 
 
 def _json_object_body():
+    """Extract a JSON field from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
