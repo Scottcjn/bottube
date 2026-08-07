@@ -52,18 +52,32 @@ IMPLEMENTED_GRANTS = {"test_payment"}
 
 
 def _db_path() -> str:
+    """Return the path to the BoTTube SQLite database.
+
+    Defaults to BASE_DIR/bottube.db but can be overridden via BOTTUBE_DB_PATH env var.
+    """
     # Default matches bottube_server.py (BASE_DIR/bottube.db); env can override.
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     return os.environ.get("BOTTUBE_DB_PATH", str(Path(base) / "bottube.db"))
 
 
 def _conn():
+    """Create a SQLite database connection with busy timeout.
+
+    Returns:
+        sqlite3.Connection with busy_timeout=30000ms.
+    """
     c = sqlite3.connect(_db_path(), timeout=30)
     c.execute("PRAGMA busy_timeout=30000")
     return c
 
 
 def init_pi_payment_tables(db_path: str = None):
+    """Create the pi_payments table if it does not already exist.
+
+    Args:
+        db_path: Optional database path. Defaults to _db_path().
+    """
     path = db_path or _db_path()
     conn = sqlite3.connect(path, timeout=30)
     try:
@@ -86,10 +100,26 @@ def init_pi_payment_tables(db_path: str = None):
 
 
 def _pi_headers():
+    """Build Authorization headers for Pi Network API requests.
+
+    Returns:
+        Dict with Authorization and Content-Type headers.
+    """
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 
 def _pi_get_payment(payment_id: str):
+    """Fetch a payment object from the Pi Network API.
+
+    Args:
+        payment_id: Pi Network payment identifier.
+
+    Returns:
+        Parsed JSON payment object from the API.
+
+    Raises:
+        requests.HTTPError: If the API request fails.
+    """
     r = requests.get(f"{PI_API_BASE}/payments/{payment_id}",
                      headers=_pi_headers(), timeout=PI_TIMEOUT)
     r.raise_for_status()
@@ -97,6 +127,16 @@ def _pi_get_payment(payment_id: str):
 
 
 def _verify_against_products(p: dict):
+    """Verify a Pi payment against the server-authoritative product catalog.
+
+    Checks that the product is known and the amount matches the expected price.
+
+    Args:
+        p: Payment object from the Pi API.
+
+    Returns:
+        Tuple of (product_key, amount) on success, or (None, error_message) on failure.
+    """
     product = (p.get("metadata") or {}).get("product", "")
     exp = PI_PRODUCTS.get(product)
     if not exp:
@@ -119,6 +159,10 @@ def _grant_entitlement(pi_uid: str, product: str, payment_id: str) -> bool:
 
 @pi_pay_bp.route("/pi/health", methods=["GET"])
 def pi_health():
+    """Health check endpoint for Pi Network payment integration.
+
+    GET /pi/health - Returns configuration status, network mode, and product catalog.
+    """
     return jsonify({
         "ok": True,
         "configured": bool(PI_API_KEY),
@@ -130,6 +174,11 @@ def pi_health():
 
 @pi_pay_bp.route("/pi/approve", methods=["POST"])
 def pi_approve():
+    """Approve a Pi Network payment.
+
+    POST /pi/approve - Verifies the payment amount and product, then calls
+    the Pi API to approve the payment. Refuses products not in IMPLEMENTED_GRANTS.
+    """
     if not PI_API_KEY:
         return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
     payment_id = ((request.get_json(silent=True) or {}).get("payment_id") or "").strip()
@@ -173,6 +222,11 @@ def pi_approve():
 
 @pi_pay_bp.route("/pi/complete", methods=["POST"])
 def pi_complete():
+    """Complete a Pi Network payment and grant entitlement.
+
+    POST /pi/complete - Verifies the payment, calls Pi API to complete the
+    transaction, then grants the purchased entitlement atomically and idempotently.
+    """
     if not PI_API_KEY:
         return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
     data = request.get_json(silent=True) or {}
