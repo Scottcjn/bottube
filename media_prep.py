@@ -185,6 +185,7 @@ class MediaPrepPipeline:
         target_width: int = 1280,
         target_height: int = 720,
     ):
+        """Initialize the instance with default values."""
         self.db = db
         self.video_dir = video_dir
         self.thumb_dir = thumb_dir
