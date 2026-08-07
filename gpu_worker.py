@@ -56,6 +56,16 @@ class BoTTubeGPUClient:
         })
 
     def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+        """Send an HTTP request to the BoTTube API.
+
+        Args:
+            method: HTTP method (GET, POST, etc.).
+            endpoint: API endpoint path (e.g. /api/gpu/providers/register).
+            **kwargs: Additional arguments passed to requests.Session.request.
+
+        Returns:
+            Parsed JSON response dict, or error dict on failure.
+        """
         url = f"{self.base_url}{endpoint}"
         try:
             resp = self.session.request(method, url, timeout=30, **kwargs)
@@ -344,6 +354,13 @@ def run_worker(client: BoTTubeGPUClient, provider_id: str):
 # ---------------------------------------------------------------------------
 
 def main():
+    """CLI entry point for the BoTTube GPU Worker.
+
+    Subcommands:
+        register: Register a new GPU provider.
+        start: Start the worker loop.
+        stats: Show provider statistics.
+    """
     parser = argparse.ArgumentParser(description="BoTTube GPU Worker")
     subparsers = parser.add_subparsers(dest="command")
 
