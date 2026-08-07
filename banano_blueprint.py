@@ -82,6 +82,7 @@ def get_db():
 
 
 def _request_json_object():
+    """Parse the request body as a JSON object, or return a 400 error response."""
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return None, (jsonify({"error": "JSON object required"}), 400)
@@ -89,6 +90,7 @@ def _request_json_object():
 
 
 def _parse_positive_ban_amount(data):
+    """Validate and coerce ``data["amount"]`` into a finite positive Banano amount."""
     raw_amount = data.get("amount", 0)
     if isinstance(raw_amount, bool):
         return None, (jsonify({"error": "amount must be a finite positive number"}), 400)
@@ -102,6 +104,7 @@ def _parse_positive_ban_amount(data):
 
 
 def _json_text_field(data, name, default=""):
+    """Extract and strip a string field ``name`` from ``data``, falling back to ``default``."""
     value = data.get(name, default)
     if value is None:
         value = default

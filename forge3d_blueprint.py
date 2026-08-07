@@ -32,11 +32,13 @@ STUDIO_MEDIA_DIR = os.environ.get("STUDIO_MEDIA_DIR",
 
 
 def _db_path():
+    """Resolve the SQLite database path from env vars, defaulting under BOTTUBE_BASE_DIR."""
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     return os.environ.get("BOTTUBE_DB_PATH", str(Path(base) / "bottube.db"))
 
 
 def _conn():
+    """Open a SQLite connection to the bottube DB with row access and a busy timeout."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
@@ -44,6 +46,7 @@ def _conn():
 
 
 def init_forge3d_tables(db_path: str = None):
+    """Create the forge3d_jobs table if it doesn't already exist."""
     c = sqlite3.connect(db_path or _db_path(), timeout=30)
     try:
         c.execute("""
@@ -66,6 +69,7 @@ def init_forge3d_tables(db_path: str = None):
 
 
 def _set(job_id, **kw):
+    """Update arbitrary columns of a forge3d_jobs row by id, stamping updated_at."""
     if not kw:
         return
     kw["updated_at"] = time.time()
@@ -98,6 +102,7 @@ def _refund_once(job_id, agent_id, cost):
 
 
 def _save_glb(data: bytes) -> str:
+    """Write a generated GLB model to STUDIO_MEDIA_DIR under a random filename."""
     Path(STUDIO_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
     fname = uuid.uuid4().hex + ".glb"
     with open(os.path.join(STUDIO_MEDIA_DIR, fname), "wb") as f:

@@ -37,6 +37,7 @@ def _cdata_safe(text):
 
 
 def _video_description_html(fields):
+    """Build the HTML snippet (thumbnail + description) used inside an RSS item."""
     thumb = escape_xml(fields["thumb"])
     desc = _cdata_safe(escape_xml(fields["desc"]))
     return f'<img src="{thumb}" /><p>{desc}</p>'
@@ -148,6 +149,7 @@ def _parse_limit():
 
 
 def _limit_error_response(exc):
+    """Wrap a validation exception as a 400 JSON error response."""
     return jsonify({"error": str(exc)}), 400
 
 
