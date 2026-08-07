@@ -28,6 +28,11 @@ whisper_bp = Blueprint("whisper_transcription", __name__)
 
 
 def _request_json_object():
+    """Parse and return a JSON object from the request body.
+    
+    Returns:
+        The result value.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -107,6 +112,11 @@ def _parse_positive_int_arg(field_name: str, default: int, max_value: Optional[i
 
 
 def _video_dir() -> str:
+    """Return the video dir path.
+    
+    Returns:
+        The result value.
+    """
     return os.environ.get(
         "BOTTUBE_VIDEO_DIR",
         str(Path(wt._get_db_path()).parent / "videos"),
@@ -114,6 +124,14 @@ def _video_dir() -> str:
 
 
 def _video_path(filename: str) -> str:
+    """Video path.
+    
+    Args:
+        filename: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return str(Path(_video_dir()) / filename)
 
 
