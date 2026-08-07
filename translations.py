@@ -148,15 +148,18 @@ TRANSLATION_DATA = {
 }
 
 def get_all_translations():
+    """Return the full static TRANSLATION_DATA structure."""
     return TRANSLATION_DATA
 
 def get_video_translations(video_url):
+    """Look up the translation entry for a video by its URL, or None if absent."""
     for video in TRANSLATION_DATA["videos"]:
         if video["video_url"] == video_url:
             return video
     return None
 
 def get_translations_by_language(language):
+    """Collect every video's translation into a given language, with source metadata."""
     translations = []
     for video in TRANSLATION_DATA["videos"]:
         if language in video["translations"]:
@@ -169,4 +172,5 @@ def get_translations_by_language(language):
     return translations
 
 def get_supported_languages():
+    """Return the list of languages declared in TRANSLATION_DATA's metadata."""
     return TRANSLATION_DATA["metadata"]["languages"]
