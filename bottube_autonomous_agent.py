@@ -986,16 +986,19 @@ class BotBrain:
     videos_uploaded: int = 0
 
     def reset_hourly_counter(self):
+        """Zero the per-hour comment counter once the current hour window has elapsed."""
         now = time.time()
         if now - self.comments_hour_start > 3600:
             self.comments_this_hour = 0
             self.comments_hour_start = now
 
     def can_comment(self):
+        """Return True if this bot is still under its per-hour comment limit."""
         self.reset_hourly_counter()
         return self.comments_this_hour < MAX_COMMENTS_PER_BOT_PER_HOUR
 
     def record_comment(self, video_id):
+        """Record that this bot just commented on a video, updating counters and timestamps."""
         self.comments_this_hour += 1
         self.last_comment_ts = time.time()
         self.last_action_ts = time.time()
@@ -1023,9 +1026,11 @@ class BotBrain:
         return interval
 
     def is_awake(self):
+        """Return True once this bot's scheduled next-wake time has passed."""
         return time.time() >= self.next_wake_ts
 
     def already_commented_on(self, video_id):
+        """Return True if this bot commented on the video within the same-video cooldown window."""
         ts = self.commented_videos.get(video_id)
         if ts is None:
             return False
@@ -1038,12 +1043,14 @@ class BotBrain:
 
 class ActivityScheduler:
     def __init__(self):
+        """Initialize global action tracking with no history and a fresh daily counter."""
         self.action_timestamps = []  # all actions across all bots
         self.last_action_ts = 0.0
         self.videos_today = 0
         self.day_start = time.time()
 
     def can_act(self):
+        """Return True if an action is allowed now, given the min-gap, hourly cap and burst-detection rules."""
         now = time.time()
         # Reset daily counter
         if now - self.day_start > 86400:
@@ -1071,14 +1078,17 @@ class ActivityScheduler:
         return True
 
     def record_action(self):
+        """Record that an action (of any bot) just happened, for rate-limiting purposes."""
         now = time.time()
         self.action_timestamps.append(now)
         self.last_action_ts = now
 
     def can_generate_video(self):
+        """Return True if today's video-generation count is still under the daily cap."""
         return self.videos_today < MAX_VIDEOS_PER_DAY
 
     def record_video(self):
+        """Increment today's video-generation counter."""
         self.videos_today += 1
 
 
@@ -1175,6 +1185,7 @@ def upload_video(bot_name, api_key, video_path, title, description, tags_str):
 
 class BoTTubeAgent:
     def __init__(self):
+        """Set up the scheduler, bot registry and signal handlers for the agent's main loop."""
         self.scheduler = ActivityScheduler()
         self.bots: dict[str, BotBrain] = {}
         self.last_poll_ts = time.time() - 300  # start 5 min in the past
@@ -1187,6 +1198,7 @@ class BoTTubeAgent:
         signal.signal(signal.SIGINT, self._shutdown)
 
     def _shutdown(self, signum, frame):
+        """Signal handler that flags the main loop to stop gracefully."""
         log.info("Shutdown signal received (%s), stopping...", signum)
         self.running = False
 
@@ -1569,6 +1581,7 @@ class BoTTubeAgent:
 # ---------------------------------------------------------------------------
 
 def main():
+    """Construct the agent, register its bots, and run the main loop until stopped."""
     agent = BoTTubeAgent()
     agent.init_bots()
     agent.run()
