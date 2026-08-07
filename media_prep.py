@@ -185,6 +185,17 @@ class MediaPrepPipeline:
         target_width: int = 1280,
         target_height: int = 720,
     ):
+        """Initialize the instance with default values.
+        
+        Args:
+            db: Parameter value.
+            video_dir: Parameter value.
+            thumb_dir: Parameter value.
+            max_duration: Parameter value.
+            max_file_mb: Parameter value.
+            target_width: Parameter value.
+            target_height: Parameter value.
+        """
         self.db = db
         self.video_dir = video_dir
         self.thumb_dir = thumb_dir
