@@ -41,6 +41,11 @@ WHISPER_MODEL = os.environ.get("BOTTUBE_WHISPER_MODEL", "whisper-1")
 
 
 def _db_path() -> str:
+    """db path. Reads from environment variables.
+    
+    Returns:
+        The result value.
+    """
     from pathlib import Path
     if "DB_PATH" in globals():
         return str(globals()["DB_PATH"])
@@ -53,12 +58,26 @@ def _db_path() -> str:
 
 
 def _connect_db() -> sqlite3.Connection:
+    """connect db. Returns a SQLite database connection.
+    
+    Returns:
+        The result value.
+    """
     db = sqlite3.connect(_db_path())
     db.row_factory = sqlite3.Row
     return db
 
 
 def _table_exists(db: sqlite3.Connection, name: str) -> bool:
+    """table exists.
+    
+    Args:
+        db: Parameter value.
+        name: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     row = db.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
         (name,),
@@ -67,10 +86,23 @@ def _table_exists(db: sqlite3.Connection, name: str) -> bool:
 
 
 def _normalized_sql(sql: str) -> str:
+    """normalized sql.
+    
+    Args:
+        sql: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     return re.sub(r"\s+", "", (sql or "").lower())
 
 
 def _migrate_captions_table(db: sqlite3.Connection) -> None:
+    """migrate captions table.
+    
+    Args:
+        db: Parameter value.
+    """
     target_sql = """
         CREATE TABLE IF NOT EXISTS video_captions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +146,11 @@ def _migrate_captions_table(db: sqlite3.Connection) -> None:
 
 
 def _rebuild_caption_search_index(db: sqlite3.Connection) -> None:
+    """rebuild caption search index.
+    
+    Args:
+        db: Parameter value.
+    """
     try:
         db.execute(
             """
@@ -248,6 +285,11 @@ def _google_words_to_cues(words: list[dict]) -> list[dict]:
 
 
 def _whisper_segments_to_cues(segments: list[dict]) -> list[dict]:
+    """whisper segments to cues.
+    
+    Args:
+        segments: Parameter value.
+    """
     cues = []
     for segment in segments:
         text = str(segment.get("text", "")).strip()
@@ -264,6 +306,14 @@ def _whisper_segments_to_cues(segments: list[dict]) -> list[dict]:
 
 
 def _format_vtt_time(seconds: float) -> str:
+    """Format vtt time.
+    
+    Args:
+        seconds: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
@@ -271,6 +321,14 @@ def _format_vtt_time(seconds: float) -> str:
 
 
 def _format_srt_time(seconds: float) -> str:
+    """Format srt time.
+    
+    Args:
+        seconds: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -279,6 +337,14 @@ def _format_srt_time(seconds: float) -> str:
 
 
 def _cues_to_vtt(cues: list[dict]) -> str:
+    """cues to vtt.
+    
+    Args:
+        cues: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     lines = ["WEBVTT", ""]
     for idx, cue in enumerate(cues, start=1):
         lines.append(str(idx))
@@ -289,6 +355,14 @@ def _cues_to_vtt(cues: list[dict]) -> str:
 
 
 def _cues_to_srt(cues: list[dict]) -> str:
+    """cues to srt.
+    
+    Args:
+        cues: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     lines = []
     for idx, cue in enumerate(cues, start=1):
         lines.append(str(idx))
@@ -299,6 +373,14 @@ def _cues_to_srt(cues: list[dict]) -> str:
 
 
 def _speech_to_text_google(audio_path: str) -> list[dict]:
+    """speech to text google.
+    
+    Args:
+        audio_path: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     token = _get_access_token()
     if not token:
         return []
@@ -365,6 +447,14 @@ def _speech_to_text_google(audio_path: str) -> list[dict]:
 
 
 def _speech_to_text_whisper(audio_path: str) -> dict:
+    """speech to text whisper. Makes an HTTP POST request.
+    
+    Args:
+        audio_path: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     if not OPENAI_API_KEY:
         return {}
 
@@ -389,6 +479,13 @@ def _speech_to_text_whisper(audio_path: str) -> dict:
 
 
 def _refresh_caption_search_index(db: sqlite3.Connection, video_id: str, text: str) -> None:
+    """refresh caption search index.
+    
+    Args:
+        db: Parameter value.
+        video_id: Parameter value.
+        text: Parameter value.
+    """
     try:
         db.execute("DELETE FROM video_captions_fts WHERE video_id = ?", (video_id,))
         db.execute(
@@ -400,6 +497,11 @@ def _refresh_caption_search_index(db: sqlite3.Connection, video_id: str, text: s
 
 
 def _caption_provider():
+    """caption provider.
+    
+    Returns:
+        The result value.
+    """
     if OPENAI_API_KEY:
         return "whisper"
     if GOOGLE_CREDS:
@@ -477,6 +579,14 @@ def generate_captions_async(video_id: str, video_path: str) -> None:
 
 
 def _fts_query(raw_query: str) -> str:
+    """fts query.
+    
+    Args:
+        raw_query: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     tokens = re.findall(r"[A-Za-z0-9_]+", raw_query.lower())
     if not tokens:
         return ""
@@ -484,6 +594,15 @@ def _fts_query(raw_query: str) -> str:
 
 
 def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
+    """find caption video ids.
+    
+    Args:
+        query: Parameter value.
+        limit: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     fts_query = _fts_query(query)
     try:
         with _connect_db() as db:
@@ -505,6 +624,15 @@ def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
 
 
 def _parse_caption_limit(default: int = 50, max_value: int = 500) -> int:
+    """Parse caption limit from input.
+    
+    Args:
+        default: Parameter value.
+        max_value: Parameter value.
+    
+    Returns:
+        The result value.
+    """
     raw_value = request.args.get("limit")
     if raw_value is None or raw_value == "":
         return default
