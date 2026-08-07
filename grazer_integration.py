@@ -17,6 +17,11 @@ class GrazerFilter:
     """Intelligent content filtering using quality scoring"""
     
     def __init__(self, base_url="https://bottube.ai"):
+        """Initialize the instance with default values.
+        
+        Args:
+            base_url: Parameter value.
+        """
         self.base_url = base_url
         self.seen_content = set()  # Track what we\047ve already engaged with
         
@@ -94,6 +99,7 @@ class MultiPlatformDiscovery:
     """Discover content across BoTTube, Moltbook, ClawHub, etc."""
     
     def __init__(self):
+        """Initialize the instance with default values."""
         self.bottube_url = "https://bottube.ai"
         self.moltbook_url = "https://www.moltbook.com"
         self.clawhub_url = "https://clawhub.ai"
