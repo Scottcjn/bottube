@@ -33,6 +33,12 @@ class Forge3DNoCredits(Forge3DError):
 
 
 def _provider_meshy(prompt: str, art_style: str = "realistic"):
+    """Return the meshy provider. Makes an HTTP POST request.
+    
+    Args:
+        prompt: Parameter value.
+        art_style: Parameter value.
+    """
     key = os.environ.get("MESHY_API_KEY", "").strip()
     if not key:
         raise Forge3DError("no_backend_configured")
