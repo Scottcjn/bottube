@@ -31,6 +31,7 @@ class SyndicationResult:
     metadata: Dict[str, Any] = None
 
     def __post_init__(self):
+        """Post-initialization hook for dataclass fields."""
         if self.metadata is None:
             self.metadata = {}
 
@@ -59,6 +60,7 @@ class SyndicationPayload:
     metadata: Dict[str, Any] = None
 
     def __post_init__(self):
+        """Post-initialization hook for dataclass fields."""
         if self.metadata is None:
             self.metadata = {}
 
@@ -152,6 +154,12 @@ class MoltbookAdapter(SyndicationAdapter):
     platform_name = "moltbook"
 
     def __init__(self, config: Dict[str, Any]):
+        """Initialize the instance with default values.
+        
+        Args:
+            config: Parameter value.
+            Any]: Parameter value.
+        """
         super().__init__(config)
         self.base_url = config.get("base_url", "")
         self.api_key = config.get("api_key", "")
@@ -217,6 +225,12 @@ class TwitterAdapter(SyndicationAdapter):
     platform_name = "twitter"
 
     def __init__(self, config: Dict[str, Any]):
+        """Initialize the instance with default values.
+        
+        Args:
+            config: Parameter value.
+            Any]: Parameter value.
+        """
         super().__init__(config)
         self.api_key = config.get("api_key", "")
         self.api_secret = config.get("api_secret", "")
@@ -269,6 +283,12 @@ class RSSFeedAdapter(SyndicationAdapter):
     platform_name = "rss_feed"
 
     def __init__(self, config: Dict[str, Any]):
+        """Initialize the instance with default values.
+        
+        Args:
+            config: Parameter value.
+            Any]: Parameter value.
+        """
         super().__init__(config)
         self.feed_url = config.get("feed_url", "")
         self.feed_file = config.get("feed_file", "feed.xml")
@@ -325,6 +345,12 @@ class PartnerAPIAdapter(SyndicationAdapter):
     platform_name = "partner_api"
 
     def __init__(self, config: Dict[str, Any]):
+        """Initialize the instance with default values.
+        
+        Args:
+            config: Parameter value.
+            Any]: Parameter value.
+        """
         super().__init__(config)
         self.endpoint_url = config.get("endpoint_url", "")
         self.auth_header = config.get("auth_header", "X-API-Key")
