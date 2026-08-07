@@ -45,6 +45,11 @@ class OpenClawBeacon:
     """OpenClaw network identity beacon"""
     
     def __init__(self, agent_name: str):
+        """Initialize the instance with default values.
+        
+        Args:
+            agent_name: Parameter value.
+        """
         self.agent_name = agent_name
         self.beacon_id = BEACON_REGISTRY.get(agent_name, self._generate_beacon(agent_name))
         self.last_heartbeat = 0
