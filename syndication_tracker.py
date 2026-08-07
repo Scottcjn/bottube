@@ -89,6 +89,7 @@ class SyndicationTracker:
     """
     
     def __init__(self, db_path: str = "bottube.db"):
+        """Initialize the instance with default values."""
         self.db_path = Path(db_path)
         self._init_tables()
     
@@ -543,6 +544,7 @@ class ReportGenerator:
     """
     
     def __init__(self, db_path: str = "bottube.db"):
+        """Initialize the instance with default values."""
         self.db_path = Path(db_path)
         self.tracker = SyndicationTracker(db_path)
     
