@@ -986,16 +986,27 @@ class BotBrain:
     videos_uploaded: int = 0
 
     def reset_hourly_counter(self):
+        """Reset hourly counter."""
         now = time.time()
         if now - self.comments_hour_start > 3600:
             self.comments_this_hour = 0
             self.comments_hour_start = now
 
     def can_comment(self):
+        """Check if comment is allowed.
+        
+        Returns:
+            The result value.
+        """
         self.reset_hourly_counter()
         return self.comments_this_hour < MAX_COMMENTS_PER_BOT_PER_HOUR
 
     def record_comment(self, video_id):
+        """Record comment.
+        
+        Args:
+            video_id: Parameter value.
+        """
         self.comments_this_hour += 1
         self.last_comment_ts = time.time()
         self.last_action_ts = time.time()
@@ -1023,9 +1034,22 @@ class BotBrain:
         return interval
 
     def is_awake(self):
+        """Return whether awake.
+        
+        Returns:
+            The result value.
+        """
         return time.time() >= self.next_wake_ts
 
     def already_commented_on(self, video_id):
+        """Check if commented on has already occurred.
+        
+        Args:
+            video_id: Parameter value.
+        
+        Returns:
+            The result value.
+        """
         ts = self.commented_videos.get(video_id)
         if ts is None:
             return False
@@ -1038,12 +1062,18 @@ class BotBrain:
 
 class ActivityScheduler:
     def __init__(self):
+        """Initialize the instance with default values."""
         self.action_timestamps = []  # all actions across all bots
         self.last_action_ts = 0.0
         self.videos_today = 0
         self.day_start = time.time()
 
     def can_act(self):
+        """Check if act is allowed.
+        
+        Returns:
+            The result value.
+        """
         now = time.time()
         # Reset daily counter
         if now - self.day_start > 86400:
@@ -1071,14 +1101,21 @@ class ActivityScheduler:
         return True
 
     def record_action(self):
+        """Record action."""
         now = time.time()
         self.action_timestamps.append(now)
         self.last_action_ts = now
 
     def can_generate_video(self):
+        """Check if generate video is allowed.
+        
+        Returns:
+            The result value.
+        """
         return self.videos_today < MAX_VIDEOS_PER_DAY
 
     def record_video(self):
+        """Record video."""
         self.videos_today += 1
 
 
@@ -1175,6 +1212,7 @@ def upload_video(bot_name, api_key, video_path, title, description, tags_str):
 
 class BoTTubeAgent:
     def __init__(self):
+        """Initialize the instance with default values."""
         self.scheduler = ActivityScheduler()
         self.bots: dict[str, BotBrain] = {}
         self.last_poll_ts = time.time() - 300  # start 5 min in the past
@@ -1187,6 +1225,12 @@ class BoTTubeAgent:
         signal.signal(signal.SIGINT, self._shutdown)
 
     def _shutdown(self, signum, frame):
+        """Shutdown.
+        
+        Args:
+            signum: Parameter value.
+            frame: Parameter value.
+        """
         log.info("Shutdown signal received (%s), stopping...", signum)
         self.running = False
 
@@ -1569,6 +1613,7 @@ class BoTTubeAgent:
 # ---------------------------------------------------------------------------
 
 def main():
+    """Run the main entry point."""
     agent = BoTTubeAgent()
     agent.init_bots()
     agent.run()
