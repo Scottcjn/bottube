@@ -76,14 +76,17 @@ CACHE_TTL = 3600
 
 
 def _supported_networks():
+    """Return the list of network names that have a configured RPC URL."""
     return [network for network, rpc_url in NETWORK_RPCS.items() if rpc_url]
 
 
 def _request_fingerprint():
+    """Build a cache key identifying the current request's method and path."""
     return f"{request.method}:{request.full_path.rstrip('?')}"
 
 
 def _cleanup_payment_cache(now=None):
+    """Evict payment-cache entries older than CACHE_TTL seconds."""
     now = time.time() if now is None else now
     expired = [
         tx_hash
@@ -95,6 +98,7 @@ def _cleanup_payment_cache(now=None):
 
 
 def _parse_positive_int_query(name, default, max_value=None):
+    """Parse a positive-integer query param, returning (value, error_message)."""
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
         return default, None
@@ -110,6 +114,7 @@ def _parse_positive_int_query(name, default, max_value=None):
 
 
 def _amount_to_raw(amount) -> int:
+    """Convert a decimal USDC amount to its raw integer representation (USDC_DECIMALS)."""
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** USDC_DECIMALS)).quantize(
         Decimal("1"),
@@ -119,6 +124,7 @@ def _amount_to_raw(amount) -> int:
 
 
 def _parse_payment_receipt(payment_data):
+    """Parse the X-PAYMENT header JSON into a normalized receipt dict, raising ValueError if malformed."""
     if not payment_data or not payment_data.lstrip().startswith("{"):
         raise ValueError("invalid_payment_format")
     data = json.loads(payment_data)
@@ -145,6 +151,7 @@ def _parse_payment_receipt(payment_data):
 
 
 def _rpc_call(rpc_url, method, params, *, timeout=15):
+    """Issue a JSON-RPC call to an EVM node and return its result, raising on error."""
     payload = {
         "jsonrpc": "2.0",
         "method": method,
@@ -161,6 +168,7 @@ def _rpc_call(rpc_url, method, params, *, timeout=15):
 
 
 def _verify_evm_usdc_transfer(tx_hash, network, recipient):
+    """Verify an on-chain USDC transfer to recipient, checking confirmations and decoding Transfer logs."""
     if not _ETH_TX_RE.match(tx_hash or ""):
         return None, "invalid_tx_hash"
 
@@ -226,8 +234,10 @@ def _verify_evm_usdc_transfer(tx_hash, network, recipient):
 def require_payment(price_key):
     """Decorator: returns HTTP 402 if no valid payment header."""
     def decorator(f):
+        """Wrap f so it requires a verified X-PAYMENT header before running."""
         @wraps(f)
         def wrapper(*args, **kwargs):
+            """Check for a valid payment header, returning HTTP 402 or calling the wrapped view."""
             price = PRICING.get(price_key, 0.001)
             if price == 0:
                 return f(*args, **kwargs)
