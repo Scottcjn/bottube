@@ -54,14 +54,17 @@ class Video:
 
     @property
     def url(self) -> str:
+        """Public BoTTube watch link for this video."""
         return f"https://bottube.ai/watch/{self.id}"
 
     @property
     def short_desc(self) -> str:
+        """Description truncated to 120 chars with an ellipsis if cut."""
         d = self.description[:120]
         return d + "..." if len(self.description) > 120 else d
 
     def to_text(self, index: int = 0) -> str:
+        """Render this video as an HTML-formatted Telegram message line, optionally numbered."""
         prefix = f"{index}. " if index else ""
         return (
             f"{prefix}🎬 <b>{_escape(self.title)}</b>\n"
@@ -80,6 +83,7 @@ class Agent:
     video_count: int
 
     def to_text(self) -> str:
+        """Render this agent as an HTML-formatted Telegram profile summary."""
         return (
             f"👤 <b>{_escape(self.display_name or self.name)}</b>\n"
             f"📝 {_escape(self.bio[:200])}\n"
@@ -101,12 +105,14 @@ class BoTTubeAPI:
     """REST client for BoTTube."""
 
     def __init__(self, base_url: str = BOTTUBE_BASE, timeout: int = 10):
+        """Set up a requests session against the BoTTube API (self-signed cert, TLS verify disabled)."""
         self.base = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.verify = False  # Self-signed cert
         self.timeout = timeout
 
     def _get(self, path: str, **params) -> Any:
+        """Issue a GET against the BoTTube API and return the parsed JSON body, raising on HTTP errors."""
         resp = self.session.get(
             f"{self.base}{path}", params=params, timeout=self.timeout,
         )
@@ -114,18 +120,22 @@ class BoTTubeAPI:
         return resp.json()
 
     def latest(self, limit: int = 5) -> List[Video]:
+        """Fetch the most recently uploaded videos."""
         data = self._get("/api/v1/videos", sort="newest", limit=limit)
         return [self._parse_video(v) for v in self._items(data)]
 
     def trending(self, limit: int = 5) -> List[Video]:
+        """Fetch videos sorted by view count."""
         data = self._get("/api/v1/videos", sort="views", limit=limit)
         return [self._parse_video(v) for v in self._items(data)]
 
     def search(self, query: str, limit: int = 5) -> List[Video]:
+        """Search videos by title/description query."""
         data = self._get("/api/v1/videos", q=query, limit=limit)
         return [self._parse_video(v) for v in self._items(data)]
 
     def get_video(self, video_id: str) -> Optional[Video]:
+        """Fetch a single video by id, returning None if not found or the request fails."""
         try:
             data = self._get(f"/api/v1/videos/{video_id}")
             return self._parse_video(data)
@@ -133,6 +143,7 @@ class BoTTubeAPI:
             return None
 
     def get_agent(self, name: str) -> Optional[Agent]:
+        """Fetch an agent profile by name, returning None if not found or the request fails."""
         try:
             data = self._get(f"/api/v1/agents/{quote(name)}")
             return Agent(
@@ -146,6 +157,7 @@ class BoTTubeAPI:
             return None
 
     def agent_videos(self, name: str, limit: int = 5) -> List[Video]:
+        """Fetch an agent's recent uploads, returning an empty list on failure."""
         try:
             data = self._get(f"/api/v1/agents/{quote(name)}/videos", limit=limit)
             return [self._parse_video(v) for v in self._items(data)]
@@ -154,12 +166,14 @@ class BoTTubeAPI:
 
     @staticmethod
     def _items(data) -> list:
+        """Normalize an API response (bare list or wrapped under videos/data/results) into a list."""
         if isinstance(data, list):
             return data
         return data.get("videos", data.get("data", data.get("results", [])))
 
     @staticmethod
     def _parse_video(v: dict) -> Video:
+        """Convert a raw API video dict into a Video dataclass, filling in defaults for missing fields."""
         return Video(
             id=str(v.get("video_id", v.get("id", ""))),
             title=v.get("title", "Untitled"),
@@ -217,6 +231,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command by reusing the /start welcome message."""
     await cmd_start(update, context)
 
 
