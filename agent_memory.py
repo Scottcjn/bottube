@@ -48,16 +48,19 @@ class TfIdfStore:
     """Simple TF-IDF similarity search. No numpy/sklearn needed."""
 
     def __init__(self):
+        """Set up an empty in-memory document store with a dirty IDF cache."""
         self._docs: Dict[str, List[str]] = {}  # doc_id -> tokens
         self._idf: Dict[str, float] = {}
         self._dirty = True
 
     def add(self, doc_id: str, text: str):
+        """Tokenize and store a document, marking the IDF cache stale."""
         tokens = self._tokenize(text)
         self._docs[doc_id] = tokens
         self._dirty = True
 
     def remove(self, doc_id: str):
+        """Drop a document from the store, marking the IDF cache stale."""
         self._docs.pop(doc_id, None)
         self._dirty = True
 
@@ -82,11 +85,13 @@ class TfIdfStore:
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
+        """Lowercase, strip non-alphanumerics and split into tokens longer than 2 chars."""
         text = text.lower()
         text = re.sub(r"[^a-z0-9\s]", " ", text)
         return [w for w in text.split() if len(w) > 2]
 
     def _rebuild_idf(self):
+        """Recompute smoothed IDF weights for every term across all stored documents."""
         n = len(self._docs)
         if n == 0:
             self._idf = {}
@@ -102,6 +107,7 @@ class TfIdfStore:
         self._dirty = False
 
     def _tfidf_vec(self, tokens: List[str]) -> Dict[str, float]:
+        """Build a term -> TF-IDF weight vector for a token list using the current IDF table."""
         tf: Counter = Counter(tokens)
         total = len(tokens) or 1
         vec = {}
@@ -112,6 +118,7 @@ class TfIdfStore:
 
     @staticmethod
     def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
+        """Compute cosine similarity between two sparse TF-IDF vectors."""
         keys = set(a) & set(b)
         if not keys:
             return 0.0
@@ -191,6 +198,7 @@ class AgentMemory:
         db_path: str | Path | None = None,
         now_fn=None,
     ):
+        """Open/create the agent's video table and load existing videos into the TF-IDF store."""
         self.agent = agent
         self._now_fn = now_fn or time.time
         self._db_path = str(db_path) if db_path else ":memory:"
@@ -381,6 +389,7 @@ class AgentMemory:
     # ------------------------------------------------------------------
 
     def _check_milestone(self, stats: AgentStats) -> Optional[SelfReference]:
+        """Return a celebratory SelfReference if the agent's video count just hit a round milestone."""
         milestones = [10, 25, 50, 100, 200, 500, 1000]
         for m in milestones:
             if stats.total_videos == m:
@@ -424,6 +433,7 @@ class AgentMemory:
         return sorted(series_names)
 
     def _get_video(self, video_id: str) -> Optional[VideoRecord]:
+        """Fetch a single video record for this agent by id, or None if not found."""
         with sqlite3.connect(self._db_path) as conn:
             row = conn.execute(
                 "SELECT video_id, title, description, tags, opinions, created_at "
@@ -442,6 +452,7 @@ class AgentMemory:
         )
 
     def _days_ago(self, ts: float) -> int:
+        """Return the number of whole days between a past timestamp and now."""
         return max(0, int((self._now_fn() - ts) / 86400))
 
     def _load_into_store(self):
@@ -461,6 +472,7 @@ class AgentMemory:
     # ------------------------------------------------------------------
 
     def _init_db(self):
+        """Create the agent_videos table and its agent-name index if they don't exist yet."""
         with sqlite3.connect(self._db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS agent_videos (
