@@ -56,10 +56,12 @@ _POLL_TIMEOUT = 300       # 5 minutes max wait per provider
 
 
 def _submit_succeeded(result: object) -> bool:
+    """Return True if result is a (success, payload) tuple with success truthy."""
     return isinstance(result, tuple) and len(result) == 2 and bool(result[0])
 
 
 def _as_submit_result(result: object) -> Optional[Tuple[bool, object]]:
+    """Coerce result into a (bool, payload) tuple, or None if it isn't shaped that way."""
     if isinstance(result, tuple) and len(result) == 2:
         return bool(result[0]), result[1]
     return None
@@ -75,6 +77,7 @@ _JOBS_TTL = 7200
 
 
 def _prune_jobs():
+    """Remove jobs older than _JOBS_TTL from the in-memory store."""
     now = time.time()
     expired = [jid for jid, j in _jobs.items()
                if now - j.get("created_at", 0) > _JOBS_TTL]
@@ -112,11 +115,13 @@ def create_job(owner_user_id: str, request: GenerationRequest) -> str:
 
 
 def get_job(job_id: str) -> Optional[dict]:
+    """Return a snapshot copy of the job record, or None if it doesn't exist."""
     with _jobs_lock:
         return dict(_jobs[job_id]) if job_id in _jobs else None
 
 
 def update_job(job_id: str, **kwargs):
+    """Merge the given fields into an existing job record and bump updated_at."""
     with _jobs_lock:
         if job_id in _jobs:
             _jobs[job_id].update(kwargs)
@@ -169,6 +174,7 @@ def get_registry() -> ProviderRegistry:
 # ---------------------------------------------------------------------------
 
 def _gen_video_id(length: int = 11) -> str:
+    """Generate a random alphanumeric video ID matching BoTTube's existing format."""
     chars = string.ascii_letters + string.digits + "-_"
     return "".join(random.choice(chars) for _ in range(length))
 
@@ -402,6 +408,7 @@ def _run_pipeline(
 
 def _record_attempt(job_id: str, provider: str, attempt: int,
                     success: bool, detail: str, category: str = "", latency_s: float = 0.0):
+    """Append a provider-attempt record to the job's history and refresh provider metrics."""
     with _jobs_lock:
         if job_id in _jobs:
             _jobs[job_id].setdefault("attempts", []).append({
@@ -621,6 +628,7 @@ class GenerationWorker:
 
     def __init__(self, router: GenerationRouter, publish_fn=None,
                  poll_interval: float = 2.0):
+        """Set up the worker with its router, publish callback, and poll cadence."""
         self.router = router
         self.publish_fn = publish_fn
         self.poll_interval = poll_interval
@@ -628,6 +636,7 @@ class GenerationWorker:
         self._thread: Optional[threading.Thread] = None
 
     def start(self):
+        """Start the background polling thread, if not already running."""
         if self._running:
             return
         self._running = True
@@ -636,9 +645,11 @@ class GenerationWorker:
         log.info("Generation worker started (poll=%.1fs)", self.poll_interval)
 
     def stop(self):
+        """Signal the background loop to stop after its current iteration."""
         self._running = False
 
     def _loop(self):
+        """Repeatedly process queued jobs until stopped."""
         while self._running:
             try:
                 self._process_queued()
@@ -647,6 +658,7 @@ class GenerationWorker:
             time.sleep(self.poll_interval)
 
     def _process_queued(self):
+        """Run the pipeline for every job currently in the queued state."""
         with _jobs_lock:
             queued = [jid for jid, j in _jobs.items()
                       if j.get("status") == JobStatus.queued.value]
