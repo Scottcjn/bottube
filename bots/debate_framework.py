@@ -53,6 +53,7 @@ class Comment:
 
     @property
     def score(self) -> int:
+        """Net vote score (upvotes minus downvotes)."""
         return self.upvotes - self.downvotes
 
 
@@ -74,12 +75,15 @@ class ThreadContext:
 
     @property
     def depth(self) -> int:
+        """Number of comments in the chain."""
         return len(self.comments)
 
     def last_comment(self) -> Optional[Comment]:
+        """Return the most recent comment in the thread, or None if empty."""
         return self.comments[-1] if self.comments else None
 
     def comments_by(self, author: str) -> List[Comment]:
+        """Return all comments in the thread written by the given author."""
         return [c for c in self.comments if c.author == author]
 
 
@@ -95,6 +99,7 @@ class RateLimiter:
     """
 
     def __init__(self, max_replies: int = 3, window_seconds: int = 3600):
+        """Set up the per-thread rate limit (max_replies per window_seconds)."""
         self.max_replies = max_replies
         self.window_seconds = window_seconds
         # thread_key -> list of timestamps
@@ -113,6 +118,7 @@ class RateLimiter:
         self._log[thread_key].append(time.time())
 
     def reset(self):
+        """Clear all recorded post timestamps for every thread."""
         self._log.clear()
 
 
@@ -129,6 +135,7 @@ class BoTTubeClient:
 
     def __init__(self, api_url: str, token: Optional[str] = None,
                  timeout: int = 15):
+        """Set up the session against api_url, with an optional bearer token."""
         self.api_url = api_url.rstrip("/")
         self.session = requests.Session()
         self.timeout = timeout
@@ -136,12 +143,14 @@ class BoTTubeClient:
             self.session.headers["Authorization"] = f"Bearer {token}"
 
     def _get(self, path: str, **params) -> Any:
+        """Issue a GET request to path with the given query params and return parsed JSON."""
         url = f"{self.api_url}{path}"
         resp = self.session.get(url, params=params, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
 
     def _post(self, path: str, json_data: dict) -> Any:
+        """Issue a POST request to path with the given JSON body and return parsed JSON."""
         url = f"{self.api_url}{path}"
         resp = self.session.post(url, json=json_data, timeout=self.timeout)
         resp.raise_for_status()
@@ -227,11 +236,13 @@ class DebateOrchestrator:
     """
 
     def __init__(self, api_url: str, token: Optional[str] = None):
+        """Create the shared API client and bot registry."""
         self.client = BoTTubeClient(api_url, token=token)
         self.bots: List[DebateBot] = []
         self._scores: Dict[str, int] = defaultdict(int)
 
     def register(self, bot: DebateBot):
+        """Attach the orchestrator's API client to bot and add it to the roster."""
         bot.client = self.client
         self.bots.append(bot)
 
@@ -348,6 +359,7 @@ class DebateBot(abc.ABC):
     rate_limit_window: int = 3600  # seconds
 
     def __init__(self):
+        """Set up the bot's rate limiter; the API client is attached later via register()."""
         self.rate_limiter = RateLimiter(
             max_replies=self.max_replies_per_hour,
             window_seconds=self.rate_limit_window,
