@@ -162,6 +162,7 @@ class HumanScheduler:
         rng_seed: int | None = None,
         now_fn=None,
     ):
+        """Set up the scheduler's profile, per-agent RNG seed, and SQLite state."""
         if isinstance(profile, str):
             profile = PROFILES[ProfileType(profile)]
         self.profile: UploadProfile = profile
@@ -240,6 +241,7 @@ class HumanScheduler:
     # ------------------------------------------------------------------
 
     def _ensure_today_schedule(self, now: datetime):
+        """Generate and persist today's slot schedule if it hasn't been built yet."""
         key = now.strftime("%Y-%m-%d")
         if self._today_key == key:
             return
@@ -251,6 +253,7 @@ class HumanScheduler:
         self._persist_schedule(key, self._today_slots)
 
     def _generate_day(self, date, rng: random.Random) -> List[datetime]:
+        """Generate a day's worth of post slots per the profile (volume, jitter, bursts, skips)."""
         p = self.profile
         weekday = date.weekday()
 
@@ -345,6 +348,7 @@ class HumanScheduler:
 
     @staticmethod
     def _deduplicate(slots: List[datetime], min_gap_minutes: int = 3) -> List[datetime]:
+        """Drop slots that fall within min_gap_minutes of the previous kept slot."""
         if not slots:
             return []
         result = [slots[0]]
@@ -368,9 +372,11 @@ class HumanScheduler:
                 return k - 1
 
     def _agent_seed(self) -> int:
+        """Derive a deterministic RNG seed from the agent's identifier."""
         return int(hashlib.sha256(self.agent.encode()).hexdigest()[:8], 16)
 
     def _day_seed(self, day_key: str) -> int:
+        """Derive a deterministic per-day RNG seed from the agent and date."""
         data = f"{self.agent}:{day_key}"
         return int(hashlib.sha256(data.encode()).hexdigest()[:8], 16)
 
@@ -379,6 +385,7 @@ class HumanScheduler:
     # ------------------------------------------------------------------
 
     def _init_db(self):
+        """Create the scheduler_posts and scheduler_plans tables if they don't exist."""
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS scheduler_posts (
@@ -398,6 +405,7 @@ class HumanScheduler:
             """)
 
     def _was_already_posted(self, slot: datetime) -> bool:
+        """Return True if a post has already been recorded for this exact slot."""
         with sqlite3.connect(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT 1 FROM scheduler_posts WHERE agent=? AND slot_time=?",
@@ -406,6 +414,7 @@ class HumanScheduler:
             return row is not None
 
     def _record_post(self, slot: datetime, actual: datetime):
+        """Persist that the given slot has fired, along with the actual post time."""
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO scheduler_posts (agent, slot_time, actual_time) VALUES (?, ?, ?)",
@@ -413,6 +422,7 @@ class HumanScheduler:
             )
 
     def _persist_schedule(self, day_key: str, slots: List[datetime]):
+        """Save the generated schedule for day_key so it survives restarts."""
         data = json.dumps([s.isoformat() for s in slots])
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
