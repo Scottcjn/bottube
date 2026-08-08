@@ -87,13 +87,16 @@ class ComfyUILTXProvider(GenerationProvider):
     """Local LTX-2 via ComfyUI."""
 
     def __init__(self):
+        """Set up the in-memory prompt_id -> outputs cache for completed jobs."""
         # Completed jobs: prompt_id -> local path
         self._completed: dict = {}
 
     def get_name(self) -> str:
+        """Return the provider's registry key."""
         return "comfyui_ltx"
 
     def get_capabilities(self) -> ProviderCapabilities:
+        """Describe this provider's modes/limits, probing the ComfyUI host for availability."""
         available = self._ping()
         return ProviderCapabilities(
             name="comfyui_ltx",
@@ -111,6 +114,7 @@ class ComfyUILTXProvider(GenerationProvider):
         )
 
     def validate_input(self, req: GenerationRequest) -> Tuple[bool, str]:
+        """Reject requests missing a prompt or asking for a mode other than text_to_video."""
         if not req.prompt:
             return False, "prompt is required"
         if req.mode != GenerationMode.text_to_video:
@@ -118,6 +122,7 @@ class ComfyUILTXProvider(GenerationProvider):
         return True, ""
 
     def submit(self, req: GenerationRequest, output_dir: Path) -> Tuple[bool, str]:
+        """Fill the LTX-2 workflow template with the prompt/seed and queue it on ComfyUI, returning its prompt_id."""
         workflow = json.loads(json.dumps(_LTX_WORKFLOW))
         workflow["2"]["inputs"]["text"] = req.prompt
         workflow["5"]["inputs"]["seed"] = random.randint(0, 2**31)
@@ -162,6 +167,7 @@ class ComfyUILTXProvider(GenerationProvider):
         return "pending", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
+        """Download the first available image/gif output for a completed prompt into output_dir."""
         output_data = self._completed.get(external_id)
         if not output_data:
             return None
@@ -191,6 +197,7 @@ class ComfyUILTXProvider(GenerationProvider):
         return None
 
     def cancel(self, external_id: str) -> bool:
+        """Ask ComfyUI to delete the queued prompt; returns False on any transport error."""
         try:
             payload = json.dumps({"delete": [external_id]}).encode()
             req = urllib.request.Request(
