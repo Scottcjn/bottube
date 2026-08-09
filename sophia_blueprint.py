@@ -61,6 +61,7 @@ _ALLOWED_ORIGINS = set(
 
 
 def _client_ip():
+    """Return the caller's IP, preferring the first X-Forwarded-For hop over remote_addr."""
     xff = request.headers.get("X-Forwarded-For", "")
     return (xff.split(",")[0].strip() if xff else request.remote_addr) or "?"
 
@@ -72,6 +73,7 @@ SOPHIA_CORPUS = os.environ.get("SOPHIA_CORPUS", "1") != "0"
 
 
 def init_sophia_corpus():
+    """Create the sophia_corpus table (per-site conversation log) if corpus logging is enabled."""
     if not SOPHIA_CORPUS:
         return
     c = sqlite3.connect(SOPHIA_CORPUS_DB, timeout=30)
@@ -112,6 +114,7 @@ def _site_from_request():
 
 
 def _log_corpus(site, origin, caller, is_anon, message, reply, gen_started):
+    """Append one chat turn to the training corpus; failures are swallowed so logging never breaks a reply."""
     if not SOPHIA_CORPUS:
         return
     try:
@@ -156,6 +159,7 @@ _GEN_INTENT = re.compile(
 
 
 def _db_path() -> str:
+    """Resolve the sqlite DB path, matching bottube_server.py unless overridden by env."""
     # Same DB the app uses; own connection (mirrors pi_payments) so we never re-import
     # bottube_server (which runs as __main__ in prod -> a second import re-executes it).
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
@@ -163,6 +167,7 @@ def _db_path() -> str:
 
 
 def _conn():
+    """Open a sqlite connection to the shared DB with row access and a generous busy timeout."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
@@ -253,6 +258,7 @@ def _kick_generation(api_key: str, prompt: str):
 
 
 def _origin_allowed(origin):
+    """Check an Origin header against the allowed Elyan sites and Pi-owned app hosts."""
     if not origin:
         return False
     if origin in _ALLOWED_ORIGINS:
@@ -278,12 +284,14 @@ def _sophia_cors(resp):
 
 @sophia_bp.route("/api/sophia/health", methods=["GET"])
 def sophia_health():
+    """Report Sophia's configured model name (never the internal LLM URL/topology)."""
     # Do NOT expose llm_url (internal Tailscale topology).
     return jsonify({"ok": True, "model": SOPHIA_MODEL})
 
 
 @sophia_bp.route("/api/sophia", methods=["POST", "OPTIONS"])
 def sophia_chat():
+    """Chat with Sophia; authed callers may opt into video-generation routing, anon visitors converse only."""
     if request.method == "OPTIONS":
         return ("", 204)  # CORS preflight (headers added in after_request)
 
