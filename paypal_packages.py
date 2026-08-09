@@ -281,6 +281,7 @@ def generate_order_id() -> str:
 
 
 def _request_json_object():
+    """Parse the request body as a JSON object, or return a 400 error response."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -290,6 +291,7 @@ def _request_json_object():
 
 
 def _optional_string_field(data: dict, field_name: str):
+    """Extract and trim an optional string field, or return a 400 error if the type is wrong."""
     value = data.get(field_name)
     if value is None:
         return "", None
@@ -299,6 +301,7 @@ def _optional_string_field(data: dict, field_name: str):
 
 
 def _optional_int_field(data: dict, field_name: str):
+    """Extract an optional positive-int field, or return a 400 error if invalid."""
     value = data.get(field_name)
     if value is None:
         return None, None
@@ -310,14 +313,17 @@ def _optional_int_field(data: dict, field_name: str):
 
 
 def _to_usd(value) -> Decimal:
+    """Quantize a value to 2 decimal places (USD cents)."""
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _to_rtc(value) -> Decimal:
+    """Quantize a value to 6 decimal places (RTC's smallest unit)."""
     return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
 def _extract_capture_details(payload: dict):
+    """Pull the first capture id and captured USD amount out of a PayPal order/webhook payload."""
     capture_id = ""
     amount_usd = None
     for purchase_unit in payload.get("purchase_units", []):
@@ -347,6 +353,7 @@ def _record_store_transaction(
     external_id: str = "",
     note: str = "",
 ) -> bool:
+    """Insert a store transaction row, deduped by (transaction_type, external_id); returns False if already recorded."""
     if external_id:
         existing = db.execute(
             """
@@ -411,6 +418,7 @@ def debit_rtc_from_agent(db, agent_id: int, amount: Decimal, reason: str) -> Non
 
 
 def _complete_order(db, order, *, capture_id: str, capture_amount_usd=None):
+    """Mark an order completed and credit RTC, idempotently keyed on the PayPal capture id."""
     order_amount = _to_usd(order["amount_usd"])
     rtc_amount = _to_rtc(order["rtc_amount"])
     if capture_amount_usd is not None and capture_amount_usd != order_amount:
@@ -470,6 +478,7 @@ def _refund_order(
     refund_amount_usd: Decimal,
     note: str = "",
 ):
+    """Apply a (possibly partial) refund to an order, debiting RTC proportionally and idempotent on refund_id."""
     if refund_id:
         existing = db.execute(
             """
