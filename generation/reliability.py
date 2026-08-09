@@ -30,6 +30,7 @@ class RetryPolicy:
     jitter_s: float = 0.2
 
     def delay_for(self, attempt_index: int) -> float:
+        """Compute the backoff delay (with jitter) before retrying the given attempt."""
         delay = min(self.max_delay_s, self.base_delay_s * (2 ** max(0, attempt_index)))
         if self.jitter_s:
             delay += random.uniform(0.0, self.jitter_s)
@@ -48,9 +49,11 @@ class ProviderMetrics:
 
     @property
     def avg_latency_s(self) -> float:
+        """Mean latency per attempt, or 0.0 if there have been no attempts."""
         return self.total_latency_s / self.attempts if self.attempts else 0.0
 
     def to_dict(self) -> dict:
+        """Serialize these metrics for JSON/CLI output."""
         return {
             "attempts": self.attempts,
             "successes": self.successes,
@@ -79,16 +82,19 @@ def classify_error(error: object) -> str:
 
 
 def is_retryable(category: str) -> bool:
+    """Return True if an error category is worth retrying (transient/throttled)."""
     return category in {"transient", "throttled"}
 
 
 def _semantic_failure_detail(value: object) -> object:
+    """Pull the detail element out of a (bool, detail)-style success_predicate failure, if shaped that way."""
     if isinstance(value, (tuple, list)) and len(value) >= 2:
         return value[1]
     return value
 
 
 def record_provider_metric(provider: str, *, success: bool, latency_s: float, category: Optional[str] = None) -> dict:
+    """Record one attempt's outcome against a provider's running metrics and return the updated snapshot."""
     metrics = _PROVIDER_METRICS.setdefault(provider, ProviderMetrics())
     metrics.attempts += 1
     metrics.total_latency_s += max(0.0, latency_s)
@@ -102,6 +108,7 @@ def record_provider_metric(provider: str, *, success: bool, latency_s: float, ca
 
 
 def provider_metrics_snapshot() -> Dict[str, dict]:
+    """Return a serialized snapshot of metrics for every provider tracked so far."""
     return {name: metrics.to_dict() for name, metrics in _PROVIDER_METRICS.items()}
 
 
