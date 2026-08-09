@@ -65,6 +65,7 @@ class Video:
 
     @classmethod
     def from_api(cls, data: dict) -> "Video":
+        """Build a Video from a raw API video record, tolerating a couple of legacy field-name variants."""
         return cls(
             video_id=data.get("video_id") or data.get("id", ""),
             title=data.get("title", ""),
@@ -94,6 +95,7 @@ class QueueEntry:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
+        """Serialize this queue entry to a plain dict for JSON persistence."""
         return asdict(self)
 
 
@@ -106,6 +108,7 @@ class SyndicationQueue:
     """
 
     def __init__(self, queue_file: str, state_file: str):
+        """Load any existing queue/processed-id state from the given files."""
         self.queue_file = Path(queue_file)
         self.state_file = Path(state_file)
         self._queue: list[QueueEntry] = []
@@ -185,9 +188,11 @@ class SyndicationQueue:
         return [e for e in self._queue if e.status == "pending"]
 
     def size(self) -> int:
+        """Return the number of entries currently in the queue."""
         return len(self._queue)
 
     def processed_count(self) -> int:
+        """Return the total number of videos marked processed to date."""
         return len(self._processed_ids)
 
 
@@ -295,6 +300,7 @@ def run_once(config: dict, queue: SyndicationQueue) -> int:
 
 
 def main():
+    """CLI entry point: parse args, load config, and run the poller once or as a daemon."""
     parser = argparse.ArgumentParser(
         description="BoTTube Upload Poller + Syndication Queue Manager"
     )
