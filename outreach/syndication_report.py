@@ -49,10 +49,12 @@ class SyndicationRun:
     duration_ms: int
 
     def to_dict(self) -> dict:
+        """Convert this run to a plain dict for JSON serialization."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SyndicationRun":
+        """Rebuild a SyndicationRun from a dict previously produced by to_dict()."""
         return cls(**d)
 
 
@@ -77,28 +79,34 @@ class SyndicationLogger:
     """
 
     def __init__(self, log_file: str = DEFAULT_RUN_LOG):
+        """Load run history from log_file, creating an empty history if it doesn't exist yet."""
         self.log_file = Path(log_file)
         self._runs: list[SyndicationRun] = []
         self._load()
 
     def _load(self):
+        """Populate self._runs from log_file on disk, if present."""
         if self.log_file.exists():
             with open(self.log_file) as f:
                 data = json.load(f)
                 self._runs = [SyndicationRun.from_dict(r) for r in data]
 
     def _save(self):
+        """Persist the full in-memory run history to log_file as JSON."""
         with open(self.log_file, "w") as f:
             json.dump([r.to_dict() for r in self._runs], f, indent=2)
 
     def log_run(self, run: SyndicationRun):
+        """Append a run to history and persist it immediately."""
         self._runs.append(run)
         self._save()
 
     def get_runs(self, limit: int = 10) -> list[SyndicationRun]:
+        """Return the most recent `limit` runs, oldest first."""
         return self._runs[-limit:]
 
     def get_all_runs(self) -> list[SyndicationRun]:
+        """Return every recorded run."""
         return list(self._runs)
 
     def get_platform_stats(self) -> dict:
@@ -114,6 +122,7 @@ class SyndicationLogger:
         return stats
 
     def get_total_stats(self) -> dict:
+        """Sum detected/queued/processed/skipped/errors counts across all recorded runs."""
         total = {"detected": 0, "queued": 0, "processed": 0, "skipped": 0, "errors": 0, "runs": len(self._runs)}
         for run in self._runs:
             total["detected"] += run.videos_detected
@@ -258,6 +267,7 @@ def seed_demo_data(logger: SyndicationLogger):
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI entrypoint: parse args and dispatch to seed/export/status/report handlers."""
     parser = argparse.ArgumentParser(description="Syndication Run Reporter")
     parser.add_argument("--log-file", default=DEFAULT_RUN_LOG, help="Path to syndication run log")
     parser.add_argument("--status", action="store_true", help="Show aggregate stats")
