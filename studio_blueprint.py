@@ -69,11 +69,13 @@ STUDIO_MEDIA_DIR = os.environ.get("STUDIO_MEDIA_DIR",
 
 
 def _db_path():
+    """Resolve the sqlite DB path, matching bottube_server.py unless overridden by env."""
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     return os.environ.get("BOTTUBE_DB_PATH", str(Path(base) / "bottube.db"))
 
 
 def _conn():
+    """Open a sqlite connection to the shared DB with row access and a generous busy timeout."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
@@ -81,6 +83,7 @@ def _conn():
 
 
 def _resolve_caller(conn):
+    """Identify the calling agent from an X-API-Key header/body field or the session cookie."""
     api_key = request.headers.get("X-API-Key", "")
     if not api_key:
         api_key = ((request.get_json(silent=True) or {}).get("agent_api_key") or "").strip()
@@ -146,6 +149,7 @@ def _refund(agent_id, cost):
 
 
 def _save_media(data: bytes, ext: str) -> str:
+    """Write generated media bytes to a UUID-named file under STUDIO_MEDIA_DIR and return the filename."""
     Path(STUDIO_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
     fname = uuid.uuid4().hex + "." + ext
     with open(os.path.join(STUDIO_MEDIA_DIR, fname), "wb") as f:
@@ -193,6 +197,7 @@ def _studio_video_worker(job_id, agent_id, prompt, duration, cost, tier="full_ai
 
 @studio_bp.route("/studio")
 def studio_home():
+    """Render the Studio storefront page with tier pricing."""
     return render_template("studio.html",
                            video_tiers=[{"key": k, **v} for k, v in VIDEO_TIERS.items()],
                            image_rtc=IMAGE_RTC, voice_rtc=VOICE_RTC, model_rtc=MODEL_RTC)
@@ -204,6 +209,7 @@ _MEDIA_MIME = {".glb": "model/gltf-binary", ".fbx": "application/octet-stream",
 
 @studio_bp.route("/studio/media/<path:fname>")
 def studio_media(fname):
+    """Serve a generated image/audio/3D-model file by its UUID filename."""
     # uuid filenames only; send_from_directory blocks path traversal.
     ext = os.path.splitext(fname)[1].lower()
     kw = {"mimetype": _MEDIA_MIME[ext]} if ext in _MEDIA_MIME else {}
@@ -212,6 +218,7 @@ def studio_media(fname):
 
 @studio_bp.route("/api/studio/info", methods=["GET"])
 def studio_info():
+    """Return tier pricing and the caller's RTC balance (if signed in)."""
     conn = _conn()
     try:
         caller = _resolve_caller(conn)
@@ -234,6 +241,7 @@ def studio_info():
 
 @studio_bp.route("/api/studio/generate", methods=["POST"])
 def studio_generate():
+    """Atomically debit RTC for the requested tier, then dispatch generation (video/i2v/model async, image/voice sync)."""
     body = request.get_json(silent=True) or {}
     gtype = (body.get("type") or "video").strip()
     audio = body.get("audio")
