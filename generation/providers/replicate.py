@@ -35,9 +35,11 @@ VIDEO_HEIGHT = 720
 class ReplicateProvider(GenerationProvider):
 
     def get_name(self) -> str:
+        """Return this provider's registry key."""
         return "replicate"
 
     def get_capabilities(self) -> ProviderCapabilities:
+        """Describe what this provider supports (modes, limits, cost/quality tier, availability)."""
         return ProviderCapabilities(
             name="replicate",
             modes=[GenerationMode.text_to_video],
@@ -53,6 +55,7 @@ class ReplicateProvider(GenerationProvider):
         )
 
     def validate_input(self, req: GenerationRequest) -> Tuple[bool, str]:
+        """Check the request has a prompt and the API token is configured before submitting."""
         if not req.prompt:
             return False, "prompt is required"
         if not REPLICATE_API_TOKEN:
@@ -60,6 +63,7 @@ class ReplicateProvider(GenerationProvider):
         return True, ""
 
     def submit(self, req: GenerationRequest, output_dir: Path) -> Tuple[bool, str]:
+        """Create a Replicate prediction; returns (ok, poll_url_or_error)."""
         payload = json.dumps({
             "version": REPLICATE_MODEL_VERSION,
             "input": {
@@ -112,6 +116,7 @@ class ReplicateProvider(GenerationProvider):
             return "pending", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
+        """Download a completed prediction's video and re-encode it to the standard output format."""
         try:
             req = urllib.request.Request(
                 external_id,
@@ -150,6 +155,7 @@ class ReplicateProvider(GenerationProvider):
             return None
 
     def cancel(self, external_id: str) -> bool:
+        """Request cancellation of a queued/running prediction; returns True if the call succeeded."""
         try:
             cancel_url = external_id + "/cancel"
             req = urllib.request.Request(
