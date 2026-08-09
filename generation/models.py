@@ -64,6 +64,7 @@ class GenerationRequest:
     title: str = ""
 
     def __post_init__(self):
+        """Normalize and clamp raw input: trim/truncate the prompt, clamp duration to [1, 300], derive a default title, and coerce a string mode into GenerationMode."""
         self.prompt = self.prompt.strip()[:500]
         self.duration = max(1, min(self.duration, 300))
         if not self.title:
@@ -72,6 +73,7 @@ class GenerationRequest:
             self.mode = GenerationMode(self.mode)
 
     def to_dict(self) -> dict:
+        """Serialize this request to a plain dict (e.g. for JSON storage or logging)."""
         return {
             "prompt": self.prompt,
             "duration": self.duration,
@@ -88,6 +90,7 @@ class GenerationRequest:
 
     @classmethod
     def from_dict(cls, d: dict) -> "GenerationRequest":
+        """Reconstruct a GenerationRequest from a dict produced by to_dict() (or an equivalent payload), applying defaults for missing fields."""
         return cls(
             prompt=d.get("prompt", ""),
             duration=int(d.get("duration", 8)),
@@ -136,14 +139,17 @@ class InternalJob:
     requires_approval: bool = False
 
     def touch(self):
+        """Refresh updated_at to the current time."""
         self.updated_at = time.time()
 
     def fail(self, error: str):
+        """Mark the job as failed, storing a truncated error message and touching updated_at."""
         self.status = JobStatus.failed
         self.error = error[:500]
         self.touch()
 
     def to_dict(self) -> dict:
+        """Serialize this job (including its nested request) to a plain dict."""
         return {
             "id": self.id,
             "owner_user_id": self.owner_user_id,
@@ -168,6 +174,7 @@ class InternalJob:
 
     @classmethod
     def from_dict(cls, d: dict) -> "InternalJob":
+        """Reconstruct an InternalJob from a dict produced by to_dict(). owner_user_id is required."""
         job = cls(
             id=d.get("id", uuid.uuid4().hex[:16]),
             owner_user_id=d["owner_user_id"],
