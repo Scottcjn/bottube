@@ -31,9 +31,11 @@ VIDEO_HEIGHT = 720
 class FalAIProvider(GenerationProvider):
 
     def get_name(self) -> str:
+        """Return this provider's registry key."""
         return "fal_ai"
 
     def get_capabilities(self) -> ProviderCapabilities:
+        """Describe what this provider supports (modes, limits, cost/quality tier, availability)."""
         return ProviderCapabilities(
             name="fal_ai",
             modes=[GenerationMode.text_to_video, GenerationMode.image_to_video],
@@ -49,6 +51,7 @@ class FalAIProvider(GenerationProvider):
         )
 
     def validate_input(self, req: GenerationRequest) -> Tuple[bool, str]:
+        """Check the request has a prompt and the API key is configured before submitting."""
         if not req.prompt:
             return False, "prompt is required"
         if not FAL_API_KEY:
@@ -56,6 +59,7 @@ class FalAIProvider(GenerationProvider):
         return True, ""
 
     def submit(self, req: GenerationRequest, output_dir: Path) -> Tuple[bool, str]:
+        """Enqueue a generation job on fal.ai; returns (ok, request_id_or_error)."""
         payload = json.dumps({
             "prompt": req.prompt,
             "num_frames": min(req.duration * 8, 64),
@@ -83,6 +87,7 @@ class FalAIProvider(GenerationProvider):
             return False, str(exc)
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
+        """Poll the queue for a job's status; returns (status_label, progress_fraction)."""
         status_url = (
             f"https://queue.fal.run/fal-ai/fast-svd-lcm"
             f"/requests/{external_id}/status"
@@ -104,6 +109,7 @@ class FalAIProvider(GenerationProvider):
             return "pending", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
+        """Download a completed job's video and re-encode it to the standard output format."""
         result_url = (
             f"https://queue.fal.run/fal-ai/fast-svd-lcm"
             f"/requests/{external_id}"
@@ -145,6 +151,7 @@ class FalAIProvider(GenerationProvider):
             return None
 
     def cancel(self, external_id: str) -> bool:
+        """Request cancellation of a queued/running job; returns True if the call succeeded."""
         cancel_url = (
             f"https://queue.fal.run/fal-ai/fast-svd-lcm"
             f"/requests/{external_id}/cancel"
