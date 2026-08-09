@@ -31,9 +31,11 @@ VIDEO_HEIGHT = 720
 class StabilityProvider(GenerationProvider):
 
     def get_name(self) -> str:
+        """Return this provider's registry key."""
         return "stability"
 
     def get_capabilities(self) -> ProviderCapabilities:
+        """Describe what this provider supports (modes, limits, styles, cost/quality tier, availability)."""
         return ProviderCapabilities(
             name="stability",
             modes=[GenerationMode.text_to_video, GenerationMode.text_to_image_sequence],
@@ -50,6 +52,7 @@ class StabilityProvider(GenerationProvider):
         )
 
     def validate_input(self, req: GenerationRequest) -> Tuple[bool, str]:
+        """Check the request has a prompt and the API key is configured before submitting."""
         if not req.prompt:
             return False, "prompt is required"
         if not STABILITY_API_KEY:
@@ -57,6 +60,7 @@ class StabilityProvider(GenerationProvider):
         return True, ""
 
     def submit(self, req: GenerationRequest, output_dir: Path) -> Tuple[bool, str]:
+        """Generate a still image via Stable Image Core, then animate it with a Ken Burns zoom into a video."""
         # Step 1: Generate image via Stable Image Core
         boundary = "----FormBoundary" + uuid.uuid4().hex[:16]
         body_parts = []
@@ -118,10 +122,12 @@ class StabilityProvider(GenerationProvider):
         return False, "ffmpeg ken-burns animation failed"
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
+        """Report job status; submit() runs synchronously, so this just checks the output file exists."""
         if external_id and Path(external_id).exists():
             return "completed", 1.0
         return "failed", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
+        """Return the generated video path if it exists on disk."""
         p = Path(external_id)
         return p if p.exists() else None
