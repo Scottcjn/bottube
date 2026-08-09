@@ -52,18 +52,21 @@ IMPLEMENTED_GRANTS = {"test_payment"}
 
 
 def _db_path() -> str:
+    """Resolve the sqlite DB path, matching bottube_server.py unless overridden by env."""
     # Default matches bottube_server.py (BASE_DIR/bottube.db); env can override.
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
     return os.environ.get("BOTTUBE_DB_PATH", str(Path(base) / "bottube.db"))
 
 
 def _conn():
+    """Open a sqlite connection to the payments DB with a generous busy timeout."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.execute("PRAGMA busy_timeout=30000")
     return c
 
 
 def init_pi_payment_tables(db_path: str = None):
+    """Create the pi_payments table if it doesn't already exist."""
     path = db_path or _db_path()
     conn = sqlite3.connect(path, timeout=30)
     try:
@@ -86,10 +89,12 @@ def init_pi_payment_tables(db_path: str = None):
 
 
 def _pi_headers():
+    """Build the auth headers required by the Pi Platform API."""
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 
 def _pi_get_payment(payment_id: str):
+    """Fetch the authoritative payment record from the Pi API."""
     r = requests.get(f"{PI_API_BASE}/payments/{payment_id}",
                      headers=_pi_headers(), timeout=PI_TIMEOUT)
     r.raise_for_status()
@@ -97,6 +102,7 @@ def _pi_get_payment(payment_id: str):
 
 
 def _verify_against_products(p: dict):
+    """Check a Pi payment's product+amount against PI_PRODUCTS; return (product, amount) or (None, reason)."""
     product = (p.get("metadata") or {}).get("product", "")
     exp = PI_PRODUCTS.get(product)
     if not exp:
@@ -119,6 +125,7 @@ def _grant_entitlement(pi_uid: str, product: str, payment_id: str) -> bool:
 
 @pi_pay_bp.route("/pi/health", methods=["GET"])
 def pi_health():
+    """Report Pi integration config status, active network, and server-authoritative prices."""
     return jsonify({
         "ok": True,
         "configured": bool(PI_API_KEY),
@@ -130,6 +137,7 @@ def pi_health():
 
 @pi_pay_bp.route("/pi/approve", methods=["POST"])
 def pi_approve():
+    """Server-side approval leg: re-verify the payment against Pi and our product table, then call Pi /approve."""
     if not PI_API_KEY:
         return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
     payment_id = ((request.get_json(silent=True) or {}).get("payment_id") or "").strip()
@@ -173,6 +181,7 @@ def pi_approve():
 
 @pi_pay_bp.route("/pi/complete", methods=["POST"])
 def pi_complete():
+    """Server-side completion leg: re-verify, call Pi /complete, then grant the entitlement idempotently."""
     if not PI_API_KEY:
         return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
     data = request.get_json(silent=True) or {}
