@@ -123,6 +123,7 @@ FALLBACK_QUOTES = [
 ]
 
 def fetch_dynamic_quotes(count=36):
+    """Fetch quotes from a public quotes API, falling back to the static list on error."""
     quotes = []
     try:
         req = urllib.request.Request("https://dummyjson.com/quotes?limit=100", headers={'User-Agent': 'Mozilla/5.0'})
@@ -142,6 +143,7 @@ def fetch_dynamic_quotes(count=36):
     return quotes[:count]
 
 def create_gradient_bg(width, height, color1, color2):
+    """Build a vertical two-color gradient image of the given size."""
     base = Image.new('RGB', (width, height), color1)
     top = Image.new('RGB', (width, height), color2)
     # Using PIL native gradient to avoid building large masks in Python.
@@ -151,6 +153,7 @@ def create_gradient_bg(width, height, color1, color2):
     return base
 
 def render_movie(quote, author, style, font_path, out_file):
+    """Render an animated quote video (one of three text-reveal styles) and encode it via ffmpeg."""
     W, H = 720, 720
     FPS = 15
     DURATION = 5.0
@@ -171,6 +174,7 @@ def render_movie(quote, author, style, font_path, out_file):
         font_size = 12
 
     def wrap_text(text, font, max_width):
+        """Greedily wrap text into lines that fit within max_width for the given font."""
         words = text.split()
         lines = []
         current_line = []
@@ -285,6 +289,7 @@ def render_movie(quote, author, style, font_path, out_file):
         raise RuntimeError(f"ffmpeg failed with return code {p.returncode}: {err.decode('utf-8', errors='ignore')}")
 
 def upload_video(file_path, idx):
+    """Upload a rendered video file to the BotTube API using the configured API key."""
     title = f"Daily Inspiration #{idx}"
     desc = "#quote #inspiration Animated by KineticTypo_Bot_by_Yuzengbao"
     import requests # Fallback to requests for multipart data
@@ -306,6 +311,7 @@ def upload_video(file_path, idx):
         print(f"Upload failed for {file_path}: {e}")
 
 def main():
+    """Fetch quotes, render an animated video for each, then upload them all to BotTube."""
     quotes = fetch_dynamic_quotes(36)
     styles = ["typewriter", "slide_up", "fade_words"]
     
