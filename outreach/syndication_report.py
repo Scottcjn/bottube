@@ -37,7 +37,19 @@ DEFAULT_STATE = "syndication_state.json"
 
 @dataclass
 class SyndicationRun:
-    """A single syndication run (one poll cycle)."""
+    """Record one persisted syndication poll cycle.
+
+    Attributes:
+        run_id: Stable identifier for the poll cycle.
+        timestamp: ISO-8601 UTC timestamp for when the run was recorded.
+        videos_detected: Number of candidate videos discovered.
+        videos_queued: Number of videos queued for syndication.
+        videos_processed: Number of videos fully processed during the run.
+        videos_skipped: Number of videos skipped without posting.
+        platforms: Per-platform counters keyed by platform name.
+        errors: Human-readable error messages collected during the run.
+        duration_ms: End-to-end runtime for the poll cycle in milliseconds.
+    """
     run_id: str
     timestamp: str
     videos_detected: int
@@ -49,12 +61,23 @@ class SyndicationRun:
     duration_ms: int
 
     def to_dict(self) -> dict:
-        """Convert this run to a plain dict for JSON serialization."""
+        """Return a JSON-serializable representation of the run.
+
+        Returns:
+            dict: Plain dataclass data suitable for ``json.dump``.
+        """
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SyndicationRun":
-        """Rebuild a SyndicationRun from a dict previously produced by to_dict()."""
+        """Rebuild a run instance from persisted JSON data.
+
+        Args:
+            d: Mapping previously produced by :meth:`to_dict`.
+
+        Returns:
+            SyndicationRun: Reconstructed run object.
+        """
         return cls(**d)
 
 
@@ -73,44 +96,68 @@ class SyndicationResult:
 # ── Run Logger ────────────────────────────────────────────────────────────────
 
 class SyndicationLogger:
-    """
-    Persists syndication runs to disk.
-    Each run = one poll cycle. Maintainers can review history.
+    """Persist and summarize historical syndication poll runs.
+
+    The logger keeps an in-memory list of :class:`SyndicationRun` objects and
+    mirrors that list to a JSON file so maintainers can inspect recent activity,
+    aggregate counts, and long-term history.
     """
 
     def __init__(self, log_file: str = DEFAULT_RUN_LOG):
-        """Load run history from log_file, creating an empty history if it doesn't exist yet."""
+        """Initialize the logger and eagerly load any existing history.
+
+        Args:
+            log_file: JSON file used for persistent run storage.
+        """
         self.log_file = Path(log_file)
         self._runs: list[SyndicationRun] = []
         self._load()
 
     def _load(self):
-        """Populate self._runs from log_file on disk, if present."""
+        """Load persisted run history from disk into memory.
+
+        Missing files are treated as an empty history instead of an error.
+        """
         if self.log_file.exists():
             with open(self.log_file) as f:
                 data = json.load(f)
                 self._runs = [SyndicationRun.from_dict(r) for r in data]
 
     def _save(self):
-        """Persist the full in-memory run history to log_file as JSON."""
+        """Write the full in-memory history back to ``log_file``."""
         with open(self.log_file, "w") as f:
             json.dump([r.to_dict() for r in self._runs], f, indent=2)
 
     def log_run(self, run: SyndicationRun):
-        """Append a run to history and persist it immediately."""
+        """Append one completed run and persist it immediately.
+
+        Args:
+            run: Newly completed syndication cycle to record.
+        """
         self._runs.append(run)
         self._save()
 
     def get_runs(self, limit: int = 10) -> list[SyndicationRun]:
-        """Return the most recent `limit` runs, oldest first."""
+        """Return up to the most recent ``limit`` runs in stored order.
+
+        Args:
+            limit: Maximum number of runs to return.
+
+        Returns:
+            list[SyndicationRun]: Tail slice of the persisted history.
+        """
         return self._runs[-limit:]
 
     def get_all_runs(self) -> list[SyndicationRun]:
-        """Return every recorded run."""
+        """Return a shallow copy of the full recorded history."""
         return list(self._runs)
 
     def get_platform_stats(self) -> dict:
-        """Aggregate stats per platform."""
+        """Aggregate posted/failed/pending counters by platform name.
+
+        Returns:
+            dict: ``platform -> {posted, failed, pending}`` summary map.
+        """
         stats = {}
         for run in self._runs:
             for platform, data in run.platforms.items():
@@ -122,7 +169,12 @@ class SyndicationLogger:
         return stats
 
     def get_total_stats(self) -> dict:
-        """Sum detected/queued/processed/skipped/errors counts across all recorded runs."""
+        """Aggregate top-level counters across every stored run.
+
+        Returns:
+            dict: Totals for detected, queued, processed, skipped, errors, and
+            overall run count.
+        """
         total = {"detected": 0, "queued": 0, "processed": 0, "skipped": 0, "errors": 0, "runs": len(self._runs)}
         for run in self._runs:
             total["detected"] += run.videos_detected
