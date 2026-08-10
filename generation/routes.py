@@ -54,6 +54,7 @@ def _json_object_body():
 
 
 def _string_field(data: dict, field_name: str, default: str = ""):
+    """Extract and strip a string field from the request body, or an error response."""
     value = data.get(field_name, default)
     if value is None:
         value = default
@@ -63,6 +64,7 @@ def _string_field(data: dict, field_name: str, default: str = ""):
 
 
 def _integer_field(data: dict, field_names, default: int = 0, error_name: str = "value"):
+    """Extract an integer from the first matching field name, or an error response."""
     for field_name in field_names:
         if field_name in data:
             value = data[field_name]
@@ -85,6 +87,7 @@ def _require_api_key(f):
     """Accept X-API-Key header or agent_api_key in JSON body."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Resolve and validate the API key, then call the wrapped view with g.agent set."""
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             data, error = _json_object_body()
@@ -133,6 +136,7 @@ def _check_rate(api_key: str) -> int | None:
 
 
 def _record_rate(api_key: str):
+    """Stamp the current time as the last generation request for this API key."""
     import time
     _rate_map[api_key] = time.time()
 
