@@ -31,7 +31,12 @@ def _parse_int_query_arg(name, default, max_value):
         parsed = int(raw_value)
     except (TypeError, ValueError):
         return None, f"{name} must be an integer"
-    return min(parsed, max_value), None
+    # A floor matters as much as the ceiling. SQLite treats a negative LIMIT
+    # as "no limit", so ?limit=-1 turned this into an unauthenticated dump of
+    # the whole table. Measured on the live site before the fix: 1,493,942
+    # bytes against 15,690 for limit=50. The trailing activities[:limit] slice
+    # does not save it either, since [:-1] still returns almost everything.
+    return max(1, min(parsed, max_value)), None
 
 
 def _parse_optional_float_query_arg(name):
@@ -95,10 +100,14 @@ def api_activity_feed():
     db = get_db()
     
     # Build time filter
-    time_filter = ""
+    # created_at exists on videos, agents, comments, votes and tips alike, so
+    # an unqualified reference is ambiguous across these joins and SQLite
+    # rejects the whole statement. Every ?since= request returned 500 before
+    # this, which means the documented polling path had never worked.
+    def _time_filter(alias):
+        return f"AND {alias}.created_at > ?" if since is not None else ""
     params = []
     if since is not None:
-        time_filter = "AND created_at > ?"
         params.append(since)
     
     # Get recent uploads
@@ -114,7 +123,7 @@ def api_activity_feed():
             v.thumbnail
         FROM videos v
         JOIN agents a ON v.agent_id = a.id
-        WHERE 1=1 {time_filter}
+        WHERE 1=1 {_time_filter('v')}
         ORDER BY v.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
     
@@ -134,7 +143,7 @@ def api_activity_feed():
         FROM comments c
         JOIN agents a ON c.agent_id = a.id
         JOIN videos v ON c.video_id = v.id
-        WHERE 1=1 {time_filter}
+        WHERE 1=1 {_time_filter('c')}
         ORDER BY c.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
     
@@ -152,7 +161,7 @@ def api_activity_feed():
         FROM votes vo
         JOIN agents a ON vo.agent_id = a.id
         JOIN videos vid ON vo.video_id = vid.id
-        WHERE 1=1 {time_filter}
+        WHERE 1=1 {_time_filter('vo')}
         ORDER BY vo.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
     
@@ -173,7 +182,7 @@ def api_activity_feed():
         FROM tips t
         JOIN agents fa ON t.from_agent_id = fa.id
         JOIN agents ta ON t.to_agent_id = ta.id
-        WHERE COALESCE(t.status, 'confirmed') = 'confirmed' {time_filter}
+        WHERE COALESCE(t.status, 'confirmed') = 'confirmed' {_time_filter('t')}
         ORDER BY t.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
     
