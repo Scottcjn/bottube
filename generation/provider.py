@@ -91,14 +91,17 @@ class ProviderRegistry:
     """Thread-safe registry of provider adapters."""
 
     def __init__(self):
+        """Start with an empty provider map."""
         self._providers: Dict[str, GenerationProvider] = {}
 
     def register(self, provider: GenerationProvider):
+        """Add or replace a provider adapter under its own name."""
         name = provider.get_name()
         self._providers[name] = provider
         log.info("Registered provider: %s", name)
 
     def get(self, name: str) -> Optional[GenerationProvider]:
+        """Look up a registered provider by name, or None if unknown."""
         return self._providers.get(name)
 
     def list_available(self) -> List[GenerationProvider]:
@@ -109,7 +112,9 @@ class ProviderRegistry:
         ]
 
     def list_all(self) -> List[GenerationProvider]:
+        """Return every registered provider, regardless of availability."""
         return list(self._providers.values())
 
     def names(self) -> List[str]:
+        """Return the names of all registered providers."""
         return list(self._providers.keys())
