@@ -34,9 +34,11 @@ VIDEO_HEIGHT = 720
 class HuggingFaceProvider(GenerationProvider):
 
     def get_name(self) -> str:
+        """Return this provider's registry key."""
         return "huggingface"
 
     def get_capabilities(self) -> ProviderCapabilities:
+        """Describe what this provider supports (modes, limits, cost/quality tier, availability)."""
         return ProviderCapabilities(
             name="huggingface",
             modes=[GenerationMode.text_to_video],
@@ -52,6 +54,7 @@ class HuggingFaceProvider(GenerationProvider):
         )
 
     def validate_input(self, req: GenerationRequest) -> Tuple[bool, str]:
+        """Check the request has a prompt, the API token is configured, and the mode is text_to_video."""
         if not req.prompt:
             return False, "prompt is required"
         if not HF_API_TOKEN:
@@ -108,18 +111,21 @@ class HuggingFaceProvider(GenerationProvider):
         return False, "all attempts exhausted"
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
+        """Report job status; submit() runs synchronously, so this just checks the output file exists."""
         # Synchronous provider -- result is the file path
         if external_id and Path(external_id).exists():
             return "completed", 1.0
         return "failed", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
+        """Return the generated video path if it exists on disk."""
         p = Path(external_id)
         return p if p.exists() else None
 
     # ------------------------------------------------------------------
     @staticmethod
     def _reencode(raw_bytes: bytes, duration: int, output_dir: Path) -> Optional[Path]:
+        """Write the raw HuggingFace video response to disk and re-encode it to the standard output format."""
         raw_path = output_dir / f"hf_raw_{uuid.uuid4().hex[:8]}.mp4"
         out_path = output_dir / f"hf_{uuid.uuid4().hex[:8]}.mp4"
         raw_path.write_bytes(raw_bytes)
