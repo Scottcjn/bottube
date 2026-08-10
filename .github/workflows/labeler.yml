@@ -11,6 +11,9 @@ permissions:
 jobs:
   label:
     runs-on: ubuntu-latest
+    # labels should never gate a contribution; fail fast (5 min) so transient
+    # runner/action-download outages don't leave the PR stuck in "pending".
+    timeout-minutes: 5
     steps:
       - uses: actions/labeler@v5
         with:
