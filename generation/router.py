@@ -46,6 +46,7 @@ class GenerationRouter:
     _last_reset: float = 0.0
 
     def __init__(self, registry: ProviderRegistry):
+        """Bind the router to a provider registry it will score candidates from."""
         self.registry = registry
 
     # ------------------------------------------------------------------
@@ -104,6 +105,7 @@ class GenerationRouter:
         req: GenerationRequest,
         mode: str,
     ) -> float:
+        """Score how well a provider fits the request under the given routing mode."""
         caps = prov.get_capabilities()
         score = 0.0
 
@@ -163,10 +165,12 @@ class GenerationRouter:
     # ------------------------------------------------------------------
 
     def _maybe_reset_usage(self):
+        """Clear the hourly usage counters once the reset window has elapsed."""
         now = time.time()
         if now - self._last_reset > 3600:
             self._usage_counts.clear()
             self._last_reset = now
 
     def _record_usage(self, name: str):
+        """Increment the usage counter for a provider that was just selected."""
         self._usage_counts[name] = self._usage_counts.get(name, 0) + 1
