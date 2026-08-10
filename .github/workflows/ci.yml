@@ -53,7 +53,17 @@ jobs:
     
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=. --cov-report=xml || true
+        # Record this branch's failures, then the merge base's, and fail only
+        # if this change ADDED one. `|| true` used to make this step incapable
+        # of failing, so a green tick proved nothing.
+        git fetch --no-tags --depth=1 origin "${{ github.base_ref || 'main' }}"
+        git stash push --include-untracked --quiet || true
+        git checkout --quiet FETCH_HEAD
+        python scripts/ci_baseline_failures.py tests/ > /tmp/base_failures.txt
+        git checkout --quiet -
+        git stash pop --quiet || true
+        python scripts/ci_regression_check.py /tmp/base_failures.txt tests/
+        pytest tests/ -q --cov=. --cov-report=xml || true
     
     - name: Upload coverage
       uses: codecov/codecov-action@v4
