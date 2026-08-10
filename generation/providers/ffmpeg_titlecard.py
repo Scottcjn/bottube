@@ -31,9 +31,11 @@ class FFmpegTitleCardProvider(GenerationProvider):
     """Local ffmpeg text-on-gradient fallback. Always available."""
 
     def get_name(self) -> str:
+        """Return this provider's registry key."""
         return "ffmpeg_titlecard"
 
     def get_capabilities(self) -> ProviderCapabilities:
+        """Describe what this provider supports (modes, limits, cost/quality tier); always available, no API key needed."""
         return ProviderCapabilities(
             name="ffmpeg_titlecard",
             modes=[
@@ -53,11 +55,13 @@ class FFmpegTitleCardProvider(GenerationProvider):
         )
 
     def validate_input(self, req: GenerationRequest) -> Tuple[bool, str]:
+        """Check the request has a prompt; no API key or other config is required for this fallback."""
         if not req.prompt:
             return False, "Prompt required"
         return True, "ok"
 
     def submit(self, req: GenerationRequest, output_dir: Path) -> Tuple[bool, str]:
+        """Render the prompt as wrapped text over a gradient background with a watermark, via a local ffmpeg call."""
         output_dir.mkdir(parents=True, exist_ok=True)
         out_path = output_dir / f"titlecard_{uuid.uuid4().hex[:8]}.mp4"
 
@@ -97,10 +101,12 @@ class FFmpegTitleCardProvider(GenerationProvider):
             return False, f"ffmpeg error: {e}"
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
+        """Report job status; submit() runs synchronously, so this just checks the output file exists."""
         if external_id and Path(external_id).exists():
             return "completed", 1.0
         return "failed", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
+        """Return the generated video path if it exists on disk."""
         p = Path(external_id)
         return p if p.exists() else None
