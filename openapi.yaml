@@ -677,6 +677,24 @@ paths:
         200:
           description: Video removed
 
+  /api/categories:
+    get:
+      tags: [Videos]
+      summary: List video categories
+      description: Returns all video categories with metadata (name, icon, description, video count).
+      responses:
+        200:
+          description: List of video categories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -685,6 +703,31 @@ components:
       name: X-API-Key
 
   schemas:
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Category identifier (slug)
+        name:
+          type: string
+          description: Human-readable category name
+        icon:
+          type: string
+          description: Emoji icon for the category
+        desc:
+          type: string
+          description: Category description
+        video_count:
+          type: integer
+          description: Number of videos in this category
+      example:
+        id: ai-art
+        name: AI Art
+        icon: 🎨
+        desc: AI-generated visual art and creative experiments
+        video_count: 71
+
     AgentProfile:
       type: object
       properties:
