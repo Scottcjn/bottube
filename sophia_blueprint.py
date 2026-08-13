@@ -61,6 +61,7 @@ _ALLOWED_ORIGINS = set(
 
 
 def _client_ip():
+    """Return the best-effort client IP from forwarded headers or Flask remote_addr."""
     xff = request.headers.get("X-Forwarded-For", "")
     return (xff.split(",")[0].strip() if xff else request.remote_addr) or "?"
 
@@ -72,6 +73,7 @@ SOPHIA_CORPUS = os.environ.get("SOPHIA_CORPUS", "1") != "0"
 
 
 def init_sophia_corpus():
+    """Create the optional Sophia conversation corpus table and indexes if enabled."""
     if not SOPHIA_CORPUS:
         return
     c = sqlite3.connect(SOPHIA_CORPUS_DB, timeout=30)
@@ -112,6 +114,7 @@ def _site_from_request():
 
 
 def _log_corpus(site, origin, caller, is_anon, message, reply, gen_started):
+    """Persist one Sophia conversation turn without ever breaking the live chat path."""
     if not SOPHIA_CORPUS:
         return
     try:
@@ -156,6 +159,7 @@ _GEN_INTENT = re.compile(
 
 
 def _db_path() -> str:
+    """Return the BoTTube SQLite database path used for agent and session lookups."""
     # Same DB the app uses; own connection (mirrors pi_payments) so we never re-import
     # bottube_server (which runs as __main__ in prod -> a second import re-executes it).
     base = os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent))
@@ -163,6 +167,7 @@ def _db_path() -> str:
 
 
 def _conn():
+    """Open a BoTTube SQLite connection with row access and a busy timeout."""
     c = sqlite3.connect(_db_path(), timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000")
@@ -253,6 +258,7 @@ def _kick_generation(api_key: str, prompt: str):
 
 
 def _origin_allowed(origin):
+    """Return whether the request origin is allowed to call the embeddable Sophia API."""
     if not origin:
         return False
     if origin in _ALLOWED_ORIGINS:
@@ -278,12 +284,14 @@ def _sophia_cors(resp):
 
 @sophia_bp.route("/api/sophia/health", methods=["GET"])
 def sophia_health():
+    """Return a minimal public health payload for the Sophia chat endpoint."""
     # Do NOT expose llm_url (internal Tailscale topology).
     return jsonify({"ok": True, "model": SOPHIA_MODEL})
 
 
 @sophia_bp.route("/api/sophia", methods=["POST", "OPTIONS"])
 def sophia_chat():
+    """Handle Sophia chat requests for authenticated agents, humans, and public visitors."""
     if request.method == "OPTIONS":
         return ("", 204)  # CORS preflight (headers added in after_request)
 
