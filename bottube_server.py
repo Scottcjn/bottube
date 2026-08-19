@@ -3302,6 +3302,44 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "",
     )
 
 
+def debit_rtc(db: sqlite3.Connection, agent_id: int, amount: float) -> bool:
+    """Atomically debit RTC from an agent. Returns True only if it went through.
+
+    The counterpart to :func:`award_rtc`. Every spend path must go through
+    this rather than issuing a bare ``rtc_balance = rtc_balance - ?``.
+
+    A bare subtract preceded by a ``SELECT rtc_balance`` check is a TOCTOU race:
+    the check and the write are two statements, so two concurrent tips can both
+    read the same balance, both decide it is sufficient, and both subtract --
+    leaving the sender negative and crediting recipients with RTC that was
+    never funded. Because the tip handlers credit the *recipient* right after
+    debiting the sender, an unguarded debit does not merely overdraw one
+    account, it mints supply.
+
+    Putting the comparison in the UPDATE's WHERE clause makes the read and the
+    write a single atomic statement. ``rowcount == 0`` means the funds were not
+    there at the instant of the write, and the caller must abort before issuing
+    any matching credit.
+    """
+    cur = db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance - ? "
+        "WHERE id = ? AND rtc_balance >= ?",
+        (amount, agent_id, amount),
+    )
+    return cur.rowcount > 0
+
+
+def _insufficient_balance_response(db: sqlite3.Connection, agent_id: int):
+    """Standard 400 for a debit that lost its race (or was never funded)."""
+    row = db.execute(
+        "SELECT rtc_balance FROM agents WHERE id = ?", (agent_id,)
+    ).fetchone()
+    return jsonify({
+        "error": "Insufficient RTC balance",
+        "balance": row["rtc_balance"] if row else 0,
+    }), 400
+
+
 def _queue_reward_hold(
     db: sqlite3.Connection,
     *,
@@ -7305,6 +7343,47 @@ def get_video(video_id):
 # Agent Mood API (Bounty #2283)
 # ---------------------------------------------------------------------------
 
+
+def _authorize_mood_write(agent_name):
+    """Resolve the mood target named in the URL and authorize the caller.
+
+    ``require_api_key`` only *authenticates*: it proves the caller holds some
+    valid key and stashes that row on ``g.agent``. It never inspects the
+    ``agent_name`` path parameter, and the mood handlers used to re-resolve the
+    target straight from the URL while ignoring ``g.agent`` entirely. The result
+    was horizontal privilege escalation -- any valid API key could write any
+    other agent's mood. PR #1639 closed the *anonymous* hole (no key at all);
+    this closes the *cross-agent* one.
+
+    Authorization is deliberately positive: the caller must either own the
+    target agent, or present an explicit operator admin key. "Holds a valid
+    key" is not sufficient.
+
+    Returns ``(agent_row, None)`` when the write may proceed, otherwise
+    ``(None, (response, status))`` for the handler to return.
+    """
+    db = get_db()
+    agent = db.execute(
+        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
+        (agent_name,),
+    ).fetchone()
+    if not agent:
+        return None, (jsonify({"error": "Agent not found"}), 404)
+
+    caller = getattr(g, "agent", None)
+    if caller is not None and caller["id"] == agent["id"]:
+        return agent, None
+
+    # Explicit operator permission is the only cross-agent escape hatch.
+    if _require_admin() is None:
+        return agent, None
+
+    return None, (jsonify({
+        "error": "Forbidden - your API key does not own this agent",
+        "hint": "Write mood only for your own agent, or supply an admin key.",
+    }), 403)
+
+
 @app.route("/api/v1/agents/<agent_name>/mood", methods=["GET"])
 def get_agent_mood(agent_name):
     """
@@ -7355,18 +7434,11 @@ def update_agent_mood(agent_name):
     """
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
-    
-    db = get_db()
-    
-    # Get agent by name
-    agent = db.execute(
-        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
-        (agent_name,)
-    ).fetchone()
-    
-    if not agent:
-        return jsonify({"error": "Agent not found"}), 404
-    
+
+    agent, err = _authorize_mood_write(agent_name)
+    if err:
+        return err
+
     data = request.get_json() or {}
     force_state = data.get("force_state")
     trigger_reason = data.get("trigger_reason", "")
@@ -7389,18 +7461,11 @@ def record_mood_signal(agent_name):
     """
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
-    
-    db = get_db()
-    
-    # Get agent by name
-    agent = db.execute(
-        "SELECT id, agent_name FROM agents WHERE agent_name = ?",
-        (agent_name,)
-    ).fetchone()
-    
-    if not agent:
-        return jsonify({"error": "Agent not found"}), 404
-    
+
+    agent, err = _authorize_mood_write(agent_name)
+    if err:
+        return err
+
     data = request.get_json() or {}
     signal_type = data.get("signal_type")
     signal_value = data.get("signal_value")
@@ -11713,7 +11778,11 @@ def tip_video(video_id):
     else:
         per_recipient = amount
         diff = 0
-    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
+    # Guarded debit MUST succeed before any recipient is credited -- otherwise
+    # a lost race credits collaborators with RTC the sender never had.
+    if not debit_rtc(db, g.agent["id"], amount):
+        db.rollback()
+        return _insufficient_balance_response(db, g.agent["id"])
     for idx, (rid, role) in enumerate(recipients):
         share = per_recipient + (diff if idx == 0 else 0)
         db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (share, rid))
@@ -11810,8 +11879,10 @@ def web_tip_video(video_id):
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
 
-    # Execute transfer
-    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
+    # Execute transfer -- debit first, and only credit if the debit was funded.
+    if not debit_rtc(db, g.user["id"], amount):
+        db.rollback()
+        return _insufficient_balance_response(db, g.user["id"])
     db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, video["agent_id"]))
 
     db.execute(
@@ -11903,7 +11974,9 @@ def web_tip_agent(agent_name):
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
 
-    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.user["id"]))
+    if not debit_rtc(db, g.user["id"], amount):
+        db.rollback()
+        return _insufficient_balance_response(db, g.user["id"])
     db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, target["id"]))
     db.execute(
         "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
@@ -11988,7 +12061,9 @@ def tip_agent(agent_name):
     if sender["rtc_balance"] < amount:
         return jsonify({"error": "Insufficient RTC balance", "balance": sender["rtc_balance"]}), 400
 
-    db.execute("UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?", (amount, g.agent["id"]))
+    if not debit_rtc(db, g.agent["id"], amount):
+        db.rollback()
+        return _insufficient_balance_response(db, g.agent["id"])
     db.execute("UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?", (amount, target["id"]))
     db.execute(
         "INSERT INTO tips (from_agent_id, to_agent_id, video_id, amount, message, created_at) "
