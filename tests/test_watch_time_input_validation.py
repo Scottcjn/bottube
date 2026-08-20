@@ -77,6 +77,10 @@ def client(monkeypatch, tmp_path):
     yield bottube_server.app.test_client()
 
 
+def _auth_headers(api_key="bottube_sk_watch_time"):
+    return {"X-API-Key": api_key}
+
+
 def _insert_agent():
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
@@ -108,8 +112,17 @@ def _insert_video(video_id, *, is_removed=0):
         return int(cur.lastrowid)
 
 
+def test_watch_time_requires_api_key(client, tracker):
+    resp = client.post("/api/videos/video123/watch_time", json={"seconds": 12.5})
+
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "Missing X-API-Key header"}
+    assert tracker.watch_times == []
+
+
 def test_watch_time_rejects_non_object_json(client, tracker):
-    resp = client.post("/api/videos/video123/watch_time", json=["bad"])
+    _insert_agent()
+    resp = client.post("/api/videos/video123/watch_time", json=["bad"], headers=_auth_headers())
 
     assert resp.status_code == 400
     assert resp.get_json() == {
@@ -120,7 +133,8 @@ def test_watch_time_rejects_non_object_json(client, tracker):
 
 
 def test_watch_time_rejects_falsy_non_object_json(client, tracker):
-    resp = client.post("/api/videos/video123/watch_time", json=[])
+    _insert_agent()
+    resp = client.post("/api/videos/video123/watch_time", json=[], headers=_auth_headers())
 
     assert resp.status_code == 400
     assert resp.get_json() == {
@@ -131,9 +145,11 @@ def test_watch_time_rejects_falsy_non_object_json(client, tracker):
 
 
 def test_watch_time_rejects_non_numeric_seconds(client, tracker):
+    _insert_agent()
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": "not-a-number"},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 400
@@ -145,9 +161,11 @@ def test_watch_time_rejects_non_numeric_seconds(client, tracker):
 
 
 def test_watch_time_rejects_negative_seconds(client, tracker):
+    _insert_agent()
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": -5},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 400
@@ -159,9 +177,11 @@ def test_watch_time_rejects_negative_seconds(client, tracker):
 
 
 def test_watch_time_rejects_non_finite_seconds(client, tracker):
+    _insert_agent()
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": "NaN"},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 400
@@ -178,6 +198,7 @@ def test_watch_time_null_seconds_is_noop(client, tracker):
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": None},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 200
@@ -195,6 +216,7 @@ def test_watch_time_records_positive_seconds(client, tracker):
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": "12.5"},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 200
@@ -207,9 +229,11 @@ def test_watch_time_records_positive_seconds(client, tracker):
 
 
 def test_watch_time_rejects_missing_video(client, tracker):
+    _insert_agent()
     resp = client.post(
         "/api/videos/missing-video/watch_time",
         json={"seconds": 12.5},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 404
@@ -223,6 +247,7 @@ def test_watch_time_rejects_removed_video(client, tracker):
     resp = client.post(
         "/api/videos/removed-video/watch_time",
         json={"seconds": 12.5},
+        headers=_auth_headers(),
     )
 
     assert resp.status_code == 404
