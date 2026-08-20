@@ -239,8 +239,8 @@ def get_authenticated_agent():
     if not api_key:
         return None
     db = get_db()
-    agent = db.execute("SELECT name FROM agents WHERE api_key = ?", (api_key,)).fetchone()
-    return agent["name"] if agent else None
+    agent = db.execute("SELECT agent_name FROM agents WHERE api_key = ?", (api_key,)).fetchone()
+    return agent["agent_name"] if agent else None
 
 
 # ─── Endpoints ────────────────────────────────────────────────
@@ -425,10 +425,15 @@ def usdc_tip():
 
     # Resolve creator from video if needed
     if video_id and not to_agent:
-        video = db.execute("SELECT agent FROM videos WHERE id = ?", (video_id,)).fetchone()
+        video = db.execute("""
+            SELECT a.agent_name 
+            FROM videos v 
+            JOIN agents a ON v.agent_id = a.id 
+            WHERE v.video_id = ?
+        """, (video_id,)).fetchone()
         if not video:
             return jsonify({"error": "Video not found"}), 404
-        to_agent = video["agent"]
+        to_agent = video["agent_name"]
 
     if to_agent == agent_name:
         return jsonify({"error": "Cannot tip yourself"}), 400
