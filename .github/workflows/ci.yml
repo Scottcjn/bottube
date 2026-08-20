@@ -9,6 +9,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
     
@@ -19,9 +20,9 @@ jobs:
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pylint
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        timeout 120 python -m pip install --timeout 60 --upgrade pip
+        timeout 120 pip install --timeout 60 flake8 pylint
+        if [ -f requirements.txt ]; then timeout 120 pip install --timeout 60 -r requirements.txt; fi
     
     - name: Lint with flake8
       run: |
@@ -37,6 +38,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
     
@@ -47,9 +49,9 @@ jobs:
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-cov
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        timeout 120 python -m pip install --timeout 60 --upgrade pip
+        timeout 120 pip install --timeout 60 pytest pytest-cov
+        if [ -f requirements.txt ]; then timeout 120 pip install --timeout 60 -r requirements.txt; fi
     
     - name: Run tests
       run: |
@@ -61,6 +63,7 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
     
@@ -71,9 +74,9 @@ jobs:
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install bandit safety
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        timeout 120 python -m pip install --timeout 60 --upgrade pip
+        timeout 120 pip install --timeout 60 bandit safety
+        if [ -f requirements.txt ]; then timeout 120 pip install --timeout 60 -r requirements.txt; fi
     
     - name: Run Bandit security linter
       continue-on-error: true
