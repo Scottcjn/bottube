@@ -212,13 +212,20 @@ def get_platform_erg_balance():
 # ---------------------------------------------------------------------------
 
 def _award_rtc(db, agent_id, amount, reason):
-    """Credit RTC to an agent's balance."""
+    """Credit RTC to an agent's balance.
+
+    The ledger column is ``earnings.reason`` (see the schema in
+    bottube_server.py and every other writer: wrtc_bridge.py,
+    paypal_packages.py, rtc_services.py). Writing ``source`` here raised
+    ``OperationalError: table earnings has no column named source`` on
+    every call, which aborted the credit.
+    """
     db.execute(
         "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
         (amount, agent_id),
     )
     db.execute(
-        "INSERT INTO earnings (agent_id, amount, source, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO earnings (agent_id, amount, reason, created_at) VALUES (?, ?, ?, ?)",
         (agent_id, amount, reason, time.time()),
     )
     db.commit()
@@ -407,9 +414,11 @@ def ergo_deposit():
         (tx_id, result["from_address"], amount_erg, fee_erg, net_erg,
          rtc_amount, agent_id, confirmations, time.time(), time.time()),
     )
-    db.commit()
 
-    # Credit RTC
+    # Credit RTC. No commit above on purpose: the deposit row and the RTC
+    # credit have to land in the SAME transaction. Committing the
+    # 'credited' row first meant that any failure in _award_rtc left the
+    # tx_id permanently claimed (409 on every retry) with 0 RTC issued.
     _award_rtc(db, agent_id, rtc_amount, f"ergo_deposit:{tx_id[:16]}")
 
     return jsonify({

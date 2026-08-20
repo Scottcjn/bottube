@@ -30,7 +30,7 @@ def client(tmp_path, monkeypatch):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             agent_id INTEGER,
             amount REAL,
-            source TEXT,
+            reason TEXT,
             created_at REAL
         );
         INSERT INTO agents (agent_name, api_key, rtc_balance)
