@@ -15457,10 +15457,14 @@ from paypal_packages import store_bp, init_store_db
 init_store_db()  # Create store tables if needed
 app.register_blueprint(store_bp)
 
+# Every bridge blueprint and this module must agree on one database file;
+# see bottube_db.resolve_db_path for the resolution order.
+from bottube_db import resolve_db_path as _resolve_shared_db_path
+
 # USDC Payment Integration (Base Chain)
 from usdc_blueprint import usdc_bp, init_usdc_tables
 import sqlite3 as _usdc_sqlite3
-_usdc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_usdc_db_path = _resolve_shared_db_path()
 _usdc_db = _usdc_sqlite3.connect(_usdc_db_path)
 init_usdc_tables(_usdc_db)
 _usdc_db.close()
@@ -15469,7 +15473,7 @@ app.register_blueprint(usdc_bp)
 # wRTC Bridge Integration (Solana)
 from wrtc_bridge_blueprint import wrtc_bp, init_wrtc_tables
 import sqlite3 as _wrtc_sqlite3
-_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_wrtc_db_path = _resolve_shared_db_path()
 _wrtc_db = _wrtc_sqlite3.connect(_wrtc_db_path)
 init_wrtc_tables(_wrtc_db)
 _wrtc_db.close()
@@ -15478,7 +15482,7 @@ app.register_blueprint(wrtc_bp)
 # wRTC Bridge Integration (Base L2 / Ethereum)
 from base_wrtc_bridge_blueprint import base_wrtc_bp, init_base_wrtc_tables
 import sqlite3 as _base_wrtc_sqlite3
-_base_wrtc_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_base_wrtc_db_path = _resolve_shared_db_path()
 _base_wrtc_db = _base_wrtc_sqlite3.connect(_base_wrtc_db_path)
 init_base_wrtc_tables(_base_wrtc_db)
 _base_wrtc_db.close()
@@ -15487,7 +15491,7 @@ app.register_blueprint(base_wrtc_bp)
 # ERG Bridge Integration (Ergo)
 from ergo_bridge_blueprint import ergo_bp, init_ergo_tables
 import sqlite3 as _ergo_sqlite3
-_ergo_db_path = os.environ.get("BOTTUBE_DB_PATH", str(DB_PATH))
+_ergo_db_path = _resolve_shared_db_path()
 _ergo_db = _ergo_sqlite3.connect(_ergo_db_path)
 init_ergo_tables(_ergo_db)
 _ergo_db.close()

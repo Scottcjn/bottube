@@ -13,6 +13,7 @@ Deposit verification uses raw JSON-RPC (no web3 dependency).
 Withdrawal processing uses web3.py for signing and sending.
 """
 
+from bottube_db import resolve_db_path
 import json
 import hmac
 import os
@@ -87,7 +88,7 @@ def get_db():
     """Get database connection from Flask g."""
     if "db" in g:
         return g.db
-    db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+    db_path = resolve_db_path()
     g.db = sqlite3.connect(db_path)
     g.db.row_factory = sqlite3.Row
     return g.db
