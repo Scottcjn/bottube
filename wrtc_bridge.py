@@ -150,14 +150,27 @@ def _award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""
 
 
 def _debit_rtc(db, agent_id: int, amount: float):
-    """Debit RTC from an agent's balance. Returns True if sufficient funds."""
-    row = db.execute("SELECT rtc_balance FROM agents WHERE id = ?", (agent_id,)).fetchone()
-    if not row or row["rtc_balance"] < amount:
-        return False
-    db.execute(
-        "UPDATE agents SET rtc_balance = rtc_balance - ? WHERE id = ?",
-        (amount, agent_id),
+    """Atomically debit RTC from an agent's balance.
+
+    Returns True if the debit succeeded (sufficient funds), False otherwise.
+
+    Fixes a TOCTOU race (bottube#1620): the previous check-then-update used
+    two separate statements, so two concurrent withdrawals could both read
+    the same balance, both pass the check, and both subtract -- overdrawing
+    the account. The comparison now lives in the UPDATE's WHERE clause,
+    making read and write a single atomic statement; ``rowcount == 0`` means
+    the funds were not there. Same fix already applied to the sibling
+    ``_debit_rtc`` in ergo_bridge_blueprint.py (#1711) -- this bridge kept
+    its own separate copy of the function with the original race intact.
+    """
+    cursor = db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance - ? "
+        "WHERE id = ? AND rtc_balance >= ?",
+        (amount, agent_id, amount),
     )
+    if cursor.rowcount == 0:
+        return False
+    db.commit()
     return True
 
 
