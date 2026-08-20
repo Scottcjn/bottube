@@ -152,7 +152,9 @@ def _award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""
 def _debit_rtc(db, agent_id: int, amount: float):
     """Atomically debit RTC from an agent's balance.
 
-    Returns True if sufficient funds were debited, False otherwise.
+    Returns True if the debit succeeded (sufficient funds), False otherwise.
+    Commits on success so a concurrent debit cannot observe a stale balance
+    (same fix as ergo_bridge_blueprint._debit_rtc, #1711).
 
     The previous check-then-update used two separate statements, so two
     concurrent withdrawals could both read the same balance, both pass the
@@ -165,7 +167,10 @@ def _debit_rtc(db, agent_id: int, amount: float):
         "WHERE id = ? AND rtc_balance >= ?",
         (amount, agent_id, amount),
     )
-    return cursor.rowcount > 0
+    if cursor.rowcount == 0:
+        return False
+    db.commit()
+    return True
 
 
 # ---------------------------------------------------------------------------
