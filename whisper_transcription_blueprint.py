@@ -24,6 +24,10 @@ import whisper_transcription as wt
 
 log = logging.getLogger("bottube.whisper_transcription_blueprint")
 
+# Upper bound for a single backfill call, so one request cannot queue the
+# entire library at once.
+_BACKFILL_BATCH_MAX = 500
+
 whisper_bp = Blueprint("whisper_transcription", __name__)
 
 
@@ -41,8 +45,11 @@ def _request_json_object():
     return data, None
 
 
-def _parse_positive_int(data, field_name: str, default: int):
+def _parse_positive_int(data, field_name: str, default: int,
+                        max_value: Optional[int] = None):
     """Parse positive integer fields from JSON request bodies."""
+    if max_value is not None:
+        assert default <= max_value
     value = data.get(field_name, default)
     if isinstance(value, bool):
         return None, (
@@ -73,6 +80,11 @@ def _parse_positive_int(data, field_name: str, default: int):
     if parsed < 1:
         return None, (
             jsonify({"error": f"{field_name} must be a positive integer"}),
+            400,
+        )
+    if max_value is not None and parsed > max_value:
+        return None, (
+            jsonify({"error": f"{field_name} must be <= {max_value}"}),
             400,
         )
     return parsed, None
@@ -109,6 +121,24 @@ def _parse_positive_int_arg(field_name: str, default: int, max_value: Optional[i
             400,
         )
     return parsed, None
+
+
+def _require_admin():
+    """Gate an admin-only endpoint using the main server's admin check.
+
+    Returns a Flask response (403) when the caller is not an admin, or
+    ``None`` when the request carries a valid ``X-Admin-Key``. Delegating to
+    ``bottube_server._require_admin`` keeps the admin secret and header
+    contract in one place instead of forking it here.
+    """
+    try:
+        import bottube_server  # type: ignore
+
+        return bottube_server._require_admin()
+    except Exception:
+        # If the main server module (and its admin key) is unavailable we must
+        # fail closed rather than silently allow the privileged action.
+        return jsonify({"error": "Forbidden"}), 403
 
 
 def _video_dir() -> str:
@@ -270,13 +300,23 @@ def trigger_backfill():
 
     Body (JSON, optional):
         { "force": false, "batch_size": 50 }
+
+    Requires ``X-Admin-Key``: this starts the Whisper worker and enqueues
+    transcription jobs, which is expensive enough that it must not be
+    reachable anonymously.
     """
+    error = _require_admin()
+    if error:
+        return error
+
     body, error = _request_json_object()
     if error:
         return error
 
     force = bool(body.get("force", False))
-    batch_size, error = _parse_positive_int(body, "batch_size", 50)
+    batch_size, error = _parse_positive_int(
+        body, "batch_size", 50, max_value=_BACKFILL_BATCH_MAX
+    )
     if error:
         return error
 

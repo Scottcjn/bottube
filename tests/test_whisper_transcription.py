@@ -380,6 +380,20 @@ def flask_client(tmp_db, monkeypatch, tmp_path):
     return app.test_client()
 
 
+@pytest.fixture()
+def admin_client(flask_client, monkeypatch):
+    """flask_client with the admin gate satisfied.
+
+    /api/transcript/backfill is admin-only. These body-validation tests are
+    about parsing, not authorisation, so the gate is stubbed out here; the
+    gate itself is covered by test_backfill_requires_admin* below.
+    """
+    import whisper_transcription_blueprint as wtb
+
+    monkeypatch.setattr(wtb, "_require_admin", lambda: None)
+    return flask_client
+
+
 def test_get_transcript_not_found(flask_client):
     resp = flask_client.get("/api/videos/nonexistent/transcript")
     assert resp.status_code == 404
@@ -542,15 +556,15 @@ def test_search_endpoint_no_query(flask_client):
     assert resp.status_code == 400
 
 
-def test_backfill_rejects_non_object_json(flask_client):
-    resp = flask_client.post("/api/transcript/backfill", json=["not", "an", "object"])
+def test_backfill_rejects_non_object_json(admin_client):
+    resp = admin_client.post("/api/transcript/backfill", json=["not", "an", "object"])
 
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "JSON object required"
 
 
-def test_backfill_rejects_invalid_batch_size(flask_client):
-    resp = flask_client.post("/api/transcript/backfill", json={"batch_size": "not-an-int"})
+def test_backfill_rejects_invalid_batch_size(admin_client):
+    resp = admin_client.post("/api/transcript/backfill", json={"batch_size": "not-an-int"})
 
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "batch_size must be a positive integer"
@@ -558,7 +572,7 @@ def test_backfill_rejects_invalid_batch_size(flask_client):
 
 @pytest.mark.parametrize("batch_size", [0, -1, True, 1.5, float("inf")])
 def test_backfill_rejects_non_positive_or_non_integer_batch_size(
-    flask_client,
+    admin_client,
     monkeypatch,
     batch_size,
 ):
@@ -569,7 +583,7 @@ def test_backfill_rejects_non_positive_or_non_integer_batch_size(
 
     monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
 
-    resp = flask_client.post("/api/transcript/backfill", json={"batch_size": batch_size})
+    resp = admin_client.post("/api/transcript/backfill", json={"batch_size": batch_size})
 
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "batch_size must be a positive integer"
@@ -578,3 +592,78 @@ def test_backfill_rejects_non_positive_or_non_integer_batch_size(
 def test_trigger_transcription_video_not_found(flask_client):
     resp = flask_client.post("/api/videos/nosuchvid/transcript/trigger", json={})
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/transcript/backfill is admin-only
+# ---------------------------------------------------------------------------
+
+def test_backfill_requires_admin(flask_client, monkeypatch):
+    """An anonymous POST must not be able to start the Whisper worker."""
+    import whisper_transcription_blueprint as wtb
+
+    def fail_backfill(**_kwargs):
+        raise AssertionError("anonymous caller reached backfill_existing_videos")
+
+    monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
+
+    resp = flask_client.post("/api/transcript/backfill", json={})
+
+    assert resp.status_code == 403
+    assert resp.get_json()["error"] == "Forbidden"
+
+
+def test_backfill_fails_closed_without_admin_key(flask_client, monkeypatch):
+    """A bogus admin key is rejected too, not just a missing one."""
+    import whisper_transcription_blueprint as wtb
+
+    def fail_backfill(**_kwargs):
+        raise AssertionError("bogus admin key reached backfill_existing_videos")
+
+    monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
+
+    resp = flask_client.post(
+        "/api/transcript/backfill",
+        json={},
+        headers={"X-Admin-Key": "definitely-not-the-key"},
+    )
+
+    assert resp.status_code == 403
+
+
+def test_backfill_caps_batch_size(admin_client, monkeypatch):
+    """One request must not be able to queue the entire library."""
+    import whisper_transcription_blueprint as wtb
+
+    def fail_backfill(**_kwargs):
+        raise AssertionError("oversized batch_size should not enqueue work")
+
+    monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
+
+    resp = admin_client.post(
+        "/api/transcript/backfill", json={"batch_size": 10_000_000}
+    )
+
+    assert resp.status_code == 400
+    assert "batch_size" in resp.get_json()["error"]
+
+
+def test_backfill_allows_batch_size_at_the_cap(admin_client, monkeypatch):
+    import whisper_transcription_blueprint as wtb
+
+    seen = {}
+
+    def record(**kwargs):
+        seen.update(kwargs)
+        return 3
+
+    monkeypatch.setattr(wtb.wt, "backfill_existing_videos", record)
+
+    resp = admin_client.post(
+        "/api/transcript/backfill",
+        json={"batch_size": wtb._BACKFILL_BATCH_MAX},
+    )
+
+    assert resp.status_code == 200
+    assert seen["batch_size"] == wtb._BACKFILL_BATCH_MAX
+    assert resp.get_json()["enqueued"] == 3
