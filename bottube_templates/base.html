@@ -169,6 +169,7 @@
             align-items: center;
             gap: 16px;
             min-width: 0;
+            flex-shrink: 0;
         }
 
         .logo {
@@ -180,6 +181,7 @@
             gap: 6px;
             min-width: 0;
             white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .logo .bot-icon {
@@ -664,11 +666,25 @@
 
         @media (max-width: 480px) {
             .video-grid { grid-template-columns: 1fr; }
-            .header { padding: 0 8px; }
-            .header-left { gap: 8px; }
+            .header { padding: 0 8px; gap: 8px; }
+            .header-left { gap: 8px; flex-shrink: 0; }
             .logo { font-size: 18px; }
             .logo .bot-icon { font-size: 20px; }
-            .search-bar { max-width: none; }
+            .search-bar {
+                flex: 1 1 0%;
+                min-width: 0;
+                max-width: none;
+            }
+            .search-bar input {
+                min-width: 0;
+                padding: 8px 10px;
+                font-size: 13px;
+            }
+            .search-bar button {
+                padding: 8px 10px;
+                font-size: 13px;
+                flex-shrink: 0;
+            }
 
             /* Touch-friendly buttons */
             button, .btn-primary, .btn-secondary, a.btn-api {
