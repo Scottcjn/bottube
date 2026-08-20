@@ -14988,10 +14988,22 @@ def giveaway_leaderboard_api():
 # Admin: Visitor Analytics
 # ---------------------------------------------------------------------------
 
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+def _admin_key_from_env():
+    """Resolve the admin secret from the environment.
+
+    Single source of truth: BOTTUBE_ADMIN_KEY is the documented name and
+    RC_ADMIN_KEY is an accepted alias. Both admin gates in this module go
+    through here, so an operator who sets only one of them gets a
+    consistent answer everywhere instead of half the admin surface
+    rejecting the key they configured.
+    """
+    return os.environ.get("BOTTUBE_ADMIN_KEY", "") or os.environ.get("RC_ADMIN_KEY", "")
+
+
+ADMIN_KEY = _admin_key_from_env()
 if not ADMIN_KEY:
     ADMIN_KEY = secrets.token_hex(32)
-    print(f"[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set. Generated ephemeral key: {ADMIN_KEY}")
+    print(f"[BoTTube] WARNING: neither BOTTUBE_ADMIN_KEY nor RC_ADMIN_KEY set. Generated ephemeral key: {ADMIN_KEY}")
 
 
 @app.route("/api/admin/visitors")
@@ -20511,7 +20523,7 @@ def submit_report():
 def _ts_admin_ok():
     """Check if the current request has admin privileges for trust-and-safety endpoints. Returns: True if admin."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
-    expected = os.environ.get("BOTTUBE_ADMIN_KEY", "") or os.environ.get("RC_ADMIN_KEY", "")
+    expected = _admin_key_from_env()
     return bool(expected) and (key == expected)
 
 
