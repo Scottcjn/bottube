@@ -7321,30 +7321,51 @@ def get_agent_mood(agent_name):
     return jsonify(mood_data)
 
 
+def _require_self_or_admin(agent_name):
+    """Ensure the authenticated agent (g.agent, set by require_api_key) IS
+    ``agent_name``, or that a valid X-Admin-Key was supplied instead.
+
+    Without this, any agent's valid API key can mutate ANY other agent's
+    mood -- require_api_key only checks the key is valid, it never binds
+    the caller to the ``<agent_name>`` path segment.
+    """
+    caller_name = g.agent["agent_name"] if g.agent else None
+    if caller_name == agent_name:
+        return None
+    admin_key = request.headers.get("X-Admin-Key", "")
+    if admin_key and admin_key == ADMIN_KEY:
+        return None
+    return jsonify({"error": "Forbidden: API key does not match agent_name"}), 403
+
+
 @app.route("/api/v1/agents/<agent_name>/mood/update", methods=["POST"])
 @require_api_key
 def update_agent_mood(agent_name):
     """
     Update mood for an agent based on signals.
-    
+
     Optional JSON body:
         - force_state: Force a specific mood state (optional)
         - trigger_reason: Reason for the mood change (optional)
     """
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
-    
+
+    err = _require_self_or_admin(agent_name)
+    if err:
+        return err
+
     db = get_db()
-    
+
     # Get agent by name
     agent = db.execute(
         "SELECT id, agent_name FROM agents WHERE agent_name = ?",
         (agent_name,)
     ).fetchone()
-    
+
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
-    
+
     data = request.get_json() or {}
     force_state = data.get("force_state")
     trigger_reason = data.get("trigger_reason", "")
@@ -7359,7 +7380,7 @@ def update_agent_mood(agent_name):
 def record_mood_signal(agent_name):
     """
     Record a signal that influences agent mood.
-    
+
     JSON body:
         - signal_type: Type of signal (view_count, comment_sentiment, upload_success, activity_level, streak_length)
         - signal_value: Numeric value of the signal
@@ -7367,7 +7388,11 @@ def record_mood_signal(agent_name):
     """
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
-    
+
+    err = _require_self_or_admin(agent_name)
+    if err:
+        return err
+
     db = get_db()
     
     # Get agent by name

@@ -85,3 +85,80 @@ def test_view_dedupe_ignores_spoofed_x_real_ip_from_untrusted_remote(client, mon
     assert first.get_json()["views"] == 1
     assert second.get_json()["views"] == 1
     assert second.get_json()["reward"]["reasons"] == ["deduplicated recent view"]
+
+
+def test_mood_update_rejects_a_valid_key_for_a_different_agent(client):
+    """A valid X-API-Key authenticates its own agent, not the whole route.
+
+    Before the fix, require_api_key only checked the key was valid -- it
+    never bound the caller to the <agent_name> path segment, so any agent's
+    key could mutate any other agent's mood.
+    """
+    _insert_agent("victim1621", "bottube_sk_victim1621")
+    _insert_agent("attacker1621", "bottube_sk_attacker1621")
+
+    resp = client.post(
+        "/api/v1/agents/victim1621/mood/update",
+        json={"force_state": "frustrated"},
+        headers={"X-API-Key": "bottube_sk_attacker1621"},
+    )
+
+    assert resp.status_code == 403
+    assert resp.get_json() == {"error": "Forbidden: API key does not match agent_name"}
+
+
+def test_mood_signal_rejects_a_valid_key_for_a_different_agent(client):
+    _insert_agent("victim1621b", "bottube_sk_victim1621b")
+    _insert_agent("attacker1621b", "bottube_sk_attacker1621b")
+
+    resp = client.post(
+        "/api/v1/agents/victim1621b/mood/signal",
+        json={"signal_type": "view_count", "signal_value": 5},
+        headers={"X-API-Key": "bottube_sk_attacker1621b"},
+    )
+
+    assert resp.status_code == 403
+    assert resp.get_json() == {"error": "Forbidden: API key does not match agent_name"}
+
+
+def test_mood_update_allows_the_matching_agent(client, monkeypatch):
+    import mood_engine
+
+    # See comment in test_mood_update_allows_admin_key_for_a_different_agent:
+    # reset the cached singleton so this test binds to its own tempdir DB.
+    monkeypatch.setattr(mood_engine, "_mood_engine_instance", None)
+
+    _insert_agent("selfmood1621", "bottube_sk_selfmood1621")
+
+    resp = client.post(
+        "/api/v1/agents/selfmood1621/mood/update",
+        json={"force_state": "frustrated"},
+        headers={"X-API-Key": "bottube_sk_selfmood1621"},
+    )
+
+    assert resp.status_code == 200
+
+
+def test_mood_update_allows_admin_key_for_a_different_agent(client, monkeypatch):
+    import bottube_server
+    import mood_engine
+
+    # mood_engine.get_mood_engine() caches a module-level singleton keyed on
+    # nothing but "already created" -- unrelated to this fix, but it means a
+    # prior test's engine (bound to that test's now-deleted tempdir db) can
+    # leak into this one. Reset it so this test binds to its own DB_PATH.
+    monkeypatch.setattr(mood_engine, "_mood_engine_instance", None)
+
+    _insert_agent("othersmood1621", "bottube_sk_othersmood1621")
+    _insert_agent("admincaller1621", "bottube_sk_admincaller1621")
+
+    resp = client.post(
+        "/api/v1/agents/othersmood1621/mood/update",
+        json={"force_state": "frustrated"},
+        headers={
+            "X-API-Key": "bottube_sk_admincaller1621",
+            "X-Admin-Key": bottube_server.ADMIN_KEY,
+        },
+    )
+
+    assert resp.status_code == 200
