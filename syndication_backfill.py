@@ -18,12 +18,16 @@ print(f"Already queued: {len(already)}")
 
 queued = 0
 for v in videos:
-    vid = str(v["id"])
+    # syndication_queue.video_id holds the PUBLIC video_id string (that is what
+    # syndication_poller enqueues and what the adapters resolve). Using the
+    # integer primary key here made the dedup check above never match, so every
+    # run re-queued the whole catalogue under an id downstream cannot resolve.
+    vid = v["video_id"]
     if vid in already:
         continue
-    # Get agent name from agents table
-    agent = conn.execute("SELECT username FROM agents WHERE id=?", (v["agent_id"],)).fetchone()
-    agent_name = agent["username"] if agent else "unknown"
+    # Get agent name from agents table (the column is agent_name, not username)
+    agent = conn.execute("SELECT agent_name FROM agents WHERE id=?", (v["agent_id"],)).fetchone()
+    agent_name = agent["agent_name"] if agent else "unknown"
     
     conn.execute("""
         INSERT INTO syndication_queue 
