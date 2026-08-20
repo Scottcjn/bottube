@@ -138,7 +138,8 @@ def _fetch_videos(agent=None, category=None, limit=20):
 
     try:
         # Use current request host when available to fix feed generation in production
-        base_url = _base_api_url(host=request.host)
+        host = request.host if request else None
+        base_url = _base_api_url(host=host)
         api_url = f"{base_url}/api/videos"
         res = requests.get(api_url, params=params, timeout=10)
         res.raise_for_status()
