@@ -32,13 +32,18 @@ def usdc_client(tmp_path):
             db.close()
 
     with sqlite3.connect(db_path) as db:
+        # Mirror the production agents schema (bottube_server.py): the
+        # identity column is agent_name, not name.
         db.execute(
-            "CREATE TABLE agents (name TEXT PRIMARY KEY, api_key TEXT UNIQUE NOT NULL)"
+            "CREATE TABLE agents ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "agent_name TEXT UNIQUE NOT NULL, "
+            "api_key TEXT UNIQUE NOT NULL)"
         )
         usdc_blueprint.init_usdc_tables(db)
         now = time.time()
         db.executemany(
-            "INSERT INTO agents (name, api_key) VALUES (?, ?)",
+            "INSERT INTO agents (agent_name, api_key) VALUES (?, ?)",
             [("alice", "key-alice"), ("bob", "key-bob")],
         )
         db.execute(

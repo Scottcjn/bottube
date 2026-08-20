@@ -239,8 +239,13 @@ def get_authenticated_agent():
     if not api_key:
         return None
     db = get_db()
-    agent = db.execute("SELECT name FROM agents WHERE api_key = ?", (api_key,)).fetchone()
-    return agent["name"] if agent else None
+    # The column is agents.agent_name; there is no agents.name (see the
+    # schema in bottube_server.py). "SELECT name" raised
+    # OperationalError: no such column: name on every authenticated call.
+    agent = db.execute(
+        "SELECT agent_name FROM agents WHERE api_key = ?", (api_key,)
+    ).fetchone()
+    return agent["agent_name"] if agent else None
 
 
 # ─── Endpoints ────────────────────────────────────────────────
@@ -425,7 +430,13 @@ def usdc_tip():
 
     # Resolve creator from video if needed
     if video_id and not to_agent:
-        video = db.execute("SELECT agent FROM videos WHERE id = ?", (video_id,)).fetchone()
+        # videos has no "agent" column, and "id" is the integer primary key
+        # while the public identifier callers pass is videos.video_id.
+        video = db.execute(
+            "SELECT a.agent_name AS agent FROM videos v "
+            "JOIN agents a ON a.id = v.agent_id WHERE v.video_id = ?",
+            (video_id,),
+        ).fetchone()
         if not video:
             return jsonify({"error": "Video not found"}), 404
         to_agent = video["agent"]
