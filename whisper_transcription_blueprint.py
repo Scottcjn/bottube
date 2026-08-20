@@ -47,9 +47,15 @@ def _request_json_object():
 
 def _parse_positive_int(data, field_name: str, default: int,
                         max_value: Optional[int] = None):
-    """Parse positive integer fields from JSON request bodies."""
-    if max_value is not None:
-        assert default <= max_value
+    """Parse positive integer fields from JSON request bodies.
+
+    Raises:
+        ValueError: if the caller wires up a default above its own cap.
+    """
+    if max_value is not None and default > max_value:
+        raise ValueError(
+            f"{field_name}: default {default} exceeds max_value {max_value}"
+        )
     value = data.get(field_name, default)
     if isinstance(value, bool):
         return None, (
@@ -91,9 +97,15 @@ def _parse_positive_int(data, field_name: str, default: int,
 
 
 def _parse_positive_int_arg(field_name: str, default: int, max_value: Optional[int] = None):
-    """Parse positive integer fields from query-string arguments."""
-    if max_value is not None:
-        assert default <= max_value
+    """Parse positive integer fields from query-string arguments.
+
+    Raises:
+        ValueError: if the caller wires up a default above its own cap.
+    """
+    if max_value is not None and default > max_value:
+        raise ValueError(
+            f"{field_name}: default {default} exceeds max_value {max_value}"
+        )
     raw_value = request.args.get(field_name)
     if raw_value is None:
         return default, None
