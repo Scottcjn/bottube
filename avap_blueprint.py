@@ -20,6 +20,7 @@ canonical JSON (sorted, compact, utf-8); signed core = envelope minus sig+anchor
 commitment = sha256(canonical(signed_core)); address = "RTC"+sha256(pubkey)[:40].
 """
 import hashlib
+import os
 import json
 import sqlite3
 import time
@@ -31,7 +32,7 @@ from nacl.exceptions import BadSignatureError
 
 avap_bp = Blueprint("avap", __name__)
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent)))
 DB_PATH = BASE_DIR / "bottube.db"
 AVAP_VERSION = "1.0"
 ANCHOR_PREFIX = "rc2"  # RustChain Node 2 (.153) anchor record
