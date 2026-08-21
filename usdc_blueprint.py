@@ -4,6 +4,7 @@ BoTTube USDC Payment Integration - Base Chain
 Flask Blueprint for USDC deposits, tips, and premium API access.
 """
 
+from bottube_db import resolve_db_path
 from flask import Blueprint, request, jsonify, g
 import math
 import sqlite3
@@ -45,7 +46,7 @@ PLATFORM_SHARE = 0.15
 def get_db():
     """Get database connection from Flask g."""
     if 'db' not in g:
-        db_path = os.environ.get('BOTTUBE_DB', '/root/bottube/bottube.db')
+        db_path = resolve_db_path()
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db

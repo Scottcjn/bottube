@@ -9,6 +9,7 @@ Implements a custodial wRTC <-> BoTTube RTC credits bridge with:
 - Lightweight public bridge pages
 """
 
+from bottube_db import resolve_db_path
 import json
 import os
 import re
@@ -89,7 +90,7 @@ def get_db():
     """Get database connection from Flask g."""
     if "db" in g:
         return g.db
-    db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+    db_path = resolve_db_path()
     g.db = sqlite3.connect(db_path)
     g.db.row_factory = sqlite3.Row
     return g.db
