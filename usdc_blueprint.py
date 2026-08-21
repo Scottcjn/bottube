@@ -13,6 +13,8 @@ import json
 import os
 import requests as http_requests
 
+from bottube_db import resolve_db_path
+
 usdc_bp = Blueprint('usdc', __name__)
 
 # ─── Base Chain Configuration ─────────────────────────────────
@@ -45,8 +47,7 @@ PLATFORM_SHARE = 0.15
 def get_db():
     """Get database connection from Flask g."""
     if 'db' not in g:
-        db_path = os.environ.get('BOTTUBE_DB', '/root/bottube/bottube.db')
-        g.db = sqlite3.connect(db_path)
+        g.db = sqlite3.connect(resolve_db_path())
         g.db.row_factory = sqlite3.Row
     return g.db
 

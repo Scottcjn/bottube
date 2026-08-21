@@ -20,6 +20,8 @@ import urllib.request
 
 from flask import Blueprint, g, jsonify, redirect, render_template, request, url_for
 
+from bottube_db import resolve_db_path
+
 wrtc_bp = Blueprint("wrtc_bridge", __name__)
 
 # Canonical wRTC settings from bounty spec.
@@ -89,8 +91,7 @@ def get_db():
     """Get database connection from Flask g."""
     if "db" in g:
         return g.db
-    db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
-    g.db = sqlite3.connect(db_path)
+    g.db = sqlite3.connect(resolve_db_path())
     g.db.row_factory = sqlite3.Row
     return g.db
 
