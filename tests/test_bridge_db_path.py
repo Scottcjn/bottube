@@ -26,6 +26,13 @@ BRIDGES = [
     "base_wrtc_bridge_blueprint",
 ]
 
+# Two more live blueprints resolved a database path of their own. Neither was
+# part of the init/runtime mismatch above, but both were worse in their own
+# way: news_routes hardcoded the path with no override at all, and
+# avap_blueprint recomputed BASE_DIR without honouring BOTTUBE_BASE_DIR, so it
+# ignored the very variable bottube_server uses.
+OTHER_DB_USERS = ["news_routes", "avap_blueprint"]
+
 
 def _server_init_path(monkeypatch_env, base_dir):
     """What bottube_server uses when creating the bridge tables.
@@ -102,3 +109,30 @@ def test_bridges_import_the_shared_resolver(module_name):
     assert hasattr(module, "resolve_db_path"), (
         f"{module_name} does not use the shared resolver"
     )
+
+
+@pytest.mark.parametrize("module_name", OTHER_DB_USERS)
+def test_other_blueprints_do_not_hardcode_a_database_path(module_name):
+    src = Path(f"{module_name}.py").read_text(encoding="utf-8", errors="replace")
+
+    assert "/root/bottube/bottube.db" not in src, (
+        f"{module_name} still hardcodes an absolute database path"
+    )
+
+
+@pytest.mark.parametrize("module_name", OTHER_DB_USERS)
+def test_other_blueprints_use_the_shared_resolver(module_name):
+    module = importlib.import_module(module_name)
+
+    assert hasattr(module, "resolve_db_path"), (
+        f"{module_name} does not use the shared resolver"
+    )
+
+
+def test_avap_honours_base_dir_override(monkeypatch, tmp_path):
+    """avap_blueprint used to recompute BASE_DIR and ignore BOTTUBE_BASE_DIR."""
+    monkeypatch.delenv("BOTTUBE_DB_PATH", raising=False)
+    monkeypatch.delenv("BOTTUBE_DB", raising=False)
+    monkeypatch.setenv("BOTTUBE_BASE_DIR", str(tmp_path))
+
+    assert resolve_db_path() == str(tmp_path / "bottube.db")

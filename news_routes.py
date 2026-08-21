@@ -6,9 +6,9 @@ from html import escape
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, Response
 
-news_bp = Blueprint("news", __name__)
+from bottube_db import resolve_db_path
 
-DB_PATH = "/root/bottube/bottube.db"
+news_bp = Blueprint("news", __name__)
 
 
 def _get_db():
@@ -17,7 +17,7 @@ def _get_db():
     Returns:
         The result value.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(resolve_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 

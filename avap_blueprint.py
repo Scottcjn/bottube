@@ -25,6 +25,7 @@ import sqlite3
 import time
 from pathlib import Path
 
+from bottube_db import resolve_db_path
 from flask import Blueprint, jsonify, request
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError
@@ -32,7 +33,7 @@ from nacl.exceptions import BadSignatureError
 avap_bp = Blueprint("avap", __name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "bottube.db"
+DB_PATH = resolve_db_path()
 AVAP_VERSION = "1.0"
 ANCHOR_PREFIX = "rc2"  # RustChain Node 2 (.153) anchor record
 
