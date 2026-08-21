@@ -24,6 +24,8 @@ import sqlite3
 import time
 import urllib.request
 
+from bottube_db import resolve_db_path
+
 ergo_bp = Blueprint("ergo_bridge", __name__)
 log = logging.getLogger("ergo_bridge")
 
@@ -67,8 +69,7 @@ REQUIRED_CONFIRMATIONS = 3
 def get_db():
     """Get database connection from Flask g."""
     if "db" not in g:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
-        g.db = sqlite3.connect(db_path)
+        g.db = sqlite3.connect(resolve_db_path())
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -76,8 +77,7 @@ def get_db():
 def init_ergo_tables(db=None):
     """Create Ergo bridge tables if they don't exist."""
     if db is None:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
-        db = sqlite3.connect(db_path)
+        db = sqlite3.connect(resolve_db_path())
         should_close = True
     else:
         should_close = False

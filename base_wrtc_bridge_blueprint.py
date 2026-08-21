@@ -25,6 +25,8 @@ from math import isfinite
 import requests as http_requests
 from flask import Blueprint, g, jsonify, render_template, request
 
+from bottube_db import resolve_db_path
+
 base_wrtc_bp = Blueprint("base_wrtc_bridge", __name__)
 
 # ─── Base Chain Configuration ─────────────────────────────────
@@ -87,8 +89,7 @@ def get_db():
     """Get database connection from Flask g."""
     if "db" in g:
         return g.db
-    db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
-    g.db = sqlite3.connect(db_path)
+    g.db = sqlite3.connect(resolve_db_path())
     g.db.row_factory = sqlite3.Row
     return g.db
 
