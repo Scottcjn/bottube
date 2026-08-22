@@ -169,16 +169,18 @@
             align-items: center;
             gap: 16px;
             min-width: 0;
+            flex: 0 0 auto;
         }
 
         .logo {
             font-size: 20px;
             font-weight: 700;
             color: var(--text-primary);
-            display: flex;
+            display: inline-flex;
             align-items: center;
             gap: 6px;
             min-width: 0;
+            flex: 0 0 auto;
             white-space: nowrap;
         }
 
@@ -200,6 +202,7 @@
             max-width: 500px;
             flex: 1 1 500px;
             min-width: 0;
+            margin-left: auto;
         }
 
         .search-bar input {
@@ -635,13 +638,18 @@
             .video-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
             .header { gap: 8px; }
             .header-left { gap: 10px; }
+            .logo {
+                flex-shrink: 0;
+                white-space: nowrap;
+            }
             .search-bar {
-                flex: 1 1 auto;
+                flex: 1 1 0;
                 max-width: none;
                 min-width: 0;
+                margin-left: 0;
             }
-            .search-bar button { padding: 8px 14px; }
-            .mobile-menu-btn { display: block; }
+            .search-bar button { padding: 8px 12px; }
+            .mobile-menu-btn { display: block; flex: 0 0 auto; }
             .header-right {
                 display: none;
                 position: absolute;
@@ -667,8 +675,16 @@
             .header { padding: 0 8px; }
             .header-left { gap: 8px; }
             .logo { font-size: 18px; }
+            .logo {
+                max-width: fit-content;
+            }
             .logo .bot-icon { font-size: 20px; }
             .search-bar { max-width: none; }
+            .search-bar button {
+                padding-left: 10px;
+                padding-right: 10px;
+                font-size: 13px;
+            }
 
             /* Touch-friendly buttons */
             button, .btn-primary, .btn-secondary, a.btn-api {
