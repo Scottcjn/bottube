@@ -33,11 +33,13 @@ from bots.retro_vs_modern import ModernBot, RetroBot
 # ---------------------------------------------------------------------------
 
 def make_video(vid="v1", tags=None):
+    """Build a minimal Video fixture with a debate tag."""
     return Video(id=vid, title="Test Debate", tags=tags or ["debate"])
 
 
 def make_comment(cid="c1", video_id="v1", author="user1", body="Hello",
                  parent_id=None, upvotes=0, downvotes=0):
+    """Build a Comment fixture with sensible defaults and optional vote counts."""
     return Comment(
         id=cid, video_id=video_id, author=author, body=body,
         parent_id=parent_id, upvotes=upvotes, downvotes=downvotes,
@@ -45,6 +47,7 @@ def make_comment(cid="c1", video_id="v1", author="user1", body="Hello",
 
 
 def make_thread(comments=None, video=None):
+    """Build a ThreadContext; the root comment id defaults to the first comment."""
     v = video or make_video()
     cs = comments or []
     root_id = cs[0].id if cs else None
@@ -69,6 +72,7 @@ class SimpleBot(DebateBot):
 
 class TestRateLimiter:
     def test_allows_up_to_max(self):
+        """Exactly max_replies are allowed within the window; the next is denied."""
         rl = RateLimiter(max_replies=3, window_seconds=3600)
         assert rl.is_allowed("thread-1") is True
         rl.record("thread-1")
@@ -79,12 +83,14 @@ class TestRateLimiter:
         assert rl.is_allowed("thread-1") is False
 
     def test_different_threads_independent(self):
+        """Exhausting one thread's budget must not affect other threads."""
         rl = RateLimiter(max_replies=1, window_seconds=3600)
         rl.record("thread-1")
         assert rl.is_allowed("thread-1") is False
         assert rl.is_allowed("thread-2") is True
 
     def test_window_expiry(self):
+        """A blocked thread becomes allowed again once its window elapses."""
         rl = RateLimiter(max_replies=1, window_seconds=1)
         rl.record("t1")
         assert rl.is_allowed("t1") is False
@@ -92,6 +98,7 @@ class TestRateLimiter:
         assert rl.is_allowed("t1") is True
 
     def test_reset_clears_all(self):
+        """reset() clears recorded usage for every tracked thread."""
         rl = RateLimiter(max_replies=1)
         rl.record("t1")
         rl.record("t2")
@@ -106,10 +113,12 @@ class TestRateLimiter:
 
 class TestComment:
     def test_score(self):
+        """score equals upvotes minus downvotes."""
         c = make_comment(upvotes=10, downvotes=3)
         assert c.score == 7
 
     def test_score_negative(self):
+        """score goes negative when downvotes exceed upvotes."""
         c = make_comment(upvotes=1, downvotes=5)
         assert c.score == -4
 
@@ -120,24 +129,29 @@ class TestComment:
 
 class TestThreadContext:
     def test_depth(self):
+        """depth counts the comments in the thread."""
         t = make_thread([make_comment("c1"), make_comment("c2")])
         assert t.depth == 2
 
     def test_empty_depth(self):
+        """An empty thread reports depth 0."""
         t = make_thread([])
         assert t.depth == 0
 
     def test_last_comment(self):
+        """last_comment returns the most recent comment in the thread."""
         c1 = make_comment("c1")
         c2 = make_comment("c2", author="bot1")
         t = make_thread([c1, c2])
         assert t.last_comment() == c2
 
     def test_last_comment_empty(self):
+        """last_comment returns None when the thread has no comments."""
         t = make_thread([])
         assert t.last_comment() is None
 
     def test_comments_by(self):
+        """comments_by filters by author, returning an empty list on no match."""
         c1 = make_comment("c1", author="RetroBot")
         c2 = make_comment("c2", author="ModernBot")
         c3 = make_comment("c3", author="RetroBot")
@@ -153,21 +167,25 @@ class TestThreadContext:
 
 class TestDebateBot:
     def test_cannot_instantiate_abstract(self):
+        """DebateBot without generate_reply implemented must not instantiate."""
         with pytest.raises(TypeError):
             DebateBot()  # abstract: generate_reply not implemented
 
     def test_concrete_bot_creates(self):
+        """A concrete subclass exposes its name and round limit."""
         bot = SimpleBot()
         assert bot.name == "SimpleBot"
         assert bot.max_rounds == 3
 
     def test_generate_reply_opener(self):
+        """With no opponent comment the bot produces an opening reply."""
         bot = SimpleBot()
         thread = make_thread([])
         reply = bot.generate_reply(thread, None)
         assert "hello" in reply.lower()
 
     def test_generate_reply_to_opponent(self):
+        """The reply addresses the opponent comment it was given."""
         bot = SimpleBot()
         opp = make_comment(author="Opponent")
         thread = make_thread([opp])
@@ -175,6 +193,7 @@ class TestDebateBot:
         assert "Opponent" in reply
 
     def test_no_self_reply(self):
+        """maybe_reply refuses to respond when the last comment is its own."""
         bot = SimpleBot()
         bot.client = MagicMock()
         # Last comment is from SimpleBot itself
@@ -184,6 +203,7 @@ class TestDebateBot:
         assert result is None
 
     def test_concession_after_max_rounds(self):
+        """After exhausting max_rounds the bot concedes (GG) rather than arguing on."""
         bot = SimpleBot()
         bot.client = MagicMock()
         bot.client.post_comment.return_value = make_comment(
@@ -206,6 +226,7 @@ class TestDebateBot:
             assert "GG" in result.body or "🤝" in result.body
 
     def test_rate_limiting(self):
+        """Replies beyond max_replies_per_hour are suppressed by the limiter."""
         bot = SimpleBot()
         bot.client = MagicMock()
         bot.client.post_comment.return_value = make_comment(
@@ -244,18 +265,21 @@ class TestDebateBot:
 
 class TestDebateOrchestrator:
     def test_register_bots(self):
+        """register() adds bots to the orchestrator roster."""
         orch = DebateOrchestrator(api_url="http://test")
         orch.register(RetroBot())
         orch.register(ModernBot())
         assert len(orch.bots) == 2
 
     def test_build_threads_empty(self):
+        """No comments yields a single empty thread at depth 0."""
         video = make_video()
         threads = DebateOrchestrator._build_threads(video, [])
         assert len(threads) == 1
         assert threads[0].depth == 0
 
     def test_build_threads_single_chain(self):
+        """A parent-linked chain collapses into one thread of matching depth."""
         video = make_video()
         c1 = make_comment("c1", parent_id=None, author="RetroBot")
         c2 = make_comment("c2", parent_id="c1", author="ModernBot")
@@ -265,6 +289,7 @@ class TestDebateOrchestrator:
         assert threads[0].depth == 3
 
     def test_build_threads_multiple_roots(self):
+        """Independent root comments produce separate threads."""
         video = make_video()
         c1 = make_comment("c1", parent_id=None, author="A")
         c2 = make_comment("c2", parent_id=None, author="B")
@@ -281,6 +306,7 @@ class TestDebateOrchestrator:
         assert isinstance(threads, list)
 
     def test_run_once_with_mock_client(self):
+        """run_once drives the full cycle: fetch videos/comments, then post a reply."""
         orch = DebateOrchestrator(api_url="http://test")
         retro = RetroBot()
         modern = ModernBot()
