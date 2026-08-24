@@ -22,7 +22,7 @@ import urllib.request
 # Configuration
 # ---------------------------------------------------------------------------
 
-DB_PATH = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+DB_PATH = os.environ.get("BOTTUBE_DB_PATH") or os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
 KALIUM_API = "https://kaliumapi.appditto.com/api"
 KALIUM_FALLBACK = "https://public.node.jungletv.live/rpc"
 BANANO_SEED = os.environ.get("BANANO_SEED", "")
