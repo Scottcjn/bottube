@@ -8098,6 +8098,7 @@ def get_comments(video_id):
 
 
 def _parse_recent_comments_limit():
+    """Parse and clamp the ?limit query param for recent-comment feeds; returns (limit, error)."""
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return 50, None
@@ -8113,6 +8114,7 @@ def _parse_recent_comments_limit():
 
 
 def _parse_recent_comments_since():
+    """Parse the ?since epoch filter for recent-comment feeds; returns (timestamp, error)."""
     raw_value = request.args.get("since")
     if raw_value in (None, ""):
         return 0, None
@@ -9237,6 +9239,7 @@ def social_graph():
 # ---------------------------------------------------------------------------
 
 def _normalize_category_filter(category):
+    """Normalize a category slug, returning None when it is not a known category."""
     category = (category or "").strip().lower()
     return category if category in CATEGORY_MAP else None
 
@@ -9870,6 +9873,7 @@ def _feed_imp_record(visitor_id, surface, bucket, videos):
 
 
 def _feed_event_json_body():
+    """Parse a feed-event request body, enforcing that it is a JSON object; returns (data, error_response)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -9879,6 +9883,7 @@ def _feed_event_json_body():
 
 
 def _feed_event_impression_id(data):
+    """Validate the impression id of a feed event; returns (imp_id, error_response)."""
     raw_value = data.get("imp") or data.get("impression_id") or ""
     if not isinstance(raw_value, str):
         return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
@@ -10407,6 +10412,7 @@ def my_quests():
 
 
 def _parse_leaderboard_limit(default=25, max_value=100):
+    """Parse and clamp the ?limit query param for leaderboard endpoints; returns (limit, error)."""
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return default, None
@@ -15786,6 +15792,7 @@ def _require_admin():
 
 
 def _admin_text_field(data, field, default="", max_length=None):
+    """Extract a length-capped string field from an admin payload; returns (value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -15798,6 +15805,7 @@ def _admin_text_field(data, field, default="", max_length=None):
 
 
 def _admin_json_body():
+    """Parse an admin request body, enforcing that it is a JSON object; returns (data, error)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -16443,6 +16451,7 @@ _github_cache = {"stars": 20, "forks": 21, "clones": 399, "ts": 0}
 
 @app.route("/api/github-stats")
 def github_stats():
+    """Serve cached star/fork counts for the BoTTube repo, refreshing at most every 5 minutes."""
     import time, urllib.request, json
     now = time.time()
     if now - _github_cache["ts"] < 300:
@@ -16693,6 +16702,7 @@ def pypi_downloads():
 # ── Platform install counters (Homebrew, APT, AUR, Docker, Tigerbrew) ──
 @app.route("/api/platform-installs")
 def api_platform_installs():
+    """Report the cached install count for a product/platform pair."""
     product = (request.args.get("product", "") or "")[:40]
     platform = (request.args.get("platform", "") or "")[:40]
     key = f"{product}_{platform}"
@@ -16711,6 +16721,7 @@ _clawrtc_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/clawrtc-github-stats")
 def clawrtc_github_stats():
+    """Serve cached star/fork counts for the RustChain repo, refreshing at most every 5 minutes."""
     import time, urllib.request, json
     now = time.time()
     if now - _clawrtc_github_cache["ts"] < 300:
@@ -16765,6 +16776,7 @@ _grazer_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/grazer-github-stats")
 def grazer_github_stats():
+    """Serve cached star/fork counts for the grazer-skill repo, refreshing at most every 5 minutes."""
     import time, urllib.request, json
     now = time.time()
     if now - _grazer_github_cache["ts"] < 300:
@@ -16977,6 +16989,7 @@ def _gen_message_id():
 
 
 def _message_text_field(data, field, default="", max_length=None):
+    """Extract a length-capped string field from a messaging payload; returns (value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -17375,6 +17388,7 @@ REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleadin
 
 
 def _report_text_field(data, field, default="", max_length=None):
+    """Extract a length-capped string field from a report payload; returns (value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -18021,6 +18035,7 @@ def _make_badge_svg(label, value, color="#3ea6ff"):
 </svg>"""
 
 def _format_count(n):
+    """Format a count compactly for display (1.2K / 3.4M)."""
     if n >= 1000000: return f"{n/1000000:.1f}M"
     if n >= 1000: return f"{n/1000:.1f}K"
     return str(n)
@@ -18384,6 +18399,7 @@ def ctr_underperforming():
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
     # Reject non-existent videos
+    """Serve impression/click/CTR stats for a video; 404 when the video does not exist."""
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
