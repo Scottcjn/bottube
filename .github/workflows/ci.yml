@@ -6,81 +6,139 @@ on:
   pull_request:
     branches: [ main ]
 
+# If several workflows fire on the same commit (push + PR, or rapid
+# pushes), don't queue a pile of redundant runs: cancel the superseded
+# ones. This reduces runner load and avoids the resource-exhaustion
+# pattern where jobs wait forever for a hosted runner.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    # Explicit job-level timeout: a hung step now fails the job with a
+    # clear "exceeded the maximum execution time" annotation instead of
+    # silently waiting (the default is 360 minutes).
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-    
+      timeout-minutes: 3
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+      timeout-minutes: 5
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pylint
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 flake8 pylint
+        if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
+      timeout-minutes: 8
+
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # Exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
+      timeout-minutes: 5
+
     - name: Lint with pylint
       continue-on-error: true
       run: |
         pylint bottube_server.py --disable=C,R,W || true
+      timeout-minutes: 5
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-    
+      timeout-minutes: 3
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+      timeout-minutes: 5
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-cov
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 pytest pytest-cov
+        if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
+      timeout-minutes: 8
+
     - name: Run tests
       run: |
         pytest tests/ -v --cov=. --cov-report=xml || true
-    
+      timeout-minutes: 10
+
     - name: Upload coverage
       uses: codecov/codecov-action@v4
       if: always()
+      timeout-minutes: 5
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-    
+      timeout-minutes: 3
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+      timeout-minutes: 5
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install bandit safety
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 bandit safety
+        if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
+      timeout-minutes: 8
+
     - name: Run Bandit security linter
       continue-on-error: true
       run: |
         bandit -r . -x ./tests || true
-    
+      timeout-minutes: 5
+
     - name: Check dependencies for vulnerabilities
       continue-on-error: true
       run: |
         safety check || true
+      timeout-minutes: 5
+
+  # Outcome report: tells the contributor *why* a check is red.
+  # A job cancelled by its timeout-minutes limit reports "cancelled";
+  # a job where a step exited non-zero reports "failure". That
+  # distinction is the difference between "CI infra hung" and
+  # "your code failed", which is exactly what the 15m01s failures
+  # obscured.
+  report:
+    name: CI outcome report
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]
+    if: always()
+    timeout-minutes: 2
+    steps:
+      - name: Distinguish timeout from failure
+        run: |
+          L="${{ needs.lint.result }}"
+          T="${{ needs.test.result }}"
+          S="${{ needs.security.result }}"
+          echo "lint=$L test=$T security=$S"
+          if echo "$L $T $S" | grep -q cancelled; then
+            echo "::error::A CI job was CANCELLED at its timeout-minutes limit (infrastructure hang, not necessarily a code failure). Re-run the workflow to confirm."
+            exit 1
+          elif echo "$L $T $S" | grep -qE 'failure|error'; then
+            echo "::error::A CI job FAILED on a step. Look at the failing job's logs above - that is a real failure."
+            exit 1
+          else
+            echo "All CI jobs completed successfully."
+          fi

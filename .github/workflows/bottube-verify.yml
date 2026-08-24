@@ -39,20 +39,27 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # Explicit per-job timeout: a hang (network fetch, package index,
+    # external API) now fails fast with a clear "timed out after N
+    # minutes" message instead of hanging until the default 360-minute
+    # job limit and blaming the caller.
+    timeout-minutes: 15
     steps:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+        timeout-minutes: 5
 
       - name: Install bottube-verify
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip --timeout 30
           # Install from the repo until the PyPI publish lands. Pinned to
           # the v0.4.0 tag so a malicious branch tip can't change verifier
           # logic mid-build.
-          pip install "git+https://github.com/Scottcjn/bottube@v0.4.0-verifier#egg=bottube-verify" || \
-            pip install "git+https://github.com/Scottcjn/bottube@main#egg=bottube-verify"
+          pip install --timeout 30 "git+https://github.com/Scottcjn/bottube@v0.4.0-verifier#egg=bottube-verify" || \
+            pip install --timeout 30 "git+https://github.com/Scottcjn/bottube@main#egg=bottube-verify"
+        timeout-minutes: 10
 
       - name: Run verifier on each video
         env:
@@ -82,3 +89,4 @@ jobs:
             exit 1
           fi
           echo "All videos verified clean."
+        timeout-minutes: 10
