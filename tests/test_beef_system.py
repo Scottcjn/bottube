@@ -86,6 +86,7 @@ def client(app):
 # ---------------------------------------------------------------------------
 
 def _post_event(client, a_id, b_id, event_type, delta, description=""):
+    """Post a relationship event for an agent pair via the beef API."""
     return client.post(
         "/api/beef/relationships",
         json={
@@ -119,6 +120,7 @@ def test_tables_created(db_path):
 # ---------------------------------------------------------------------------
 
 def test_canonical_pair_ordering():
+    """_canonical_pair orders agent ids consistently regardless of argument order."""
     import agent_relationships as ar
     assert ar._canonical_pair(5, 3) == (3, 5)
     assert ar._canonical_pair(1, 2) == (1, 2)
@@ -129,27 +131,32 @@ def test_canonical_pair_ordering():
 # ---------------------------------------------------------------------------
 
 def test_transition_neutral_to_friendly():
+    """Tension at the friendly threshold promotes a neutral pair to friendly."""
     import agent_relationships as ar
     # tension at threshold → friendly
     assert ar._transition_state(30, "neutral", None) == "friendly"
 
 
 def test_transition_friendly_to_rivals():
+    """Higher tension promotes a friendly pair to rivals."""
     import agent_relationships as ar
     assert ar._transition_state(60, "friendly", None) == "rivals"
 
 
 def test_transition_rivals_to_beef():
+    """Tension at the beef threshold escalates rivals into an active beef."""
     import agent_relationships as ar
     assert ar._transition_state(85, "rivals", None) == "beef"
 
 
 def test_transition_below_threshold_stays_neutral():
+    """Tension below the first threshold leaves the pair neutral."""
     import agent_relationships as ar
     assert ar._transition_state(20, "neutral", None) == "neutral"
 
 
 def test_max_beef_duration_forces_frenemies():
+    """A beef older than 14 days flips to frenemies regardless of tension."""
     import agent_relationships as ar
     # beef_started_at 15 days ago → should flip to frenemies
     started = time.time() - 15 * 86400
@@ -158,6 +165,7 @@ def test_max_beef_duration_forces_frenemies():
 
 
 def test_beef_within_14_days_stays_beef():
+    """A beef younger than 14 days stays active."""
     import agent_relationships as ar
     started = time.time() - 5 * 86400
     result = ar._transition_state(90, "beef", started)
@@ -169,12 +177,14 @@ def test_beef_within_14_days_stays_beef():
 # ---------------------------------------------------------------------------
 
 def test_list_relationships_empty(client):
+    """GET /relationships returns an empty list when nothing exists."""
     resp = client.get("/api/beef/relationships")
     assert resp.status_code == 200
     assert resp.get_json() == []
 
 
 def test_list_relationships_rejects_malformed_agent_filter(client):
+    """A non-integer agent_id filter is rejected with 400 and a clear error."""
     _post_event(client, 1, 2, "comment_disagree", 10)
 
     resp = client.get("/api/beef/relationships?agent_id=not-an-int")
@@ -188,6 +198,7 @@ def test_list_relationships_rejects_malformed_agent_filter(client):
 # ---------------------------------------------------------------------------
 
 def test_create_relationship_via_event(client):
+    """Posting the first event for a pair creates the relationship with that tension."""
     resp = _post_event(client, 1, 2, "comment_disagree", 10)
     assert resp.status_code == 200
     data = resp.get_json()
@@ -201,6 +212,7 @@ def test_create_relationship_via_event(client):
 # ---------------------------------------------------------------------------
 
 def test_tension_accumulates_to_rivals(client):
+    """Successive events accumulate tension until the pair transitions to rivals."""
     _post_event(client, 3, 4, "disagree", 30)
     _post_event(client, 3, 4, "callout", 31)
     resp = _post_event(client, 3, 4, "hot_take", 0)  # zero-delta; just fetch
@@ -210,6 +222,7 @@ def test_tension_accumulates_to_rivals(client):
 
 
 def test_tension_accumulates_to_beef(client):
+    """One large event pushes the pair into beef and stamps beef_started_at."""
     _post_event(client, 5, 6, "disagree", 90)
     resp = client.get("/api/beef/relationships")
     rels = resp.get_json()
@@ -223,6 +236,7 @@ def test_tension_accumulates_to_beef(client):
 # ---------------------------------------------------------------------------
 
 def test_get_single_relationship(client):
+    """GET /relationships/<id> returns the stored relationship record."""
     _post_event(client, 7, 8, "collab", 5)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = rels[0]["id"]
@@ -232,6 +246,7 @@ def test_get_single_relationship(client):
 
 
 def test_get_relationship_not_found(client):
+    """GET for an unknown relationship id returns 404."""
     resp = client.get("/api/beef/relationships/9999")
     assert resp.status_code == 404
 
@@ -241,6 +256,7 @@ def test_get_relationship_not_found(client):
 # ---------------------------------------------------------------------------
 
 def test_admin_kill(client):
+    """The admin kill endpoint removes a relationship from normal listings."""
     _post_event(client, 9, 10, "callout", 90)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = rels[0]["id"]
@@ -259,6 +275,7 @@ def test_admin_kill(client):
 # ---------------------------------------------------------------------------
 
 def test_events_are_logged(client):
+    """Every posted event is recorded in the relationship's event log in order."""
     _post_event(client, 11, 12, "first_event", 10, "initial skirmish")
     _post_event(client, 11, 12, "second_event", 5, "follow-up")
     rels = client.get("/api/beef/relationships").get_json()
@@ -274,6 +291,7 @@ def test_events_are_logged(client):
 # ---------------------------------------------------------------------------
 
 def test_arc_templates_listed(client):
+    """The templates endpoint exposes the four built-in drama arcs."""
     resp = client.get("/api/beef/arcs/templates")
     assert resp.status_code == 200
     templates = resp.get_json()
@@ -286,6 +304,7 @@ def test_arc_templates_listed(client):
 # ---------------------------------------------------------------------------
 
 def test_start_drama_arc(client):
+    """Starting an arc creates it active on the relationship with the chosen template."""
     _post_event(client, 13, 14, "disagree", 65)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 13)
@@ -301,6 +320,7 @@ def test_start_drama_arc(client):
 
 
 def test_start_drama_arc_rejects_non_object_json(client):
+    """Arc creation rejects non-object JSON bodies with 400."""
     resp = client.post("/api/beef/arcs", json=["not", "an", "object"])
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "JSON object required"
@@ -324,12 +344,14 @@ def test_start_drama_arc_rejects_non_object_json(client):
     ],
 )
 def test_start_drama_arc_rejects_malformed_fields(client, payload, error):
+    """Arc creation validates relationship_id and arc_template types and blanks."""
     resp = client.post("/api/beef/arcs", json=payload)
     assert resp.status_code == 400
     assert resp.get_json()["error"] == error
 
 
 def test_list_active_arcs(client):
+    """GET /arcs lists started arcs keyed by their relationship id."""
     _post_event(client, 15, 16, "callout", 70)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 15)
@@ -346,6 +368,7 @@ def test_list_active_arcs(client):
 # ---------------------------------------------------------------------------
 
 def test_resolve_drama_arc(client):
+    """Resolving an arc marks it resolved and records the resolution note."""
     _post_event(client, 17, 18, "disagree", 70)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 17)
@@ -360,6 +383,7 @@ def test_resolve_drama_arc(client):
 
 
 def test_resolve_drama_arc_rejects_non_object_json(client):
+    """Arc resolution rejects non-object JSON bodies with 400."""
     _post_event(client, 23, 24, "disagree", 70)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 23)
@@ -374,6 +398,7 @@ def test_resolve_drama_arc_rejects_non_object_json(client):
 
 
 def test_resolve_drama_arc_rejects_non_string_note(client):
+    """Arc resolution requires resolution_note to be a string."""
     _post_event(client, 25, 26, "disagree", 70)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = next(r["id"] for r in rels if r["agent_a_id"] == 25)
@@ -395,6 +420,7 @@ def test_resolve_drama_arc_rejects_non_string_note(client):
 # ---------------------------------------------------------------------------
 
 def test_drama_leaderboard(client):
+    """The drama leaderboard ranks agents involved in relationships."""
     _post_event(client, 20, 21, "beef", 90)
     _post_event(client, 20, 22, "disagree", 40)
     resp = client.get("/api/beef/leaderboard")
@@ -410,16 +436,19 @@ def test_drama_leaderboard(client):
 # ---------------------------------------------------------------------------
 
 def test_missing_agents_returns_400(client):
+    """An event missing either agent id is rejected with 400."""
     resp = client.post("/api/beef/relationships", json={"event_type": "test", "delta": 5})
     assert resp.status_code == 400
 
 
 def test_same_agent_returns_400(client):
+    """Self-relationships (same agent on both sides) are rejected with 400."""
     resp = _post_event(client, 99, 99, "self_hate", 10)
     assert resp.status_code == 400
 
 
 def test_relationship_event_rejects_non_object_json(client):
+    """The event endpoint rejects non-object JSON bodies with 400."""
     resp = client.post("/api/beef/relationships", json=[{"agent_a_id": 1}])
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "JSON object required"
@@ -451,6 +480,7 @@ def test_relationship_event_rejects_non_object_json(client):
     ],
 )
 def test_relationship_event_rejects_malformed_fields(client, payload, error):
+    """The event endpoint validates agent id types and finite delta values."""
     resp = client.post("/api/beef/relationships", json=payload)
     assert resp.status_code == 400
     assert resp.get_json()["error"] == error
