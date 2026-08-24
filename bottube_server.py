@@ -4138,6 +4138,7 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
     canonical_event = _canonical_webhook_event(event)
 
     def _deliver():
+        """Deliver a canonical webhook event to every active hook of the agent, enforcing event filters and the 100/hour rate window."""
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
         hooks = conn.execute(
@@ -4288,6 +4289,7 @@ def require_api_key(f):
     """Decorator to require a valid agent API key."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """API-key auth wrapper: validates X-API-Key, rejects banned agents, and refreshes last_active before dispatching."""
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             return jsonify({"error": "Missing X-API-Key header"}), 401
@@ -18463,6 +18465,7 @@ def record_watch_time(video_id):
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
     # Reject non-existent videos
+    """Serve A/B thumbnail variant stats and the current winner for a video; 404 when the video does not exist."""
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18516,6 +18519,7 @@ def _eng_lat_start():
 
 @app.after_request
 def _eng_lat_record(response):
+    """After-response hook recording request latency into the engineering histograms, skipping media/static paths and capping in-flight tails."""
     try:
         t0 = getattr(g, "_eng_t0", None)
         if t0 is None:
@@ -18580,6 +18584,7 @@ def _eng_probe_node(node, timeout=2.0):
 
 
 def _eng_percentile(values, pct):
+    """Return the p-th percentile of a list of latency samples (nearest-rank)."""
     if not values:
         return 0.0
     s = sorted(values)
@@ -18588,6 +18593,7 @@ def _eng_percentile(values, pct):
 
 
 def _eng_format_uptime(seconds):
+    """Format a seconds count as a compact uptime string (Xd Yh / Yh Zm / Zm)."""
     seconds = int(max(0, seconds))
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
@@ -18775,6 +18781,7 @@ _PROVENANCE_SCHEMA_LOCK = _eng_Lock()
 
 
 def _ensure_provenance_schema():
+    """Create the video_provenance table (canonical hashes, creator keys, model/workflow metadata) once per process."""
     global _PROVENANCE_SCHEMA_READY
     if _PROVENANCE_SCHEMA_READY:
         return
@@ -19479,6 +19486,7 @@ def _firehose_sign(payload):
 
 
 def _firehose_relay_pubkey_b64():
+    """Return the firehose relay's Ed25519 public key as url-safe base64, loading it lazily."""
     _firehose_load_relay_key()
     pk = _FIREHOSE_RELAY.get("pk")
     if pk is None:
@@ -20410,6 +20418,7 @@ def agent_accept_terms():
 # --- Public report endpoint -----------------------------------------------
 
 def _public_report_text_field(data, field, max_length):
+    """Extract a length-capped string field from a public report payload; returns (value, error)."""
     value = data.get(field, "")
     if value is None:
         value = ""
@@ -20847,6 +20856,7 @@ def _uv_record_for_video(video_id, ensure_sprite=True):
 
 
 def _uv_cache_warm():
+    """Load all visual embeddings into the in-memory matrix cache for nearest-neighbour search; returns False when empty."""
     try:
         import numpy as _np
     except ImportError:
@@ -21953,6 +21963,7 @@ def _agent_ed25519_seal(seckey_bytes):
 
 
 def _agent_ed25519_unseal(sealed_hex):
+    """XOR-unseal a hex-encoded payload using the master key derived from the agent signing secret."""
     if not sealed_hex:
         return b""
     try:
@@ -22092,6 +22103,7 @@ def _verify_v3_signature(pubkey_hex, signature_hex, video_id,
 
 
 def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    """Compute the v1 manifest leaf hash over video id, canonical hash, uploader signature and timestamp."""
     parts = "|".join([
         video_id or "",
         canonical_sha256 or "",
@@ -22103,6 +22115,7 @@ def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
 
 def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
                       canonical_360p_sha256, uploader_sig, uploaded_at):
+    """Compute the v2 manifest leaf hash, adding domain separation plus thumbnail and 360p hashes."""
     parts = "|".join([
         _LEAF_DOMAIN_V2,
         video_id or "",
@@ -22157,6 +22170,7 @@ def _manifest_leaf(version, video_id, canonical_sha256,
 
 
 def _manifest_leaf_recipe(version):
+    """Return the human-readable leaf-hash recipe for a manifest version (v1/v2/v3)."""
     v = int(version or 1)
     if v >= MANIFEST_V3:
         return (
@@ -24899,6 +24913,7 @@ if __name__ == "__main__":
 
 @app.route("/tips/dashboard")
 def tips_dashboard():
+    """Render the tips leaderboard page, syncing pending tips and ranking top recipients and tippers."""
     db = get_db()
     _sync_pending_tips(db)
 
