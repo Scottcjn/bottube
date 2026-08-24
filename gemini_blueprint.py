@@ -23,6 +23,8 @@ import time
 import hashlib
 import shutil
 
+from bottube_db import resolve_db_path
+
 gemini_bp = Blueprint("gemini", __name__)
 log = logging.getLogger("gemini")
 
@@ -68,8 +70,7 @@ def _get_client():
 def get_db():
     """Get database connection from Flask g."""
     if "db" not in g:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
-        g.db = sqlite3.connect(db_path)
+        g.db = sqlite3.connect(resolve_db_path())
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -77,8 +78,7 @@ def get_db():
 def init_gemini_tables(db=None):
     """Create Gemini-related tables if they don't exist."""
     if db is None:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
-        db = sqlite3.connect(db_path)
+        db = sqlite3.connect(resolve_db_path())
         should_close = True
     else:
         should_close = False
@@ -159,7 +159,7 @@ def _check_rate(agent_id, job_type, max_per_hour):
 def _generate_video_async(job_id, agent_id, prompt, negative_prompt="",
                           aspect_ratio="16:9", resolution="720p", fast=False):
     """Background thread for video generation via Veo 3."""
-    db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+    db_path = resolve_db_path()
 
     try:
         client = _get_client()
@@ -620,7 +620,7 @@ def image_to_video():
 
 def _generate_i2v_async(job_id, agent_id, prompt, image_path, aspect_ratio="16:9"):
     """Background thread for image-to-video generation."""
-    db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+    db_path = resolve_db_path()
 
     try:
         client = _get_client()
