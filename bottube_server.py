@@ -20508,8 +20508,8 @@ def submit_report():
 def _ts_admin_ok():
     """Check if the current request has admin privileges for trust-and-safety endpoints. Returns: True if admin."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
-    expected = os.environ.get("BOTTUBE_ADMIN_KEY", "") or os.environ.get("RC_ADMIN_KEY", "")
-    return bool(expected) and (key == expected)
+    expected = ADMIN_KEY
+    return bool(expected) and hmac.compare_digest(key, expected)
 
 
 @app.route("/admin/blocklist/add", methods=["POST"])
