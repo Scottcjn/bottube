@@ -67,7 +67,7 @@ REQUIRED_CONFIRMATIONS = 3
 def get_db():
     """Get database connection from Flask g."""
     if "db" not in g:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+        db_path = os.environ.get("BOTTUBE_DB_PATH") or os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
     return g.db
@@ -76,7 +76,7 @@ def get_db():
 def init_ergo_tables(db=None):
     """Create Ergo bridge tables if they don't exist."""
     if db is None:
-        db_path = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+        db_path = os.environ.get("BOTTUBE_DB_PATH") or os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
         db = sqlite3.connect(db_path)
         should_close = True
     else:
