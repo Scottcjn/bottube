@@ -22,6 +22,9 @@ from telegram_bot import (
 # ---------------------------------------------------------------------------
 
 def make_video(**kwargs):
+    """Build a Video model instance with sensible test defaults."""
+    """Build a Video model instance with sensible test defaults."""
+    """Build a Video model instance with sensible test defaults."""
     defaults = dict(
         id="v1", title="Test Video", description="A great video about testing",
         views=100, likes=10, thumbnail="https://img.test/thumb.jpg",
@@ -32,6 +35,9 @@ def make_video(**kwargs):
 
 
 def make_agent(**kwargs):
+    """Build an Agent model instance with sensible test defaults."""
+    """Build an Agent model instance with sensible test defaults."""
+    """Build an Agent model instance with sensible test defaults."""
     defaults = dict(
         name="testbot", display_name="TestBot",
         bio="I make test videos", avatar_url="", video_count=42,
@@ -42,6 +48,9 @@ def make_agent(**kwargs):
 
 class MockResponse:
     def __init__(self, json_data, status_code=200):
+        """Store the JSON payload and status code for the mock response."""
+        """Store the JSON payload and status code for the mock response."""
+        """Store the JSON payload and status code for the mock response."""
         self._json = json_data
         self.status_code = status_code
 
@@ -59,18 +68,22 @@ class MockResponse:
 
 class TestVideo:
     def test_url(self):
+        """Video.url builds the public watch URL from the video id."""
         v = make_video(id="abc123")
         assert v.url == "https://bottube.ai/watch/abc123"
 
     def test_short_desc_truncation(self):
+        """Long descriptions are truncated to under 124 characters in short_desc."""
         v = make_video(description="x" * 200)
         assert len(v.short_desc) <= 124
 
     def test_short_desc_no_truncation(self):
+        """Short descriptions pass through short_desc unchanged."""
         v = make_video(description="Short desc")
         assert v.short_desc == "Short desc"
 
     def test_to_text(self):
+        """to_text renders title, agent name and view count into the message."""
         v = make_video(title="My Video", agent_name="Bot", views=50, likes=5)
         text = v.to_text(1)
         assert "My Video" in text
@@ -78,6 +91,7 @@ class TestVideo:
         assert "50" in text
 
     def test_to_text_escapes_html(self):
+        """to_text HTML-escapes the title so injected scripts render inert."""
         v = make_video(title="<script>alert(1)</script>")
         text = v.to_text()
         assert "<script>" not in text
@@ -90,12 +104,14 @@ class TestVideo:
 
 class TestAgent:
     def test_to_text(self):
+        """Agent to_text renders display name and video count into the message."""
         a = make_agent(display_name="CosmoBot", bio="Space videos", video_count=100)
         text = a.to_text()
         assert "CosmoBot" in text
         assert "100 videos" in text
 
     def test_to_text_url(self):
+        """Agent names with spaces are URL-encoded in the profile link."""
         a = make_agent(name="cosmo bot")
         text = a.to_text()
         assert "cosmo%20bot" in text
@@ -123,6 +139,7 @@ class TestEscape:
 class TestBoTTubeAPI:
     @patch("telegram_bot.requests.Session")
     def test_latest(self, mock_session_cls):
+        """latest() fetches and formats the most recent videos list."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -140,6 +157,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_search(self, mock_session_cls):
+        """search() returns matching videos from the search endpoint."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse([
@@ -155,6 +173,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_video(self, mock_session_cls):
+        """get_video() returns a single formatted video."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -171,6 +190,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_video_not_found(self, mock_session_cls):
+        """get_video() returns None when the API responds 404."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({}, 404)
@@ -181,6 +201,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_agent(self, mock_session_cls):
+        """get_agent() returns the agent profile payload."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -196,16 +217,19 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_list(self, mock_session_cls):
+        """_items normalises a bare JSON list into video records."""
         api = BoTTubeAPI("http://test")
         assert api._items([1, 2, 3]) == [1, 2, 3]
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_dict_with_videos(self, mock_session_cls):
+        """_items extracts records from a dict with a 'videos' key."""
         api = BoTTubeAPI("http://test")
         assert api._items({"videos": [1]}) == [1]
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_dict_with_data(self, mock_session_cls):
+        """_items extracts records from a dict with a 'data' key."""
         api = BoTTubeAPI("http://test")
         assert api._items({"data": [2]}) == [2]
 
