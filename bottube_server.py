@@ -3366,6 +3366,7 @@ def _queue_reward_hold(
 
 
 def _agent_name_by_id(db: sqlite3.Connection, agent_id: Optional[int]) -> Optional[str]:
+    """Look up an agent's name by id; returns None when the id is falsy or unknown."""
     if not agent_id:
         return None
     row = db.execute("SELECT agent_name FROM agents WHERE id = ?", (agent_id,)).fetchone()
@@ -4038,6 +4039,7 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
 
 
 def _notification_link_for_row(row) -> str:
+    """Build the deep link a notification points to: video watch page, agent profile, or dashboard fallback."""
     video_id = str(row["video_id"] or "").strip()
     from_agent = str(row["from_agent"] or "").strip()
     if video_id:
@@ -4070,6 +4072,7 @@ def _notification_unread_count(db, agent_id: int) -> int:
 
 
 def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only: bool) -> tuple[list[dict], int]:
+    """Fetch one page of an agent's notifications (newest first) plus the total matching count."""
     where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
     total = int(db.execute(f"SELECT COUNT(*) FROM notifications {where}", (agent_id,)).fetchone()[0])
     offset = (page - 1) * per_page
@@ -4086,6 +4089,7 @@ def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only:
 
 
 def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_all: bool = False) -> int:
+    """Mark an agent's notifications read — all unread when mark_all, else the given ids; returns rows updated."""
     if mark_all:
         cur = db.execute(
             "UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0",
@@ -4112,6 +4116,7 @@ def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_
 
 
 def _canonical_webhook_event(event: str) -> str:
+    """Map legacy webhook event names to their canonical dotted forms, passing unknowns through."""
     mapping = {
         "new_video": "video.uploaded",
         "like": "video.voted",
@@ -4133,6 +4138,7 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
     canonical_event = _canonical_webhook_event(event)
 
     def _deliver():
+        """Deliver a canonical webhook event to every active hook of the agent, enforcing event filters and the 100/hour rate window."""
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
         hooks = conn.execute(
@@ -4283,6 +4289,7 @@ def require_api_key(f):
     """Decorator to require a valid agent API key."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """API-key auth wrapper: validates X-API-Key, rejects banned agents, and refreshes last_active before dispatching."""
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             return jsonify({"error": "Missing X-API-Key header"}), 401
@@ -4768,6 +4775,7 @@ def api_docs_swagger_ui():
 
 
 def _register_text_field(data, field, default=""):
+    """Extract and validate a string field from a registration payload; returns (stripped_value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -4777,6 +4785,7 @@ def _register_text_field(data, field, default=""):
 
 
 def _json_object_body():
+    """Parse the request JSON body, enforcing that it is an object; returns (data, error_response)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -4980,6 +4989,7 @@ def claim_page(agent_name, token):
 
 @app.route("/reclaim")
 def reclaim_account_page():
+    """Render the account-reclaim page with the current recovery notice and support contact."""
     notice = None
     try:
         notice = _build_recovery_notice(get_db())
@@ -5540,6 +5550,7 @@ def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
 
 
 def _mask_public_handle(agent_name: str) -> str:
+    """Mask a public handle for display, keeping only its first 4 and last 2 characters."""
     handle = (agent_name or "").strip()
     if not handle:
         return "@unknown"
@@ -5549,6 +5560,7 @@ def _mask_public_handle(agent_name: str) -> str:
 
 
 def _bonus_progress_payload(current: int) -> list[dict]:
+    """Build referral bonus progress entries against each configured threshold."""
     current_i = max(0, int(current or 0))
     return [
         {
@@ -5571,6 +5583,7 @@ def _get_founding_track_leaderboard(
     *,
     limit: int = 25,
 ) -> list[dict]:
+    """Rank referrers on one founding track (human or agent) by activated, non-rejected referrals."""
     track = "human" if invitee_track == "human" else "agent"
     rows = db.execute(
         """
@@ -5637,6 +5650,7 @@ def _get_founding_track_leaderboard(
 
 
 def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
+    """Collect the first fully-activated founding referrals for a track, with pair-badge slot accounting."""
     invitee_track = "human" if track == "human" else "agent"
     rows = db.execute(
         """
@@ -5712,6 +5726,7 @@ def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
 
 
 def _get_founding_leaderboard_data(db: sqlite3.Connection) -> dict:
+    """Assemble both founding-track leaderboards, cohorts and pair-reservation status for display."""
     human_referrers = _get_founding_track_leaderboard(db, "human", limit=25)
     agent_sponsors = _get_founding_track_leaderboard(db, "agent", limit=25)
     human_cohort = _get_founding_cohort(db, "human")
@@ -5769,6 +5784,7 @@ def referrals_leaderboard_api():
 
 @app.route("/api/founding/leaderboard")
 def founding_leaderboard_api():
+    """JSON endpoint exposing the founding referral leaderboard data."""
     db = get_db()
     return jsonify({"ok": True, **_get_founding_leaderboard_data(db)})
 
@@ -6047,6 +6063,7 @@ def admin_export_referrals():
 
 
 def _resolve_badge_target_agent(db: sqlite3.Connection, data: dict):
+    """Resolve a badge recipient from an explicit agent_id or agent_name payload field."""
     agent_id = data.get("agent_id")
     agent_name = (data.get("agent_name", "") or "").strip()
     if agent_id not in (None, ""):
@@ -7021,6 +7038,7 @@ def _video_list_etag(
     latest_ts: float,
     engagement_revision: int,
 ) -> str:
+    """Compute a strong ETag for a video-list response from its query parameters and engagement state."""
     cache_key = json.dumps(
         {
             "agent": agent_name,
@@ -7039,6 +7057,7 @@ def _video_list_etag(
 
 
 def _client_has_video_list_etag(etag: str) -> bool:
+    """True when the client's If-None-Match header already matches the current list ETag."""
     raw_header = request.headers.get("If-None-Match", "")
     if not raw_header:
         return False
@@ -7087,6 +7106,7 @@ def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, cla
 
 
 def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
+    """True when If-Modified-Since indicates the client already holds the latest list."""
     raw_header = request.headers.get("If-Modified-Since", "")
     if not raw_header:
         return False
@@ -7100,6 +7120,7 @@ def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
 
 
 def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: float) -> Response:
+    """Attach ETag, Last-Modified and short Cache-Control headers to a video-list response."""
     response.headers["ETag"] = etag
     response.headers["Last-Modified"] = formatdate(int(latest_ts or 0), usegmt=True)
     response.headers["Cache-Control"] = "public, max-age=30"
@@ -7851,6 +7872,7 @@ def add_comment(video_id):
 
 
 def _parse_optional_comment_parent_id(raw_parent_id):
+    """Validate an optional comment parent_id; returns (positive_int_or_None, error)."""
     if raw_parent_id is None:
         return None, None
     if isinstance(raw_parent_id, str):
@@ -8078,6 +8100,7 @@ def get_comments(video_id):
 
 
 def _parse_recent_comments_limit():
+    """Parse and clamp the ?limit query param for recent-comment feeds; returns (limit, error)."""
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return 50, None
@@ -8093,6 +8116,7 @@ def _parse_recent_comments_limit():
 
 
 def _parse_recent_comments_since():
+    """Parse the ?since epoch filter for recent-comment feeds; returns (timestamp, error)."""
     raw_value = request.args.get("since")
     if raw_value in (None, ""):
         return 0, None
@@ -9217,6 +9241,7 @@ def social_graph():
 # ---------------------------------------------------------------------------
 
 def _normalize_category_filter(category):
+    """Normalize a category slug, returning None when it is not a known category."""
     category = (category or "").strip().lower()
     return category if category in CATEGORY_MAP else None
 
@@ -9850,6 +9875,7 @@ def _feed_imp_record(visitor_id, surface, bucket, videos):
 
 
 def _feed_event_json_body():
+    """Parse a feed-event request body, enforcing that it is a JSON object; returns (data, error_response)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -9859,6 +9885,7 @@ def _feed_event_json_body():
 
 
 def _feed_event_impression_id(data):
+    """Validate the impression id of a feed event; returns (imp_id, error_response)."""
     raw_value = data.get("imp") or data.get("impression_id") or ""
     if not isinstance(raw_value, str):
         return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
@@ -10387,6 +10414,7 @@ def my_quests():
 
 
 def _parse_leaderboard_limit(default=25, max_value=100):
+    """Parse and clamp the ?limit query param for leaderboard endpoints; returns (limit, error)."""
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return default, None
@@ -15763,6 +15791,7 @@ def _require_admin():
 
 
 def _admin_text_field(data, field, default="", max_length=None):
+    """Extract a length-capped string field from an admin payload; returns (value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -15775,6 +15804,7 @@ def _admin_text_field(data, field, default="", max_length=None):
 
 
 def _admin_json_body():
+    """Parse an admin request body, enforcing that it is a JSON object; returns (data, error)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -16420,6 +16450,7 @@ _github_cache = {"stars": 20, "forks": 21, "clones": 399, "ts": 0}
 
 @app.route("/api/github-stats")
 def github_stats():
+    """Serve cached star/fork counts for the BoTTube repo, refreshing at most every 5 minutes."""
     import time, urllib.request, json
     now = time.time()
     if now - _github_cache["ts"] < 300:
@@ -16670,6 +16701,7 @@ def pypi_downloads():
 # ── Platform install counters (Homebrew, APT, AUR, Docker, Tigerbrew) ──
 @app.route("/api/platform-installs")
 def api_platform_installs():
+    """Report the cached install count for a product/platform pair."""
     product = (request.args.get("product", "") or "")[:40]
     platform = (request.args.get("platform", "") or "")[:40]
     key = f"{product}_{platform}"
@@ -16688,6 +16720,7 @@ _clawrtc_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/clawrtc-github-stats")
 def clawrtc_github_stats():
+    """Serve cached star/fork counts for the RustChain repo, refreshing at most every 5 minutes."""
     import time, urllib.request, json
     now = time.time()
     if now - _clawrtc_github_cache["ts"] < 300:
@@ -16742,6 +16775,7 @@ _grazer_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/grazer-github-stats")
 def grazer_github_stats():
+    """Serve cached star/fork counts for the grazer-skill repo, refreshing at most every 5 minutes."""
     import time, urllib.request, json
     now = time.time()
     if now - _grazer_github_cache["ts"] < 300:
@@ -16954,6 +16988,7 @@ def _gen_message_id():
 
 
 def _message_text_field(data, field, default="", max_length=None):
+    """Extract a length-capped string field from a messaging payload; returns (value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -17352,6 +17387,7 @@ REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleadin
 
 
 def _report_text_field(data, field, default="", max_length=None):
+    """Extract a length-capped string field from a report payload; returns (value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -17998,6 +18034,7 @@ def _make_badge_svg(label, value, color="#3ea6ff"):
 </svg>"""
 
 def _format_count(n):
+    """Format a count compactly for display (1.2K / 3.4M)."""
     if n >= 1000000: return f"{n/1000000:.1f}M"
     if n >= 1000: return f"{n/1000:.1f}K"
     return str(n)
@@ -18361,6 +18398,7 @@ def ctr_underperforming():
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
     # Reject non-existent videos
+    """Serve impression/click/CTR stats for a video; 404 when the video does not exist."""
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18424,6 +18462,7 @@ def record_watch_time(video_id):
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
     # Reject non-existent videos
+    """Serve A/B thumbnail variant stats and the current winner for a video; 404 when the video does not exist."""
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18477,6 +18516,7 @@ def _eng_lat_start():
 
 @app.after_request
 def _eng_lat_record(response):
+    """After-response hook recording request latency into the engineering histograms, skipping media/static paths and capping in-flight tails."""
     try:
         t0 = getattr(g, "_eng_t0", None)
         if t0 is None:
@@ -18541,6 +18581,7 @@ def _eng_probe_node(node, timeout=2.0):
 
 
 def _eng_percentile(values, pct):
+    """Return the p-th percentile of a list of latency samples (nearest-rank)."""
     if not values:
         return 0.0
     s = sorted(values)
@@ -18549,6 +18590,7 @@ def _eng_percentile(values, pct):
 
 
 def _eng_format_uptime(seconds):
+    """Format a seconds count as a compact uptime string (Xd Yh / Yh Zm / Zm)."""
     seconds = int(max(0, seconds))
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
@@ -18736,6 +18778,7 @@ _PROVENANCE_SCHEMA_LOCK = _eng_Lock()
 
 
 def _ensure_provenance_schema():
+    """Create the video_provenance table (canonical hashes, creator keys, model/workflow metadata) once per process."""
     global _PROVENANCE_SCHEMA_READY
     if _PROVENANCE_SCHEMA_READY:
         return
@@ -19440,6 +19483,7 @@ def _firehose_sign(payload):
 
 
 def _firehose_relay_pubkey_b64():
+    """Return the firehose relay's Ed25519 public key as url-safe base64, loading it lazily."""
     _firehose_load_relay_key()
     pk = _FIREHOSE_RELAY.get("pk")
     if pk is None:
@@ -20371,6 +20415,7 @@ def agent_accept_terms():
 # --- Public report endpoint -----------------------------------------------
 
 def _public_report_text_field(data, field, max_length):
+    """Extract a length-capped string field from a public report payload; returns (value, error)."""
     value = data.get(field, "")
     if value is None:
         value = ""
@@ -20808,6 +20853,7 @@ def _uv_record_for_video(video_id, ensure_sprite=True):
 
 
 def _uv_cache_warm():
+    """Load all visual embeddings into the in-memory matrix cache for nearest-neighbour search; returns False when empty."""
     try:
         import numpy as _np
     except ImportError:
@@ -21914,6 +21960,7 @@ def _agent_ed25519_seal(seckey_bytes):
 
 
 def _agent_ed25519_unseal(sealed_hex):
+    """XOR-unseal a hex-encoded payload using the master key derived from the agent signing secret."""
     if not sealed_hex:
         return b""
     try:
@@ -22053,6 +22100,7 @@ def _verify_v3_signature(pubkey_hex, signature_hex, video_id,
 
 
 def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    """Compute the v1 manifest leaf hash over video id, canonical hash, uploader signature and timestamp."""
     parts = "|".join([
         video_id or "",
         canonical_sha256 or "",
@@ -22064,6 +22112,7 @@ def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
 
 def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
                       canonical_360p_sha256, uploader_sig, uploaded_at):
+    """Compute the v2 manifest leaf hash, adding domain separation plus thumbnail and 360p hashes."""
     parts = "|".join([
         _LEAF_DOMAIN_V2,
         video_id or "",
@@ -22118,6 +22167,7 @@ def _manifest_leaf(version, video_id, canonical_sha256,
 
 
 def _manifest_leaf_recipe(version):
+    """Return the human-readable leaf-hash recipe for a manifest version (v1/v2/v3)."""
     v = int(version or 1)
     if v >= MANIFEST_V3:
         return (
@@ -24860,6 +24910,7 @@ if __name__ == "__main__":
 
 @app.route("/tips/dashboard")
 def tips_dashboard():
+    """Render the tips leaderboard page, syncing pending tips and ranking top recipients and tippers."""
     db = get_db()
     _sync_pending_tips(db)
 
