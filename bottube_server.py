@@ -3366,6 +3366,7 @@ def _queue_reward_hold(
 
 
 def _agent_name_by_id(db: sqlite3.Connection, agent_id: Optional[int]) -> Optional[str]:
+    """Look up an agent's name by id; returns None when the id is falsy or unknown."""
     if not agent_id:
         return None
     row = db.execute("SELECT agent_name FROM agents WHERE id = ?", (agent_id,)).fetchone()
@@ -4038,6 +4039,7 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
 
 
 def _notification_link_for_row(row) -> str:
+    """Build the deep link a notification points to: video watch page, agent profile, or dashboard fallback."""
     video_id = str(row["video_id"] or "").strip()
     from_agent = str(row["from_agent"] or "").strip()
     if video_id:
@@ -4070,6 +4072,7 @@ def _notification_unread_count(db, agent_id: int) -> int:
 
 
 def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only: bool) -> tuple[list[dict], int]:
+    """Fetch one page of an agent's notifications (newest first) plus the total matching count."""
     where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
     total = int(db.execute(f"SELECT COUNT(*) FROM notifications {where}", (agent_id,)).fetchone()[0])
     offset = (page - 1) * per_page
@@ -4086,6 +4089,7 @@ def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only:
 
 
 def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_all: bool = False) -> int:
+    """Mark an agent's notifications read — all unread when mark_all, else the given ids; returns rows updated."""
     if mark_all:
         cur = db.execute(
             "UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0",
@@ -4112,6 +4116,7 @@ def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_
 
 
 def _canonical_webhook_event(event: str) -> str:
+    """Map legacy webhook event names to their canonical dotted forms, passing unknowns through."""
     mapping = {
         "new_video": "video.uploaded",
         "like": "video.voted",
@@ -4768,6 +4773,7 @@ def api_docs_swagger_ui():
 
 
 def _register_text_field(data, field, default=""):
+    """Extract and validate a string field from a registration payload; returns (stripped_value, error)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -4777,6 +4783,7 @@ def _register_text_field(data, field, default=""):
 
 
 def _json_object_body():
+    """Parse the request JSON body, enforcing that it is an object; returns (data, error_response)."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -4980,6 +4987,7 @@ def claim_page(agent_name, token):
 
 @app.route("/reclaim")
 def reclaim_account_page():
+    """Render the account-reclaim page with the current recovery notice and support contact."""
     notice = None
     try:
         notice = _build_recovery_notice(get_db())
@@ -5540,6 +5548,7 @@ def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
 
 
 def _mask_public_handle(agent_name: str) -> str:
+    """Mask a public handle for display, keeping only its first 4 and last 2 characters."""
     handle = (agent_name or "").strip()
     if not handle:
         return "@unknown"
@@ -5549,6 +5558,7 @@ def _mask_public_handle(agent_name: str) -> str:
 
 
 def _bonus_progress_payload(current: int) -> list[dict]:
+    """Build referral bonus progress entries against each configured threshold."""
     current_i = max(0, int(current or 0))
     return [
         {
@@ -5571,6 +5581,7 @@ def _get_founding_track_leaderboard(
     *,
     limit: int = 25,
 ) -> list[dict]:
+    """Rank referrers on one founding track (human or agent) by activated, non-rejected referrals."""
     track = "human" if invitee_track == "human" else "agent"
     rows = db.execute(
         """
@@ -5637,6 +5648,7 @@ def _get_founding_track_leaderboard(
 
 
 def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
+    """Collect the first fully-activated founding referrals for a track, with pair-badge slot accounting."""
     invitee_track = "human" if track == "human" else "agent"
     rows = db.execute(
         """
@@ -5712,6 +5724,7 @@ def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
 
 
 def _get_founding_leaderboard_data(db: sqlite3.Connection) -> dict:
+    """Assemble both founding-track leaderboards, cohorts and pair-reservation status for display."""
     human_referrers = _get_founding_track_leaderboard(db, "human", limit=25)
     agent_sponsors = _get_founding_track_leaderboard(db, "agent", limit=25)
     human_cohort = _get_founding_cohort(db, "human")
@@ -5769,6 +5782,7 @@ def referrals_leaderboard_api():
 
 @app.route("/api/founding/leaderboard")
 def founding_leaderboard_api():
+    """JSON endpoint exposing the founding referral leaderboard data."""
     db = get_db()
     return jsonify({"ok": True, **_get_founding_leaderboard_data(db)})
 
@@ -6047,6 +6061,7 @@ def admin_export_referrals():
 
 
 def _resolve_badge_target_agent(db: sqlite3.Connection, data: dict):
+    """Resolve a badge recipient from an explicit agent_id or agent_name payload field."""
     agent_id = data.get("agent_id")
     agent_name = (data.get("agent_name", "") or "").strip()
     if agent_id not in (None, ""):
@@ -7021,6 +7036,7 @@ def _video_list_etag(
     latest_ts: float,
     engagement_revision: int,
 ) -> str:
+    """Compute a strong ETag for a video-list response from its query parameters and engagement state."""
     cache_key = json.dumps(
         {
             "agent": agent_name,
@@ -7039,6 +7055,7 @@ def _video_list_etag(
 
 
 def _client_has_video_list_etag(etag: str) -> bool:
+    """True when the client's If-None-Match header already matches the current list ETag."""
     raw_header = request.headers.get("If-None-Match", "")
     if not raw_header:
         return False
@@ -7087,6 +7104,7 @@ def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, cla
 
 
 def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
+    """True when If-Modified-Since indicates the client already holds the latest list."""
     raw_header = request.headers.get("If-Modified-Since", "")
     if not raw_header:
         return False
@@ -7100,6 +7118,7 @@ def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
 
 
 def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: float) -> Response:
+    """Attach ETag, Last-Modified and short Cache-Control headers to a video-list response."""
     response.headers["ETag"] = etag
     response.headers["Last-Modified"] = formatdate(int(latest_ts or 0), usegmt=True)
     response.headers["Cache-Control"] = "public, max-age=30"
@@ -7851,6 +7870,7 @@ def add_comment(video_id):
 
 
 def _parse_optional_comment_parent_id(raw_parent_id):
+    """Validate an optional comment parent_id; returns (positive_int_or_None, error)."""
     if raw_parent_id is None:
         return None, None
     if isinstance(raw_parent_id, str):
