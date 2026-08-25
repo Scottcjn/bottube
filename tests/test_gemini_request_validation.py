@@ -16,6 +16,13 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    """Build an isolated Flask app around just the Gemini blueprint.
+
+    Registers only `gemini_bp` on a throwaway `Flask(__name__)` (rather than
+    importing the full `bottube_server` app) and stubs the actual
+    generation calls to always fail the test if reached, so these tests can
+    prove validation runs *before* any expensive/paid Gemini API call.
+    """
     db_path = tmp_path / "gemini.db"
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
@@ -39,6 +46,13 @@ def client(tmp_path, monkeypatch):
     app.register_blueprint(gemini_blueprint.gemini_bp)
 
     def _test_get_db():
+        """Replace `gemini_blueprint.get_db` with a per-request connection to the test DB.
+
+        The blueprint's real `get_db` opens the production database path;
+        swapping it (via `monkeypatch.setattr` below) is what keeps every
+        request in these tests confined to `db_path` instead of touching
+        whatever database the blueprint module was configured for.
+        """
         if "test_db" in g:
             return g.test_db
         db = sqlite3.connect(str(db_path))
@@ -48,6 +62,7 @@ def client(tmp_path, monkeypatch):
 
     @app.teardown_appcontext
     def _close_db(_exc):
+        """Close the per-request test connection so SQLite file handles don't leak across requests."""
         db = g.pop("test_db", None)
         if db is not None:
             db.close()
@@ -74,15 +89,18 @@ def client(tmp_path, monkeypatch):
 
 
 def _auth_headers():
+    """Return the API key header for the single agent seeded by the `client` fixture."""
     return {"X-API-Key": "bottube_sk_gemini_agent"}
 
 
 def _job_count(db_path):
+    """Return how many rows exist in `gemini_jobs`, used to prove rejected requests created none."""
     with sqlite3.connect(str(db_path)) as db:
         return db.execute("SELECT COUNT(*) FROM gemini_jobs").fetchone()[0]
 
 
 def _insert_jobs(db_path, count):
+    """Seed `count` already-completed jobs, oldest first, to test limit/pagination behavior."""
     with sqlite3.connect(str(db_path)) as db:
         for idx in range(count):
             db.execute(
@@ -97,6 +115,12 @@ def _insert_jobs(db_path, count):
 
 
 def test_authenticated_video_rejects_non_object_json_without_job(client):
+    """A JSON array body must 400 before any job row is created.
+
+    `_job_count == 0` afterward is the load-bearing assertion: it proves
+    the rejection happens before the (stubbed-to-fail) generation call, not
+    just that the HTTP status looks right.
+    """
     resp = client.post(
         "/api/gemini/generate-video",
         json=["not", "an", "object"],
@@ -109,6 +133,7 @@ def test_authenticated_video_rejects_non_object_json_without_job(client):
 
 
 def test_authenticated_video_rejects_non_string_prompt_without_job(client):
+    """A list-typed `prompt` must be rejected, not silently stringified into a job."""
     resp = client.post(
         "/api/gemini/generate-video",
         json={"prompt": ["draw this"]},
@@ -121,6 +146,12 @@ def test_authenticated_video_rejects_non_string_prompt_without_job(client):
 
 
 def test_authenticated_video_rejects_non_string_negative_prompt_without_job(client):
+    """`negative_prompt` needs its own type check even though `prompt` is valid here.
+
+    A validator that only checked `prompt` and forwarded the rest of the
+    body unchecked would let a malformed `negative_prompt` reach the
+    (stubbed) generation call instead of failing fast with a clear error.
+    """
     resp = client.post(
         "/api/gemini/generate-video",
         json={"prompt": "draw this", "negative_prompt": ["bad"]},
@@ -133,6 +164,12 @@ def test_authenticated_video_rejects_non_string_negative_prompt_without_job(clie
 
 
 def test_authenticated_image_rejects_non_string_prompt_before_generation(client):
+    """The image endpoint enforces the same `prompt` type check as video, independently.
+
+    Video and image are separate routes/handlers; this guards against the
+    image path having its own, weaker (or missing) copy of the validation
+    the video tests above already cover.
+    """
     resp = client.post(
         "/api/gemini/generate-image",
         json={"prompt": {"text": "draw this"}},
@@ -145,6 +182,7 @@ def test_authenticated_image_rejects_non_string_prompt_before_generation(client)
 
 
 def test_jobs_rejects_malformed_limit(client):
+    """A non-numeric `limit` query param must 400 rather than fall back to a default silently."""
     resp = client.get("/api/gemini/jobs?limit=not-an-int", headers=_auth_headers())
 
     assert resp.status_code == 400
@@ -152,6 +190,13 @@ def test_jobs_rejects_malformed_limit(client):
 
 
 def test_jobs_clamps_limit(client):
+    """`limit` must be clamped into [1, 50], not passed through raw to the SQL query.
+
+    `limit=0` clamping up to 1 and `limit=999` clamping down to 50 (against
+    60 seeded jobs) both matter: an un-clamped 0 would return an empty
+    result silently, and an un-clamped huge limit would let a caller pull
+    the entire job history in one request.
+    """
     _insert_jobs(client.db_path, 60)
 
     resp = client.get("/api/gemini/jobs?limit=0", headers=_auth_headers())
@@ -184,6 +229,13 @@ def test_jobs_clamps_limit(client):
 def test_free_gemini_routes_reject_malformed_json_without_quota_or_job(
     client, path, payload, expected_error
 ):
+    """Unauthenticated /free/* endpoints must reject bad input before spending IP quota.
+
+    Unlike the authenticated tests above, no `_auth_headers()` is sent here
+    -- these routes are rate-limited per IP instead of per API key, so the
+    `_ip_rate_buckets == {}` assertion confirms a malformed request doesn't
+    consume a free-tier quota slot it never earned by reaching real work.
+    """
     resp = client.post(path, json=payload)
 
     assert resp.status_code == 400
