@@ -14,6 +14,7 @@ authenticated /api/feed/subscriptions routes.
 
 
 def test_feed_rejects_non_integer_page(client):
+    """Non-integer ?page values return 400 with a descriptive error."""
     response = client.get("/api/feed?page=abc")
     assert response.status_code == 400
     data = response.get_json()
@@ -22,6 +23,7 @@ def test_feed_rejects_non_integer_page(client):
 
 
 def test_feed_rejects_non_integer_per_page(client):
+    """Non-integer ?per_page values return 400."""
     response = client.get("/api/feed?per_page=xyz")
     assert response.status_code == 400
     data = response.get_json()
@@ -29,26 +31,31 @@ def test_feed_rejects_non_integer_per_page(client):
 
 
 def test_feed_rejects_zero_page(client):
+    """?page=0 is rejected — pages are 1-indexed."""
     response = client.get("/api/feed?page=0")
     assert response.status_code == 400
 
 
 def test_feed_rejects_negative_page(client):
+    """Negative ?page values are rejected with 400."""
     response = client.get("/api/feed?page=-5")
     assert response.status_code == 400
 
 
 def test_feed_rejects_zero_per_page(client):
+    """?per_page=0 is rejected as invalid."""
     response = client.get("/api/feed?per_page=0")
     assert response.status_code == 400
 
 
 def test_feed_rejects_negative_per_page(client):
+    """Negative ?per_page values are rejected with 400."""
     response = client.get("/api/feed?per_page=-1")
     assert response.status_code == 400
 
 
 def test_feed_rejects_per_page_above_max(client):
+    """per_page values exceeding the server cap (50) return 400."""
     response = client.get("/api/feed?per_page=51")
     assert response.status_code == 400
     data = response.get_json()
@@ -56,21 +63,25 @@ def test_feed_rejects_per_page_above_max(client):
 
 
 def test_feed_rejects_float_page(client):
+    """Float page values like 1.5 are rejected instead of truncating."""
     response = client.get("/api/feed?page=1.5")
     assert response.status_code == 400
 
 
 def test_feed_rejects_null_page(client):
+    """Literal string 'null' as ?page is rejected with 400."""
     response = client.get("/api/feed?page=null")
     assert response.status_code == 400
 
 
 def test_feed_rejects_nan_page(client):
+    """Literal string 'NaN' as ?page is rejected with 400."""
     response = client.get("/api/feed?page=NaN")
     assert response.status_code == 400
 
 
 def test_feed_accepts_valid_pagination(client):
+    """Valid page and per_page params return 200 with correct page value."""
     response = client.get("/api/feed?page=1&per_page=10")
     assert response.status_code == 200
     data = response.get_json()
@@ -80,6 +91,7 @@ def test_feed_accepts_valid_pagination(client):
 
 
 def test_feed_omits_defaults_when_unset(client):
+    """Omitted pagination params fall back to server defaults cleanly."""
     response = client.get("/api/feed")
     assert response.status_code == 200
     data = response.get_json()
@@ -88,6 +100,7 @@ def test_feed_omits_defaults_when_unset(client):
 
 
 def test_feed_per_page_boundary_values(client):
+    """Boundary values 1 and 50 are accepted; values above 50 are rejected."""
     for pp in (1, 50):
         r = client.get(f"/api/feed?per_page={pp}")
         assert r.status_code == 200
@@ -100,6 +113,7 @@ def test_feed_per_page_boundary_values(client):
 
 
 def test_feed_helper_direct_call_with_malformed_page(app):
+    """_parse_positive_int_query returns a 400 tuple for non-integer input."""
     with app.test_request_context("/api/feed?page=abc"):
         from bottube_server import _parse_positive_int_query
         value, error = _parse_positive_int_query("page", 1)
