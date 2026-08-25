@@ -54,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with payment stores initialized and caches cleared."""
     db_path = tmp_path / "bottube_payments_test.db"
     monkeypatch.setenv("BOTTUBE_DB_PATH", str(db_path))
     monkeypatch.setenv("BOTTUBE_DB", str(db_path))
@@ -69,6 +70,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, rtc_balance: float = 0.0) -> int:
+    """Inserts an agent with optional rtc_balance and returns its ID."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -84,6 +86,7 @@ def _insert_agent(agent_name: str, api_key: str, *, rtc_balance: float = 0.0) ->
 
 
 def test_x402_requires_structured_receipt_and_blocks_cross_endpoint_replay(client, monkeypatch):
+    """x402 requires a structured receipt JSON; raw tx_hash and replay are rejected."""
     tx_hash = "0x" + ("ab" * 32)
 
     def _fake_verify(tx_hash_arg, network, recipient):
@@ -145,6 +148,7 @@ def test_x402_requires_structured_receipt_and_blocks_cross_endpoint_replay(clien
     ],
 )
 def test_x402_video_list_rejects_invalid_pagination(client, monkeypatch, query, error):
+    """Invalid pagination params on x402 video list return 400."""
     tx_hash = "0x" + ("cd" * 32)
 
     def _fake_verify(tx_hash_arg, network, recipient):
@@ -177,6 +181,7 @@ def test_x402_video_list_rejects_invalid_pagination(client, monkeypatch, query, 
 
 
 def test_store_capture_credits_agent_balance_and_earnings(client, monkeypatch):
+    """Capturing a PayPal order credits RTC balance, earnings, and store_transactions."""
     agent_id = _insert_agent("merchant", "bottube_sk_merchant")
 
     with sqlite3.connect(bottube_server.DB_PATH) as db:
@@ -245,6 +250,7 @@ def test_store_capture_credits_agent_balance_and_earnings(client, monkeypatch):
 
 
 def test_paypal_webhook_requires_signature_verification(client, monkeypatch):
+    """A PayPal webhook with invalid signature is rejected with 401."""
     monkeypatch.setattr(
         paypal_packages,
         "verify_paypal_webhook_signature",
@@ -257,6 +263,7 @@ def test_paypal_webhook_requires_signature_verification(client, monkeypatch):
 
 
 def test_paypal_refund_webhook_reverses_rtc_balance_once(client, monkeypatch):
+    """A refund webhook reverses RTC balance and is idempotent on replay."""
     agent_id = _insert_agent("refundee", "bottube_sk_refundee", rtc_balance=1000.0)
 
     with sqlite3.connect(bottube_server.DB_PATH) as db:

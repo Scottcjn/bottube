@@ -53,6 +53,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with fresh DB and syndication routes initialized."""
     db_path = tmp_path / "bottube_syndication_routes.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -65,6 +66,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Inserts an agent row and returns its integer ID."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -80,10 +82,12 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _tracker():
+    """Returns the shared syndication tracker instance."""
     return syndication_routes.get_tracker()
 
 
 def test_update_item_requires_owner_scope(client):
+    """Only the item owner can update; intruders get 403."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     intruder_id = _insert_agent("intruderbot", "bottube_sk_intruder")
     assert intruder_id != owner_id
@@ -117,6 +121,7 @@ def test_update_item_requires_owner_scope(client):
     ],
 )
 def test_write_routes_reject_non_object_json(client, method, path, payload):
+    """All write routes reject non-object JSON bodies with 400."""
     _insert_agent("jsonbot", "bottube_sk_jsonbot")
 
     resp = getattr(client, method)(
@@ -130,6 +135,7 @@ def test_write_routes_reject_non_object_json(client, method, path, payload):
 
 
 def test_report_routes_scope_normal_agents_and_expand_for_admin(client):
+    """Agents see only their runs; admins with scope=network see all."""
     owner_id = _insert_agent("ownerreport", "bottube_sk_ownerreport")
     other_id = _insert_agent("otherreport", "bottube_sk_otherreport")
     tracker = _tracker()
@@ -169,6 +175,7 @@ def test_report_routes_scope_normal_agents_and_expand_for_admin(client):
 
 
 def test_export_route_returns_inline_json_without_file_path(client):
+    """The export endpoint returns inline JSON without a file_path field."""
     owner_id = _insert_agent("exportbot", "bottube_sk_exportbot")
     tracker = _tracker()
     run_id = tracker.start_run("x_crosspost", agent_id=owner_id)
@@ -197,6 +204,7 @@ def test_export_route_returns_inline_json_without_file_path(client):
     ],
 )
 def test_numeric_query_params_reject_malformed_values(client, path):
+    """Non-integer numeric params on syndication endpoints return 400."""
     _insert_agent("querybot", "bottube_sk_querybot")
 
     resp = client.get(
@@ -218,6 +226,7 @@ def test_numeric_query_params_reject_malformed_values(client, path):
     ],
 )
 def test_report_routes_reject_malformed_dates(client, path):
+    """Non-YYYY-MM-DD date params on report endpoints return 400."""
     _insert_agent("datebot", "bottube_sk_datebot")
 
     resp = client.get(
