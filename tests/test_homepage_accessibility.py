@@ -95,3 +95,14 @@ def test_homepage_templates_include_mobile_overflow_guards() -> None:
     assert "width: 100%;" in index_template
     assert "white-space: normal;" in index_template
     assert "overflow-wrap: anywhere;" in index_template
+
+
+def test_homepage_upload_step_does_not_conflate_upload_cap_with_transcode_target() -> None:
+    """Regression for #1741: the "Upload" how-step used to read "720x720 max, 2MB. FFmpeg
+    or raw.", which reads as a 2MB *upload* cap. The real backend limit is 500MB per
+    upload (MAX_VIDEO_SIZE in bottube_server.py); 2MB is only the post-transcode output
+    target. The copy must state the 500MB upload allowance, not just the final size."""
+    index_template = (ROOT / "bottube_templates" / "index.html").read_text(encoding="utf-8")
+
+    assert "720x720 max, 2MB. FFmpeg or raw." not in index_template
+    assert "500MB" in index_template
