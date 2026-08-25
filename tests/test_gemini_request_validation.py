@@ -16,6 +16,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    """Flask test client with Gemini blueprint and stubbed generation/threading."""
     db_path = tmp_path / "gemini.db"
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
@@ -74,15 +75,18 @@ def client(tmp_path, monkeypatch):
 
 
 def _auth_headers():
+    """Returns API key headers for the Gemini test agent."""
     return {"X-API-Key": "bottube_sk_gemini_agent"}
 
 
 def _job_count(db_path):
+    """Returns the total number of rows in the gemini_jobs table."""
     with sqlite3.connect(str(db_path)) as db:
         return db.execute("SELECT COUNT(*) FROM gemini_jobs").fetchone()[0]
 
 
 def _insert_jobs(db_path, count):
+    """Inserts n completed image jobs into gemini_jobs for list-limit testing."""
     with sqlite3.connect(str(db_path)) as db:
         for idx in range(count):
             db.execute(
@@ -97,6 +101,7 @@ def _insert_jobs(db_path, count):
 
 
 def test_authenticated_video_rejects_non_object_json_without_job(client):
+    """A JSON array on generate-video returns 400 without creating a job."""
     resp = client.post(
         "/api/gemini/generate-video",
         json=["not", "an", "object"],
@@ -109,6 +114,7 @@ def test_authenticated_video_rejects_non_object_json_without_job(client):
 
 
 def test_authenticated_video_rejects_non_string_prompt_without_job(client):
+    """A non-string prompt on generate-video returns 400 without creating a job."""
     resp = client.post(
         "/api/gemini/generate-video",
         json={"prompt": ["draw this"]},
@@ -121,6 +127,7 @@ def test_authenticated_video_rejects_non_string_prompt_without_job(client):
 
 
 def test_authenticated_video_rejects_non_string_negative_prompt_without_job(client):
+    """A non-string negative_prompt on generate-video returns 400."""
     resp = client.post(
         "/api/gemini/generate-video",
         json={"prompt": "draw this", "negative_prompt": ["bad"]},
@@ -133,6 +140,7 @@ def test_authenticated_video_rejects_non_string_negative_prompt_without_job(clie
 
 
 def test_authenticated_image_rejects_non_string_prompt_before_generation(client):
+    """A non-string prompt on generate-image returns 400 before generation runs."""
     resp = client.post(
         "/api/gemini/generate-image",
         json={"prompt": {"text": "draw this"}},
@@ -145,6 +153,7 @@ def test_authenticated_image_rejects_non_string_prompt_before_generation(client)
 
 
 def test_jobs_rejects_malformed_limit(client):
+    """A non-integer limit on /api/gemini/jobs returns 400."""
     resp = client.get("/api/gemini/jobs?limit=not-an-int", headers=_auth_headers())
 
     assert resp.status_code == 400
@@ -152,6 +161,7 @@ def test_jobs_rejects_malformed_limit(client):
 
 
 def test_jobs_clamps_limit(client):
+    """limit=0 is clamped to 1; limit=999 is clamped to 50."""
     _insert_jobs(client.db_path, 60)
 
     resp = client.get("/api/gemini/jobs?limit=0", headers=_auth_headers())
@@ -184,6 +194,7 @@ def test_jobs_clamps_limit(client):
 def test_free_gemini_routes_reject_malformed_json_without_quota_or_job(
     client, path, payload, expected_error
 ):
+    """Free Gemini routes reject malformed JSON without consuming quota or creating jobs."""
     resp = client.post(path, json=payload)
 
     assert resp.status_code == 400

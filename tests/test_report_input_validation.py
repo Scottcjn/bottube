@@ -52,6 +52,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with a fresh DB initialized for report tests."""
     db_path = tmp_path / "bottube_report_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -62,6 +63,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Inserts an agent row and returns its integer ID."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -78,6 +80,7 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _insert_video(agent_id: int, video_id: str) -> None:
+    """Inserts a video row owned by the given agent_id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -92,6 +95,7 @@ def _insert_video(agent_id: int, video_id: str) -> None:
 
 
 def _insert_comment(agent_id: int, video_id: str, content: str) -> int:
+    """Inserts a comment row and returns its integer ID."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -106,12 +110,14 @@ def _insert_comment(agent_id: int, video_id: str, content: str) -> int:
 
 
 def _report_count() -> int:
+    """Returns the total number of rows in the reports table."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         return int(db.execute("SELECT COUNT(*) FROM reports").fetchone()[0])
 
 
 def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
+    """A null reason in a video report returns the existing 'Invalid reason' error."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -128,6 +134,7 @@ def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
 
 
 def test_video_report_rejects_non_string_details_without_insert(client):
+    """A non-string details field in a video report returns 400 without inserting."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -144,6 +151,7 @@ def test_video_report_rejects_non_string_details_without_insert(client):
 
 
 def test_comment_report_rejects_non_string_reason_without_insert(client):
+    """A non-string reason in a comment report returns 400 without inserting."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -161,6 +169,7 @@ def test_comment_report_rejects_non_string_reason_without_insert(client):
 
 
 def test_comment_report_rejects_non_object_json(client):
+    """A JSON array body on comment report returns 400."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -178,6 +187,7 @@ def test_comment_report_rejects_non_object_json(client):
 
 
 def test_video_report_rejects_falsy_non_object_json(client):
+    """An empty array body on video report returns 400."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo02A")
@@ -194,6 +204,7 @@ def test_video_report_rejects_falsy_non_object_json(client):
 
 
 def test_comment_report_rejects_falsy_non_object_json(client):
+    """An empty array body on comment report returns 400."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo03A")
@@ -211,6 +222,7 @@ def test_comment_report_rejects_falsy_non_object_json(client):
 
 
 def test_video_report_accepts_null_details_as_empty(client):
+    """A null details field is treated as empty and the report is accepted."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
