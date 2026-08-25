@@ -26,6 +26,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _build_box(box_type: bytes, data: bytes) -> bytes:
+    """Pack an MP4 box (big-endian size + type + payload) for test fixtures."""
     size = 8 + len(data)
     return struct.pack(">I", size) + box_type + data
 
@@ -489,6 +490,7 @@ class TestRegistrationFlow:
     """Tests for POST /api/register (needed to obtain an API key for upload)."""
 
     def test_register_returns_api_key(self, client):
+        """Successful registration returns an agent id and API key."""
         resp = client.post("/api/register", json={
             "agent_name": "test_reg_agent",
         })
@@ -499,23 +501,28 @@ class TestRegistrationFlow:
         assert data["agent_name"] == "test_reg_agent"
 
     def test_register_duplicate_agent(self, client):
+        """Registering an already-taken agent_name is rejected."""
         client.post("/api/register", json={"agent_name": "dup_agent"})
         resp = client.post("/api/register", json={"agent_name": "dup_agent"})
         assert resp.status_code == 409
 
     def test_register_invalid_name(self, client):
+        """Names with spaces/special characters are rejected."""
         resp = client.post("/api/register", json={"agent_name": "AB CD!!"})
         assert resp.status_code == 400
 
     def test_register_missing_name(self, client):
+        """Registration without an agent_name is rejected with 400."""
         resp = client.post("/api/register", json={})
         assert resp.status_code == 400
 
     def test_register_name_too_short(self, client):
+        """Agent names shorter than the minimum length are rejected."""
         resp = client.post("/api/register", json={"agent_name": "x"})
         assert resp.status_code == 400
 
     def test_register_name_too_long(self, client):
+        """Agent names longer than the maximum length are rejected."""
         resp = client.post("/api/register", json={"agent_name": "a" * 33})
         assert resp.status_code == 400
 
@@ -524,6 +531,7 @@ class TestHealthEndpoint:
     """Tests for GET /health."""
 
     def test_health_returns_ok(self, client):
+        """The health endpoint reports ok with expected fields."""
         resp = client.get("/health")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -537,6 +545,7 @@ class TestVideoListEndpoint:
     """Tests for GET /api/videos."""
 
     def test_videos_returns_list(self, client):
+        """The videos endpoint returns a paginated list envelope."""
         resp = client.get("/api/videos")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -545,6 +554,7 @@ class TestVideoListEndpoint:
         assert "total" in data
 
     def test_videos_pagination(self, client):
+        """Page/per_page params are honoured in the videos listing."""
         resp = client.get("/api/videos?page=1&per_page=5")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -560,6 +570,7 @@ class TestStatsEndpoint:
     """Tests for GET /api/stats."""
 
     def test_stats_returns_counts(self, client):
+        """Stats endpoint returns agent/video/human counts."""
         resp = client.get("/api/stats")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -569,6 +580,7 @@ class TestStatsEndpoint:
         assert "top_agents" in data
 
     def test_stats_accepts_valid_top_agents_limit(self, client):
+        """A valid ?limit on stats is accepted."""
         resp = client.get("/api/stats?limit=1")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -587,6 +599,7 @@ class TestStatsEndpoint:
     def test_stats_rejects_malformed_or_out_of_range_limit(
         self, client, query, expected_error
     ):
+        """Malformed or out-of-range stats limits are rejected with 400."""
         resp = client.get(f"/api/stats?{query}")
         assert resp.status_code == 400
         assert resp.get_json() == {"error": expected_error}
@@ -596,6 +609,7 @@ class TestCategoriesEndpoint:
     """Tests for GET /api/categories."""
 
     def test_categories_returns_list(self, client):
+        """The categories endpoint returns the category list."""
         resp = client.get("/api/categories")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -610,10 +624,12 @@ class TestSearchEndpoint:
     """Tests for GET /api/search."""
 
     def test_search_requires_query(self, client):
+        """Search without a q parameter is rejected with 400."""
         resp = client.get("/api/search")
         assert resp.status_code == 400
         assert "q parameter required" in resp.get_json()["error"]
 
     def test_search_returns_results(self, client):
+        """Search with a query returns 200 with results."""
         resp = client.get("/api/search?q=test")
         assert resp.status_code == 200
