@@ -4,6 +4,7 @@ from generation.reliability import RetryPolicy, classify_error, provider_metrics
 
 
 def test_classify_error_categories():
+    """classify_error maps error messages/exceptions to the correct category string."""
     assert classify_error("401 unauthorized api key") == "auth"
     assert classify_error("429 rate limit exceeded") == "throttled"
     assert classify_error(TimeoutError("request timed out")) == "transient"
@@ -11,6 +12,7 @@ def test_classify_error_categories():
 
 
 def test_run_with_retries_retries_transient_then_succeeds():
+    """Transient errors are retried up to the attempt limit, succeeding on the second try."""
     calls = {"count": 0}
 
     def flaky():
@@ -37,6 +39,7 @@ def test_run_with_retries_retries_transient_then_succeeds():
 
 
 def test_run_with_retries_does_not_retry_auth_errors():
+    """Auth errors are not retried; the function returns immediately after one attempt."""
     calls = {"count": 0}
 
     def auth_failure():
@@ -62,6 +65,7 @@ def test_run_with_retries_does_not_retry_auth_errors():
 
 
 def test_run_with_retries_records_semantic_false_result_as_failure():
+    """A False success_predicate result is recorded as a throttled failure in metrics."""
     ok, value, category, latency_s, attempts = run_with_retries(
         "unit_provider_semantic_false",
         "submit",
@@ -82,6 +86,7 @@ def test_run_with_retries_records_semantic_false_result_as_failure():
 
 
 def test_run_with_retries_classifies_semantic_failure_reason_not_tuple_repr():
+    """The failure reason string (not repr) determines the error category."""
     class NoisyFalse:
         def __bool__(self):
             return False
@@ -105,6 +110,7 @@ def test_run_with_retries_classifies_semantic_failure_reason_not_tuple_repr():
 
 
 def test_run_with_retries_latency_includes_semantic_retry_sleep():
+    """Latency measurement includes sleep time between semantic retries."""
     calls = {"count": 0}
 
     def semantic_then_permanent():
@@ -129,6 +135,7 @@ def test_run_with_retries_latency_includes_semantic_retry_sleep():
 
 
 def test_run_with_retries_does_not_reuse_stale_semantic_failure_after_exception():
+    """A transient exception after a semantic failure resets the failure state."""
     calls = {"count": 0}
 
     def semantic_then_exception():

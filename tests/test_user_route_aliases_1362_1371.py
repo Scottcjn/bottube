@@ -18,6 +18,7 @@ existing route. Anonymous users on auth-required surfaces are redirected to
 
 
 def test_explore_returns_200_for_anonymous(client):
+    """/explore returns 200 with HTML content for anonymous users."""
     resp = client.get("/explore")
     assert resp.status_code == 200, (
         f"/explore must return 200 (renders discover.html), got {resp.status_code}"
@@ -26,6 +27,7 @@ def test_explore_returns_200_for_anonymous(client):
 
 
 def test_leaderboard_returns_200_for_anonymous(client):
+    """/leaderboard returns 200 with HTML content for anonymous users."""
     resp = client.get("/leaderboard")
     assert resp.status_code == 200, (
         f"/leaderboard must return 200, got {resp.status_code}"
@@ -34,18 +36,21 @@ def test_leaderboard_returns_200_for_anonymous(client):
 
 
 def test_premium_returns_200_for_anonymous(client):
+    """/premium returns 200 with HTML content for anonymous users."""
     resp = client.get("/premium")
     assert resp.status_code == 200
     assert resp.content_type.startswith("text/html")
 
 
 def test_contact_returns_200_for_anonymous(client):
+    """/contact returns 200 with HTML content for anonymous users."""
     resp = client.get("/contact")
     assert resp.status_code == 200
     assert resp.content_type.startswith("text/html")
 
 
 def test_stars_returns_native_page_for_anonymous(client):
+    """/stars renders the native sprint page without embedding githubassets."""
     resp = client.get("/stars", follow_redirects=False)
     html = resp.get_data(as_text=True)
 
@@ -61,6 +66,7 @@ def test_stars_returns_native_page_for_anonymous(client):
 
 
 def test_me_redirects_anonymous_to_login(client):
+    """/me redirects anonymous users to /login?next=/me."""
     resp = client.get("/me", follow_redirects=False)
     assert resp.status_code == 302, (
         f"/me must redirect to /login for anonymous users, got {resp.status_code}"
@@ -73,6 +79,7 @@ def test_me_redirects_anonymous_to_login(client):
 
 
 def test_wallet_redirects_anonymous_to_login(client):
+    """/wallet redirects anonymous users to /login?next=/wallet."""
     resp = client.get("/wallet", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -81,6 +88,7 @@ def test_wallet_redirects_anonymous_to_login(client):
 
 
 def test_settings_redirects_anonymous_to_login(client):
+    """/settings redirects anonymous users to /login?next=/settings."""
     resp = client.get("/settings", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -89,6 +97,7 @@ def test_settings_redirects_anonymous_to_login(client):
 
 
 def test_subscriptions_redirects_anonymous_to_login(client):
+    """/subscriptions redirects anonymous users to /login?next=/subscriptions."""
     resp = client.get("/subscriptions", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -97,6 +106,7 @@ def test_subscriptions_redirects_anonymous_to_login(client):
 
 
 def test_playlists_redirects_anonymous_to_login(client):
+    """/playlists redirects anonymous users to /login?next=/playlists."""
     resp = client.get("/playlists", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -105,6 +115,7 @@ def test_playlists_redirects_anonymous_to_login(client):
 
 
 def test_history_redirects_anonymous_to_login(client):
+    """/history redirects anonymous users to /login?next=/history."""
     resp = client.get("/history", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -128,6 +139,7 @@ def test_existing_trending_route_still_200(client):
 
 
 def test_existing_channel_route_still_200(client):
+    """/channel/<name> returns 404 for unknown agents (no regression)."""
     """The /channel/<name> alias (Refs #1371) must still resolve."""
     resp = client.get("/channel/nonexistent-agent")
     assert resp.status_code == 404, (
