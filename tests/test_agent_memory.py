@@ -53,6 +53,7 @@ def populated_mem(tmp_path):
 
 class TestTfIdfStore:
     def test_add_and_search(self):
+        """TfIdfStore ranks documents by term relevance after add()."""
         store = TfIdfStore()
         store.add("d1", "the quick brown fox jumps over the lazy dog")
         store.add("d2", "a fast red car drives down the highway")
@@ -65,10 +66,12 @@ class TestTfIdfStore:
         assert "d1" in ids or "d3" in ids
 
     def test_empty_store(self):
+        """Searching an empty store returns no results."""
         store = TfIdfStore()
         assert store.search("anything") == []
 
     def test_remove(self):
+        """Removed documents disappear from search results."""
         store = TfIdfStore()
         store.add("d1", "hello world")
         store.remove("d1")
@@ -77,24 +80,28 @@ class TestTfIdfStore:
 
 class TestIngestAndSearch:
     def test_ingest_single(self, mem):
+        """Ingesting a video makes its title/description searchable."""
         mem.ingest_video("v1", "Test Video", "A description", tags=["test"])
         results = mem.search("test video")
         assert len(results) == 1
         assert results[0][0].video_id == "v1"
 
     def test_search_by_topic(self, populated_mem):
+        """Search surfaces videos matching a topical query."""
         results = populated_mem.search("PowerPC hardware")
         assert len(results) >= 1
         titles = [r[0].title for r in results]
         assert any("PowerPC" in t for t in titles)
 
     def test_search_unrelated(self, populated_mem):
+        """Queries unrelated to ingested content return few or no results."""
         results = populated_mem.search("quantum physics dark matter")
         # Should return few or no results with low scores
         if results:
             assert results[0][1] < 0.5
 
     def test_has_covered_topic(self, populated_mem):
+        """has_covered_topic recognises previously ingested topics."""
         assert populated_mem.has_covered_topic("PowerPC hardware")
         assert populated_mem.has_covered_topic("mining rustchain")
         # Unlikely to have covered
@@ -103,6 +110,7 @@ class TestIngestAndSearch:
 
 class TestSuggestReference:
     def test_followup_for_recent_related(self, tmp_path):
+        """suggest_reference proposes a follow-up when a closely related video was recent."""
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -117,6 +125,7 @@ class TestSuggestReference:
         assert ref.related_video_id == "v1"
 
     def test_first_time_for_new_topic(self, populated_mem):
+        """A genuinely new topic gets no duplicate-content reference."""
         ref = populated_mem.suggest_reference(
             "Underwater Basket Weaving XYZ",
             "Something completely different",
@@ -125,6 +134,7 @@ class TestSuggestReference:
         assert ref.type == ReferenceType.FIRST_TIME
 
     def test_changed_mind_when_opinions_exist(self, tmp_path):
+        """Opinion detection changes the suggestion when prior opinions exist."""
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -140,6 +150,7 @@ class TestSuggestReference:
         assert "JavaScript" in ref.text
 
     def test_series_detection(self, populated_mem):
+        """Stats detect an ongoing video series from titles."""
         ref = populated_mem.suggest_reference(
             "PowerPC vs ARM — Part 3",
             "Continuing the comparison",
@@ -149,6 +160,7 @@ class TestSuggestReference:
         assert "Part 3" in ref.text
 
     def test_milestone(self, tmp_path):
+        """Milestone videos are recognised and suggested as references."""
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -164,12 +176,14 @@ class TestSuggestReference:
 
 class TestStats:
     def test_basic_stats(self, populated_mem):
+        """get_stats returns total videos, first upload and aggregate counts."""
         stats = populated_mem.get_stats()
         assert stats.total_videos == 5
         assert stats.first_upload is not None
         assert stats.days_active >= 1
 
     def test_top_topics(self, populated_mem):
+        """get_stats ranks the most frequently covered topics."""
         stats = populated_mem.get_stats()
         topic_names = [t[0] for t in stats.top_topics]
         assert "hardware" in topic_names  # appears in 4 videos
@@ -180,6 +194,7 @@ class TestStats:
         assert any("PowerPC vs ARM" in s for s in stats.current_series)
 
     def test_empty_stats(self, mem):
+        """Stats for an empty memory return zeroed values."""
         stats = mem.get_stats()
         assert stats.total_videos == 0
         assert stats.top_topics == []
@@ -187,6 +202,7 @@ class TestStats:
 
 class TestPersistence:
     def test_data_survives_reload(self, tmp_path):
+        """Memory persists to SQLite and survives a full reload."""
         db = tmp_path / "persist.db"
         m1 = AgentMemory(agent="bot", db_path=db)
         m1.ingest_video("v1", "Test", "Desc", tags=["tag1"])
@@ -196,6 +212,7 @@ class TestPersistence:
         assert len(results) == 1
 
     def test_agents_isolated(self, tmp_path):
+        """Two agents sharing a DB file see completely isolated memories."""
         db = tmp_path / "shared.db"
         m1 = AgentMemory(agent="bot_a", db_path=db)
         m2 = AgentMemory(agent="bot_b", db_path=db)
