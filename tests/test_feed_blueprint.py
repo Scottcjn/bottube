@@ -21,6 +21,13 @@ import feed_blueprint
 
 
 def test_escape_xml_handles_none_and_all_special_characters():
+    """`escape_xml` must null-safe and cover all five XML-reserved characters.
+
+    RSS/Atom output breaks (or becomes injectable) if any one of
+    `& < > " '` is left unescaped in title/description text pulled from
+    user-controlled video metadata; `None` is included because upstream
+    fields are frequently optional.
+    """
     assert feed_blueprint.escape_xml(None) == ""
     assert (
         feed_blueprint.escape_xml("Rock & <Roll> \"Mix\" 'Tape'")
@@ -29,6 +36,13 @@ def test_escape_xml_handles_none_and_all_special_characters():
 
 
 def test_timestamp_helpers_normalize_epoch_and_iso_values():
+    """RFC 2822 (RSS) and ISO 8601 (Atom) timestamp helpers must agree on the same instant.
+
+    Feeds carry `created_at` in a mix of forms depending on the source
+    (numeric epoch, epoch-as-string, or an ISO string with/without a `Z`);
+    all three must resolve to the identical UTC instant so RSS and Atom
+    readers don't disagree about when a video was published.
+    """
     expected = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 
     assert parsedate_to_datetime(feed_blueprint._to_rfc2822(0)) == expected
@@ -46,6 +60,14 @@ def test_timestamp_helpers_normalize_epoch_and_iso_values():
 
 
 def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
+    """`_normalize_videos` must accept any of the API's response shapes and drop junk entries.
+
+    The upstream videos API has returned results under a bare list,
+    `videos`, `items`, or `data` at different times; this locks in support
+    for all four AND proves a non-dict entry (a stray string, `None`, or a
+    non-list value under the key) is dropped instead of crashing the
+    template renderer downstream.
+    """
     video_a = {"id": "a"}
     video_b = {"id": "b"}
 
@@ -63,6 +85,14 @@ def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
 
 
 def test_vid_fields_applies_defaults_and_derived_urls():
+    """A video with only an `id` must still render a complete, non-broken feed entry.
+
+    Real entries can be missing title/description/author/category; this
+    proves `_vid_fields` fills every field the RSS/Atom templates expect
+    with a sane default and derives the thumbnail/stream/watch URLs from
+    just the id, rather than leaving template placeholders empty or
+    raising a `KeyError`.
+    """
     fields = feed_blueprint._vid_fields({"id": "vid123"})
 
     assert fields == {
@@ -88,6 +118,7 @@ def test_vid_fields_applies_defaults_and_derived_urls():
     ],
 )
 def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
+    """No `limit` must default to 20, and any value within [1, 100] must pass through unchanged."""
     app = Flask(__name__)
     with app.test_request_context(path):
         assert feed_blueprint._parse_limit() == expected
@@ -105,6 +136,14 @@ def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
     ],
 )
 def test_parse_limit_rejects_invalid_values(path, message):
+    """Zero, negative, over-100, non-integer, and empty `limit` must each raise with a matching, specific message.
+
+    Pinning the exact error text (not just that *a* `ValueError` is
+    raised) catches a regression where the check still rejects the value
+    but the message stops matching the reason -- e.g. an over-100 value
+    reported as "must be an integer" would be confusing and technically
+    wrong.
+    """
     app = Flask(__name__)
     with app.test_request_context(path), pytest.raises(ValueError, match=message):
         feed_blueprint._parse_limit()
@@ -120,10 +159,18 @@ def test_parse_limit_rejects_invalid_values(path, message):
     ],
 )
 def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, path):
+    """All four feed routes must validate `limit` before ever calling `_fetch_videos`.
+
+    Monkeypatches `_fetch_videos` to raise if it's called at all, so a
+    route that validates too late (e.g. after already hitting the
+    upstream API) fails loudly here instead of just wasting a request on
+    input that was going to be rejected anyway.
+    """
     app = Flask(__name__)
     app.register_blueprint(feed_blueprint.feed_bp)
 
     def fail_fetch_videos(*args, **kwargs):
+        """Fail the test if reached, proving invalid-limit routes never call it."""
         raise AssertionError("_fetch_videos should not run for invalid limits")
 
     monkeypatch.setattr(feed_blueprint, "_fetch_videos", fail_fetch_videos)
@@ -135,16 +182,29 @@ def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, p
 
 
 def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatch):
+    """`_fetch_videos` must call the upstream API with the right params, check the response, and normalize it.
+
+    Records every call `_fetch_videos` makes (including whether it checked
+    the response status) via `calls`, and returns a response shaped like
+    real upstream output (including a junk `"skip"` entry) to prove the
+    request is built correctly end to end, not just that it returns
+    *something*.
+    """
     calls = []
 
     class FakeResponse:
+        """A stand-in for `requests.Response` that records status checks and returns canned JSON."""
+
         def raise_for_status(self):
+            """Record that the caller checked for an HTTP error, without actually raising one."""
             calls.append(("raise_for_status",))
 
         def json(self):
+            """Return upstream-shaped JSON including one deliberately invalid entry."""
             return {"items": [{"id": "one"}, "skip", {"id": "two"}]}
 
     def fake_get(url, params, timeout):
+        """Stand in for `requests.get`, recording the exact call args instead of hitting the network."""
         calls.append((url, params, timeout))
         return FakeResponse()
 
@@ -165,7 +225,15 @@ def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatc
 
 
 def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
+    """A network failure while fetching videos must degrade to an empty feed, not a 500.
+
+    Feed readers hitting `/feed/rss` during an upstream outage should get
+    a valid (if empty) feed rather than an error page, so this locks in
+    that `_fetch_videos` swallows the exception instead of letting it
+    propagate.
+    """
     def fake_get(url, params, timeout):
+        """Simulate the upstream API being unreachable."""
         raise RuntimeError("network unavailable")
 
     monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
@@ -174,10 +242,19 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
 
 
 def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
+    """RSS and Atom output must stay valid, well-formed XML even with hostile field content.
+
+    Feeds a title containing a literal `]]>` (which would prematurely
+    close a CDATA section) and a thumbnail URL with `&`/`<` characters,
+    then parses the actual response with `ElementTree` -- if escaping is
+    wrong anywhere, this fails on the XML parse itself rather than on a
+    weaker string-contains check.
+    """
     app = Flask(__name__)
     app.register_blueprint(feed_blueprint.feed_bp)
 
     def fake_fetch_videos(agent=None, category=None, limit=20):
+        """Return one video with adversarial title/description/URL content instead of hitting the network."""
         return [
             {
                 "video_id": "feedxml01",
