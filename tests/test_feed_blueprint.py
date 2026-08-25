@@ -21,6 +21,7 @@ import feed_blueprint
 
 
 def test_escape_xml_handles_none_and_all_special_characters():
+    """Ensure feed XML escaping is safe for missing text and every reserved XML character."""
     assert feed_blueprint.escape_xml(None) == ""
     assert (
         feed_blueprint.escape_xml("Rock & <Roll> \"Mix\" 'Tape'")
@@ -29,6 +30,7 @@ def test_escape_xml_handles_none_and_all_special_characters():
 
 
 def test_timestamp_helpers_normalize_epoch_and_iso_values():
+    """Normalize mixed timestamp shapes into stable RSS and Atom date formats."""
     expected = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 
     assert parsedate_to_datetime(feed_blueprint._to_rfc2822(0)) == expected
@@ -46,6 +48,7 @@ def test_timestamp_helpers_normalize_epoch_and_iso_values():
 
 
 def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
+    """Discard malformed video entries while supporting the response envelope shapes the API emits."""
     video_a = {"id": "a"}
     video_b = {"id": "b"}
 
@@ -63,6 +66,7 @@ def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
 
 
 def test_vid_fields_applies_defaults_and_derived_urls():
+    """Backfill missing metadata so feed entries still expose complete thumbnail, stream, and watch links."""
     fields = feed_blueprint._vid_fields({"id": "vid123"})
 
     assert fields == {
@@ -88,6 +92,7 @@ def test_vid_fields_applies_defaults_and_derived_urls():
     ],
 )
 def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
+    """Accept the documented feed limit range and preserve the caller's requested cap."""
     app = Flask(__name__)
     with app.test_request_context(path):
         assert feed_blueprint._parse_limit() == expected
@@ -105,6 +110,7 @@ def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
     ],
 )
 def test_parse_limit_rejects_invalid_values(path, message):
+    """Fail fast on invalid feed limits instead of letting oversized or malformed requests through."""
     app = Flask(__name__)
     with app.test_request_context(path), pytest.raises(ValueError, match=message):
         feed_blueprint._parse_limit()
@@ -120,6 +126,7 @@ def test_parse_limit_rejects_invalid_values(path, message):
     ],
 )
 def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, path):
+    """Return a client error before any upstream fetch when the feed limit itself is invalid."""
     app = Flask(__name__)
     app.register_blueprint(feed_blueprint.feed_bp)
 
@@ -135,6 +142,7 @@ def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, p
 
 
 def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatch):
+    """Forward agent, category, and limit filters to the API and strip non-dictionary payload items."""
     calls = []
 
     class FakeResponse:
@@ -165,6 +173,7 @@ def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatc
 
 
 def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
+    """Treat upstream fetch failures as an empty feed instead of crashing the route."""
     def fake_get(url, params, timeout):
         raise RuntimeError("network unavailable")
 
@@ -174,6 +183,7 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
 
 
 def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
+    """Escape XML attributes and CDATA edge cases so generated feeds stay parseable."""
     app = Flask(__name__)
     app.register_blueprint(feed_blueprint.feed_bp)
 

@@ -10,6 +10,7 @@ import pytest
     ],
 )
 def test_feed_rejects_unknown_filter_options(client, query):
+    """Reject unsupported mode, bucket, and category values before feed selection starts."""
     response = client.get(f"/api/feed?{query}")
 
     assert response.status_code == 400
@@ -17,6 +18,7 @@ def test_feed_rejects_unknown_filter_options(client, query):
 
 
 def test_feed_accepts_known_filter_options(client):
+    """Accept canonical filter values and echo the resolved feed mode in the payload."""
     response = client.get("/api/feed?mode=latest&bucket=latest&category=music")
 
     assert response.status_code == 200
