@@ -15,6 +15,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture
 def usdc_client(tmp_path):
+    """Flask test app with the USDC blueprint registered against an isolated temp DB."""
     db_path = tmp_path / "bottube.db"
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -22,11 +23,13 @@ def usdc_client(tmp_path):
 
     @app.before_request
     def before_request():
+        """Open a row-factory SQLite connection per request in app context."""
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
 
     @app.teardown_request
     def teardown_request(_exc):
+        """Close the per-request DB connection if it was opened."""
         db = getattr(g, "db", None)
         if db is not None:
             db.close()
@@ -68,6 +71,7 @@ def _table_count(db_path, table):
 
 
 def _balance(db_path, agent_name):
+    """Read an agent's USDC balance and total_spent directly from the test DB."""
     with sqlite3.connect(db_path) as db:
         row = db.execute(
             "SELECT balance_usdc, total_spent FROM usdc_balances WHERE agent_name = ?",
@@ -78,6 +82,7 @@ def _balance(db_path, agent_name):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_usdc_tip_rejects_malformed_amounts_without_writes(usdc_client, amount):
+    """Malformed tip amounts are rejected with zero DB writes to tips or balances."""
     before_tips = _table_count(usdc_client.db_path, "usdc_tips")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -95,6 +100,7 @@ def test_usdc_tip_rejects_malformed_amounts_without_writes(usdc_client, amount):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_usdc_payout_rejects_malformed_amounts_without_writes(usdc_client, amount):
+    """Malformed payout amounts are rejected with zero DB writes."""
     before_payouts = _table_count(usdc_client.db_path, "usdc_payouts")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -111,6 +117,7 @@ def test_usdc_payout_rejects_malformed_amounts_without_writes(usdc_client, amoun
 
 
 def test_usdc_payout_rejects_non_string_address_without_writes(usdc_client):
+    """Non-string payout addresses are rejected without touching the DB."""
     before_payouts = _table_count(usdc_client.db_path, "usdc_payouts")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -127,6 +134,7 @@ def test_usdc_payout_rejects_non_string_address_without_writes(usdc_client):
 
 
 def test_usdc_tip_rejects_non_object_json_body(usdc_client):
+    """Tip endpoint rejects non-object JSON bodies with 400."""
     before_tips = _table_count(usdc_client.db_path, "usdc_tips")
 
     response = usdc_client.post(
@@ -152,6 +160,7 @@ def test_usdc_tip_rejects_malformed_recipient_fields_without_writes(
     payload,
     error,
 ):
+    """Malformed recipient fields are rejected without any balance mutation."""
     before_tips = _table_count(usdc_client.db_path, "usdc_tips")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -171,6 +180,7 @@ def test_usdc_deposit_rejects_non_object_json_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Deposit endpoint validates the body shape before on-chain verification runs."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -192,6 +202,7 @@ def test_usdc_deposit_rejects_non_string_tx_hash_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Non-string tx hashes are rejected before the chain is queried."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -210,6 +221,7 @@ def test_usdc_deposit_rejects_non_string_tx_hash_before_verification(
 
 
 def test_usdc_premium_rejects_non_object_json_without_writes(usdc_client):
+    """Premium endpoint rejects non-object JSON bodies with zero writes."""
     before_premium = _table_count(usdc_client.db_path, "usdc_premium")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -226,6 +238,7 @@ def test_usdc_premium_rejects_non_object_json_without_writes(usdc_client):
 
 
 def test_usdc_premium_rejects_non_string_tier_without_writes(usdc_client):
+    """Non-string premium tiers are rejected without DB mutation."""
     before_premium = _table_count(usdc_client.db_path, "usdc_premium")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -245,6 +258,7 @@ def test_usdc_verify_payment_rejects_non_object_json_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Payment verification validates body shape before chain access."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -261,6 +275,7 @@ def test_usdc_verify_payment_rejects_non_string_tx_hash_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Payment verification rejects non-string tx hashes before chain access."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -277,6 +292,7 @@ def test_usdc_verify_payment_rejects_non_string_tx_hash_before_verification(
 
 
 def test_valid_usdc_tip_still_debits_sender_and_credits_creator(usdc_client):
+    """A valid tip still debits the sender and credits the creator after all the rejection guards."""
     response = usdc_client.post(
         "/api/usdc/tip",
         json={"to_agent": "bob", "amount_usdc": "2.00"},
@@ -297,6 +313,7 @@ def test_valid_usdc_tip_still_debits_sender_and_credits_creator(usdc_client):
 
 
 def test_valid_usdc_payout_still_creates_pending_request(usdc_client):
+    """A valid payout still creates a pending request after all the rejection guards."""
     response = usdc_client.post(
         "/api/usdc/payout",
         json={"to_address": "0x" + "b" * 40, "amount_usdc": "1.25"},
