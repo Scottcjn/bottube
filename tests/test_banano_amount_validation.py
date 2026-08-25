@@ -16,6 +16,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture
 def ban_client(tmp_path):
+    """Flask test client wired to a temporary SQLite DB with seed agents and transactions."""
     db_path = tmp_path / "bottube.db"
     app = Flask(__name__)
     app.secret_key = "test-secret-key"
@@ -68,11 +69,13 @@ def ban_client(tmp_path):
 
 
 def _ban_transaction_count(db_path):
+    """Returns the total number of rows in the ban_transactions table."""
     with sqlite3.connect(db_path) as db:
         return db.execute("SELECT COUNT(*) FROM ban_transactions").fetchone()[0]
 
 
 def test_banano_info_endpoint_is_public(ban_client):
+    """The /api/banano/info endpoint returns chain metadata without auth."""
     response = ban_client.get("/api/banano/info")
 
     assert response.status_code == 200
@@ -86,6 +89,7 @@ def test_banano_info_endpoint_is_public(ban_client):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True, 0, -1])
 def test_ban_tip_rejects_invalid_amounts_without_writes(ban_client, amount):
+    """Invalid tip amounts are rejected without creating DB rows."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post("/ban/tip", json={"to_agent": "bob", "amount": amount})
@@ -97,6 +101,7 @@ def test_ban_tip_rejects_invalid_amounts_without_writes(ban_client, amount):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True, 0, -1])
 def test_ban_withdraw_rejects_invalid_amounts_without_writes(ban_client, amount):
+    """Invalid withdraw amounts are rejected without creating DB rows."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post(
@@ -110,6 +115,7 @@ def test_ban_withdraw_rejects_invalid_amounts_without_writes(ban_client, amount)
 
 
 def test_ban_tip_rejects_non_object_json_body(ban_client):
+    """A JSON array body on /ban/tip returns 400."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post("/ban/tip", json=["not", "an", "object"])
@@ -120,6 +126,7 @@ def test_ban_tip_rejects_non_object_json_body(ban_client):
 
 
 def test_valid_ban_tip_still_records_sender_and_recipient_rows(ban_client):
+    """A valid tip creates both tip_sent and tip_received transaction rows."""
     response = ban_client.post("/ban/tip", json={"to_agent": "bob", "amount": "1.25"})
 
     assert response.status_code == 200
@@ -142,6 +149,7 @@ def test_valid_ban_tip_still_records_sender_and_recipient_rows(ban_client):
 
 
 def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
+    """A non-object JSON body on /ban/reward-video-gen returns 400."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post("/ban/reward-video-gen", json=["not", "an", "object"])
@@ -153,6 +161,7 @@ def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
 
 @pytest.mark.parametrize("field", ["agent_name", "video_id", "gen_method"])
 def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field):
+    """Non-string agent_name/video_id/gen_method fields return 400."""
     before = _ban_transaction_count(ban_client.db_path)
     payload = {
         "agent_name": "alice",
@@ -170,6 +179,7 @@ def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field
 
 @pytest.mark.parametrize("query", ["limit=0", "limit=-1", "offset=-1"])
 def test_ban_transactions_rejects_non_positive_pagination(ban_client, query):
+    """Non-positive limit or negative offset params return 400."""
     response = ban_client.get(f"/ban/transactions/alice?{query}")
 
     assert response.status_code == 400
@@ -177,6 +187,7 @@ def test_ban_transactions_rejects_non_positive_pagination(ban_client, query):
 
 
 def test_valid_ban_video_generation_reward_still_records_reward(ban_client):
+    """A valid video generation reward creates a reward transaction row."""
     response = ban_client.post(
         "/ban/reward-video-gen",
         json={"agent_name": "alice", "video_id": "video-1", "gen_method": "text"},
