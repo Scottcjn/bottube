@@ -20,12 +20,15 @@ from glitch_engine import (
 
 
 class TestGlitchTypes:
+    """Verifies that all GlitchType and Personality enums have associated data."""
     def test_all_types_have_templates(self):
+        """Every GlitchType has at least 2 templates in the registry."""
         for gt in GlitchType:
             assert gt in GLITCH_TEMPLATES
             assert len(GLITCH_TEMPLATES[gt]) >= 2
 
     def test_all_personalities_have_weights(self):
+        """Every Personality has weights for all GlitchTypes."""
         for p in Personality:
             assert p in PERSONALITY_WEIGHTS
             weights = PERSONALITY_WEIGHTS[p]
@@ -33,12 +36,15 @@ class TestGlitchTypes:
                 assert gt in weights, f"{p} missing weight for {gt}"
 
     def test_template_count(self):
+        """The total template count meets the minimum threshold of 10."""
         total = sum(len(v) for v in GLITCH_TEMPLATES.values())
         assert total >= 10, f"Only {total} templates, need 10+"
 
 
 class TestGlitchEngine:
+    """Tests core GlitchEngine behavior: probability, cooldown, forcing, history."""
     def test_no_glitch_most_of_the_time(self):
+        """At 2% probability, most calls should not produce a glitch event."""
         """With 2% probability, most calls should NOT glitch."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         glitched = 0
@@ -51,6 +57,7 @@ class TestGlitchEngine:
         assert glitched <= 15, f"Too many glitches: {glitched}/100"
 
     def test_cooldown_prevents_rapid_glitches(self):
+        """After a glitch, cooldown_seconds prevents another immediately."""
         """After a glitch, cooldown prevents another."""
         engine = GlitchEngine(
             glitch_probability=1.0,  # always glitch
@@ -63,6 +70,7 @@ class TestGlitchEngine:
         assert e2 is None  # cooldown active
 
     def test_reset_cooldown(self):
+        """reset_cooldown re-enables glitching after a previous event."""
         engine = GlitchEngine(
             glitch_probability=1.0,
             cooldown_seconds=9999,
@@ -74,6 +82,7 @@ class TestGlitchEngine:
         assert event is not None
 
     def test_wrong_draft_replaces_description(self):
+        """WRONG_DRAFT replaces the original description entirely."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         _, desc, event = engine.force_glitch(
             "Title", "Original desc", "wrong_draft",
@@ -82,6 +91,7 @@ class TestGlitchEngine:
         assert event.glitch_type == GlitchType.WRONG_DRAFT
 
     def test_other_types_append_to_description(self):
+        """All other glitch types append to the original description."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         for gt in GlitchType:
             if gt == GlitchType.WRONG_DRAFT:
@@ -92,6 +102,7 @@ class TestGlitchEngine:
             assert desc.startswith("Original desc"), f"{gt}: lost original"
 
     def test_topic_substitution(self):
+        """The {topic} placeholder is replaced in the output."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         _, desc, _ = engine.force_glitch(
             "T", "D", "meta_awareness", topic="blockchain",
@@ -100,6 +111,7 @@ class TestGlitchEngine:
         assert "{topic}" not in desc
 
     def test_history_tracking(self):
+        """get_history returns all glitch events since engine creation."""
         engine = GlitchEngine(
             glitch_probability=1.0,
             cooldown_seconds=0,
@@ -111,12 +123,15 @@ class TestGlitchEngine:
         assert len(engine.get_history()) == 2
 
     def test_invalid_personality_raises(self):
+        """An invalid personality string raises ValueError."""
         with pytest.raises(ValueError):
             GlitchEngine(personality="nonexistent")
 
 
 class TestPersonalityWeighting:
+    """Verifies personality weights produce the expected glitch type distributions."""
     def test_serious_favors_vulnerability(self):
+        """Serious personality produces more VULNERABILITY glitches."""
         """Serious personality should produce more vulnerability glitches."""
         engine = GlitchEngine(
             personality="serious",
@@ -139,6 +154,7 @@ class TestPersonalityWeighting:
         )
 
     def test_funny_favors_tangent_and_offtopic(self):
+        """Funny personality favors tangent/offtopic/self-deprecation types."""
         engine = GlitchEngine(
             personality="funny",
             glitch_probability=1.0,
@@ -161,6 +177,7 @@ class TestPersonalityWeighting:
         )
 
     def test_all_personalities_produce_variety(self):
+        """Each personality produces at least 3 different glitch types."""
         """Each personality should produce at least 3 different glitch types."""
         for p in Personality:
             engine = GlitchEngine(
@@ -181,7 +198,9 @@ class TestPersonalityWeighting:
 
 
 class TestFrequencyDistribution:
+    """Tests statistical properties of glitch frequency and meta-awareness rarity."""
     def test_glitch_rate_approximately_correct(self):
+        """Over many rolls, glitch rate is near the configured probability."""
         """Over 10000 rolls, glitch rate should be near target."""
         engine = GlitchEngine(
             glitch_probability=0.05,  # 5% for testability
@@ -200,6 +219,7 @@ class TestFrequencyDistribution:
         assert 0.01 <= rate <= 0.12, f"Rate {rate:.3f} outside expected range"
 
     def test_meta_awareness_is_rarest(self):
+        """Meta-awareness fires less often than other glitch types."""
         """Meta-awareness should fire less often than other types."""
         engine = GlitchEngine(
             glitch_probability=0.10,
@@ -226,7 +246,9 @@ class TestFrequencyDistribution:
 
 
 class TestEdgeCases:
+    """Edge case tests for empty inputs and force_glitch across all types."""
     def test_empty_strings(self):
+        """Empty title and desc inputs are handled without errors."""
         engine = GlitchEngine(glitch_probability=1.0, cooldown_seconds=0,
                               rng_seed=42)
         title, desc, event = engine.maybe_glitch("", "")
@@ -234,6 +256,7 @@ class TestEdgeCases:
         assert isinstance(desc, str)
 
     def test_force_glitch_all_types(self):
+        """force_glitch works for every GlitchType with no unresolved placeholders."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         for gt in GlitchType:
             title, desc, event = engine.force_glitch(

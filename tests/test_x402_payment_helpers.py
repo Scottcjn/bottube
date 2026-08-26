@@ -15,12 +15,14 @@ import x402_payment
 
 @pytest.fixture(autouse=True)
 def clear_payment_cache():
+    """Autouse fixture that clears the payment cache around each test."""
     x402_payment._payment_cache.clear()
     yield
     x402_payment._payment_cache.clear()
 
 
 def test_amount_to_raw_uses_usdc_decimals_and_rounds_down():
+    """Amount conversion uses 6 decimals and truncates sub-unit remainders."""
     assert x402_payment._amount_to_raw("0") == 0
     assert x402_payment._amount_to_raw("0.000001") == 1
     assert x402_payment._amount_to_raw("0.0000019") == 1
@@ -28,6 +30,7 @@ def test_amount_to_raw_uses_usdc_decimals_and_rounds_down():
 
 
 def test_parse_payment_receipt_defaults_network_and_normalizes_fields():
+    """Receipt parsing defaults network to base and trims/lowercases fields."""
     tx_hash = "0x" + ("ab" * 32)
     receipt = json.dumps(
         {
@@ -57,11 +60,13 @@ def test_parse_payment_receipt_defaults_network_and_normalizes_fields():
     ],
 )
 def test_parse_payment_receipt_rejects_invalid_payloads(payload, reason):
+    """Malformed payloads raise ValueError with the matching reason."""
     with pytest.raises(ValueError, match=reason):
         x402_payment._parse_payment_receipt(payload)
 
 
 def test_cleanup_payment_cache_removes_expired_entries_only():
+    """Cache cleanup evicts only entries at or past TTL."""
     x402_payment._payment_cache.update(
         {
             "expired": {"time": 100, "fingerprint": "GET:/expired"},
@@ -77,6 +82,7 @@ def test_cleanup_payment_cache_removes_expired_entries_only():
 
 
 def test_verify_payment_rejects_claimed_underpayment_before_rpc(monkeypatch):
+    """Claimed amounts below price fail fast without any RPC call."""
     def fail_if_called(*args, **kwargs):
         pytest.fail("on-chain verifier should not be called for claimed underpayment")
 
@@ -103,6 +109,7 @@ def test_verify_payment_rejects_claimed_underpayment_before_rpc(monkeypatch):
 
 
 def test_verify_payment_caches_success_and_blocks_cross_endpoint_replay(monkeypatch):
+    """Successful verification caches per fingerprint; reuse on another endpoint is blocked."""
     tx_hash = "0x" + ("22" * 32)
     calls = []
 
@@ -156,6 +163,7 @@ def test_verify_payment_caches_success_and_blocks_cross_endpoint_replay(monkeypa
 
 
 def test_verify_payment_detects_receipt_and_transfer_amount_mismatch(monkeypatch):
+    """On-chain amount differing from the receipt claim fails verification."""
     tx_hash = "0x" + ("33" * 32)
 
     def fake_verify(tx_hash_arg, network, recipient):

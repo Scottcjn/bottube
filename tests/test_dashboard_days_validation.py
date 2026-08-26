@@ -36,11 +36,13 @@ def _setup_agent(app):
 
 
 def _login(client, agent_id):
+    """Logs in the given agent id via the session transaction."""
     with client.session_transaction() as sess:
         sess["user_id"] = agent_id
 
 
 def test_days_default_when_omitted(app, client):
+    """Omitted days param defaults to 30 labels."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics")
@@ -50,6 +52,7 @@ def test_days_default_when_omitted(app, client):
 
 
 def test_days_non_integer_returns_400(app, client):
+    """Non-integer days returns 400 with an integer error."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=abc")
@@ -58,6 +61,7 @@ def test_days_non_integer_returns_400(app, client):
 
 
 def test_days_below_minimum_returns_400(app, client):
+    """days=6 below the minimum (7) returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=6")
@@ -66,6 +70,7 @@ def test_days_below_minimum_returns_400(app, client):
 
 
 def test_days_above_maximum_returns_400(app, client):
+    """days=91 above the maximum (90) returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=91")
@@ -74,6 +79,7 @@ def test_days_above_maximum_returns_400(app, client):
 
 
 def test_days_at_lower_boundary(app, client):
+    """days=7 is accepted and yields 7 labels."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=7")
@@ -82,6 +88,7 @@ def test_days_at_lower_boundary(app, client):
 
 
 def test_days_at_upper_boundary(app, client):
+    """days=90 is accepted and yields 90 labels."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=90")
@@ -90,6 +97,7 @@ def test_days_at_upper_boundary(app, client):
 
 
 def test_days_zero_returns_400(app, client):
+    """days=0 is rejected with 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=0")
@@ -97,6 +105,7 @@ def test_days_zero_returns_400(app, client):
 
 
 def test_days_negative_returns_400(app, client):
+    """Negative days values are rejected with 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=-5")

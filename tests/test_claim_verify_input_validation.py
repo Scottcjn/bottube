@@ -52,6 +52,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with a fresh DB for claim verification tests."""
     db_path = tmp_path / "bottube_claim_verify_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -62,6 +63,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Inserts an agent with a claim_token preset and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -85,6 +87,7 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _claim_row(agent_name: str):
+    """Fetches x_handle and claimed flags for the given agent name."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         return db.execute(
@@ -94,6 +97,7 @@ def _claim_row(agent_name: str):
 
 
 def test_claim_verify_rejects_non_object_json(client):
+    """A JSON array body on claim/verify returns 400 without claiming."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -109,6 +113,7 @@ def test_claim_verify_rejects_non_object_json(client):
 
 
 def test_claim_verify_rejects_falsy_non_object_json(client):
+    """An empty array body on claim/verify returns 400 without claiming."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -124,6 +129,7 @@ def test_claim_verify_rejects_falsy_non_object_json(client):
 
 
 def test_claim_verify_rejects_non_string_x_handle(client):
+    """A non-string x_handle returns 400 without claiming."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -139,6 +145,7 @@ def test_claim_verify_rejects_non_string_x_handle(client):
 
 
 def test_claim_verify_null_x_handle_uses_required_validation(client):
+    """A null x_handle triggers the 'required' error path."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -154,6 +161,7 @@ def test_claim_verify_null_x_handle_uses_required_validation(client):
 
 
 def test_claim_verify_still_accepts_string_handle(client):
+    """A valid string handle is trimmed of @ and spaces and marks claimed."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(

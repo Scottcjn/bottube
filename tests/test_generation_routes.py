@@ -14,6 +14,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture
 def fake_bottube_server(monkeypatch):
+    """Provides a minimal bottube_server stub with FakeDB and CATEGORY_MAP."""
     class FakeDB:
         def execute(self, *_args, **_kwargs):
             return self
@@ -36,6 +37,7 @@ def fake_bottube_server(monkeypatch):
 
 @pytest.fixture
 def generation_client(fake_bottube_server):
+    """Flask test client wired to the generation blueprint with stubbed server."""
     from generation.routes import generation_bp
 
     app = Flask(__name__)
@@ -46,6 +48,7 @@ def generation_client(fake_bottube_server):
 
 @pytest.fixture
 def legacy_generation_client(fake_bottube_server):
+    """Flask test client wired to the legacy video_gen blueprint."""
     from video_gen_blueprint import video_gen_bp
 
     app = Flask(__name__)
@@ -55,6 +58,7 @@ def legacy_generation_client(fake_bottube_server):
 
 
 def test_generation_job_rejects_non_object_json_before_auth(generation_client):
+    """A string body on /api/generation/jobs returns 400 before auth check."""
     resp = generation_client.post("/api/generation/jobs", json="not-object")
 
     assert resp.status_code == 400
@@ -62,6 +66,7 @@ def test_generation_job_rejects_non_object_json_before_auth(generation_client):
 
 
 def test_generation_job_rejects_non_string_prompt(generation_client):
+    """A non-string prompt on /api/generation/jobs returns 400."""
     resp = generation_client.post(
         "/api/generation/jobs",
         json={"prompt": ["make a video"]},
@@ -73,6 +78,7 @@ def test_generation_job_rejects_non_string_prompt(generation_client):
 
 
 def test_generation_job_rejects_non_string_body_api_key(generation_client):
+    """A non-string agent_api_key in body returns 400."""
     resp = generation_client.post(
         "/api/generation/jobs",
         json={"agent_api_key": ["test-key"], "prompt": "make a video"},
@@ -85,6 +91,7 @@ def test_generation_job_rejects_non_string_body_api_key(generation_client):
 def test_legacy_generate_video_rejects_non_object_json_before_auth(
     legacy_generation_client,
 ):
+    """A JSON array on /api/generate-video returns 400."""
     resp = legacy_generation_client.post(
         "/api/generate-video",
         json=["not", "an", "object"],
@@ -95,6 +102,7 @@ def test_legacy_generate_video_rejects_non_object_json_before_auth(
 
 
 def test_legacy_generate_video_rejects_malformed_fields(legacy_generation_client):
+    """Non-string prompt/category/title and non-int duration all return 400."""
     headers = {"X-API-Key": "test-key"}
 
     prompt_resp = legacy_generation_client.post(
@@ -134,6 +142,7 @@ def test_legacy_generate_video_rejects_boolean_duration_before_start(
     legacy_generation_client,
     monkeypatch,
 ):
+    """A boolean duration value returns 400 without starting generation."""
     import video_gen_blueprint
 
     monkeypatch.setattr(
@@ -155,6 +164,7 @@ def test_legacy_generate_video_rejects_boolean_duration_before_start(
 def test_legacy_generate_video_rejects_non_string_body_api_key(
     legacy_generation_client,
 ):
+    """A non-string agent_api_key on legacy route returns 400."""
     resp = legacy_generation_client.post(
         "/api/generate-video",
         json={"agent_api_key": ["test-key"], "prompt": "make a video"},

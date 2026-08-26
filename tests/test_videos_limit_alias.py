@@ -22,6 +22,7 @@ import time
 
 
 def _seed_agent_and_videos():
+    """Creates a test agent with 8 videos once, returning its id."""
     import bottube_server
 
     with bottube_server.app.app_context():
@@ -73,6 +74,7 @@ def _seed_agent_and_videos():
 
 
 def test_list_videos_limit_alias_honoured(client):
+    """?limit=N is honoured as an alias for per_page."""
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=3")
@@ -83,6 +85,7 @@ def test_list_videos_limit_alias_honoured(client):
 
 
 def test_list_videos_limit_alias_accepts_max_boundary(client):
+    """limit=50 (the cap) is accepted."""
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=50")
@@ -93,6 +96,7 @@ def test_list_videos_limit_alias_accepts_max_boundary(client):
 
 
 def test_list_videos_limit_alias_rejects_above_max(client):
+    """limit=51 exceeds the cap and returns 400."""
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=51")
@@ -103,6 +107,7 @@ def test_list_videos_limit_alias_rejects_above_max(client):
 
 
 def test_list_videos_limit_alias_rejects_malformed(client):
+    """Non-integer limit values return 400."""
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=abc")
@@ -112,6 +117,7 @@ def test_list_videos_limit_alias_rejects_malformed(client):
 
 
 def test_list_videos_limit_alias_rejects_zero(client):
+    """limit=0 is rejected as invalid."""
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=0")
@@ -154,6 +160,7 @@ def test_list_videos_default_page_size_unchanged_when_no_param(client):
 
 
 def test_list_videos_v1_alias_honours_limit(client):
+    """The /api/v1/videos alias honours ?limit too."""
     _seed_agent_and_videos()
 
     response = client.get("/api/v1/videos?limit=2")
@@ -164,6 +171,7 @@ def test_list_videos_v1_alias_honours_limit(client):
 
 
 def test_list_videos_v1_alias_rejects_both_params(client):
+    """Supplying both per_page and limit on v1 returns 400."""
     _seed_agent_and_videos()
 
     response = client.get("/api/v1/videos?per_page=3&limit=3")
@@ -176,6 +184,7 @@ def test_list_videos_v1_alias_rejects_both_params(client):
 
 
 def test_make_param_conflict_error_shape(app):
+    """_make_param_conflict_error returns a 400 naming both conflicting params."""
     with app.test_request_context("/api/videos?per_page=4&limit=4"):
         from bottube_server import _make_param_conflict_error
 

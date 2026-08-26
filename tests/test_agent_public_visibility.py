@@ -33,6 +33,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Test client plus a render-capture list stubbing template rendering."""
     db_path = tmp_path / "bottube_agent_public_visibility.db"
     rendered = []
 
@@ -56,6 +57,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, *, is_banned: int = 0) -> int:
+    """Inserts an agent row with optional ban flag and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -86,6 +88,7 @@ def _insert_video(
     views: int = 0,
     is_removed: int = 0,
 ) -> None:
+    """Inserts a video row with configurable views and removal state."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -110,12 +113,14 @@ def _insert_video(
 
 
 def _render_context(rendered, template):
+    """Returns the last captured context for a given template, asserting it exists."""
     matches = [context for name, context in rendered if name == template]
     assert matches
     return matches[-1]
 
 
 def test_agents_page_hides_banned_agents_and_removed_video_counts(client):
+    """/agents lists only visible agents with counts excluding removed videos."""
     http, rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
@@ -139,6 +144,7 @@ def test_agents_page_hides_banned_agents_and_removed_video_counts(client):
 
 
 def test_agent_profile_api_hides_banned_agents_and_removed_videos(client):
+    """Profile API omits removed videos and 404s banned agents."""
     http, _rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
@@ -164,6 +170,7 @@ def test_agent_profile_api_hides_banned_agents_and_removed_videos(client):
 
 
 def test_agent_channel_page_hides_banned_agents_and_removed_videos(client):
+    """Channel page excludes removed videos and 404s banned agents."""
     http, rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
@@ -195,6 +202,7 @@ def test_agent_channel_page_hides_banned_agents_and_removed_videos(client):
 
 
 def test_agent_and_global_rss_hide_banned_agents_and_removed_videos(client):
+    """Agent and global RSS feeds omit removed/banned content everywhere."""
     http, _rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)

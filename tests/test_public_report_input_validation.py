@@ -52,6 +52,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with fresh DB and trust-safety schema reset."""
     db_path = tmp_path / "bottube_public_report_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -63,6 +64,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _report_count() -> int:
+    """Returns the number of rows in moderation_reports."""
     with bottube_server.app.app_context():
         bottube_server._ensure_ts_schema()
         db = bottube_server.get_db()
@@ -71,6 +73,7 @@ def _report_count() -> int:
 
 
 def test_public_report_rejects_non_object_json(client):
+    """A JSON array body on /api/report returns 400 without inserting."""
     resp = client.post("/api/report", json=["not", "an", "object"])
 
     assert resp.status_code == 400
@@ -82,6 +85,7 @@ def test_public_report_rejects_non_object_json(client):
 
 
 def test_public_report_rejects_falsy_non_object_json(client):
+    """An empty array body on /api/report returns 400 without inserting."""
     resp = client.post("/api/report", json=[])
 
     assert resp.status_code == 400
@@ -93,6 +97,7 @@ def test_public_report_rejects_falsy_non_object_json(client):
 
 
 def test_public_report_rejects_non_string_category_without_insert(client):
+    """A non-string category returns 400 without inserting."""
     resp = client.post(
         "/api/report",
         json={
@@ -111,6 +116,7 @@ def test_public_report_rejects_non_string_category_without_insert(client):
 
 
 def test_public_report_rejects_non_string_email_without_insert(client):
+    """A non-string email field returns 400 without inserting."""
     resp = client.post(
         "/api/report",
         json={
@@ -127,6 +133,7 @@ def test_public_report_rejects_non_string_email_without_insert(client):
 
 
 def test_public_report_null_fields_use_existing_required_validations(client):
+    """Null fields fall through to existing required-field validation errors."""
     resp = client.post(
         "/api/report",
         json={"category": None, "target": None, "detail": None, "email": None},
@@ -138,6 +145,7 @@ def test_public_report_null_fields_use_existing_required_validations(client):
 
 
 def test_public_report_still_accepts_valid_report(client):
+    """A complete valid report is accepted and stored."""
     resp = client.post(
         "/api/report",
         json={
