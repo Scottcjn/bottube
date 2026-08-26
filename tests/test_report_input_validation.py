@@ -24,6 +24,12 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the hardcoded production DB path to the test bootstrap path.
+
+    Import-time code opens `/root/bottube/bottube.db` before the `client`
+    fixture can monkeypatch `DB_PATH`, so without this shim collecting
+    this module would touch production report/comment data.
+    """
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -38,6 +44,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Force paypal_packages' schema init onto the test bootstrap DB, not the real one."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -52,6 +59,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Yield a Flask test client on an isolated, per-test SQLite database."""
     db_path = tmp_path / "bottube_report_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -62,6 +70,12 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Insert a minimal agent row directly and return its id.
+
+    Used to seed both the video/comment owner and the reporter, since
+    report validation itself doesn't depend on how the accounts were
+    created.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -78,6 +92,7 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _insert_video(agent_id: int, video_id: str) -> None:
+    """Seed a video owned by `agent_id` so `/api/videos/<id>/report` has a target to reject or accept a report against."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -92,6 +107,7 @@ def _insert_video(agent_id: int, video_id: str) -> None:
 
 
 def _insert_comment(agent_id: int, video_id: str, content: str) -> int:
+    """Seed a comment and return its id, so `/api/comments/<id>/report` has a target."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -106,12 +122,18 @@ def _insert_comment(agent_id: int, video_id: str, content: str) -> int:
 
 
 def _report_count() -> int:
+    """Return how many rows exist in `reports`, used to prove a rejected request inserted nothing."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         return int(db.execute("SELECT COUNT(*) FROM reports").fetchone()[0])
 
 
 def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
+    """`reason: null` must fail the same "Invalid reason" check as an unrecognized reason string, not a separate null-check path.
+
+    Proves `null` doesn't get special-cased into passing through or into a
+    different (weaker) error message than a plain bad `reason` value would get.
+    """
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -128,6 +150,12 @@ def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
 
 
 def test_video_report_rejects_non_string_details_without_insert(client):
+    """A dict-typed `details` on a video report must 400 with a specific message and write nothing.
+
+    `reason` here is valid ("spam"), isolating the check to `details`
+    alone -- proves the two fields are validated independently rather
+    than one bad field's error masking a check on the other.
+    """
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -144,6 +172,7 @@ def test_video_report_rejects_non_string_details_without_insert(client):
 
 
 def test_comment_report_rejects_non_string_reason_without_insert(client):
+    """A list-typed `reason` on a comment report must 400 and insert nothing, mirroring the video-report reason check."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -161,6 +190,7 @@ def test_comment_report_rejects_non_string_reason_without_insert(client):
 
 
 def test_comment_report_rejects_non_object_json(client):
+    """A JSON array body to /comments/<id>/report must 400 with "JSON body must be an object" and write nothing."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -178,6 +208,7 @@ def test_comment_report_rejects_non_object_json(client):
 
 
 def test_video_report_rejects_falsy_non_object_json(client):
+    """An empty JSON array (`[]`, which is falsy in Python) must still be rejected as "not an object", not treated as "no body"."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo02A")
@@ -194,6 +225,13 @@ def test_video_report_rejects_falsy_non_object_json(client):
 
 
 def test_comment_report_rejects_falsy_non_object_json(client):
+    """The same falsy-empty-array case as the video-report test above, but for the comment-report endpoint.
+
+    A validator using `if not body:` to mean "body missing" would wrongly
+    let `[]` fall through as "no body provided" instead of "wrong type" --
+    covering both endpoints catches this if only one of the two handlers
+    shares that bug.
+    """
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo03A")
@@ -211,6 +249,13 @@ def test_comment_report_rejects_falsy_non_object_json(client):
 
 
 def test_video_report_accepts_null_details_as_empty(client):
+    """`details: null` must succeed (unlike `reason: null`) since details is genuinely optional.
+
+    Paired with `test_video_report_null_reason_...` above: `null` is
+    rejected for the required `reason` field but accepted for the
+    optional `details` field, proving the two aren't validated by one
+    blanket "no nulls" rule.
+    """
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
