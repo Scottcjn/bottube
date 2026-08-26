@@ -71,6 +71,7 @@ def app(tmp_path, monkeypatch):
 
 
 def _assert_invalid_matrix(client, path, cases):
+    """Asserts each param/value pair returns 400 naming the offending param."""
     for param, values in cases.items():
         for value in values:
             response = client.get(path, query_string={param: value})
@@ -83,6 +84,7 @@ def _assert_invalid_matrix(client, path, cases):
 
 
 def _assert_valid_matrix(client, path, cases):
+    """Asserts each param/value pair returns 200."""
     for param, value in cases.items():
         response = client.get(path, query_string={param: value})
         assert response.status_code == 200, (
@@ -92,6 +94,7 @@ def _assert_valid_matrix(client, path, cases):
 
 
 def _insert_related_video(app):
+    """Seeds an agent and video used by related-video tests."""
     import bottube_server
 
     with app.app_context():
@@ -115,6 +118,7 @@ def _insert_related_video(app):
 
 
 def test_feed_validates_every_reported_parameter(client):
+    """Every documented /api/feed param rejects malformed, negative, and oversized values."""
     _assert_invalid_matrix(
         client,
         "/api/feed",
@@ -131,6 +135,7 @@ def test_feed_validates_every_reported_parameter(client):
 
 
 def test_feed_accepts_valid_values_and_preserves_defaults(client):
+    """Valid param values are accepted and response defaults stay stable."""
     baseline = client.get("/api/feed")
     assert baseline.status_code == 200
     baseline_body = baseline.get_json()
@@ -156,6 +161,7 @@ def test_feed_accepts_valid_values_and_preserves_defaults(client):
 
 
 def test_trending_validates_limit_days_and_since(client):
+    """/api/trending rejects malformed limit, days, and since values."""
     _assert_invalid_matrix(
         client,
         "/api/trending",
@@ -168,6 +174,7 @@ def test_trending_validates_limit_days_and_since(client):
 
 
 def test_trending_accepts_valid_values_and_preserves_defaults(client):
+    """Valid trending params return 200 with defaults preserved."""
     assert client.get("/api/trending").status_code == 200
     _assert_valid_matrix(
         client,
@@ -181,6 +188,7 @@ def test_trending_accepts_valid_values_and_preserves_defaults(client):
 
 
 def test_videos_validates_page(client):
+    """/api/videos rejects malformed or out-of-range page values."""
     _assert_invalid_matrix(
         client,
         "/api/videos",
@@ -191,6 +199,7 @@ def test_videos_validates_page(client):
 
 
 def test_related_validates_limit_before_database_lookup(client):
+    """Related endpoint validates limit before touching the DB."""
     _assert_invalid_matrix(
         client,
         "/api/videos/not_present/related",
@@ -199,6 +208,7 @@ def test_related_validates_limit_before_database_lookup(client):
 
 
 def test_related_accepts_valid_limit_and_preserves_default(app, client):
+    """Valid and omitted limits on related return 200."""
     _insert_related_video(app)
     path = "/api/videos/shared_validator_video/related"
     assert client.get(path).status_code == 200
@@ -206,6 +216,7 @@ def test_related_accepts_valid_limit_and_preserves_default(app, client):
 
 
 def test_shared_int_parser_covers_default_type_and_bounds():
+    """parse_positive_int handles defaults, coercion, and min/max bounds."""
     app = Flask(__name__)
 
     with app.test_request_context("/?limit="):
@@ -224,6 +235,7 @@ def test_shared_int_parser_covers_default_type_and_bounds():
 
 
 def test_shared_enum_parser_normalizes_and_names_bad_parameter():
+    """parse_enum normalizes case and names the offending param in errors."""
     app = Flask(__name__)
 
     with app.test_request_context("/?sort=LATEST"):
@@ -241,6 +253,7 @@ def test_shared_enum_parser_normalizes_and_names_bad_parameter():
 
 
 def test_shared_timestamp_parser_accepts_unix_and_iso_and_rejects_bounds():
+    """parse_timestamp_iso accepts unix/ISO input and rejects bad or extreme values."""
     app = Flask(__name__)
 
     with app.test_request_context("/?since=1700000000"):

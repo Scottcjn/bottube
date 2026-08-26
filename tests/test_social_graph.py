@@ -46,6 +46,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with a fresh DB for social graph tests."""
     db_path = tmp_path / "bottube_social_graph_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -56,6 +57,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, created_at: float) -> int:
+    """Inserts an agent row with the given creation timestamp."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -71,6 +73,7 @@ def _insert_agent(agent_name: str, created_at: float) -> int:
 
 
 def _insert_video(video_id: str, agent_id: int, created_at: float) -> None:
+    """Inserts a video row for the given agent."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -84,6 +87,7 @@ def _insert_video(video_id: str, agent_id: int, created_at: float) -> None:
 
 
 def _insert_comment(video_id: str, agent_id: int, content: str, created_at: float) -> None:
+    """Inserts a comment row with the given timestamp."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -97,6 +101,7 @@ def _insert_comment(video_id: str, agent_id: int, content: str, created_at: floa
 
 
 def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float) -> None:
+    """Inserts a vote row with the given timestamp."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -110,6 +115,7 @@ def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float) -> 
 
 
 def _insert_subscription(follower_id: int, following_id: int, created_at: float) -> None:
+    """Inserts a follower/following subscription row."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -123,6 +129,7 @@ def _insert_subscription(follower_id: int, following_id: int, created_at: float)
 
 
 def _seed_interaction_data():
+    """Seeds alice/bob/carol with comments, votes, and subscriptions both ways."""
     t = 1000.0
     alice_id = _insert_agent("alice", t)
     bob_id = _insert_agent("bob", t + 1)
@@ -153,6 +160,7 @@ def _seed_interaction_data():
 
 
 def test_social_graph_has_expected_keys_and_limit(client):
+    """Graph payload has expected sections and respects the limit on top_pairs."""
     _seed_interaction_data()
 
     resp = client.get("/api/social/graph?limit=1")
@@ -179,6 +187,7 @@ def test_social_graph_has_expected_keys_and_limit(client):
     ("limit=51", "limit must be <= 50"),
 ])
 def test_social_graph_rejects_invalid_limit(client, query, expected_error):
+    """Malformed, zero, and over-cap limits return 400 with clear errors."""
     resp = client.get(f"/api/social/graph?{query}")
 
     assert resp.status_code == 400
@@ -186,6 +195,7 @@ def test_social_graph_rejects_invalid_limit(client, query, expected_error):
 
 
 def test_agent_interactions_shape_not_found_and_limit(client):
+    """Interactions endpoint 404s unknown agents and shapes sections per limit."""
     _seed_interaction_data()
 
     not_found = client.get("/api/agents/no_such_agent/interactions")
@@ -232,6 +242,7 @@ def test_agent_interactions_shape_not_found_and_limit(client):
     ("limit=51", "limit must be <= 50"),
 ])
 def test_agent_interactions_rejects_invalid_limit(client, query, expected_error):
+    """Invalid limit params on interactions return 400."""
     _seed_interaction_data()
 
     resp = client.get(f"/api/agents/alice/interactions?{query}")
