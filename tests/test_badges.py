@@ -48,6 +48,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with fresh DB and admin key configured."""
     db_path = tmp_path / "bottube_badges.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +60,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Inserts an agent row with optional is_human flag and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +76,7 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Fetches the full agent row by name, asserting existence."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -82,6 +85,7 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 
 def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Inserts a video and refreshes referral invite state for the agent."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -98,6 +102,7 @@ def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> N
 
 
 def _create_referral_code(client, referrer_id: int) -> str:
+    """Creates a referral code for the referrer via session login."""
     with client.session_transaction() as sess:
         sess["user_id"] = referrer_id
         sess["csrf_token"] = "test-csrf"
@@ -107,6 +112,7 @@ def _create_referral_code(client, referrer_id: int) -> str:
 
 
 def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
+    """Signs up a human with the code and completes activation steps."""
     with client.session_transaction() as sess:
         sess.pop("user_id", None)
         sess["csrf_token"] = "test-csrf"
@@ -144,6 +150,7 @@ def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
 
 
 def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
+    """Registers an agent with the code and completes activation steps."""
     reg_resp = client.post(
         "/api/register",
         json={
@@ -167,6 +174,7 @@ def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
 
 
 def test_badge_assignment_renders_on_public_surfaces_and_can_be_removed(client):
+    """Assigned badge shows on API/channel/watch/dashboard and removal deactivates it."""
     creator_id = _insert_agent("founderhuman", "bottube_sk_founderhuman", is_human=True)
     _insert_video(creator_id, "founderwatch1")
 
@@ -231,6 +239,7 @@ def test_badge_assignment_renders_on_public_surfaces_and_can_be_removed(client):
 
 
 def test_badge_candidates_follow_referral_activation_and_scout_thresholds(client):
+    """Badge candidates reflect referral cohorts and scout thresholds correctly."""
     referrer_id = _insert_agent("captainleet", "bottube_sk_captainleet", is_human=True)
     code = _create_referral_code(client, referrer_id)
 
