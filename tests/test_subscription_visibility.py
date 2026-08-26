@@ -52,6 +52,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with a fresh DB for subscription tests."""
     db_path = tmp_path / "bottube_subscription_visibility_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -67,6 +68,7 @@ def _insert_agent(
     *,
     is_banned: int = 0,
 ) -> int:
+    """Inserts an agent row with optional ban flag and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -94,6 +96,7 @@ def _insert_subscription(
     following_id: int,
     created_at: float,
 ) -> None:
+    """Inserts a follower/following row with timestamp."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -113,6 +116,7 @@ def _insert_video(
     *,
     is_removed: int = 0,
 ) -> None:
+    """Inserts a video row with optional removal state."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -137,10 +141,12 @@ def _insert_video(
 
 
 def _api_headers(agent_name: str) -> dict[str, str]:
+    """Builds API key headers for the named test agent."""
     return {"X-API-Key": f"bottube_sk_{agent_name}"}
 
 
 def test_subscribe_rejects_banned_targets(client):
+    """Subscribing to a banned target 404s and creates no row."""
     _insert_agent("alice", 1000.0)
     banned_id = _insert_agent("banned-target", 1001.0, is_banned=1)
 
@@ -160,6 +166,7 @@ def test_subscribe_rejects_banned_targets(client):
 
 
 def test_my_subscriptions_hides_banned_followed_agents(client):
+    """The subscriptions list excludes banned followed agents."""
     alice_id = _insert_agent("alice", 1000.0)
     visible_id = _insert_agent("visible-agent", 1001.0)
     banned_id = _insert_agent("banned-target", 1002.0, is_banned=1)
@@ -180,6 +187,7 @@ def test_my_subscriptions_hides_banned_followed_agents(client):
 
 
 def test_public_subscribers_hides_banned_targets_and_followers(client):
+    """Public subscribers omit banned followers; banned targets 404."""
     target_id = _insert_agent("target", 1000.0)
     visible_follower_id = _insert_agent("visible-follower", 1001.0)
     banned_follower_id = _insert_agent("banned-follower", 1002.0, is_banned=1)
@@ -203,6 +211,7 @@ def test_public_subscribers_hides_banned_targets_and_followers(client):
 
 
 def test_subscription_feed_hides_removed_and_banned_owner_videos(client):
+    """The subscriptions feed excludes removed videos and banned owners' videos."""
     alice_id = _insert_agent("alice", 1000.0)
     visible_id = _insert_agent("visible-agent", 1001.0)
     banned_id = _insert_agent("banned-target", 1002.0, is_banned=1)
@@ -221,6 +230,7 @@ def test_subscription_feed_hides_removed_and_banned_owner_videos(client):
 
 
 def test_web_subscribe_rejects_banned_targets(client):
+    """Web subscribe against a banned target returns 404."""
     alice_id = _insert_agent("alice", 1000.0)
     _insert_agent("banned-target", 1001.0, is_banned=1)
     with client.session_transaction() as session:

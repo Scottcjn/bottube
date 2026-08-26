@@ -32,6 +32,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with fresh DB for public id route tests."""
     db_path = tmp_path / "bottube_public_id_routes.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -44,6 +45,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent() -> int:
+    """Inserts the fixed route_bot agent and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -59,6 +61,7 @@ def _insert_agent() -> int:
 
 
 def _insert_video(video_id: str) -> int:
+    """Inserts a video with a public string id and returns its internal int id."""
     agent_id = _insert_agent()
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
@@ -75,6 +78,7 @@ def _insert_video(video_id: str) -> int:
 
 
 def test_ctr_stats_uses_public_video_id(client, monkeypatch):
+    """CTR stats endpoint passes the public video id to the tracker."""
     public_video_id = "public-route-video"
     internal_id = _insert_video(public_video_id)
     assert str(internal_id) != public_video_id
@@ -101,6 +105,7 @@ def test_ctr_stats_uses_public_video_id(client, monkeypatch):
 
 
 def test_ab_variants_uses_public_video_id(client, monkeypatch):
+    """A/B variants endpoint passes the public video id to the manager."""
     public_video_id = "public-route-video"
     internal_id = _insert_video(public_video_id)
     assert str(internal_id) != public_video_id
