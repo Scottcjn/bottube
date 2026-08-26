@@ -655,8 +655,24 @@ def process_withdrawals():
 
         except subprocess.TimeoutExpired:
             results.append({"id": wid, "ok": False, "error": "Timeout"})
+            db.execute(
+                "UPDATE wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                (wid,),
+            )
+            db.execute(
+                "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+                (w["net_wrtc"] + WITHDRAW_FEE, w["agent_id"]),
+            )
         except Exception as e:
             results.append({"id": wid, "ok": False, "error": str(e)})
+            db.execute(
+                "UPDATE wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                (wid,),
+            )
+            db.execute(
+                "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+                (w["net_wrtc"] + WITHDRAW_FEE, w["agent_id"]),
+            )
 
     db.commit()
 
