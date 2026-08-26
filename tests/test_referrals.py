@@ -48,6 +48,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with fresh DB and admin key configured."""
     db_path = tmp_path / "bottube_referrals.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +60,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Inserts an agent row with optional is_human flag and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +76,7 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _insert_video_and_mark(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Inserts a video and marks first-upload referral milestones."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -90,6 +93,7 @@ def _insert_video_and_mark(agent_id: int, video_id: str, *, created_at: float = 
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Fetches the full agent row by name, asserting existence."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -99,6 +103,7 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 @pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "201"])
 def test_referral_leaderboard_rejects_invalid_limit(client, limit):
+    """Non-positive, malformed, or oversized limit params return 400."""
     resp = client.get(f"/api/referrals/leaderboard?limit={limit}")
 
     assert resp.status_code == 400
@@ -108,6 +113,7 @@ def test_referral_leaderboard_rejects_invalid_limit(client, limit):
 
 @pytest.mark.parametrize("limit", [None, "1", "200"])
 def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit):
+    """Omitted, minimum, and maximum limits are accepted."""
     path = "/api/referrals/leaderboard"
     if limit is not None:
         path = f"{path}?limit={limit}"
@@ -121,6 +127,7 @@ def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit)
 
 
 def test_referral_dashboard_tracks_human_and_agent_funnels(client):
+    """Referral summary tracks human/agent funnels and milestone completion."""
     referrer_id = _insert_agent("founder1337", "bottube_sk_founder", is_human=True)
 
     with client.session_transaction() as sess:
@@ -210,6 +217,7 @@ def test_referral_dashboard_tracks_human_and_agent_funnels(client):
 
 
 def test_referral_admin_review_and_export(client):
+    """Admin can list, approve, and export referrals with evidence refs."""
     referrer_id = _insert_agent("captainref", "bottube_sk_captain", is_human=True)
 
     with client.session_transaction() as sess:
@@ -264,6 +272,7 @@ def test_referral_admin_review_and_export(client):
 
 
 def test_referral_track_setting_blocks_wrong_funnel(client):
+    """A code locked to the human track rejects agent registrations."""
     referrer_id = _insert_agent("humancode", "bottube_sk_humancode")
 
     resp = client.post(

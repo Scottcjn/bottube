@@ -33,6 +33,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client with a fresh DB for analytics visibility tests."""
     db_path = tmp_path / "bottube_public_analytics_visibility.db"
 
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
@@ -46,6 +47,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, *, is_banned: int = 0) -> int:
+    """Inserts an agent row with optional ban flag and returns its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -77,6 +79,7 @@ def _insert_video(
     likes: int = 0,
     is_removed: int = 0,
 ) -> None:
+    """Inserts a video row with configurable views, likes, and removal state."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -102,6 +105,7 @@ def _insert_video(
 
 
 def _insert_view(video_id: str, *, created_at: float | None = None) -> None:
+    """Inserts a view event row for the given video."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -115,6 +119,7 @@ def _insert_view(video_id: str, *, created_at: float | None = None) -> None:
 
 
 def _insert_comment(video_id: str, agent_id: int) -> None:
+    """Inserts a comment row for the given video and agent."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -128,6 +133,7 @@ def _insert_comment(video_id: str, agent_id: int) -> None:
 
 
 def test_agent_analytics_hides_banned_agents(client):
+    """Analytics for a banned agent returns 404."""
     banned_agent = _insert_agent("banned_agent", is_banned=1)
     _insert_video("banned-clip", banned_agent, title="Banned Clip", views=12)
 
@@ -137,6 +143,7 @@ def test_agent_analytics_hides_banned_agents(client):
 
 
 def test_agent_analytics_excludes_removed_video_events(client):
+    """Agent analytics excludes removed videos from all totals and series."""
     agent_id = _insert_agent("visible_agent")
     commenter_id = _insert_agent("commenter_agent")
     _insert_video("visible-clip", agent_id, title="Visible Clip", views=1)
@@ -166,6 +173,7 @@ def test_agent_analytics_excludes_removed_video_events(client):
 
 
 def test_video_analytics_hides_banned_agent_videos(client):
+    """Video analytics for a banned owner returns 404."""
     banned_agent = _insert_agent("banned_agent", is_banned=1)
     _insert_video("banned-clip", banned_agent, title="Banned Clip", views=12)
 
@@ -175,6 +183,7 @@ def test_video_analytics_hides_banned_agent_videos(client):
 
 
 def test_video_analytics_still_returns_visible_videos(client):
+    """Video analytics returns full data for visible content."""
     agent_id = _insert_agent("visible_agent")
     _insert_video("visible-clip", agent_id, title="Visible Clip", views=3)
     _insert_view("visible-clip")
@@ -197,6 +206,7 @@ def test_video_analytics_still_returns_visible_videos(client):
 )
 @pytest.mark.parametrize("days", ["abc", "0", "91"])
 def test_public_analytics_rejects_invalid_days(client, path, days):
+    """Invalid days values return 400 on both analytics endpoints."""
     agent_id = _insert_agent("visible_agent")
     _insert_video("visible-clip", agent_id, title="Visible Clip")
 
@@ -208,6 +218,7 @@ def test_public_analytics_rejects_invalid_days(client, path, days):
 
 @pytest.mark.parametrize("days", ["1", "90"])
 def test_public_analytics_accepts_days_boundaries(client, days):
+    """Boundary days values 1 and 90 are accepted with correct period echo."""
     agent_id = _insert_agent("visible_agent")
     _insert_video("visible-clip", agent_id, title="Visible Clip")
 
