@@ -1,3 +1,80 @@
+# RIP-0301: Tip Credits + Atlas Land Economy integration
+# This module extends rtc_services to support tip credit maturation
+# and atlas deed transfers, reusing the existing RTC value rail.
+
+try:
+    from tip_credits_atlas import TipCreditsAtlasEconomy
+    _rip0301: TipCreditsAtlasEconomy | None = None
+    _rip0301_enabled = True
+except ImportError:
+    _rip0301 = None
+    _rip0301_enabled = False
+
+
+def get_rip0301_economy() -> "TipCreditsAtlasEconomy":
+    """Get or initialize the RIP-0301 economy coordinator."""
+    global _rip0301
+    if not _rip0301_enabled:
+        raise RuntimeError("RIP-0301 module not available")
+    if _rip0301 is None:
+        _rip0301 = TipCreditsAtlasEconomy()
+    return _rip0301
+
+
+def process_rip0301_block(current_block: int) -> dict:
+    """Process RIP-0301 chain events for the current block.
+    
+    Called by the node's block processor. Returns a summary of
+    tip credit maturation and RTC settlement.
+    """
+    if not _rip0301_enabled:
+        return {"block": current_block, "rip0301": "disabled"}
+    economy = get_rip0301_economy()
+    return economy.process_block(current_block)
+
+
+def create_tip_credit(
+    sender: str,
+    receiver: str,
+    amount: int,
+    block: int,
+    hw_attestation_hash: str | None = None,
+    beacon_identity: str | None = None,
+):
+    """Create a tip credit via RIP-0301."""
+    if not _rip0301_enabled:
+        return None
+    economy = get_rip0301_economy()
+    return economy.tip(sender, receiver, amount, block, hw_attestation_hash, beacon_identity)
+
+
+def register_atlas_parcel(
+    parcel_id: str,
+    owner: str,
+    beacon_service_id: str | None,
+    block: int,
+):
+    """Register an Atlas land parcel via RIP-0301."""
+    if not _rip0301_enabled:
+        return None
+    economy = get_rip0301_economy()
+    return economy.register_atlas_parcel(parcel_id, owner, beacon_service_id, block)
+
+
+def transfer_atlas_deed(
+    deed_id: str,
+    new_owner: str,
+    rtc_amount: int,
+    current_block: int,
+    rtc_settled: bool = False,
+):
+    """Atomically transfer an Atlas deed via RIP-0301."""
+    if not _rip0301_enabled:
+        return False
+    economy = get_rip0301_economy()
+    return economy.transfer_atlas_deed(deed_id, new_owner, rtc_amount, current_block, rtc_settled)
+
+
 """
 RTC Service Gateway — Pay RTC for Real Services
 =================================================

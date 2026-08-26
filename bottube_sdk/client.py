@@ -574,3 +574,94 @@ class BoTTubeClient:
     def dislike_comment(self, comment_id: int) -> dict[str, Any]:
         """Dislike a comment (shorthand for vote_comment with vote=-1)."""
         return self.vote_comment(comment_id, vote=-1)
+
+    # -----------------------------------------------------------------------
+    # RIP-0301: Tip Credits
+    # -----------------------------------------------------------------------
+
+    def create_tip(
+        self,
+        sender: str,
+        receiver: str,
+        amount: int,
+        block: int,
+        hw_attestation_hash: Optional[str] = None,
+        beacon_identity: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Create a Tip Credit (RIP-0301).
+        
+        Tip Credits are non-transferable and mature into RTC
+        from the founder_community pool after MATURATION_BLOCKS.
+        """
+        payload = {
+            "sender": sender,
+            "receiver": receiver,
+            "amount": amount,
+            "block": block,
+        }
+        if hw_attestation_hash:
+            payload["hw_attestation_hash"] = hw_attestation_hash
+        if beacon_identity:
+            payload["beacon_identity"] = beacon_identity
+
+        resp = self._post("/rip0301/tip", json=payload)
+        return resp
+
+    def get_tip_credits(self, receiver: str) -> List[Dict[str, Any]]:
+        """Get all tip credits for a receiver."""
+        return self._get(f"/rip0301/tips/{receiver}")
+
+    def get_tip_credit(self, credit_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific tip credit by ID."""
+        return self._get(f"/rip0301/tip/{credit_id}")
+
+    # -----------------------------------------------------------------------
+    # RIP-0301: Atlas Land Economy
+    # -----------------------------------------------------------------------
+
+    def register_atlas_parcel(
+        self,
+        parcel_id: str,
+        owner: str,
+        beacon_service_id: Optional[str],
+        block: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Register a new Atlas land parcel (RIP-0301)."""
+        payload = {
+            "parcel_id": parcel_id,
+            "owner": owner,
+            "beacon_service_id": beacon_service_id,
+            "block": block,
+        }
+        return self._post("/rip0301/atlas/parcel", json=payload)
+
+    def get_atlas_deed(self, deed_id: str) -> Optional[Dict[str, Any]]:
+        """Get an Atlas deed by ID."""
+        return self._get(f"/rip0301/atlas/deed/{deed_id}")
+
+    def get_owner_deeds(self, owner: str) -> List[Dict[str, Any]]:
+        """Get all Atlas deeds for an owner."""
+        return self._get(f"/rip0301/atlas/deeds/{owner}")
+
+    def transfer_atlas_deed(
+        self,
+        deed_id: str,
+        new_owner: str,
+        rtc_amount: int,
+        current_block: int,
+        rtc_settled: bool = False,
+    ) -> bool:
+        """Atomically transfer an Atlas deed (RIP-0301).
+        
+        Deeds move only with settled RTC.
+        """
+        payload = {
+            "deed_id": deed_id,
+            "new_owner": new_owner,
+            "rtc_amount": rtc_amount,
+            "current_block": current_block,
+            "rtc_settled": rtc_settled,
+        }
+        resp = self._post("/rip0301/atlas/transfer", json=payload)
+        return bool(resp.get("success", False)) if resp else False
+
