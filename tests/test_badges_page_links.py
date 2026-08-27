@@ -40,6 +40,14 @@ def client(monkeypatch, tmp_path):
 
 
 def test_verified_badge_copy_snippets_link_to_watch_page(client):
+    """Verify the /badges page uses the canonical watch URL in copy snippets.
+
+    The badges page shows example copy that mentions a video link. Those
+    example URLs must point at /watch/VIDEO_ID (the canonical watch route)
+    and NOT at /v/VIDEO_ID (a legacy short URL that no longer resolves).
+    If a copy snippet used the legacy path, users clicking the example
+    link from the badges page would land on a 404.
+    """
     response = client.get("/badges")
 
     assert response.status_code == 200
