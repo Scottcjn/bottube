@@ -59,18 +59,35 @@ class MockResponse:
 
 class TestVideo:
     def test_url(self):
+        """Verify Video.url builds the canonical watch URL from the id.
+
+        Pins the URL format so Telegram deep links / share previews
+        don't silently break when the route changes.
+        """
         v = make_video(id="abc123")
         assert v.url == "https://bottube.ai/watch/abc123"
 
     def test_short_desc_truncation(self):
+        """Verify short_desc caps long descriptions and appends an ellipsis.
+
+        The Telegram message budget is tight; descriptions over ~120
+        chars must be truncated so the whole message fits in one
+        Telegram send without 4096-char overflow.
+        """
         v = make_video(description="x" * 200)
         assert len(v.short_desc) <= 124
 
     def test_short_desc_no_truncation(self):
+        """Verify short_desc returns short descriptions unchanged."""
         v = make_video(description="Short desc")
         assert v.short_desc == "Short desc"
 
     def test_to_text(self):
+        """Verify Video.to_text includes title, agent, and view count.
+
+        The Telegram message body must surface the three pieces of
+        info a user needs to decide whether to click through.
+        """
         v = make_video(title="My Video", agent_name="Bot", views=50, likes=5)
         text = v.to_text(1)
         assert "My Video" in text
@@ -78,6 +95,13 @@ class TestVideo:
         assert "50" in text
 
     def test_to_text_escapes_html(self):
+        """Verify Video.to_text HTML-escapes script tags in the title.
+
+        Telegram parses a limited HTML subset; raw <script> tags would
+        be passed through as text but other tags could be interpreted
+        as HTML. The escape must convert < and > so the output is
+        safe to send as Telegram HTML.
+        """
         v = make_video(title="<script>alert(1)</script>")
         text = v.to_text()
         assert "<script>" not in text
@@ -90,12 +114,23 @@ class TestVideo:
 
 class TestAgent:
     def test_to_text(self):
+        """Verify Agent.to_text renders display name and video count.
+
+        The Telegram agent card must include both the display name and
+        the video count so users can gauge whether to follow.
+        """
         a = make_agent(display_name="CosmoBot", bio="Space videos", video_count=100)
         text = a.to_text()
         assert "CosmoBot" in text
         assert "100 videos" in text
 
     def test_to_text_url(self):
+        """Verify Agent.to_text URL-encodes spaces in the agent name.
+
+        Agent names with spaces must produce URL-encoded links so
+        the Telegram inline keyboard buttons navigate to a valid
+        /agents/{name} route.
+        """
         a = make_agent(name="cosmo bot")
         text = a.to_text()
         assert "cosmo%20bot" in text
@@ -107,12 +142,24 @@ class TestAgent:
 
 class TestEscape:
     def test_escapes_lt_gt(self):
+        """Verify _escape converts angle brackets to HTML entities."""
         assert _escape("<b>") == "&lt;b&gt;"
 
     def test_escapes_ampersand(self):
+        """Verify _escape converts & to &amp; (must run before other entities).
+
+        Ordering guard: if & were escaped last, the entity-ampersands
+        from < > conversions would be double-escaped. This test pins
+        the canonical single-escape behavior.
+        """
         assert _escape("A & B") == "A &amp; B"
 
     def test_clean_text_unchanged(self):
+        """Verify _escape passes plain alphanumeric text through unchanged.
+
+        Guards against accidental double-escape or whitespace
+        stripping in the hot path used for every Telegram message.
+        """
         assert _escape("Hello World") == "Hello World"
 
 
@@ -123,6 +170,12 @@ class TestEscape:
 class TestBoTTubeAPI:
     @patch("telegram_bot.requests.Session")
     def test_latest(self, mock_session_cls):
+        """Verify BoTTubeAPI.latest returns parsed Video objects.
+
+        Uses a mock Session to return a canned JSON envelope and
+        asserts the helper deserialises one Video correctly. This is
+        the contract the /latest Telegram command depends on.
+        """
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -140,6 +193,11 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_search(self, mock_session_cls):
+        """Verify BoTTubeAPI.search returns parsed Video objects from a list response.
+
+        The search endpoint returns a JSON array (not an envelope),
+        so _items must handle the list case. This test pins that.
+        """
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse([
@@ -155,6 +213,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_video(self, mock_session_cls):
+        """Verify BoTTubeAPI.get_video returns a single Video for an existing id."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -171,6 +230,12 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_video_not_found(self, mock_session_cls):
+        """Verify get_video returns None for a 404 response.
+
+        The Telegram flow expects a graceful fallback (show "not
+        found" message) rather than an exception when the video id
+        doesn't exist.
+        """
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({}, 404)
@@ -181,6 +246,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_agent(self, mock_session_cls):
+        """Verify BoTTubeAPI.get_agent parses agent JSON into an Agent object."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -196,16 +262,24 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_list(self, mock_session_cls):
+        """Verify _items returns a list response unchanged."""
         api = BoTTubeAPI("http://test")
         assert api._items([1, 2, 3]) == [1, 2, 3]
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_dict_with_videos(self, mock_session_cls):
+        """Verify _items extracts the 'videos' key from a dict envelope."""
         api = BoTTubeAPI("http://test")
         assert api._items({"videos": [1]}) == [1]
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_dict_with_data(self, mock_session_cls):
+        """Verify _items extracts the 'data' key from a dict envelope.
+
+        Some upstream endpoints use 'data' instead of 'videos'. The
+        helper must accept either so the Telegram bot works against
+        any of the server's response shapes.
+        """
         api = BoTTubeAPI("http://test")
         assert api._items({"data": [2]}) == [2]
 
@@ -216,7 +290,13 @@ class TestBoTTubeAPI:
 
 class TestBotIntegration:
     def test_video_list_formatting(self):
-        """Test that a list of videos formats correctly."""
+        """Verify a list of videos renders into a coherent Telegram message.
+
+        Builds a 5-video list, joins the per-video to_text outputs
+        with double newlines, and asserts that all titles appear and
+        that the emoji prefix (🎬) is present exactly 5 times. This
+        is the end-to-end shape the /latest command sends.
+        """
         videos = [
             make_video(id=f"v{i}", title=f"Video {i}", views=i * 10)
             for i in range(1, 6)
@@ -230,6 +310,13 @@ class TestBotIntegration:
         assert result.count("🎬") == 5
 
     def test_agent_with_videos_formatting(self):
+        """Verify the agent + recent-uploads Telegram message format.
+
+        Joins an agent card with a 'Recent uploads' section listing
+        three videos. Asserts the agent display name appears and the
+        first video title ('Vid 0') is included in the rendered
+        output.
+        """
         agent = make_agent(display_name="CosmoBot", video_count=100)
         videos = [make_video(title=f"Vid {i}") for i in range(3)]
 

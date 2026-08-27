@@ -141,6 +141,13 @@ def _api_headers(agent_name: str) -> dict[str, str]:
 
 
 def test_subscribe_rejects_banned_targets(client):
+    """Verify subscribing to a banned agent is rejected with 404 and no row is created.
+
+    Regression: subscribing must surface banned targets as not-found
+    (rather than succeeding with a hidden follow), and crucially must
+    NOT create a subscriptions row. The post-condition assertion on
+    follow_count == 0 catches a bug where validation runs after insert.
+    """
     _insert_agent("alice", 1000.0)
     banned_id = _insert_agent("banned-target", 1001.0, is_banned=1)
 
@@ -160,6 +167,13 @@ def test_subscribe_rejects_banned_targets(client):
 
 
 def test_my_subscriptions_hides_banned_followed_agents(client):
+    """Verify /api/agents/me/subscriptions filters out banned followings.
+
+    Even though alice previously subscribed to a banned agent, the
+    response must only return non-banned entries. This guards against
+    a stale-subscription leak where banned status changes after the
+    subscription row is written.
+    """
     alice_id = _insert_agent("alice", 1000.0)
     visible_id = _insert_agent("visible-agent", 1001.0)
     banned_id = _insert_agent("banned-target", 1002.0, is_banned=1)
@@ -180,6 +194,15 @@ def test_my_subscriptions_hides_banned_followed_agents(client):
 
 
 def test_public_subscribers_hides_banned_targets_and_followers(client):
+    """Verify public subscriber lists hide banned agents on both sides.
+
+    Two protections in one test: (a) the subscribers list of a visible
+    target must not include banned followers, and (b) asking for the
+    subscribers list of a banned target must 404 (the target itself
+    is invisible). Together these prevent banned agents from either
+    appearing in public graphs or being used as anchor points for
+    public subscriber enumeration.
+    """
     target_id = _insert_agent("target", 1000.0)
     visible_follower_id = _insert_agent("visible-follower", 1001.0)
     banned_follower_id = _insert_agent("banned-follower", 1002.0, is_banned=1)
@@ -203,6 +226,14 @@ def test_public_subscribers_hides_banned_targets_and_followers(client):
 
 
 def test_subscription_feed_hides_removed_and_banned_owner_videos(client):
+    """Verify the subscriptions feed filters both removed and banned-owner videos.
+
+    The /api/feed/subscriptions endpoint composes videos from all
+    followed agents. It must drop (a) videos with is_removed=1 and
+    (b) videos owned by agents that have since been banned. Without
+    these filters, the subscription feed would leak moderation
+    actions and surface content the moderation team has taken down.
+    """
     alice_id = _insert_agent("alice", 1000.0)
     visible_id = _insert_agent("visible-agent", 1001.0)
     banned_id = _insert_agent("banned-target", 1002.0, is_banned=1)
@@ -221,6 +252,14 @@ def test_subscription_feed_hides_removed_and_banned_owner_videos(client):
 
 
 def test_web_subscribe_rejects_banned_targets(client):
+    """Verify the web (session-based) subscribe endpoint also rejects banned targets.
+
+    The /api/agents/{name}/web-subscribe endpoint is the browser-flow
+    counterpart to the API /subscribe endpoint. It must apply the
+    same ban-check before accepting the CSRF-protected POST. The test
+    sets a valid CSRF token in the session to confirm the failure is
+    due to the ban check, not CSRF validation.
+    """
     alice_id = _insert_agent("alice", 1000.0)
     _insert_agent("banned-target", 1001.0, is_banned=1)
     with client.session_transaction() as session:

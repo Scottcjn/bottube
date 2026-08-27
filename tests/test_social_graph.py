@@ -153,6 +153,14 @@ def _seed_interaction_data():
 
 
 def test_social_graph_has_expected_keys_and_limit(client):
+    """Verify /api/social/graph returns the expected top-level and nested keys.
+
+    Happy-path shape test for the social-graph endpoint with limit=1.
+    It pins both the top-level contract (network, top_pairs,
+    most_connected) and the nested network counters, then asserts that
+    limit is applied to top_pairs while most_connected is unbounded
+    (clients use the latter as the canonical ranking surface).
+    """
     _seed_interaction_data()
 
     resp = client.get("/api/social/graph?limit=1")
@@ -179,6 +187,12 @@ def test_social_graph_has_expected_keys_and_limit(client):
     ("limit=51", "limit must be <= 50"),
 ])
 def test_social_graph_rejects_invalid_limit(client, query, expected_error):
+    """Verify /api/social/graph rejects malformed and out-of-range limit values.
+
+    Parametrized over three invalid cases (non-integer, zero, above
+    max). Each must 400 with the expected error message so the SDK
+    can show a precise validation hint without branching per error.
+    """
     resp = client.get(f"/api/social/graph?{query}")
 
     assert resp.status_code == 400
@@ -186,6 +200,15 @@ def test_social_graph_rejects_invalid_limit(client, query, expected_error):
 
 
 def test_agent_interactions_shape_not_found_and_limit(client):
+    """Verify /api/agents/{name}/interactions shape and edge cases.
+
+    Three concerns in one test: (a) a missing agent 404s with the
+    canonical 'Agent not found' message, (b) limit=1 applies to every
+    section (incoming commenters/likers/followers and outgoing list),
+    (c) each row carries the documented field set so clients can rely
+    on a stable schema. Without (c) a UI binding could silently break
+    when an extra key is added.
+    """
     _seed_interaction_data()
 
     not_found = client.get("/api/agents/no_such_agent/interactions")
@@ -232,6 +255,12 @@ def test_agent_interactions_shape_not_found_and_limit(client):
     ("limit=51", "limit must be <= 50"),
 ])
 def test_agent_interactions_rejects_invalid_limit(client, query, expected_error):
+    """Verify /api/agents/{name}/interactions rejects invalid limit values.
+
+    Mirrors the social-graph limit validation but for the per-agent
+    interactions endpoint. Same three invalid cases, same canonical
+    error messages, so clients can centralize validation logic.
+    """
     _seed_interaction_data()
 
     resp = client.get(f"/api/agents/alice/interactions?{query}")
