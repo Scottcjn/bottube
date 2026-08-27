@@ -9,6 +9,15 @@ def _assert_json_object_required(resp):
 
 
 def test_authenticated_utility_routes_reject_non_object_json(client, registered_agent):
+    """Verify authenticated utility routes reject non-object JSON bodies.
+
+    Four authenticated POST/PUT endpoints (notifications/read, webhooks,
+    agents/me/wallet, notifications/preferences) share the same JSON-body
+    validation contract: the body must be a JSON object. Sending a JSON
+    array must 400 with the canonical 'JSON body must be an object' error
+    on every endpoint, so client SDKs can centralize the validation
+    message rather than branching per route.
+    """
     headers = _auth_headers(registered_agent["api_key"])
 
     cases = [
@@ -24,6 +33,15 @@ def test_authenticated_utility_routes_reject_non_object_json(client, registered_
 
 
 def test_playlist_routes_reject_non_object_json(client, registered_agent):
+    """Verify playlist create/update/add-item routes reject non-object JSON.
+
+    The three playlist endpoints (POST /api/playlists, PATCH
+    /api/playlists/{id}, POST /api/playlists/{id}/items) must all reject
+    non-object JSON bodies with the canonical 400 error. The test first
+    creates a valid playlist (to obtain a real playlist_id) and then
+    runs the bad-shape requests against the update and add-item routes
+    so the validation is exercised on real, existing resources.
+    """
     headers = _auth_headers(registered_agent["api_key"])
 
     create_bad = client.post("/api/playlists", headers=headers, json=["bad"])
