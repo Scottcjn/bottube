@@ -18,11 +18,18 @@ import sys
 import time
 import urllib.request
 
+from bottube_db import resolve_db_path
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-DB_PATH = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+# Reads BOTTUBE_DB_PATH first (the name the main server and table-creation
+# code use), then falls back to the legacy BOTTUBE_DB alias and finally
+# BOTTUBE_BASE_DIR. A bare os.environ.get("BOTTUBE_DB", ...) here used to
+# silently miss BOTTUBE_DB_PATH-only deployments and write payouts against
+# a bottube.db that has none of the server's tables.
+DB_PATH = resolve_db_path()
 KALIUM_API = "https://kaliumapi.appditto.com/api"
 KALIUM_FALLBACK = "https://public.node.jungletv.live/rpc"
 BANANO_SEED = os.environ.get("BANANO_SEED", "")

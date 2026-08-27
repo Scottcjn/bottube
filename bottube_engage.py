@@ -25,11 +25,16 @@ import os
 import json
 import logging
 
+from bottube_db import resolve_db_path
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("engage")
 
 BASE_URL = os.environ.get("BOTTUBE_URL", "https://bottube.ai")
-DB_PATH = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+# Same BOTTUBE_DB_PATH -> BOTTUBE_DB -> BOTTUBE_BASE_DIR resolution the server
+# and blueprints use, so this script does not drift onto a different db file
+# on BOTTUBE_DB_PATH-only deployments (see banano_payout.py for the same fix).
+DB_PATH = resolve_db_path()
 VERIFY_SSL = False
 
 # ── Bot Personalities for Replies ────────────────────────────────────
