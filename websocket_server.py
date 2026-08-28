@@ -31,6 +31,13 @@ def _get_db(app):
     return db
 
 
+def _event_object(data):
+    if isinstance(data, dict):
+        return data
+    emit("error", {"message": "Event data must be an object"})
+    return None
+
+
 def _coerce_flag(value):
     """Return safe 0/1 int from bool/int values or None when invalid."""
     if isinstance(value, bool):
@@ -56,6 +63,9 @@ def _coerce_non_negative_number(value, default=0.0):
 @socketio.on("join")
 def on_join(data):
     """User joins a video chat room."""
+    data = _event_object(data)
+    if data is None:
+        return
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
     join_room(room)
@@ -69,6 +79,9 @@ def on_leave(data):
     Args:
         data: Parameter value.
     """
+    data = _event_object(data)
+    if data is None:
+        return
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
     leave_room(room)
@@ -79,6 +92,9 @@ def on_leave(data):
 def on_chat_message(data):
     """Handle incoming chat message via WebSocket."""
     from flask import current_app
+    data = _event_object(data)
+    if data is None:
+        return
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
     user_id = data.get("user_id", "")
@@ -94,14 +110,6 @@ def on_chat_message(data):
         emit("error", {"message": "Message must be 1-500 characters"})
         return
 
-    # Rate limit: 1 message per 2 seconds per user per room
-    key = f"{user_id}:{room}"
-    now = time.time()
-    if key in _last_message_time and (now - _last_message_time[key]) < 2:
-        emit("error", {"message": "Slow down! Wait 2 seconds between messages."})
-        return
-    _last_message_time[key] = now
-
     is_super = _coerce_flag(data.get("is_super", 0))
     tip = _coerce_non_negative_number(data.get("tip_amount", 0), default=0.0)
     if is_super is None:
@@ -110,6 +118,14 @@ def on_chat_message(data):
     if tip is None:
         emit("error", {"message": "tip_amount must be a finite non-negative number"})
         return
+
+    # Rate limit: 1 message per 2 seconds per user per room
+    key = f"{user_id}:{room}"
+    now = time.time()
+    if key in _last_message_time and (now - _last_message_time[key]) < 2:
+        emit("error", {"message": "Slow down! Wait 2 seconds between messages."})
+        return
+    _last_message_time[key] = now
 
     # Check ban
     db = _get_db(current_app)
@@ -147,19 +163,26 @@ def on_chat_message(data):
 @socketio.on("super_chat")
 def on_super_chat(data):
     """Handle super chat (highlighted message with RTC tip)."""
+    data = _event_object(data)
+    if data is None:
+        return
     tip = _coerce_non_negative_number(data.get("tip_amount", 1), default=1.0)
     if tip is None or tip <= 0:
         emit("error", {"message": "tip_amount must be a finite positive number"})
         return
-    data["is_super"] = 1
-    data["tip_amount"] = tip
-    on_chat_message(data)
+    payload = dict(data)
+    payload["is_super"] = 1
+    payload["tip_amount"] = tip
+    on_chat_message(payload)
 
 
 @socketio.on("mod_action")
 def on_mod_action(data):
     """Moderator actions: ban, timeout, slow_mode."""
     from flask import current_app
+    data = _event_object(data)
+    if data is None:
+        return
     action = data.get("action")
     room = data.get("video_id", "")
     
