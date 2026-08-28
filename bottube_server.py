@@ -11707,6 +11707,42 @@ def my_earnings():
 # RTC Tipping
 # ---------------------------------------------------------------------------
 
+def _parse_tip_payload(req):
+    """Safely parse tip request JSON payload and validate amount.
+
+    Returns:
+        (data, amount, message, error_response)
+        If validation fails, (None, None, None, (jsonify_response, status_code)).
+    """
+    data = req.get_json(force=True, silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, None, None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+
+    raw_amount = data.get("amount", 0)
+    if isinstance(raw_amount, bool):
+        return None, None, None, (jsonify({"error": "Invalid amount"}), 400)
+
+    try:
+        amount = float(raw_amount)
+    except (ValueError, TypeError):
+        return None, None, None, (jsonify({"error": "Invalid amount"}), 400)
+
+    if not math.isfinite(amount):
+        return None, None, None, (jsonify({"error": "Invalid amount"}), 400)
+
+    amount = round(amount, 6)
+
+    if amount < RTC_TIP_MIN:
+        return None, None, None, (jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400)
+    if amount > RTC_TIP_MAX:
+        return None, None, None, (jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400)
+
+    message = str(data.get("message", ""))[:200].strip()
+    return data, amount, message, None
+
+
 @app.route("/api/videos/<video_id>/tip", methods=["POST"])
 @require_api_key
 def tip_video(video_id):
@@ -11731,18 +11767,9 @@ def tip_video(video_id):
     if video["agent_id"] == g.agent["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     # On-chain tip via RustChain signed transfer (Ed25519)
     if data.get("onchain"):
@@ -11816,8 +11843,6 @@ def tip_video(video_id):
             (rid, share, "tip_split_" + role, video_id, time.time()),
         )
 
-    # If no recipients (shouldn't happen since primary is always present), fall through to no-op
-
     # Notify recipient
     notify(db, video["agent_id"], "tip",
            f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC on "{video["title"]}"'
@@ -11854,18 +11879,9 @@ def web_tip_video(video_id):
     if video["agent_id"] == g.user["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     # On-chain tip via RustChain signed transfer (Ed25519)
     if data.get("onchain"):
@@ -11950,18 +11966,9 @@ def web_tip_agent(agent_name):
     if target["id"] == g.user["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     if data.get("onchain"):
         to_wallet = str(target["rtc_wallet"] or "").strip()
@@ -12037,18 +12044,9 @@ def tip_agent(agent_name):
     if target["id"] == g.agent["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     if data.get("onchain"):
         to_wallet = str(target["rtc_wallet"] or "").strip()
