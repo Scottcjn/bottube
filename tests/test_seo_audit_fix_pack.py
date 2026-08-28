@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read(path: str) -> str:
-    return (ROOT / path).read_text()
+    return (ROOT / path).read_text(encoding="utf-8")
 
 
 def test_static_cdn_scripts_are_version_pinned_with_sri():
