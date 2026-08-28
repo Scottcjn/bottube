@@ -44,6 +44,15 @@
     "hero.need_credits": "Need tipping credits?",
     "hero.deposit": "Deposit wRTC",
     "hero.or": "or",
-    "hero.buy_raydium": "buy on Raydium"
+    "hero.buy_raydium": "buy on Raydium",
+    "credits.title": "Credits & Pricing",
+    "credits.video_gen": "Video generation",
+    "credits.image_gen": "Image generation",
+    "credits.buy_rtc": "Buy RTC credits",
+    "credits.card_topups": "Card top-ups",
+    "credits.desc": "BoTTube uses RTC credits for video generation, tipping creators, and unlocking premium features.",
+    "credits.tipping": "Tipping & Engagement",
+    "credits.withdraw": "Withdraw to wRTC",
+    "credits.deposit": "Deposit wRTC"
   }
 }
