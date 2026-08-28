@@ -274,6 +274,9 @@ def api_top_videos():
         return jsonify({"error": "agent_id required"}), 400
     
     metric = request.args.get('metric', 'views')
+    if metric not in ('views', 'engagement', 'tips'):
+        return jsonify({"error": "Invalid metric, must be one of: views, engagement, tips"}), 400
+
     try:
         limit = int(request.args.get('limit', '10'))
     except (TypeError, ValueError):
@@ -288,10 +291,8 @@ def api_top_videos():
         order_clause = "ORDER BY view_count DESC"
     elif metric == 'engagement':
         order_clause = "ORDER BY (comments_count * 5 + votes_count * 2) DESC"
-    elif metric == 'tips':
+    else:  # tips
         order_clause = "ORDER BY tips_total DESC"
-    else:
-        order_clause = "ORDER BY view_count DESC"
     
     query = f"""SELECT 
             v.video_id,
