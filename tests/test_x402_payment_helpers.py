@@ -15,12 +15,14 @@ import x402_payment
 
 @pytest.fixture(autouse=True)
 def clear_payment_cache():
+    """Autouse fixture that clears the x402 payment cache before and after each test."""
     x402_payment._payment_cache.clear()
     yield
     x402_payment._payment_cache.clear()
 
 
 def test_amount_to_raw_uses_usdc_decimals_and_rounds_down():
+    """amount_to_raw uses USDC 6-decimal scale and floors sub-unit precision."""
     assert x402_payment._amount_to_raw("0") == 0
     assert x402_payment._amount_to_raw("0.000001") == 1
     assert x402_payment._amount_to_raw("0.0000019") == 1
@@ -28,6 +30,7 @@ def test_amount_to_raw_uses_usdc_decimals_and_rounds_down():
 
 
 def test_parse_payment_receipt_defaults_network_and_normalizes_fields():
+    """Receipt parsing defaults network and normalizes field case."""
     tx_hash = "0x" + ("ab" * 32)
     receipt = json.dumps(
         {
@@ -57,11 +60,13 @@ def test_parse_payment_receipt_defaults_network_and_normalizes_fields():
     ],
 )
 def test_parse_payment_receipt_rejects_invalid_payloads(payload, reason):
+    """Malformed receipt payloads are rejected."""
     with pytest.raises(ValueError, match=reason):
         x402_payment._parse_payment_receipt(payload)
 
 
 def test_cleanup_payment_cache_removes_expired_entries_only():
+    """Cache cleanup removes only entries past TTL."""
     x402_payment._payment_cache.update(
         {
             "expired": {"time": 100, "fingerprint": "GET:/expired"},
@@ -77,7 +82,9 @@ def test_cleanup_payment_cache_removes_expired_entries_only():
 
 
 def test_verify_payment_rejects_claimed_underpayment_before_rpc(monkeypatch):
+    """A claimed amount below the required minimum is rejected before hitting the RPC."""
     def fail_if_called(*args, **kwargs):
+        """Stub that fails the test if the underlying call is reached."""
         pytest.fail("on-chain verifier should not be called for claimed underpayment")
 
     monkeypatch.setattr(x402_payment, "_verify_evm_usdc_transfer", fail_if_called)
@@ -103,10 +110,12 @@ def test_verify_payment_rejects_claimed_underpayment_before_rpc(monkeypatch):
 
 
 def test_verify_payment_caches_success_and_blocks_cross_endpoint_replay(monkeypatch):
+    """A verified transfer is cached and its hash is blocked from being replayed across endpoints."""
     tx_hash = "0x" + ("22" * 32)
     calls = []
 
     def fake_verify(tx_hash_arg, network, recipient):
+        """Capture verify args and return a canned success receipt for caching/replay tests."""
         calls.append((tx_hash_arg, network, recipient))
         return (
             {
@@ -156,9 +165,11 @@ def test_verify_payment_caches_success_and_blocks_cross_endpoint_replay(monkeypa
 
 
 def test_verify_payment_detects_receipt_and_transfer_amount_mismatch(monkeypatch):
+    """A mismatch between the receipt amount and the verified transfer amount is rejected."""
     tx_hash = "0x" + ("33" * 32)
 
     def fake_verify(tx_hash_arg, network, recipient):
+        """Return a fixed receipt for the amount-mismatch test."""
         return (
             {
                 "tx_hash": tx_hash_arg,
