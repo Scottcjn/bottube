@@ -3366,6 +3366,9 @@ def _queue_reward_hold(
 
 
 def _agent_name_by_id(db: sqlite3.Connection, agent_id: Optional[int]) -> Optional[str]:
+    """Look up an agent's display name by numeric id.
+
+    Returns the agent_name string, or None when the id is falsy or unknown."""
     if not agent_id:
         return None
     row = db.execute("SELECT agent_name FROM agents WHERE id = ?", (agent_id,)).fetchone()
@@ -4038,6 +4041,10 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
 
 
 def _notification_link_for_row(row) -> str:
+    """Pick the frontend link a notification should deep-link to.
+
+    Prefers the referenced video's watch page, falls back to the acting
+    agent's profile, and finally the dashboard when neither is present."""
     video_id = str(row["video_id"] or "").strip()
     from_agent = str(row["from_agent"] or "").strip()
     if video_id:
@@ -4048,6 +4055,8 @@ def _notification_link_for_row(row) -> str:
 
 
 def _notification_to_dict(row) -> dict:
+    """Serialize a notifications row into the JSON shape served by the API,
+    including the resolved deep link."""
     return {
         "id": row["id"],
         "type": row["type"],
@@ -4061,6 +4070,7 @@ def _notification_to_dict(row) -> dict:
 
 
 def _notification_unread_count(db, agent_id: int) -> int:
+    """Return the number of unread notifications for an agent."""
     return int(
         db.execute(
             "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
@@ -4070,6 +4080,10 @@ def _notification_unread_count(db, agent_id: int) -> int:
 
 
 def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only: bool) -> tuple[list[dict], int]:
+    """Load one page of notifications for an agent, newest first.
+
+    Returns (items, total) where total counts every matching row (unread
+    only when unread_only is set), independent of the page window."""
     where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
     total = int(db.execute(f"SELECT COUNT(*) FROM notifications {where}", (agent_id,)).fetchone()[0])
     offset = (page - 1) * per_page
@@ -4086,6 +4100,12 @@ def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only:
 
 
 def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_all: bool = False) -> int:
+    """Mark notifications as read for an agent.
+
+    With mark_all, every unread row for the agent is flushed. Otherwise
+    only the given notification_ids (non-integer entries are skipped)
+    are updated, and always scoped to the owning agent. Returns the
+    number of rows updated."""
     if mark_all:
         cur = db.execute(
             "UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0",
@@ -4112,6 +4132,8 @@ def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_
 
 
 def _canonical_webhook_event(event: str) -> str:
+    """Map legacy internal event names to their canonical webhook event
+    identifiers; unknown names pass through unchanged."""
     mapping = {
         "new_video": "video.uploaded",
         "like": "video.voted",
@@ -4764,10 +4786,16 @@ def health():
 @app.route("/api/docs")
 def api_docs_swagger_ui():
     # Self-hosted Swagger UI assets (no CDN dependency).
+    """Serve the self-hosted Swagger UI page for the API docs (no CDN
+    dependency, so docs work offline and behind firewalls)."""
     return render_template("api_swagger.html")
 
 
 def _register_text_field(data, field, default=""):
+    """Extract a required-to-be-string field from a registration payload.
+
+    Returns (stripped_value, None) on success or (None, reason) when the
+    value is present but not a string."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -4777,6 +4805,10 @@ def _register_text_field(data, field, default=""):
 
 
 def _json_object_body():
+    """Parse the request body as a JSON object.
+
+    Returns ({}, None) for an absent body, (data, None) for a dict, or
+    (None, (response, 400)) when the body is JSON but not an object."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -4980,6 +5012,8 @@ def claim_page(agent_name, token):
 
 @app.route("/reclaim")
 def reclaim_account_page():
+    """Render the account-reclaim page, degrading to a DB-free recovery
+    notice when the database is unavailable."""
     notice = None
     try:
         notice = _build_recovery_notice(get_db())
@@ -5540,6 +5574,8 @@ def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
 
 
 def _mask_public_handle(agent_name: str) -> str:
+    """Return a privacy-safe public form of a handle: short handles pass
+    through, longer ones are truncated to first 4 and last 2 characters."""
     handle = (agent_name or "").strip()
     if not handle:
         return "@unknown"
@@ -5549,6 +5585,8 @@ def _mask_public_handle(agent_name: str) -> str:
 
 
 def _bonus_progress_payload(current: int) -> list[dict]:
+    """Build the referral-bonus progress ladder for an agent's current
+    referral count: each threshold with current, remaining, and reached."""
     current_i = max(0, int(current or 0))
     return [
         {
@@ -5562,6 +5600,8 @@ def _bonus_progress_payload(current: int) -> list[dict]:
 
 
 def _filter_badges_by_keys(badges: list[dict], allowed_keys: set[str]) -> list[dict]:
+    """Keep only badge entries whose badge_key is in the allowed set,
+    preserving their original order."""
     return [badge for badge in badges if badge["badge_key"] in allowed_keys]
 
 
@@ -6047,6 +6087,9 @@ def admin_export_referrals():
 
 
 def _resolve_badge_target_agent(db: sqlite3.Connection, data: dict):
+    """Resolve a badge-award target from a payload by numeric agent_id or
+    by agent_name. Returns the agents row (id, agent_name, display_name,
+    is_human) or None when neither identifier matches."""
     agent_id = data.get("agent_id")
     agent_name = (data.get("agent_name", "") or "").strip()
     if agent_id not in (None, ""):
@@ -7021,6 +7064,9 @@ def _video_list_etag(
     latest_ts: float,
     engagement_revision: int,
 ) -> str:
+    """Compute a weak ETag for a video-list response from the pagination,
+    sort, and freshness inputs that can change its content. A 24-char
+    SHA-256 digest of the canonical JSON cache key keeps headers short."""
     cache_key = json.dumps(
         {
             "agent": agent_name,
@@ -7039,6 +7085,8 @@ def _video_list_etag(
 
 
 def _client_has_video_list_etag(etag: str) -> bool:
+    """True when the request's If-None-Match header already covers the
+    given ETag (exact match or the '*' wildcard)."""
     raw_header = request.headers.get("If-None-Match", "")
     if not raw_header:
         return False
@@ -7087,6 +7135,9 @@ def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, cla
 
 
 def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
+    """True when the request's If-Modified-Since header is at least as new
+    as the latest video timestamp, meaning the client's cached copy is
+    still fresh. Unparseable or absent headers are treated as not fresh."""
     raw_header = request.headers.get("If-Modified-Since", "")
     if not raw_header:
         return False
@@ -7100,6 +7151,8 @@ def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
 
 
 def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: float) -> Response:
+    """Attach ETag, Last-Modified, and a short public max-age to a
+    video-list response so clients and CDNs can revalidate cheaply."""
     response.headers["ETag"] = etag
     response.headers["Last-Modified"] = formatdate(int(latest_ts or 0), usegmt=True)
     response.headers["Cache-Control"] = "public, max-age=30"
@@ -7851,6 +7904,11 @@ def add_comment(video_id):
 
 
 def _parse_optional_comment_parent_id(raw_parent_id):
+    """Validate an optional comment parent_id from JSON input.
+
+    Accepts None/blank as no parent, rejects bools and non-integer
+    floats, and requires a positive integer otherwise. Returns
+    (parent_id, None) or (None, reason)."""
     if raw_parent_id is None:
         return None, None
     if isinstance(raw_parent_id, str):
@@ -8078,6 +8136,10 @@ def get_comments(video_id):
 
 
 def _parse_recent_comments_limit():
+    """Validate the ?limit query parameter for recent-comment listings.
+
+    Defaults to 50 when absent; returns (limit, None) clamped to 1..100
+    or (None, reason) for non-integer or out-of-range values."""
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return 50, None
@@ -8093,6 +8155,9 @@ def _parse_recent_comments_limit():
 
 
 def _parse_recent_comments_since():
+    """Validate the ?since query parameter (a unix timestamp) for
+    recent-comment listings. Defaults to 0 (no floor) when absent;
+    returns (since, None) for finite numbers or (None, reason)."""
     raw_value = request.args.get("since")
     if raw_value in (None, ""):
         return 0, None
@@ -8148,6 +8213,11 @@ def recent_comments():
 # ---------------------------------------------------------------------------
 
 def _parse_vote_payload(req):
+    """Parse and validate the vote value from a vote request body.
+
+    The body must be a JSON object (when present) and vote must be the
+    integer 1 (like), -1 (dislike), or 0 (remove vote). Returns
+    (vote, None) on success or (None, (response, 400)) on failure."""
     data = req.get_json(silent=True)
     if data is not None and not isinstance(data, dict):
         return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
@@ -9224,6 +9294,8 @@ def social_graph():
 # ---------------------------------------------------------------------------
 
 def _normalize_category_filter(category):
+    """Normalize a category filter to its canonical lowercase form;
+    returns None when the value is empty or not a known category."""
     category = (category or "").strip().lower()
     return category if category in CATEGORY_MAP else None
 
@@ -9857,6 +9929,10 @@ def _feed_imp_record(visitor_id, surface, bucket, videos):
 
 
 def _feed_event_json_body():
+    """Parse a feed-event request body as a JSON object.
+
+    Returns ({}, None) for an absent body, (data, None) for a dict, or
+    (None, (response, 400)) when the body is JSON but not an object."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -9866,6 +9942,10 @@ def _feed_event_json_body():
 
 
 def _feed_event_impression_id(data):
+    """Validate the impression id on a feed event (imp_<8-32 hex>).
+
+    Accepts either the 'imp' or 'impression_id' key and returns
+    (imp_id, None) or (None, (response, 400)) for malformed values."""
     raw_value = data.get("imp") or data.get("impression_id") or ""
     if not isinstance(raw_value, str):
         return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
@@ -10394,6 +10474,11 @@ def my_quests():
 
 
 def _parse_leaderboard_limit(default=25, max_value=100):
+    """Validate the ?limit query parameter for leaderboard endpoints.
+
+    Defaults to `default` when absent; integer values are clamped into
+    1..max_value so oversized requests cannot be abused. Returns
+    (limit, None) or (None, reason) for non-integers."""
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return default, None
@@ -12202,6 +12287,8 @@ def tip_leaderboard():
 
 
 def _parse_tip_leaderboard_limit(default=20, max_value=50):
+    """Validate the ?limit query parameter for the tip leaderboard,
+    clamped into 1..max_value (default 20, cap 50)."""
     return _parse_positive_int_query(
         "limit",
         default,
@@ -15770,6 +15857,11 @@ def _require_admin():
 
 
 def _admin_text_field(data, field, default="", max_length=None):
+    """Extract an optional text field from an admin payload.
+
+    Missing or null values fall back to `default`; non-strings are
+    rejected; valid strings are stripped and truncated to max_length.
+    Returns (value, None) or (None, reason)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -15782,6 +15874,10 @@ def _admin_text_field(data, field, default="", max_length=None):
 
 
 def _admin_json_body():
+    """Parse an admin request body as a JSON object.
+
+    Returns ({}, None) for an absent body, (data, None) for a dict, or
+    (None, reason) when the body is JSON but not an object."""
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -16427,6 +16523,10 @@ _github_cache = {"stars": 20, "forks": 21, "clones": 399, "ts": 0}
 
 @app.route("/api/github-stats")
 def github_stats():
+    """Serve cached star/fork counts for the BoTTube repo.
+
+    Refreshes from the public GitHub API at most every 5 minutes and
+    silently keeps serving the last good values if the fetch fails."""
     import time, urllib.request, json
     now = time.time()
     if now - _github_cache["ts"] < 300:
@@ -16677,6 +16777,8 @@ def pypi_downloads():
 # ── Platform install counters (Homebrew, APT, AUR, Docker, Tigerbrew) ──
 @app.route("/api/platform-installs")
 def api_platform_installs():
+    """Report the cached download/install count for a product/platform
+    pair, truncated to 40 chars each. Missing cache data reports 0."""
     product = (request.args.get("product", "") or "")[:40]
     platform = (request.args.get("platform", "") or "")[:40]
     key = f"{product}_{platform}"
@@ -16695,6 +16797,9 @@ _clawrtc_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/clawrtc-github-stats")
 def clawrtc_github_stats():
+    """Serve cached star/fork counts for the RustChain repo, refreshed
+    from the public GitHub API at most every 5 minutes and falling back
+    to the last good values on fetch failure."""
     import time, urllib.request, json
     now = time.time()
     if now - _clawrtc_github_cache["ts"] < 300:
@@ -16749,6 +16854,9 @@ _grazer_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/grazer-github-stats")
 def grazer_github_stats():
+    """Serve cached star/fork counts for the grazer-skill repo, refreshed
+    from the public GitHub API at most every 5 minutes and falling back
+    to the last good values on fetch failure."""
     import time, urllib.request, json
     now = time.time()
     if now - _grazer_github_cache["ts"] < 300:
@@ -16961,6 +17069,11 @@ def _gen_message_id():
 
 
 def _message_text_field(data, field, default="", max_length=None):
+    """Extract an optional text field from a message payload.
+
+    Missing or null values fall back to `default`; non-strings are
+    rejected; valid strings are stripped and truncated to max_length.
+    Returns (value, None) or (None, reason)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -17359,6 +17472,11 @@ REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleadin
 
 
 def _report_text_field(data, field, default="", max_length=None):
+    """Extract an optional text field from a report payload.
+
+    Missing or null values fall back to `default`; non-strings are
+    rejected; valid strings are stripped and truncated to max_length.
+    Returns (value, None) or (None, reason)."""
     value = data.get(field, default)
     if value is None:
         value = default
@@ -18005,6 +18123,8 @@ def _make_badge_svg(label, value, color="#3ea6ff"):
 </svg>"""
 
 def _format_count(n):
+    """Format a count for compact display: 1.2M for millions, 3.4K for
+    thousands, otherwise the plain integer."""
     if n >= 1000000: return f"{n/1000000:.1f}M"
     if n >= 1000: return f"{n/1000:.1f}K"
     return str(n)
@@ -18318,6 +18438,7 @@ def beacon_atlas():
 
 @app.route("/beacon")
 def beacon_landing_page():
+    """Render the beacon landing page (PoA hardware-attestation beacon)."""
     return render_template("beacon.html")
 
 
@@ -18368,6 +18489,10 @@ def ctr_underperforming():
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
     # Reject non-existent videos
+    """Serve impression/click/CTR stats for a video.
+
+    404s for unknown videos, returns zeroed stats when the tracker has
+    none, and 500s if the tracker itself errors."""
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18431,6 +18556,8 @@ def record_watch_time(video_id):
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
     # Reject non-existent videos
+    """Serve A/B variant performance for a video, including the current
+    winning variant. 404s for unknown videos, 500s on tracker errors."""
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18479,11 +18606,19 @@ _ENG_LATENCY_ADMIN_PREFIXES = ("/admin/",)
 
 @app.before_request
 def _eng_lat_start():
+    """Record the request start time on flask.g for end-to-end latency
+    measurement (paired with _eng_lat_record on response)."""
     g._eng_t0 = time.time()
 
 
 @app.after_request
 def _eng_lat_record(response):
+    """Capture the request's end-to-end latency into the in-memory
+    histogram on response.
+
+    Skips media/static paths, drops samples over the 10-minute ceiling,
+    and routes admin-prefix requests into a separate histogram. Never
+    raises: telemetry must not break responses."""
     try:
         t0 = getattr(g, "_eng_t0", None)
         if t0 is None:
@@ -18548,6 +18683,7 @@ def _eng_probe_node(node, timeout=2.0):
 
 
 def _eng_percentile(values, pct):
+    """Nearest-rank percentile of a list of latencies; 0.0 for empty input."""
     if not values:
         return 0.0
     s = sorted(values)
@@ -18556,6 +18692,8 @@ def _eng_percentile(values, pct):
 
 
 def _eng_format_uptime(seconds):
+    """Format an uptime in seconds as a compact human string, e.g.
+    '3d 4h', '2h 15m', or '9m'."""
     seconds = int(max(0, seconds))
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
@@ -18695,6 +18833,8 @@ def _eng_collect():
 
 
 def _eng_table_exists(db, name):
+    """True when the named table exists in the SQLite database; a failed
+    probe is reported as absent rather than raising."""
     try:
         row = db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
