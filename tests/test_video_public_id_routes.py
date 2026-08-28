@@ -18,6 +18,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -32,6 +33,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated video routes app."""
     db_path = tmp_path / "bottube_public_id_routes.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -44,6 +46,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent() -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -59,6 +62,7 @@ def _insert_agent() -> int:
 
 
 def _insert_video(video_id: str) -> int:
+    """Insert a video row directly with the given public id."""
     agent_id = _insert_agent()
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
@@ -75,12 +79,14 @@ def _insert_video(video_id: str) -> int:
 
 
 def test_ctr_stats_uses_public_video_id(client, monkeypatch):
+    """CTR stats are queried by public video id and not the internal id."""
     public_video_id = "public-route-video"
     internal_id = _insert_video(public_video_id)
     assert str(internal_id) != public_video_id
 
     class FakeCTRTracker:
         def get_stats(self, video_id):
+            """FakeCTRTracker.get_stats asserting the public id and returning canned stats."""
             assert video_id == public_video_id
             return {
                 "video_id": video_id,
@@ -101,16 +107,19 @@ def test_ctr_stats_uses_public_video_id(client, monkeypatch):
 
 
 def test_ab_variants_uses_public_video_id(client, monkeypatch):
+    """AB variant stats and winner are queried by public video id."""
     public_video_id = "public-route-video"
     internal_id = _insert_video(public_video_id)
     assert str(internal_id) != public_video_id
 
     class FakeABManager:
         def get_variant_stats(self, video_id):
+            """FakeABManager.get_variant_stats asserting the public id."""
             assert video_id == public_video_id
             return [{"variant_key": "a", "impressions": 3, "clicks": 1, "ctr": 1 / 3}]
 
         def get_winner(self, video_id):
+            """FakeABManager.get_winner asserting the public id."""
             assert video_id == public_video_id
             return "a"
 

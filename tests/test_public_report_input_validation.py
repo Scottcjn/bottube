@@ -24,6 +24,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -38,6 +39,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -52,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated public-report app."""
     db_path = tmp_path / "bottube_public_report_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -63,6 +66,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _report_count() -> int:
+    """Return the number of report rows in the test DB."""
     with bottube_server.app.app_context():
         bottube_server._ensure_ts_schema()
         db = bottube_server.get_db()
@@ -71,6 +75,7 @@ def _report_count() -> int:
 
 
 def test_public_report_rejects_non_object_json(client):
+    """A non-object report body is rejected with 400 before any insert."""
     resp = client.post("/api/report", json=["not", "an", "object"])
 
     assert resp.status_code == 400
@@ -82,6 +87,7 @@ def test_public_report_rejects_non_object_json(client):
 
 
 def test_public_report_rejects_falsy_non_object_json(client):
+    """A falsy non-object report body is rejected with 400 before any insert."""
     resp = client.post("/api/report", json=[])
 
     assert resp.status_code == 400
@@ -93,6 +99,7 @@ def test_public_report_rejects_falsy_non_object_json(client):
 
 
 def test_public_report_rejects_non_string_category_without_insert(client):
+    """A non-string category is rejected with 400 with no report row inserted."""
     resp = client.post(
         "/api/report",
         json={
@@ -111,6 +118,7 @@ def test_public_report_rejects_non_string_category_without_insert(client):
 
 
 def test_public_report_rejects_non_string_email_without_insert(client):
+    """A non-string email is rejected with 400 with no report row inserted."""
     resp = client.post(
         "/api/report",
         json={
@@ -127,6 +135,7 @@ def test_public_report_rejects_non_string_email_without_insert(client):
 
 
 def test_public_report_null_fields_use_existing_required_validations(client):
+    """Null category/email fall through to the existing required-field validation."""
     resp = client.post(
         "/api/report",
         json={"category": None, "target": None, "detail": None, "email": None},
@@ -138,6 +147,7 @@ def test_public_report_null_fields_use_existing_required_validations(client):
 
 
 def test_public_report_still_accepts_valid_report(client):
+    """A well-formed report body is accepted and stored."""
     resp = client.post(
         "/api/report",
         json={

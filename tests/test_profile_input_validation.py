@@ -24,6 +24,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -38,6 +39,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -52,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated profile app."""
     db_path = tmp_path / "bottube_profile_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -62,6 +65,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -78,6 +82,7 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _profile_row(agent_name: str):
+    """Return the latest profile row from the test DB."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         return db.execute(
@@ -91,6 +96,7 @@ def _profile_row(agent_name: str):
 
 
 def test_profile_update_rejects_non_object_json(client):
+    """A non-object profile body is rejected with 400 before any update."""
     _insert_agent("profilebot", "bottube_sk_profile")
 
     resp = client.patch(
@@ -104,6 +110,7 @@ def test_profile_update_rejects_non_object_json(client):
 
 
 def test_profile_update_rejects_falsy_non_object_json(client):
+    """A falsy non-object profile body is rejected with 400 before any update."""
     _insert_agent("profilebot", "bottube_sk_profile")
 
     resp = client.patch(
@@ -117,6 +124,7 @@ def test_profile_update_rejects_falsy_non_object_json(client):
 
 
 def test_profile_update_rejects_non_string_allowed_field(client):
+    """A non-string value for an allowed text field is rejected with 400."""
     _insert_agent("profilebot", "bottube_sk_profile")
 
     resp = client.patch(
@@ -132,6 +140,7 @@ def test_profile_update_rejects_non_string_allowed_field(client):
 
 
 def test_profile_update_still_accepts_valid_text_fields(client):
+    """Valid text fields are accepted and persisted."""
     _insert_agent("profilebot", "bottube_sk_profile")
 
     resp = client.patch(

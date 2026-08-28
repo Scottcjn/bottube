@@ -10,13 +10,16 @@ from flask import Flask
 
 @pytest.fixture()
 def generation_routes(monkeypatch):
+    """Generation routes app under test with create_job/thread swapped to doubles."""
     created_requests = []
 
     class FakeDB:
         def execute(self, *_args, **_kwargs):
+            """No-op cursor.execute that returns itself (FakeCursor)."""
             return self
 
         def fetchone(self):
+            """FakeCursor.fetchone returning a canned agent row."""
             return {
                 "id": 1,
                 "agent_name": "generation_bot",
@@ -33,6 +36,7 @@ def generation_routes(monkeypatch):
     monkeypatch.setattr(routes, "_record_rate", lambda _api_key: None)
 
     def _create_job(_owner_id, req):
+        """Stub create_job that records requests and returns a fixed job id."""
         created_requests.append(req)
         return "job-1"
 
@@ -40,9 +44,11 @@ def generation_routes(monkeypatch):
 
     class DummyThread:
         def __init__(self, *_args, **_kwargs):
+            """DummyThread no-op constructor."""
             pass
 
         def start(self):
+            """DummyThread no-op start."""
             pass
 
     monkeypatch.setattr(routes.threading, "Thread", DummyThread)
@@ -51,6 +57,7 @@ def generation_routes(monkeypatch):
 
 
 def _post_generation_job(routes, payload):
+    """POST a generation job payload and return the response."""
     app = Flask(__name__)
     with app.test_request_context(
         "/api/generation/jobs",
@@ -62,6 +69,7 @@ def _post_generation_job(routes, payload):
 
 
 def test_generation_job_rejects_boolean_duration(generation_routes):
+    """A boolean duration is rejected with 400."""
     resp, status = _post_generation_job(
         generation_routes,
         {"prompt": "make a video", "duration": True},
@@ -85,6 +93,7 @@ def test_generation_job_rejects_malformed_duration_aliases(
     generation_routes,
     payload,
 ):
+    """Malformed duration alias strings are rejected with 400."""
     resp, status = _post_generation_job(generation_routes, payload)
 
     assert status == 400
@@ -105,6 +114,7 @@ def test_generation_job_preserves_valid_duration_inputs(
     payload,
     expected_duration,
 ):
+    """Valid duration inputs are accepted and passed through to create_job."""
     resp, status = _post_generation_job(generation_routes, payload)
 
     assert status == 202

@@ -24,6 +24,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -38,6 +39,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -52,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated claim-verify app."""
     db_path = tmp_path / "bottube_claim_verify_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -62,6 +65,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -85,6 +89,7 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _claim_row(agent_name: str):
+    """Return the latest claim row from the test DB."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         return db.execute(
@@ -94,6 +99,7 @@ def _claim_row(agent_name: str):
 
 
 def test_claim_verify_rejects_non_object_json(client):
+    """A non-object claim body is rejected with 400 before any insert."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -109,6 +115,7 @@ def test_claim_verify_rejects_non_object_json(client):
 
 
 def test_claim_verify_rejects_falsy_non_object_json(client):
+    """A falsy non-object claim body is rejected with 400 before any insert."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -124,6 +131,7 @@ def test_claim_verify_rejects_falsy_non_object_json(client):
 
 
 def test_claim_verify_rejects_non_string_x_handle(client):
+    """A non-string x_handle is rejected with 400 with no claim row inserted."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -139,6 +147,7 @@ def test_claim_verify_rejects_non_string_x_handle(client):
 
 
 def test_claim_verify_null_x_handle_uses_required_validation(client):
+    """A null x_handle falls through to the existing required-field validation."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(
@@ -154,6 +163,7 @@ def test_claim_verify_null_x_handle_uses_required_validation(client):
 
 
 def test_claim_verify_still_accepts_string_handle(client):
+    """A string x_handle is accepted and stored."""
     _insert_agent("claimbot", "bottube_sk_claim")
 
     resp = client.post(

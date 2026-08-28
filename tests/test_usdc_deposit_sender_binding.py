@@ -27,6 +27,7 @@ MALLORY_WALLET = "0x2222222222222222222222222222222222222222"
 
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
+    """USDC deposit app with the store and verify path swapped to test doubles."""
     import usdc_blueprint as usdc
 
     db_path = tmp_path / "usdc.db"
@@ -61,6 +62,7 @@ def app(tmp_path, monkeypatch):
     flask_app.register_blueprint(usdc.usdc_bp)
 
     def _test_get_db():
+        """Per-test SQLite connection swapped in for the deposit store."""
         if "test_db" in g:
             return g.test_db
         db = sqlite3.connect(str(db_path))
@@ -72,6 +74,7 @@ def app(tmp_path, monkeypatch):
 
     # The on-chain transfer is "really" sent by ALICE_WALLET to the treasury.
     def _fake_verify(tx_hash):
+        """Stub verify returning a fixed transfer whose sender is the bound wallet."""
         return (
             {
                 "tx_hash": tx_hash,
@@ -93,10 +96,12 @@ def app(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def client(app):
+    """Flask test client for the USDC deposit binding routes."""
     return app.test_client()
 
 
 def _deposit(client, api_key, tx_hash):
+    """POST a USDC deposit for the agent identified by api_key."""
     return client.post(
         "/api/usdc/deposit",
         json={"tx_hash": tx_hash},
@@ -105,6 +110,7 @@ def _deposit(client, api_key, tx_hash):
 
 
 def _balance(client, name):
+    """GET the USDC balance for the agent identified by api_key."""
     with client.application.app_context():
         import usdc_blueprint as usdc
 
@@ -116,6 +122,7 @@ def _balance(client, name):
 
 
 def test_deposit_succeeds_when_sender_matches_bound_wallet(client):
+    """A deposit succeeds when the transfer sender matches the agent bound wallet."""
     resp = _deposit(client, "k_alice", "0x" + "a" * 64)
     assert resp.status_code == 200, resp.get_json()
     assert resp.get_json()["ok"] is True
@@ -123,6 +130,7 @@ def test_deposit_succeeds_when_sender_matches_bound_wallet(client):
 
 
 def test_deposit_blocks_claiming_another_users_transfer(client):
+    """A deposit claiming another user's transfer is rejected with 403."""
     # Mallory tries to claim Alice's treasury transfer. Must be rejected (403)
     # and must NOT credit Mallory.
     resp = _deposit(client, "k_mallory", "0x" + "b" * 64)
@@ -132,6 +140,7 @@ def test_deposit_blocks_claiming_another_users_transfer(client):
 
 
 def test_deposit_requires_bound_wallet(client):
+    """A deposit from an agent without a bound wallet is rejected with 422."""
     resp = _deposit(client, "k_carol", "0x" + "c" * 64)
     assert resp.status_code == 400, resp.get_json()
     assert "no ethereum wallet" in resp.get_json()["error"].lower()
@@ -139,6 +148,7 @@ def test_deposit_requires_bound_wallet(client):
 
 
 def test_rejected_deposit_is_not_recorded(client):
+    """A rejected deposit is not recorded in the store."""
     _deposit(client, "k_mallory", "0x" + "d" * 64)
     with client.application.app_context():
         import usdc_blueprint as usdc

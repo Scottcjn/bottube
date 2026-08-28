@@ -19,6 +19,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +34,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated public-interaction app."""
     db_path = tmp_path / "bottube_public_interaction_visibility.db"
 
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
@@ -46,6 +48,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, *, is_banned: int = 0) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +77,7 @@ def _insert_video(
     *,
     is_removed: int = 0,
 ) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -95,6 +99,7 @@ def _insert_video(
 
 
 def _insert_comment(video_id: str, agent_id: int) -> None:
+    """Insert a comment row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -108,6 +113,7 @@ def _insert_comment(video_id: str, agent_id: int) -> None:
 
 
 def _insert_vote(video_id: str, agent_id: int, vote: int = 1) -> None:
+    """Insert a vote row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -121,6 +127,7 @@ def _insert_vote(video_id: str, agent_id: int, vote: int = 1) -> None:
 
 
 def _insert_subscription(follower_id: int, following_id: int) -> None:
+    """Insert a subscription row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -134,6 +141,7 @@ def _insert_subscription(follower_id: int, following_id: int) -> None:
 
 
 def test_agent_interactions_hide_banned_agents_and_removed_videos(client):
+    """Agent interactions hide interactions involving banned agents or removed videos."""
     alice = _insert_agent("alice")
     bob = _insert_agent("bob")
     banned = _insert_agent("banned", is_banned=1)
@@ -172,6 +180,7 @@ def test_agent_interactions_hide_banned_agents_and_removed_videos(client):
 
 
 def test_agent_interactions_hide_banned_target_agent(client):
+    """Interactions targeting a banned agent are hidden."""
     banned = _insert_agent("banned", is_banned=1)
     bob = _insert_agent("bob")
     _insert_video("banned-visible", banned)
@@ -183,6 +192,7 @@ def test_agent_interactions_hide_banned_target_agent(client):
 
 
 def test_social_graph_excludes_banned_agents_and_removed_video_edges(client):
+    """The social graph excludes edges to banned agents and removed videos."""
     alice = _insert_agent("alice")
     bob = _insert_agent("bob")
     banned = _insert_agent("banned", is_banned=1)
