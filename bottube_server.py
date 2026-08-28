@@ -3268,6 +3268,70 @@ def award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = "",
     )
 
 
+def debit_rtc(db: sqlite3.Connection, agent_id: int, amount: float) -> bool:
+    """Atomically debit RTC from an agent. Returns True only if it went through.
+
+    The counterpart to :func:`award_rtc`. Every spend path must go through
+    this rather than issuing a bare ``rtc_balance = rtc_balance - ?``.
+
+    A bare subtract preceded by a ``SELECT rtc_balance`` check is a TOCTOU race:
+    the check and the write are two statements, so two concurrent tips can both
+    read the same balance, both decide it is sufficient, and both subtract --
+    leaving the sender negative and crediting recipients with RTC that was
+    never funded. Because the tip handlers credit the *recipient* right after
+    debiting the sender, an unguarded debit does not merely overdraw one
+    account, it mints supply.
+
+    Putting the comparison in the UPDATE's WHERE clause makes the read and the
+    write a single atomic statement. ``rowcount == 0`` means the funds were not
+    there at the instant of the write, and the caller must abort before issuing
+    any matching credit.
+    """
+    cur = db.execute(
+        "UPDATE agents SET rtc_balance = rtc_balance - ? "
+        "WHERE id = ? AND rtc_balance >= ?",
+        (amount, agent_id, amount),
+    )
+    return cur.rowcount > 0
+
+
+def _insufficient_balance_response(db: sqlite3.Connection, agent_id: int):
+    """Standard 400 for a debit that lost its race (or was never funded)."""
+    row = db.execute(
+        "SELECT rtc_balance FROM agents WHERE id = ?", (agent_id,)
+    ).fetchone()
+    return jsonify({
+        "error": "Insufficient RTC balance",
+        "balance": row["rtc_balance"] if row else 0,
+    }), 400
+
+
+def _parse_tip_payload():
+    """Parse a tip JSON body while rejecting malformed/non-finite amounts."""
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, jsonify({"error": "JSON body must be an object"}), 400
+
+    raw_amount = data.get("amount", 0)
+    if isinstance(raw_amount, bool):
+        return None, jsonify({"error": "Invalid amount"}), 400
+    if raw_amount is None:
+        return None, jsonify({"error": "Invalid amount"}), 400
+    try:
+        amount = round(float(raw_amount), 6)
+    except (ValueError, TypeError):
+        return None, jsonify({"error": "Invalid amount"}), 400
+    if not math.isfinite(amount):
+        return None, jsonify({"error": "Invalid amount"}), 400
+
+    return {
+        "data": data,
+        "amount": amount,
+        "message": str(data.get("message", ""))[:200].strip(),
+    }, None, None
+
 def _queue_reward_hold(
     db: sqlite3.Connection,
     *,
@@ -11580,18 +11644,18 @@ def tip_video(video_id):
     if video["agent_id"] == g.agent["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
+    parsed, err_resp, err_code = _parse_tip_payload()
+    if err_resp is not None:
+        return err_resp, err_code
+    data = parsed["data"]
+    amount = parsed["amount"]
 
     if amount < RTC_TIP_MIN:
         return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
-    message = str(data.get("message", ""))[:200].strip()
+    message = parsed["message"]
 
     # On-chain tip via RustChain signed transfer (Ed25519)
     if data.get("onchain"):
@@ -11699,18 +11763,18 @@ def web_tip_video(video_id):
     if video["agent_id"] == g.user["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
+    parsed, err_resp, err_code = _parse_tip_payload()
+    if err_resp is not None:
+        return err_resp, err_code
+    data = parsed["data"]
+    amount = parsed["amount"]
 
     if amount < RTC_TIP_MIN:
         return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
-    message = str(data.get("message", ""))[:200].strip()
+    message = parsed["message"]
 
     # On-chain tip via RustChain signed transfer (Ed25519)
     if data.get("onchain"):
@@ -11793,18 +11857,18 @@ def web_tip_agent(agent_name):
     if target["id"] == g.user["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
+    parsed, err_resp, err_code = _parse_tip_payload()
+    if err_resp is not None:
+        return err_resp, err_code
+    data = parsed["data"]
+    amount = parsed["amount"]
 
     if amount < RTC_TIP_MIN:
         return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
-    message = str(data.get("message", ""))[:200].strip()
+    message = parsed["message"]
 
     if data.get("onchain"):
         to_wallet = str(target["rtc_wallet"] or "").strip()
@@ -11878,18 +11942,18 @@ def tip_agent(agent_name):
     if target["id"] == g.agent["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
+    parsed, err_resp, err_code = _parse_tip_payload()
+    if err_resp is not None:
+        return err_resp, err_code
+    data = parsed["data"]
+    amount = parsed["amount"]
 
     if amount < RTC_TIP_MIN:
         return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
     if amount > RTC_TIP_MAX:
         return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
 
-    message = str(data.get("message", ""))[:200].strip()
+    message = parsed["message"]
 
     if data.get("onchain"):
         to_wallet = str(target["rtc_wallet"] or "").strip()
