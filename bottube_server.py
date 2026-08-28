@@ -8150,10 +8150,10 @@ def recent_comments():
 def _parse_vote_payload(req):
     data = req.get_json(silent=True)
     if data is not None and not isinstance(data, dict):
-        return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+        return None, (jsonify({"ok": False, "error": "JSON body must be an object"}), 400)
     data = data or {}
     vote_val = data.get("vote", 0)
-    if isinstance(vote_val, bool) or not isinstance(vote_val, int) or vote_val not in (1, -1, 0):
+    if type(vote_val) is not int or vote_val not in (1, -1, 0):
         return None, (jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400)
     return vote_val, None
 
