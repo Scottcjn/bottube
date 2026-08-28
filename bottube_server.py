@@ -20320,6 +20320,12 @@ def report_page():
                            tos_effective=TOS_EFFECTIVE)
 
 
+@app.route("/credits")
+def credits_page():
+    """Render the Credits & Pricing page with locale-aware copy."""
+    return render_template("credits.html")
+
+
 # Privacy template already exists in the templates dir; ensure a route exists.
 @app.route("/privacy")
 def privacy_page():
