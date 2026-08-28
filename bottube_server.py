@@ -81,7 +81,8 @@ except ImportError:
 # Allow overriding storage location via env.
 # Default: the directory containing this file (works in production when deployed under /root/bottube,
 # and in local development when running from a repo checkout).
-BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent)))
+INSTALL_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(INSTALL_DIR)))
 
 DB_PATH = BASE_DIR / "bottube.db"
 VIDEO_DIR = BASE_DIR / "videos"
@@ -112,7 +113,8 @@ def _get_ab_manager():
     return _ab_manager
 
 AVATAR_DIR = BASE_DIR / "avatars"
-TEMPLATE_DIR = BASE_DIR / "bottube_templates"
+# Templates/static ship with the install tree; BOTTUBE_BASE_DIR is writable data only.
+TEMPLATE_DIR = INSTALL_DIR / "bottube_templates"
 
 # Largest value SQLite can store in an INTEGER column / accept as a bound
 # parameter. Larger Python ints raise OverflowError in the driver.
@@ -1385,7 +1387,7 @@ _load_translations()
 # App setup
 # ---------------------------------------------------------------------------
 
-STATIC_DIR = BASE_DIR / "bottube_static"
+STATIC_DIR = INSTALL_DIR / "bottube_static"
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=str(STATIC_DIR), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = MAX_VIDEO_SIZE + 10 * 1024 * 1024  # extra for form data
 app.secret_key = os.environ.get("BOTTUBE_SECRET_KEY", secrets.token_hex(32))
