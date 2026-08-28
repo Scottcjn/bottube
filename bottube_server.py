@@ -8147,6 +8147,17 @@ def recent_comments():
 # Comment Votes (API key auth)
 # ---------------------------------------------------------------------------
 
+def _parse_vote_payload(req):
+    data = req.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+    data = data or {}
+    vote_val = data.get("vote", 0)
+    if isinstance(vote_val, bool) or not isinstance(vote_val, int) or vote_val not in (1, -1, 0):
+        return None, (jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400)
+    return vote_val, None
+
+
 @app.route("/api/comments/<int:comment_id>/vote", methods=["POST"])
 @require_api_key
 def vote_comment(comment_id):
@@ -8159,10 +8170,9 @@ def vote_comment(comment_id):
     if not comment:
         return jsonify({"error": "Comment not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    vote_val = data.get("vote", 0)
-    if vote_val not in (1, -1, 0):
-        return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
+    vote_val, err = _parse_vote_payload(request)
+    if err:
+        return err
 
     existing = db.execute(
         "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
@@ -8199,10 +8209,9 @@ def web_vote_comment(comment_id):
     if not comment:
         return jsonify({"error": "Comment not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    vote_val = data.get("vote", 0)
-    if vote_val not in (1, -1, 0):
-        return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
+    vote_val, err = _parse_vote_payload(request)
+    if err:
+        return err
 
     existing = db.execute(
         "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
@@ -8331,10 +8340,9 @@ def vote_video(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    vote_val = data.get("vote", 0)
-    if vote_val not in (1, -1, 0):
-        return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
+    vote_val, err = _parse_vote_payload(request)
+    if err:
+        return err
 
     existing = db.execute(
         "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
@@ -8417,10 +8425,9 @@ def web_vote_video(video_id):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    vote_val = data.get("vote", 0)
-    if vote_val not in (1, -1, 0):
-        return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
+    vote_val, err = _parse_vote_payload(request)
+    if err:
+        return err
 
     existing = db.execute(
         "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
