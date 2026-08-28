@@ -135,10 +135,28 @@ def _conn():
 @avap_bp.route("/avap/anchor", methods=["POST"])
 def avap_anchor():
     """Record a commitment hash as anchored, idempotently returning the existing tx if already anchored."""
-    data = request.get_json(silent=True) or {}
-    commitment = (data.get("commitment") or "").strip().lower()
+    data = request.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    data = data or {}
+
+    raw_commitment = data.get("commitment")
+    if not isinstance(raw_commitment, str):
+        return jsonify({"error": "invalid commitment (want 64-hex sha256)"}), 400
+
+    commitment = raw_commitment.strip().lower()
     if len(commitment) != 64 or any(c not in "0123456789abcdef" for c in commitment):
         return jsonify({"error": "invalid commitment (want 64-hex sha256)"}), 400
+
+    video_id = data.get("video_id", "")
+    if video_id is not None and not isinstance(video_id, str):
+        return jsonify({"error": "video_id must be a string"}), 400
+    video_id = (video_id or "").strip()
+
+    sender = data.get("sender", "")
+    if sender is not None and not isinstance(sender, str):
+        return jsonify({"error": "sender must be a string"}), 400
+    sender = (sender or "").strip()
 
     conn = _conn()
     try:
@@ -153,7 +171,7 @@ def avap_anchor():
         conn.execute(
             "INSERT INTO avap_anchors (commitment, tx, video_id, sender, anchored_at) "
             "VALUES (?,?,?,?,?)",
-            (commitment, tx, data.get("video_id", ""), data.get("sender", ""), now),
+            (commitment, tx, video_id, sender, now),
         )
         conn.commit()
         return jsonify({"tx": tx, "anchored_at": now, "commitment": commitment})
