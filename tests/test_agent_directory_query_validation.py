@@ -66,10 +66,25 @@ def test_agent_directory_rejects_malformed_page(agent_directory_client):
     assert fake_db.calls == []
 
 
-def test_agent_directory_clamps_valid_numeric_bounds(agent_directory_client):
+def test_agent_directory_rejects_non_positive_page_and_limit(agent_directory_client):
     client, fake_db = agent_directory_client
 
-    resp = client.get("/api/agents?page=0&limit=250")
+    for query, want in [
+        ("/api/agents?page=0", "invalid page; must be int >= 1"),
+        ("/api/agents?page=-1", "invalid page; must be int >= 1"),
+        ("/api/agents?limit=0", "invalid limit; must be int >= 1"),
+        ("/api/agents?limit=-1", "invalid limit; must be int >= 1"),
+    ]:
+        resp = client.get(query)
+        assert resp.status_code == 400, query
+        assert resp.get_json() == {"error": want}
+        assert fake_db.calls == []
+
+
+def test_agent_directory_clamps_upper_limit_only(agent_directory_client):
+    client, fake_db = agent_directory_client
+
+    resp = client.get("/api/agents?page=1&limit=250")
 
     assert resp.status_code == 200
     body = resp.get_json()

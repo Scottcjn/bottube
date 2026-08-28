@@ -47,8 +47,9 @@ def _parse_agent_directory_int(name: str, default: int, min_value: int, max_valu
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{name} must be an integer") from exc
 
-    value = max(min_value, value)
-    if max_value is not None:
+    if value < min_value:
+        raise ValueError(f"invalid {name}; must be int >= {min_value}")
+    if max_value is not None and value > max_value:
         value = min(max_value, value)
     return value
 
