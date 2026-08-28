@@ -424,6 +424,15 @@ class TestAnalyticsApiTopVideos:
         assert response.status_code == 400
         assert "limit" in response.get_json()["error"]
 
+    def test_analytics_api_top_videos_rejects_invalid_metric(self, client):
+        """Top videos API should reject unsupported metric values with 400."""
+        aid = _insert_agent("topmetricbad", "test-key-top-metric-bad")
+
+        response = client.get(f"/analytics/api/top-videos?agent_id={aid}&metric=garbage")
+
+        assert response.status_code == 400
+        assert "metric" in response.get_json()["error"]
+
     @pytest.mark.parametrize("limit", ["1", "50"])
     def test_analytics_api_top_videos_accepts_boundary_limits(self, client, limit):
         """Top videos API should accept the documented 1..50 boundary values."""
