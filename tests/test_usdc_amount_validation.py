@@ -78,6 +78,7 @@ def _balance(db_path, agent_name):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_usdc_tip_rejects_malformed_amounts_without_writes(usdc_client, amount):
+    """Usdc tip rejects malformed amounts without writes."""
     before_tips = _table_count(usdc_client.db_path, "usdc_tips")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -95,6 +96,7 @@ def test_usdc_tip_rejects_malformed_amounts_without_writes(usdc_client, amount):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_usdc_payout_rejects_malformed_amounts_without_writes(usdc_client, amount):
+    """Usdc payout rejects malformed amounts without writes."""
     before_payouts = _table_count(usdc_client.db_path, "usdc_payouts")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -111,6 +113,7 @@ def test_usdc_payout_rejects_malformed_amounts_without_writes(usdc_client, amoun
 
 
 def test_usdc_payout_rejects_non_string_address_without_writes(usdc_client):
+    """Usdc payout rejects non string address without writes."""
     before_payouts = _table_count(usdc_client.db_path, "usdc_payouts")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -127,6 +130,7 @@ def test_usdc_payout_rejects_non_string_address_without_writes(usdc_client):
 
 
 def test_usdc_tip_rejects_non_object_json_body(usdc_client):
+    """Usdc tip rejects non object json body."""
     before_tips = _table_count(usdc_client.db_path, "usdc_tips")
 
     response = usdc_client.post(
@@ -152,6 +156,7 @@ def test_usdc_tip_rejects_malformed_recipient_fields_without_writes(
     payload,
     error,
 ):
+    """Reject non-string to_agent/video_id on USDC tip without DB writes."""
     before_tips = _table_count(usdc_client.db_path, "usdc_tips")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -171,6 +176,7 @@ def test_usdc_deposit_rejects_non_object_json_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Reject non-object JSON on USDC deposit before on-chain verification runs."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -192,6 +198,7 @@ def test_usdc_deposit_rejects_non_string_tx_hash_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Reject non-string tx_hash on USDC deposit before on-chain verification runs."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -210,6 +217,7 @@ def test_usdc_deposit_rejects_non_string_tx_hash_before_verification(
 
 
 def test_usdc_premium_rejects_non_object_json_without_writes(usdc_client):
+    """Usdc premium rejects non object json without writes."""
     before_premium = _table_count(usdc_client.db_path, "usdc_premium")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -226,6 +234,7 @@ def test_usdc_premium_rejects_non_object_json_without_writes(usdc_client):
 
 
 def test_usdc_premium_rejects_non_string_tier_without_writes(usdc_client):
+    """Usdc premium rejects non string tier without writes."""
     before_premium = _table_count(usdc_client.db_path, "usdc_premium")
     before_alice = _balance(usdc_client.db_path, "alice")
 
@@ -245,6 +254,7 @@ def test_usdc_verify_payment_rejects_non_object_json_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Reject non-object JSON on verify-payment before on-chain verification runs."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -261,6 +271,7 @@ def test_usdc_verify_payment_rejects_non_string_tx_hash_before_verification(
     usdc_client,
     monkeypatch,
 ):
+    """Reject non-string tx_hash on verify-payment before on-chain verification runs."""
     monkeypatch.setattr(
         usdc_blueprint,
         "verify_usdc_transfer_onchain",
@@ -277,6 +288,7 @@ def test_usdc_verify_payment_rejects_non_string_tx_hash_before_verification(
 
 
 def test_valid_usdc_tip_still_debits_sender_and_credits_creator(usdc_client):
+    """Valid usdc tip still debits sender and credits creator."""
     response = usdc_client.post(
         "/api/usdc/tip",
         json={"to_agent": "bob", "amount_usdc": "2.00"},
@@ -297,6 +309,7 @@ def test_valid_usdc_tip_still_debits_sender_and_credits_creator(usdc_client):
 
 
 def test_valid_usdc_payout_still_creates_pending_request(usdc_client):
+    """Valid usdc payout still creates pending request."""
     response = usdc_client.post(
         "/api/usdc/payout",
         json={"to_address": "0x" + "b" * 40, "amount_usdc": "1.25"},
