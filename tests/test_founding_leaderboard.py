@@ -19,6 +19,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +34,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     Path(bootstrap_path).unlink(missing_ok=True)
@@ -48,6 +50,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated founding-leaderboard app."""
     db_path = tmp_path / "bottube_founding.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +62,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +78,7 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Look up an agent by name and return its row id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -82,6 +87,7 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 
 def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -98,6 +104,7 @@ def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> N
 
 
 def _create_referral_code(client, referrer_id: int) -> str:
+    """Create a referral code for an agent directly."""
     with client.session_transaction() as sess:
         sess["user_id"] = referrer_id
         sess["csrf_token"] = "test-csrf"
@@ -107,6 +114,7 @@ def _create_referral_code(client, referrer_id: int) -> str:
 
 
 def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
+    """Mark a referred human invite as activated."""
     with client.session_transaction() as sess:
         sess.pop("user_id", None)
         sess["csrf_token"] = "test-csrf"
@@ -144,6 +152,7 @@ def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
 
 
 def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
+    """Mark a referred agent invite as activated."""
     reg_resp = client.post(
         "/api/register",
         json={
@@ -167,6 +176,7 @@ def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
 
 
 def _assign_badge(client, agent_name: str, badge_key: str, *, cohort_number: int = 0):
+    """Assign a badge to an agent directly."""
     resp = client.post(
         "/api/admin/badges/assign",
         headers={"X-Admin-Key": "test-admin"},
@@ -181,6 +191,7 @@ def _assign_badge(client, agent_name: str, badge_key: str, *, cohort_number: int
 
 
 def test_founding_leaderboard_api_splits_tracks_and_surfaces_badges(client):
+    """The API splits human/agent tracks and surfaces assigned badges."""
     referrer_id = _insert_agent("captainleet", "bottube_sk_captainleet", is_human=True)
     code = _create_referral_code(client, referrer_id)
 
@@ -223,6 +234,7 @@ def test_founding_leaderboard_api_splits_tracks_and_surfaces_badges(client):
 
 
 def test_public_founding_page_renders_required_sections(client):
+    """The public founding page renders all required sections."""
     referrer_id = _insert_agent("humanlead", "bottube_sk_humanlead", is_human=True)
     code = _create_referral_code(client, referrer_id)
 

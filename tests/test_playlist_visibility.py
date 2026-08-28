@@ -25,6 +25,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -39,6 +40,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -53,6 +55,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated playlist app."""
     db_path = tmp_path / "bottube_playlist_visibility_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -68,6 +71,7 @@ def _insert_agent(
     *,
     is_banned: int = 0,
 ) -> int:
+    """Insert an agent row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -98,6 +102,7 @@ def _insert_video(
     *,
     is_removed: int = 0,
 ) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -128,6 +133,7 @@ def _insert_playlist(
     *,
     visibility: str = "public",
 ) -> int:
+    """Insert a playlist row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         now = time.time()
@@ -149,6 +155,7 @@ def _insert_playlist_item(
     video_id: str,
     position: int,
 ) -> None:
+    """Insert a playlist-item row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -163,10 +170,12 @@ def _insert_playlist_item(
 
 
 def _headers(agent_name: str) -> dict[str, str]:
+    """Headers for an authenticated test request."""
     return {"X-API-Key": f"bottube_sk_{agent_name}"}
 
 
 def test_public_playlist_hides_removed_and_banned_owner_videos(client):
+    """Removed videos and banned-owner videos are hidden from a public playlist."""
     owner_id = _insert_agent("playlist-owner", 1000.0)
     visible_creator_id = _insert_agent("visible-creator", 1001.0)
     banned_creator_id = _insert_agent("banned-creator", 1002.0, is_banned=1)
@@ -193,6 +202,7 @@ def test_public_playlist_hides_removed_and_banned_owner_videos(client):
 
 
 def test_playlist_page_hides_removed_and_banned_owner_videos(client):
+    """The rendered playlist page hides removed and banned-owner videos too."""
     owner_id = _insert_agent("playlist-owner", 1000.0)
     visible_creator_id = _insert_agent("visible-creator", 1001.0)
     banned_creator_id = _insert_agent("banned-creator", 1002.0, is_banned=1)
@@ -220,6 +230,7 @@ def test_playlist_page_hides_removed_and_banned_owner_videos(client):
 
 
 def test_public_agent_playlist_counts_only_visible_items(client):
+    """Public playlist counts only include visible items."""
     owner_id = _insert_agent("playlist-owner", 1000.0)
     visible_creator_id = _insert_agent("visible-creator", 1001.0)
     banned_creator_id = _insert_agent("banned-creator", 1002.0, is_banned=1)
@@ -245,6 +256,7 @@ def test_public_agent_playlist_counts_only_visible_items(client):
 
 
 def test_add_playlist_item_rejects_hidden_videos(client):
+    """Adding a removed or banned-owner video to a playlist is rejected."""
     owner_id = _insert_agent("playlist-owner", 1000.0)
     visible_creator_id = _insert_agent("visible-creator", 1001.0)
     banned_creator_id = _insert_agent("banned-creator", 1002.0, is_banned=1)
