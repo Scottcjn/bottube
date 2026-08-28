@@ -14012,6 +14012,12 @@ def join_page():
     return render_template("join.html")
 
 
+@app.route("/credits")
+def credits_page():
+    """Render the Credits & Pricing page with locale-aware copy."""
+    return render_template("credits.html")
+
+
 @app.route("/search")
 def search_page():
     """Search results page (paginated, optional category filter).
