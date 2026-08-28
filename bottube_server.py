@@ -14995,10 +14995,19 @@ def giveaway_leaderboard_api():
 # Admin: Visitor Analytics
 # ---------------------------------------------------------------------------
 
-ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+def _admin_key_from_env():
+    """Resolve the admin secret from the environment.
+
+    BOTTUBE_ADMIN_KEY is the documented name; RC_ADMIN_KEY is an accepted alias.
+    Both admin gates in this module read ADMIN_KEY, which is initialized from here.
+    """
+    return os.environ.get("BOTTUBE_ADMIN_KEY", "") or os.environ.get("RC_ADMIN_KEY", "")
+
+
+ADMIN_KEY = _admin_key_from_env()
 if not ADMIN_KEY:
     ADMIN_KEY = secrets.token_hex(32)
-    print(f"[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set. Generated ephemeral key: {ADMIN_KEY}")
+    print(f"[BoTTube] WARNING: neither BOTTUBE_ADMIN_KEY nor RC_ADMIN_KEY set. Generated ephemeral key: {ADMIN_KEY}")
 
 
 @app.route("/api/admin/visitors")
