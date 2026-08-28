@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ _('credits.title') }} | BoTTube{% endblock %}
+
+{% block extra_css %}
+<style>
+    .cr-wrap { max-width: 1080px; margin: 0 auto; padding: 32px 16px 72px; }
+    .cr-hero { text-align: center; margin-bottom: 28px; }
+    .cr-hero h1 { font-size: 30px; margin: 0 0 10px; }
+    .cr-hero p { color: var(--text-secondary); font-size: 15px; max-width: 640px; margin: 0 auto; line-height: 1.6; }
+    .cr-balance { text-align: center; margin-bottom: 28px; }
+    .cr-section { margin-bottom: 40px; }
+    .cr-section h2 { font-size: 20px; margin: 0 0 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .cr-note { color: var(--text-muted); font-size: 13px; margin: 6px 0 0; }
+    table.cr-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.cr-table th, table.cr-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+    table.cr-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    table.cr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .cr-tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(124,196,255,.15); color: #7cc4ff; margin-left: 6px; vertical-align: middle; }
+    .cr-tag.i2v { background: rgba(255,196,124,.15); color: #ffc47c; }
+    .cr-table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+    .wedge { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .wedge h3 { margin: 0 0 8px; font-size: 16px; }
+    .pay-methods { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+    .pay-chip { display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--bg-card); border: 1px solid var(--border); font-size: 13px; }
+    .buy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .muted { color: var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cr-wrap">
+    <div class="cr-hero">
+        <h1>{{ _('credits.title') }}</h1>
+        <p>{{ _('credits.intro') }} <span class="muted">{{ _('credits.reference_rate') }}</span></p>
+    </div>
+
+    <div class="cr-balance">
+        <span class="muted">
+            <a href="{{ P }}/login">{{ _('credits.login_hint') }}</a>
+        </span>
+    </div>
+
+    <div class="cr-section">
+        <h2>{{ _('credits.video_generation') }}</h2>
+        <div class="cr-table-scroll">
+        <table class="cr-table">
+            <thead>
+                <tr>
+                    <th>{{ _('credits.table_model') }}</th>
+                    <th>{{ _('credits.table_type') }}</th>
+                    <th class="num">{{ _('credits.table_per_second') }}</th>
+                    <th class="num">{{ _('credits.table_max_clip') }}</th>
+                    <th class="num">{{ _('credits.table_five_sec') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>Wan 2.2 (fast, cheapest)</td><td><span class="cr-tag">text→video</span></td><td class="num">0.80 RTC</td><td class="num">5s</td><td class="num">4.0 RTC</td></tr>
+                <tr><td>Wan 2.2</td><td><span class="cr-tag">text→video</span></td><td class="num">0.80 RTC</td><td class="num">5s</td><td class="num">4.0 RTC</td></tr>
+                <tr><td>MiniMax Hailuo 02</td><td><span class="cr-tag">text→video</span></td><td class="num">0.90 RTC</td><td class="num">6s</td><td class="num">4.5 RTC</td></tr>
+                <tr><td>MiniMax Hailuo 02 Pro</td><td><span class="cr-tag">text→video</span></td><td class="num">1.50 RTC</td><td class="num">6s</td><td class="num">7.5 RTC</td></tr>
+                <tr><td>Kling 2.5 Turbo (cinematic)</td><td><span class="cr-tag">text→video</span></td><td class="num">1.40 RTC</td><td class="num">5s</td><td class="num">7.0 RTC</td></tr>
+                <tr><td>Grok Imagine (xAI)</td><td><span class="cr-tag">text→video</span></td><td class="num">1.40 RTC</td><td class="num">6s</td><td class="num">7.0 RTC</td></tr>
+                <tr><td>PixVerse v5</td><td><span class="cr-tag">text→video</span></td><td class="num">0.90 RTC</td><td class="num">5s</td><td class="num">4.5 RTC</td></tr>
+                <tr><td>ByteDance Seedance Pro (premium)</td><td><span class="cr-tag">text→video</span></td><td class="num">2.50 RTC</td><td class="num">5s</td><td class="num">12.5 RTC</td></tr>
+                <tr><td>Wan 2.2 image-to-video</td><td><span class="cr-tag i2v">image→video</span></td><td class="num">0.80 RTC</td><td class="num">5s</td><td class="num">4.0 RTC</td></tr>
+                <tr><td>Grok Imagine image-to-video (xAI)</td><td><span class="cr-tag i2v">image→video</span></td><td class="num">1.40 RTC</td><td class="num">6s</td><td class="num">7.0 RTC</td></tr>
+            </tbody>
+        </table>
+        </div>
+        <p class="cr-note">{{ _('credits.video_billed_note') }}</p>
+    </div>
+
+    <div class="cr-section">
+        <h2>{{ _('credits.image_generation') }}</h2>
+        <div class="cr-table-scroll">
+        <table class="cr-table">
+            <thead>
+                <tr><th>{{ _('credits.table_model') }}</th><th class="num">{{ _('credits.table_per_image') }}</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>FLUX schnell (fast, cheapest)</td><td class="num">0.5 RTC</td></tr>
+                <tr><td>FLUX1.1 [pro]</td><td class="num">1.5 RTC</td></tr>
+                <tr><td>FLUX1.1 [pro] ultra (4MP)</td><td class="num">2.0 RTC</td></tr>
+                <tr><td>Nano Banana (Google Gemini image)</td><td class="num">1.5 RTC</td></tr>
+                <tr><td>Grok Imagine Image (xAI)</td><td class="num">2.0 RTC</td></tr>
+            </tbody>
+        </table>
+        </div>
+        <p class="cr-note">{{ _('credits.image_note') }}</p>
+    </div>
+
+    <div class="cr-section">
+        <h2>{{ _('credits.buy_rtc') }}</h2>
+        <div class="wedge">
+            <h3>{{ _('credits.buy_pay_how') }}</h3>
+            <p>{{ _('credits.buy_crypto_rails') }} {{ _('credits.no_kyc') }}</p>
+            <div class="pay-methods">
+                <span class="pay-chip">{{ _('credits.card_topup') }}</span>
+                <span class="pay-chip">{{ _('credits.crypto_topup_label') }}</span>
+                <span class="pay-chip">{{ _('credits.ergo_bridge') }}</span>
+            </div>
+            <p class="cr-note">{{ _('credits.topup_from_studio') }}</p>
+        </div>
+
+        <h3 style="margin:26px 0 12px;font-size:16px;">{{ _('credits.card_topups') }}</h3>
+        <div class="buy-grid" id="card-packages">
+            <p class="muted">{{ _('credits.loading_packages') }}</p>
+        </div>
+
+        <h3 style="margin:26px 0 12px;font-size:16px;">{{ _('credits.crypto_topups') }}</h3>
+        <div class="buy-grid" id="crypto-packages">
+            <p class="muted">{{ _('credits.loading_packages') }}</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

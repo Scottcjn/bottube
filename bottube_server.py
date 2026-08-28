@@ -5571,6 +5571,10 @@ def _get_founding_track_leaderboard(
     *,
     limit: int = 25,
 ) -> list[dict]:
+    """Build the founding-tracking leaderboard for one invitee track.
+
+    Aggregates per-referrer invite, activation, and review statistics and
+    returns a row per agent (invite code, totals, first activation time)."""
     track = "human" if invitee_track == "human" else "agent"
     rows = db.execute(
         """
@@ -5637,6 +5641,9 @@ def _get_founding_track_leaderboard(
 
 
 def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
+    """Build the founding cohort listing for a track: the activated,
+    accepted invitees in activation order, each annotated with early and
+    pair badge counts, plus cohort slot and pair-badge summary counters."""
     invitee_track = "human" if track == "human" else "agent"
     rows = db.execute(
         """
@@ -5712,6 +5719,9 @@ def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
 
 
 def _get_founding_leaderboard_data(db: sqlite3.Connection) -> dict:
+    """Assemble the founding leaderboard API payload: referrer/sponsor
+    leaderboards for both tracks, both cohorts, and pair-reservation
+    summaries keyed human/agent."""
     human_referrers = _get_founding_track_leaderboard(db, "human", limit=25)
     agent_sponsors = _get_founding_track_leaderboard(db, "agent", limit=25)
     human_cohort = _get_founding_cohort(db, "human")
@@ -5769,6 +5779,8 @@ def referrals_leaderboard_api():
 
 @app.route("/api/founding/leaderboard")
 def founding_leaderboard_api():
+    """Serve the founding leaderboard JSON payload, aggregating both
+    founding tracks and their cohorts."""
     db = get_db()
     return jsonify({"ok": True, **_get_founding_leaderboard_data(db)})
 
@@ -11695,6 +11707,42 @@ def my_earnings():
 # RTC Tipping
 # ---------------------------------------------------------------------------
 
+def _parse_tip_payload(req):
+    """Safely parse tip request JSON payload and validate amount.
+
+    Returns:
+        (data, amount, message, error_response)
+        If validation fails, (None, None, None, (jsonify_response, status_code)).
+    """
+    data = req.get_json(force=True, silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, None, None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+
+    raw_amount = data.get("amount", 0)
+    if isinstance(raw_amount, bool):
+        return None, None, None, (jsonify({"error": "Invalid amount"}), 400)
+
+    try:
+        amount = float(raw_amount)
+    except (ValueError, TypeError):
+        return None, None, None, (jsonify({"error": "Invalid amount"}), 400)
+
+    if not math.isfinite(amount):
+        return None, None, None, (jsonify({"error": "Invalid amount"}), 400)
+
+    amount = round(amount, 6)
+
+    if amount < RTC_TIP_MIN:
+        return None, None, None, (jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400)
+    if amount > RTC_TIP_MAX:
+        return None, None, None, (jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400)
+
+    message = str(data.get("message", ""))[:200].strip()
+    return data, amount, message, None
+
+
 @app.route("/api/videos/<video_id>/tip", methods=["POST"])
 @require_api_key
 def tip_video(video_id):
@@ -11719,18 +11767,9 @@ def tip_video(video_id):
     if video["agent_id"] == g.agent["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     # On-chain tip via RustChain signed transfer (Ed25519)
     if data.get("onchain"):
@@ -11804,8 +11843,6 @@ def tip_video(video_id):
             (rid, share, "tip_split_" + role, video_id, time.time()),
         )
 
-    # If no recipients (shouldn't happen since primary is always present), fall through to no-op
-
     # Notify recipient
     notify(db, video["agent_id"], "tip",
            f'@{g.agent["agent_name"]} tipped {amount:.4f} RTC on "{video["title"]}"'
@@ -11842,18 +11879,9 @@ def web_tip_video(video_id):
     if video["agent_id"] == g.user["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     # On-chain tip via RustChain signed transfer (Ed25519)
     if data.get("onchain"):
@@ -11938,18 +11966,9 @@ def web_tip_agent(agent_name):
     if target["id"] == g.user["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     if data.get("onchain"):
         to_wallet = str(target["rtc_wallet"] or "").strip()
@@ -12025,18 +12044,9 @@ def tip_agent(agent_name):
     if target["id"] == g.agent["id"]:
         return jsonify({"error": "You cannot tip yourself"}), 400
 
-    data = request.get_json(force=True, silent=True) or {}
-    try:
-        amount = round(float(data.get("amount", 0)), 6)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount < RTC_TIP_MIN:
-        return jsonify({"error": f"Minimum tip is {RTC_TIP_MIN} RTC"}), 400
-    if amount > RTC_TIP_MAX:
-        return jsonify({"error": f"Maximum tip is {RTC_TIP_MAX} RTC"}), 400
-
-    message = str(data.get("message", ""))[:200].strip()
+    data, amount, message, err = _parse_tip_payload(request)
+    if err:
+        return err[0], err[1]
 
     if data.get("onchain"):
         to_wallet = str(target["rtc_wallet"] or "").strip()
@@ -18743,6 +18753,9 @@ _PROVENANCE_SCHEMA_LOCK = _eng_Lock()
 
 
 def _ensure_provenance_schema():
+    """Create the video_provenance and video_renditions tables plus their
+    indexes once. Double-checked under a lock so concurrent callers only
+    run the DDL a single time."""
     global _PROVENANCE_SCHEMA_READY
     if _PROVENANCE_SCHEMA_READY:
         return
@@ -19135,6 +19148,8 @@ _KEYFRAME_LOCKS_LOCK = _eng_Lock()
 
 
 def _keyframe_lock_for(video_id):
+    """Return the per-video keyframe-processing lock, creating and caching
+    one lazily under a registry lock."""
     with _KEYFRAME_LOCKS_LOCK:
         lk = _KEYFRAME_LOCKS.get(video_id)
         if lk is None:
@@ -19447,6 +19462,8 @@ def _firehose_sign(payload):
 
 
 def _firehose_relay_pubkey_b64():
+    """Return the firehose relay public key as URL-safe base64 (no
+    padding), or an empty string when the relay key is not loaded."""
     _firehose_load_relay_key()
     pk = _FIREHOSE_RELAY.get("pk")
     if pk is None:
@@ -20269,6 +20286,7 @@ def ts_inspect_uploaded_file(file_path, agent_id):
 @app.route("/terms")
 @app.route("/tos")
 def terms_page():
+    """Render the terms-of-service page with the current version metadata."""
     return render_template("terms.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20276,6 +20294,8 @@ def terms_page():
 
 @app.route("/aup")
 def aup_page():
+    """Render the acceptable-use policy page with the current version
+    metadata."""
     return render_template("aup.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20283,6 +20303,7 @@ def aup_page():
 
 @app.route("/dmca")
 def dmca_page():
+    """Render the DMCA policy page with the current version metadata."""
     return render_template("dmca.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20290,14 +20311,24 @@ def dmca_page():
 
 @app.route("/report")
 def report_page():
+    """Render the report/submission policy page with the current version
+    metadata."""
     return render_template("report.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
 
 
+@app.route("/credits")
+def credits_page():
+    """Render the Credits & Pricing page with locale-aware copy."""
+    return render_template("credits.html")
+
+
 # Privacy template already exists in the templates dir; ensure a route exists.
 @app.route("/privacy")
 def privacy_page():
+    """Render the privacy policy page, falling back to the template
+    without version variables if the template does not expose them."""
     try:
         return render_template("privacy.html",
                                tos_version=TOS_VERSION,
@@ -20378,6 +20409,11 @@ def agent_accept_terms():
 # --- Public report endpoint -----------------------------------------------
 
 def _public_report_text_field(data, field, max_length):
+    """Extract and validate a string field from a public report payload.
+
+    Missing or non-string values are rejected/defaulted and the value is
+    stripped and truncated to max_length. Returns (value, None) or
+    (None, reason)."""
     value = data.get(field, "")
     if value is None:
         value = ""
@@ -20656,6 +20692,9 @@ def _uv_ensure_schema():
 
 
 def _uv_rate_wait():
+    """Block until a minimum inter-request gap has elapsed for rate
+    limiting, atomically reserving the next allowed slot. Sleeps in
+    short bounded intervals so shutdown is not delayed."""
     while True:
         with _UV_RATE_LOCK:
             now = time.time()
@@ -20815,6 +20854,9 @@ def _uv_record_for_video(video_id, ensure_sprite=True):
 
 
 def _uv_cache_warm():
+    """Load the visual-embedding matrix and video ids into the in-memory
+    cache from the DB. Returns False (and clears the cache) when numpy
+    is unavailable or there are no embeddings to load."""
     try:
         import numpy as _np
     except ImportError:
@@ -21121,6 +21163,8 @@ def _ue_embed_text(text, attempts=4):
 
 
 def _ue_text_sha(text):
+    """Return a truncated (24-char) SHA-256 hex digest of text, treating
+    None/empty as an empty string."""
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:24]
 
 
@@ -21188,6 +21232,8 @@ def _ue_record_for_video(video_id, video_row=None):
 
 
 def _ue_record_for_video_async(video_id):
+    """Dispatch background recording of the user-engagement embedding for a
+    video on a daemon thread, logging (never raising) dispatch failures."""
     try:
         threading.Thread(
             target=_ue_record_for_video, args=(video_id,),
@@ -21921,6 +21967,9 @@ def _agent_ed25519_seal(seckey_bytes):
 
 
 def _agent_ed25519_unseal(sealed_hex):
+    """Unseal agent data encrypted with the agent Ed25519 signing key:
+    XORs the sealed bytes against a SHA-256 of the master key. Returns
+    empty bytes for blank or malformed hex."""
     if not sealed_hex:
         return b""
     try:
@@ -22060,6 +22109,8 @@ def _verify_v3_signature(pubkey_hex, signature_hex, video_id,
 
 
 def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    """Compute the SHA-256 manifest leaf for provenance manifest v1 from
+    video_id, canonical_sha256, uploader_sig and uploaded_at."""
     parts = "|".join([
         video_id or "",
         canonical_sha256 or "",
@@ -22071,6 +22122,8 @@ def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
 
 def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
                       canonical_360p_sha256, uploader_sig, uploaded_at):
+    """Compute the SHA-256 manifest leaf for provenance manifest v2, adding
+    thumbnail and canonical_360p digests under the v2 domain marker."""
     parts = "|".join([
         _LEAF_DOMAIN_V2,
         video_id or "",
@@ -22125,6 +22178,8 @@ def _manifest_leaf(version, video_id, canonical_sha256,
 
 
 def _manifest_leaf_recipe(version):
+    """Return a human-readable recipe string describing how a manifest leaf
+    is computed for the given manifest version."""
     v = int(version or 1)
     if v >= MANIFEST_V3:
         return (
@@ -22308,6 +22363,8 @@ def _renditions_dir_for(video_id):
 
 
 def _renditions_ffmpeg_available():
+    """True when the configured rendition ffmpeg binary path exists and is
+    executable."""
     return Path(RENDITION_FFMPEG).is_file() and os.access(RENDITION_FFMPEG, os.X_OK)
 
 
@@ -24867,6 +24924,8 @@ if __name__ == "__main__":
 
 @app.route("/tips/dashboard")
 def tips_dashboard():
+    """Render the tips dashboard: top receivers and tippers, confirmation
+    totals incl. pending, and recent confirmed tips."""
     db = get_db()
     _sync_pending_tips(db)
 
