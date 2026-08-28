@@ -129,34 +129,52 @@ def _conn():
     return sqlite3.connect(str(DB_PATH))
 
 
+def _json_object_body():
+    """Return a JSON object body, treating an empty body as the historical empty object."""
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
+def _text_field(data: dict, field_name: str):
+    """Return a request text field or a 400 response for values SQLite cannot bind safely."""
+    value = data.get(field_name, "")
+    if value is None:
+        return "", None
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value, None
+
+
 # --------------------------------------------------------------------------- #
 # anchoring
 # --------------------------------------------------------------------------- #
 @avap_bp.route("/avap/anchor", methods=["POST"])
 def avap_anchor():
     """Record a commitment hash as anchored, idempotently returning the existing tx if already anchored."""
-    data = request.get_json(silent=True)
-    if data is not None and not isinstance(data, dict):
-        return jsonify({"error": "Request body must be a JSON object"}), 400
-    data = data or {}
+    data, error = _json_object_body()
+    if error:
+        return error
 
-    raw_commitment = data.get("commitment")
-    if not isinstance(raw_commitment, str):
-        return jsonify({"error": "invalid commitment (want 64-hex sha256)"}), 400
-
-    commitment = raw_commitment.strip().lower()
+    commitment_raw, error = _text_field(data, "commitment")
+    if error:
+        return error
+    commitment = commitment_raw.strip().lower()
     if len(commitment) != 64 or any(c not in "0123456789abcdef" for c in commitment):
         return jsonify({"error": "invalid commitment (want 64-hex sha256)"}), 400
 
-    video_id = data.get("video_id", "")
-    if video_id is not None and not isinstance(video_id, str):
-        return jsonify({"error": "video_id must be a string"}), 400
-    video_id = (video_id or "").strip()
+    video_id, error = _text_field(data, "video_id")
+    if error:
+        return error
+    video_id = video_id.strip()
 
-    sender = data.get("sender", "")
-    if sender is not None and not isinstance(sender, str):
-        return jsonify({"error": "sender must be a string"}), 400
-    sender = (sender or "").strip()
+    sender, error = _text_field(data, "sender")
+    if error:
+        return error
+    sender = sender.strip()
 
     conn = _conn()
     try:
