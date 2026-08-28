@@ -24,6 +24,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -38,6 +39,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -52,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated report-capable app."""
     db_path = tmp_path / "bottube_report_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -62,6 +65,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -78,6 +82,7 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _insert_video(agent_id: int, video_id: str) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -92,6 +97,7 @@ def _insert_video(agent_id: int, video_id: str) -> None:
 
 
 def _insert_comment(agent_id: int, video_id: str, content: str) -> int:
+    """Insert a comment row and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -106,12 +112,14 @@ def _insert_comment(agent_id: int, video_id: str, content: str) -> int:
 
 
 def _report_count() -> int:
+    """Row count of a report table, to assert no insert occurred."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         return int(db.execute("SELECT COUNT(*) FROM reports").fetchone()[0])
 
 
 def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
+    """A null reason reuses the existing invalid-reason error path."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -128,6 +136,7 @@ def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
 
 
 def test_video_report_rejects_non_string_details_without_insert(client):
+    """A non-string details field is rejected with 400 and no report is inserted."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -144,6 +153,7 @@ def test_video_report_rejects_non_string_details_without_insert(client):
 
 
 def test_comment_report_rejects_non_string_reason_without_insert(client):
+    """A non-string reason is rejected with 400 and no report is inserted."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -161,6 +171,7 @@ def test_comment_report_rejects_non_string_reason_without_insert(client):
 
 
 def test_comment_report_rejects_non_object_json(client):
+    """A non-object comment-report body is rejected with 400."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")
@@ -178,6 +189,7 @@ def test_comment_report_rejects_non_object_json(client):
 
 
 def test_video_report_rejects_falsy_non_object_json(client):
+    """Falsy video-report bodies (null/list) are rejected with 400."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo02A")
@@ -194,6 +206,7 @@ def test_video_report_rejects_falsy_non_object_json(client):
 
 
 def test_comment_report_rejects_falsy_non_object_json(client):
+    """Falsy comment-report bodies are rejected with 400."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo03A")
@@ -211,6 +224,7 @@ def test_comment_report_rejects_falsy_non_object_json(client):
 
 
 def test_video_report_accepts_null_details_as_empty(client):
+    """A null details field is accepted and treated as empty for the report."""
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
     _insert_video(owner_id, "ownervideo01A")

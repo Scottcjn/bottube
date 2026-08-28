@@ -8,21 +8,26 @@ from flask import Flask
 
 class FakeResult:
     def __init__(self, one=None, rows=None):
+        """Initialise the fake cursor with a canned rows payload."""
         self.one = one
         self.rows = rows or []
 
     def fetchone(self):
+        """Return the first canned row."""
         return self.one
 
     def fetchall(self):
+        """Return all canned rows."""
         return self.rows
 
 
 class FakeDB:
     def __init__(self):
+        """Initialise the fake DB row wrapper."""
         self.calls = []
 
     def execute(self, sql, params=()):
+        """Fake execute that records the SQL and returns the fake cursor."""
         self.calls.append((sql, params))
         if "COUNT(*)" in sql:
             return FakeResult(one=(0,))
@@ -31,6 +36,7 @@ class FakeDB:
 
 @pytest.fixture
 def agent_directory_client(monkeypatch):
+    """Flask test client for the agent-directory endpoints."""
     fake_db = FakeDB()
     monkeypatch.setitem(
         sys.modules,
@@ -47,6 +53,7 @@ def agent_directory_client(monkeypatch):
 
 
 def test_agent_directory_rejects_malformed_limit(agent_directory_client):
+    """A non-integer directory limit is rejected with 400."""
     client, fake_db = agent_directory_client
 
     resp = client.get("/api/agents?limit=abc")
@@ -57,6 +64,7 @@ def test_agent_directory_rejects_malformed_limit(agent_directory_client):
 
 
 def test_agent_directory_rejects_malformed_page(agent_directory_client):
+    """A non-integer directory page is rejected with 400."""
     client, fake_db = agent_directory_client
 
     resp = client.get("/api/agents?page=abc")
@@ -67,6 +75,7 @@ def test_agent_directory_rejects_malformed_page(agent_directory_client):
 
 
 def test_agent_directory_clamps_valid_numeric_bounds(agent_directory_client):
+    """Out-of-range numeric parameters are clamped to valid bounds."""
     client, fake_db = agent_directory_client
 
     resp = client.get("/api/agents?page=0&limit=250")
@@ -81,6 +90,7 @@ def test_agent_directory_clamps_valid_numeric_bounds(agent_directory_client):
 
 @pytest.mark.parametrize("sort", ["newest", "popular", "active"])
 def test_agent_directory_accepts_valid_sort(agent_directory_client, sort):
+    """A supported sort value is accepted."""
     client, fake_db = agent_directory_client
 
     resp = client.get(f"/api/agents?sort={sort}")
@@ -91,6 +101,7 @@ def test_agent_directory_accepts_valid_sort(agent_directory_client, sort):
 
 
 def test_agent_directory_rejects_invalid_sort(agent_directory_client):
+    """An unsupported sort value is rejected with 400."""
     client, fake_db = agent_directory_client
 
     resp = client.get("/api/agents?sort=trending")
@@ -104,6 +115,7 @@ def test_agent_directory_rejects_invalid_sort(agent_directory_client):
 
 @pytest.mark.parametrize("agent_type", ["agent", "human", "all"])
 def test_agent_directory_accepts_valid_type(agent_directory_client, agent_type):
+    """A supported agent type filter is accepted."""
     client, fake_db = agent_directory_client
 
     resp = client.get(f"/api/agents?type={agent_type}")
@@ -113,6 +125,7 @@ def test_agent_directory_accepts_valid_type(agent_directory_client, agent_type):
 
 
 def test_agent_directory_rejects_invalid_type(agent_directory_client):
+    """An unsupported agent type is rejected with 400."""
     client, fake_db = agent_directory_client
 
     resp = client.get("/api/agents?type=robot")
@@ -125,6 +138,7 @@ def test_agent_directory_rejects_invalid_type(agent_directory_client):
 
 
 def test_agent_directory_empty_sort_uses_default(agent_directory_client):
+    """An empty sort falls back to the documented default ordering."""
     client, fake_db = agent_directory_client
 
     resp = client.get("/api/agents?sort=")
