@@ -71,6 +71,7 @@ def app(tmp_path, monkeypatch):
 
 
 def _assert_invalid_matrix(client, path, cases):
+    """Assert every (param, value) case across an endpoint returns 400."""
     for param, values in cases.items():
         for value in values:
             response = client.get(path, query_string={param: value})
@@ -83,6 +84,7 @@ def _assert_invalid_matrix(client, path, cases):
 
 
 def _assert_valid_matrix(client, path, cases):
+    """Assert every (param, value) case across an endpoint returns 200."""
     for param, value in cases.items():
         response = client.get(path, query_string={param: value})
         assert response.status_code == 200, (
@@ -92,6 +94,7 @@ def _assert_valid_matrix(client, path, cases):
 
 
 def _insert_related_video(app):
+    """Insert a video row so the related endpoint has a target to resolve."""
     import bottube_server
 
     with app.app_context():
@@ -115,6 +118,7 @@ def _insert_related_video(app):
 
 
 def test_feed_validates_every_reported_parameter(client):
+    """The feed endpoint rejects every invalid value for each pagination parameter."""
     _assert_invalid_matrix(
         client,
         "/api/feed",
@@ -131,6 +135,7 @@ def test_feed_validates_every_reported_parameter(client):
 
 
 def test_feed_accepts_valid_values_and_preserves_defaults(client):
+    """The feed endpoint accepts valid values and keeps defaults unchanged."""
     baseline = client.get("/api/feed")
     assert baseline.status_code == 200
     baseline_body = baseline.get_json()
@@ -156,6 +161,7 @@ def test_feed_accepts_valid_values_and_preserves_defaults(client):
 
 
 def test_trending_validates_limit_days_and_since(client):
+    """Trending rejects invalid limit/days/since values with 400."""
     _assert_invalid_matrix(
         client,
         "/api/trending",
@@ -168,6 +174,7 @@ def test_trending_validates_limit_days_and_since(client):
 
 
 def test_trending_accepts_valid_values_and_preserves_defaults(client):
+    """Trending accepts valid values and preserves its defaults."""
     assert client.get("/api/trending").status_code == 200
     _assert_valid_matrix(
         client,
@@ -181,6 +188,7 @@ def test_trending_accepts_valid_values_and_preserves_defaults(client):
 
 
 def test_videos_validates_page(client):
+    """The videos endpoint rejects invalid page values."""
     _assert_invalid_matrix(
         client,
         "/api/videos",
@@ -191,6 +199,7 @@ def test_videos_validates_page(client):
 
 
 def test_related_validates_limit_before_database_lookup(client):
+    """Related validates limit before touching the DB, so invalid limits 400 even for unknown videos."""
     _assert_invalid_matrix(
         client,
         "/api/videos/not_present/related",
@@ -199,6 +208,7 @@ def test_related_validates_limit_before_database_lookup(client):
 
 
 def test_related_accepts_valid_limit_and_preserves_default(app, client):
+    """Related accepts a valid limit and leaves the default in effect when omitted."""
     _insert_related_video(app)
     path = "/api/videos/shared_validator_video/related"
     assert client.get(path).status_code == 200
@@ -206,6 +216,7 @@ def test_related_accepts_valid_limit_and_preserves_default(app, client):
 
 
 def test_shared_int_parser_covers_default_type_and_bounds():
+    """The shared int parser handles default, type, and min/max bounds."""
     app = Flask(__name__)
 
     with app.test_request_context("/?limit="):
@@ -224,6 +235,7 @@ def test_shared_int_parser_covers_default_type_and_bounds():
 
 
 def test_shared_enum_parser_normalizes_and_names_bad_parameter():
+    """The shared enum parser normalizes case and names the bad parameter in its error."""
     app = Flask(__name__)
 
     with app.test_request_context("/?sort=LATEST"):
@@ -241,6 +253,7 @@ def test_shared_enum_parser_normalizes_and_names_bad_parameter():
 
 
 def test_shared_timestamp_parser_accepts_unix_and_iso_and_rejects_bounds():
+    """The shared timestamp parser accepts unix and ISO values and rejects out-of-range ones."""
     app = Flask(__name__)
 
     with app.test_request_context("/?since=1700000000"):

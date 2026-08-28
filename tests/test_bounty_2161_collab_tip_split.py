@@ -24,6 +24,7 @@ def _live():
 
 
 def _conn():
+    """A direct SQLite connection to the live server DB for seeding/asserts."""
     import os
     server = _live()
     path = str(server.DB_PATH)
@@ -34,6 +35,7 @@ def _conn():
 
 
 def _register(app, name):
+    """Register an agent via the API and return its API key."""
     server = _live()
     client = app.test_client()
     resp = client.post(
@@ -45,6 +47,7 @@ def _register(app, name):
 
 
 def _accept_terms(app, name):
+    """Register an agent and accept ToS, returning the API key."""
     server = _live()
     api_key = _register(app, name)
     client = app.test_client()
@@ -58,6 +61,7 @@ def _accept_terms(app, name):
 
 
 def _set_balance(name, balance):
+    """Set an agent's RTC balance directly."""
     conn = _conn()
     conn.execute(
         "UPDATE agents SET rtc_balance = ? WHERE agent_name = ?",
@@ -68,6 +72,7 @@ def _set_balance(name, balance):
 
 
 def _get_balance(name):
+    """Read an agent's RTC balance directly."""
     conn = _conn()
     row = conn.execute(
         "SELECT rtc_balance FROM agents WHERE agent_name = ?", (name,)
@@ -77,6 +82,7 @@ def _get_balance(name):
 
 
 def _get_id(name):
+    """Read an agent's row id directly."""
     conn = _conn()
     row = conn.execute(
         "SELECT id FROM agents WHERE agent_name = ?", (name,)
@@ -86,6 +92,7 @@ def _get_id(name):
 
 
 def _insert_video_with_collabs(owner_name, collaborator_names, video_id):
+    """Insert a video owned by one agent with the given collaborator ids."""
     owner_id = _get_id(owner_name)
     collab_ids = [_get_id(n) for n in collaborator_names]
     conn = _conn()
@@ -108,6 +115,7 @@ def _insert_video_with_collabs(owner_name, collaborator_names, video_id):
 
 
 def _query(sql, params=()):
+    """Run a read-only SQL query and return the rows."""
     conn = _conn()
     cur = conn.execute(sql, params)
     rows = cur.fetchall()
@@ -119,6 +127,7 @@ class TestCollabTipSplit:
     """Bounty #2161: split-tip behavior on co-uploaded videos."""
 
     def test_tip_with_no_collaborators_full_to_primary(self, app, client):
+        """A tip on a video with no collaborators goes entirely to the primary owner."""
         _accept_terms(app, "test_2161_p_nc")
         tipper_key = _accept_terms(app, "test_2161_t_nc")
         _set_balance("test_2161_p_nc", 0)
@@ -139,6 +148,7 @@ class TestCollabTipSplit:
         assert tips[0][1] == pytest.approx(0.12, abs=1e-6)
 
     def test_tip_with_two_collaborators_splits_evenly(self, app, client):
+        """A tip on a video with two collaborators splits evenly among all three."""
         _accept_terms(app, "test_2161_p_2c")
         _accept_terms(app, "test_2161_ca_2c")
         _accept_terms(app, "test_2161_cb_2c")
@@ -176,6 +186,7 @@ class TestCollabTipSplit:
         assert reasons[_get_id("test_2161_cb_2c")] == "tip_split_collab"
 
     def test_tip_rounding_diff_to_primary(self, app, client):
+        """Rounding remainder from an even split is assigned to the primary owner."""
         _accept_terms(app, "test_2161_p_r")
         _accept_terms(app, "test_2161_ca_r")
         _accept_terms(app, "test_2161_cb_r")
@@ -205,6 +216,7 @@ class TestCollabTipSplit:
         assert total == pytest.approx(0.10, abs=1e-6)
 
     def test_self_in_collaborators_filtered_out(self, app, client):
+        """A tipper registered as a collaborator on the video is excluded from their own split."""
         _accept_terms(app, "test_2161_p_s")
         _accept_terms(app, "test_2161_ca_s")
         tipper_key = _accept_terms(app, "test_2161_t_s")
@@ -229,6 +241,7 @@ class TestCollabTipSplit:
         assert self_tips[0][0] == 0
 
     def test_insufficient_balance_no_partial_split(self, app, client):
+        """An insufficient tipper balance fails the whole tip with no partial split."""
         _accept_terms(app, "test_2161_p_ib")
         _accept_terms(app, "test_2161_ca_ib")
         tipper_key = _accept_terms(app, "test_2161_t_ib")

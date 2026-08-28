@@ -16,6 +16,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture
 def ban_client(tmp_path):
+    """Banano blueprint app with an isolated SQLite DB and per-request connection hooks."""
     db_path = tmp_path / "bottube.db"
     app = Flask(__name__)
     app.secret_key = "test-secret-key"
@@ -24,11 +25,13 @@ def ban_client(tmp_path):
 
     @app.before_request
     def before_request():
+        """Open and store the per-request test DB connection."""
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
 
     @app.teardown_request
     def teardown_request(_exc):
+        """Close the per-request test DB connection after each request."""
         db = getattr(g, "db", None)
         if db is not None:
             db.close()
@@ -68,11 +71,13 @@ def ban_client(tmp_path):
 
 
 def _ban_transaction_count(db_path):
+    """Row count of ban_transactions, to assert no write occurred."""
     with sqlite3.connect(db_path) as db:
         return db.execute("SELECT COUNT(*) FROM ban_transactions").fetchone()[0]
 
 
 def test_banano_info_endpoint_is_public(ban_client):
+    """The chain-info endpoint is public and reports the banano chain."""
     response = ban_client.get("/api/banano/info")
 
     assert response.status_code == 200
@@ -86,6 +91,7 @@ def test_banano_info_endpoint_is_public(ban_client):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True, 0, -1])
 def test_ban_tip_rejects_invalid_amounts_without_writes(ban_client, amount):
+    """Invalid tip amounts are rejected with 400 and no transaction is written."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post("/ban/tip", json={"to_agent": "bob", "amount": amount})
@@ -97,6 +103,7 @@ def test_ban_tip_rejects_invalid_amounts_without_writes(ban_client, amount):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True, 0, -1])
 def test_ban_withdraw_rejects_invalid_amounts_without_writes(ban_client, amount):
+    """Invalid withdraw amounts are rejected with 400 and no transaction is written."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post(
@@ -110,6 +117,7 @@ def test_ban_withdraw_rejects_invalid_amounts_without_writes(ban_client, amount)
 
 
 def test_ban_tip_rejects_non_object_json_body(ban_client):
+    """A non-object tip JSON body is rejected with 400 and no transaction is written."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post("/ban/tip", json=["not", "an", "object"])
@@ -120,6 +128,7 @@ def test_ban_tip_rejects_non_object_json_body(ban_client):
 
 
 def test_valid_ban_tip_still_records_sender_and_recipient_rows(ban_client):
+    """A well-formed tip still records the sender/recipient transaction rows."""
     response = ban_client.post("/ban/tip", json={"to_agent": "bob", "amount": "1.25"})
 
     assert response.status_code == 200
@@ -142,6 +151,7 @@ def test_valid_ban_tip_still_records_sender_and_recipient_rows(ban_client):
 
 
 def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
+    """A non-object reward body is rejected with 400 and no transaction is written."""
     before = _ban_transaction_count(ban_client.db_path)
 
     response = ban_client.post("/ban/reward-video-gen", json=["not", "an", "object"])
@@ -153,6 +163,7 @@ def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
 
 @pytest.mark.parametrize("field", ["agent_name", "video_id", "gen_method"])
 def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field):
+    """Non-string reward fields are rejected with 400 and no transaction is written."""
     before = _ban_transaction_count(ban_client.db_path)
     payload = {
         "agent_name": "alice",
@@ -170,6 +181,7 @@ def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field
 
 @pytest.mark.parametrize("query", ["limit=0", "limit=-1", "offset=-1"])
 def test_ban_transactions_rejects_non_positive_pagination(ban_client, query):
+    """Non-positive transaction pagination is rejected with 400."""
     response = ban_client.get(f"/ban/transactions/alice?{query}")
 
     assert response.status_code == 400
@@ -177,6 +189,7 @@ def test_ban_transactions_rejects_non_positive_pagination(ban_client, query):
 
 
 def test_valid_ban_video_generation_reward_still_records_reward(ban_client):
+    """A well-formed video-generation reward still records the reward transaction."""
     response = ban_client.post(
         "/ban/reward-video-gen",
         json={"agent_name": "alice", "video_id": "video-1", "gen_method": "text"},
