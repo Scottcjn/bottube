@@ -78,6 +78,48 @@ def test_vid_fields_applies_defaults_and_derived_urls():
     }
 
 
+def test_vid_fields_rejects_unsafe_thumbnail_urls_and_quotes_ids():
+    fields = feed_blueprint._vid_fields(
+        {
+            "id": "vid 123/<bad>",
+            "thumbnail_url": "javascript:alert(1)",
+        }
+    )
+
+    assert fields["thumb"] == "https://bottube.ai/api/videos/vid%20123%2F%3Cbad%3E/thumbnail"
+    assert fields["stream"] == "https://bottube.ai/api/videos/vid%20123%2F%3Cbad%3E/stream"
+    assert fields["watch"] == "https://bottube.ai/watch/vid%20123%2F%3Cbad%3E"
+
+
+def test_video_description_html_uses_accessible_lazy_thumbnail_markup():
+    html = feed_blueprint._video_description_html(
+        {
+            "thumb": "https://cdn.example.test/thumb.jpg?x=1&y=2",
+            "title": "A <great> video",
+            "desc": "hello",
+        }
+    )
+
+    assert '<img src="https://cdn.example.test/thumb.jpg?x=1&amp;y=2"' in html
+    assert 'alt="Video thumbnail: A &lt;great&gt; video"' in html
+    assert 'loading="lazy" decoding="async" width="720" height="720"' in html
+    assert "<p>hello</p>" in html
+
+
+def test_video_description_html_omits_unsafe_thumbnail_url():
+    html = feed_blueprint._video_description_html(
+        {
+            "thumb": "javascript:alert(1)",
+            "title": "Unsafe thumb",
+            "desc": "description",
+        }
+    )
+
+    assert "<img" not in html
+    assert "javascript:" not in html
+    assert html == "<p>description</p>"
+
+
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
@@ -164,6 +206,35 @@ def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatc
     ]
 
 
+def test_fetch_videos_does_not_trust_unlisted_host_header(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            calls.append(("raise_for_status",))
+
+        def json(self):
+            return {"videos": [{"id": "one"}]}
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params, timeout))
+        return FakeResponse()
+
+    app = Flask(__name__)
+    monkeypatch.delenv("BOTTUBE_API_BASE", raising=False)
+    monkeypatch.delenv("BOTTUBE_FEED_ALLOWED_HOSTS", raising=False)
+    monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
+
+    with app.test_request_context("/feed/rss", headers={"Host": "169.254.169.254"}):
+        videos = feed_blueprint._fetch_videos(limit=2)
+
+    assert videos == [{"id": "one"}]
+    assert calls == [
+        ("https://bottube.ai/api/videos", {"per_page": 2}, 10),
+        ("raise_for_status",),
+    ]
+
+
 def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
     def fake_get(url, params, timeout):
         raise RuntimeError("network unavailable")
@@ -200,18 +271,44 @@ def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
 
 
 def test_base_api_url_uses_request_host_when_env_unset():
-    """Test that _base_api_url falls back to request.host when BOTTUBE_API_BASE is unset."""
+    """Trusted request hosts still work when BOTTUBE_API_BASE is unset."""
     import os
     from unittest import mock
 
     # Ensure BOTTUBE_API_BASE is not set for this test
     with mock.patch.dict(os.environ, {}, clear=True):
-        # Test with a provided host
-        assert feed_blueprint._base_api_url(host="example.com") == "https://example.com"
-        assert feed_blueprint._base_api_url(host="api.test.local:8080") == "https://api.test.local:8080"
+        assert feed_blueprint._base_api_url(host="bottube.ai") == "https://bottube.ai"
+        assert feed_blueprint._base_api_url(host="www.bottube.ai") == "https://www.bottube.ai"
+        assert feed_blueprint._base_api_url(host="localhost:8097") == "http://localhost:8097"
 
         # Test fallback to localhost when no host provided
         assert feed_blueprint._base_api_url() == "http://127.0.0.1:5000"
+
+
+def test_base_api_url_rejects_untrusted_request_host_when_env_unset():
+    """Untrusted Host headers must not become outbound feed API origins."""
+    import os
+    from unittest import mock
+
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert feed_blueprint._base_api_url(host="169.254.169.254") == "https://bottube.ai"
+        assert feed_blueprint._base_api_url(host="evil.example.test") == "https://bottube.ai"
+        assert feed_blueprint._base_api_url(host="bottube.ai@evil.example.test") == "https://bottube.ai"
+
+
+def test_base_api_url_allows_explicit_feed_host_allowlist():
+    import os
+    from unittest import mock
+
+    with mock.patch.dict(
+        os.environ,
+        {"BOTTUBE_FEED_ALLOWED_HOSTS": "feeds.example.test"},
+        clear=True,
+    ):
+        assert (
+            feed_blueprint._base_api_url(host="feeds.example.test:8443")
+            == "https://feeds.example.test:8443"
+        )
 
 
 def test_base_api_url_respects_env_override():

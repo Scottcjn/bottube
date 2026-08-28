@@ -144,8 +144,95 @@
 
   function allButtons(){ return document.querySelectorAll(".gen"); }
   function setBusy(b){ allButtons().forEach(function(x){ x.disabled = b; }); }
-  function say(m){ statusEl.innerHTML = m; }
-  function clearResult(){ resultEl.innerHTML = ""; }
+  function say(m){ statusEl.textContent = m == null ? "" : String(m); }
+  function clearResult(){ resultEl.replaceChildren(); }
+  function safeAmount(value) {
+    var n = Number(value);
+    return Number.isFinite(n) ? String(n) : "?";
+  }
+  function safeHttpUrl(value) {
+    try {
+      var url = new URL(String(value || ""), window.location.origin);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+      return url.href;
+    } catch (e) {
+      return "";
+    }
+  }
+  function safeSameOriginUrl(value) {
+    var href = safeHttpUrl(value);
+    if (!href) return "";
+    try {
+      return new URL(href).origin === window.location.origin ? href : "";
+    } catch (e) {
+      return "";
+    }
+  }
+  function setBalance(value) {
+    var strong = document.createElement("strong");
+    strong.textContent = safeAmount(value) + " RTC";
+    balEl.replaceChildren("Your balance: ", strong);
+  }
+  function setLoginPrompt() {
+    var link = document.createElement("a");
+    link.href = "/login";
+    link.textContent = "log in";
+    balEl.replaceChildren("Sign in to generate — ", link, ".");
+  }
+  function renderDownloadLink(url, label) {
+    var wrap = document.createElement("div");
+    wrap.style.marginTop = "8px";
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "";
+    link.textContent = label;
+    wrap.appendChild(link);
+    return wrap;
+  }
+  function renderImageResult(mediaUrl) {
+    var img = document.createElement("img");
+    img.src = mediaUrl;
+    img.alt = "generated image";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.width = 720;
+    img.height = 720;
+    resultEl.replaceChildren(img, renderDownloadLink(mediaUrl, "Download image →"));
+  }
+  function renderAudioResult(mediaUrl) {
+    var audio = document.createElement("audio");
+    audio.controls = true;
+    audio.autoplay = true;
+    audio.src = mediaUrl;
+    resultEl.replaceChildren(audio, renderDownloadLink(mediaUrl, "Download audio →"));
+  }
+  function renderModelResult(modelUrl, formats) {
+    var viewer = document.createElement("model-viewer");
+    viewer.src = modelUrl;
+    viewer.setAttribute("camera-controls", "");
+    viewer.setAttribute("auto-rotate", "");
+    viewer.setAttribute("ar", "");
+    viewer.setAttribute("shadow-intensity", "1");
+    viewer.style.cssText = "width:100%;height:360px;background:#111;border-radius:8px;";
+
+    var wrap = renderDownloadLink(modelUrl, "Download GLB →");
+    if (Array.isArray(formats) && formats.length) {
+      var safeFormats = formats.map(function (item) { return String(item); }).join(", ");
+      wrap.appendChild(document.createTextNode(" · formats: " + safeFormats));
+    }
+    resultEl.replaceChildren(viewer, wrap);
+  }
+  function sayWithWatchLink(watchUrl) {
+    var href = safeSameOriginUrl(watchUrl);
+    if (!href) {
+      say("🎬 Done — check your channel.");
+      return;
+    }
+    var link = document.createElement("a");
+    link.href = href;
+    link.textContent = "Watch your video →";
+    statusEl.replaceChildren("🎬 Done! ", link);
+  }
 
   window.stMode = function (mode) {
     curMode = mode;
@@ -173,8 +260,8 @@
         signedIn = !!d.signed_in;
         voiceEnabled = d.voice_enabled !== false;
         try { i2vRate = d.tiers.video.full_ai.rtc_per_sec || 1.0; window.stSecondsI2v && window.stSecondsI2v(); } catch (e) {}
-        if (!signedIn) { balEl.innerHTML = 'Sign in to generate — <a href="/login">log in</a>.'; setBusy(true); }
-        else { balEl.innerHTML = "Your balance: <strong>" + (d.rtc_balance != null ? d.rtc_balance : "?") + " RTC</strong>"; }
+        if (!signedIn) { setLoginPrompt(); setBusy(true); }
+        else { setBalance(d.rtc_balance); }
         if (!voiceEnabled) {
           var vb = document.getElementById("voice-btn");
           if (vb) { vb.disabled = true; vb.textContent = "Voice temporarily unavailable"; }
@@ -209,16 +296,22 @@
           else say(res.d.error || ("error " + res.status));
           return;
         }
-        balEl.innerHTML = "Your balance: <strong>" + res.d.new_balance + " RTC</strong>";
+        setBalance(res.d.new_balance);
         if (res.d.type === "image") {
           setBusy(false); say("✅ Charged " + res.d.charged_rtc + " RTC.");
-          resultEl.innerHTML = '<img src="' + res.d.media_url + '" alt="generated image"><div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download image →</a></div>';
+          var imageUrl = safeHttpUrl(res.d.media_url);
+          if (imageUrl) renderImageResult(imageUrl);
+          else say("Image generated, but the returned media URL was invalid.");
         } else if (res.d.type === "voice") {
           setBusy(false); say("✅ Charged " + res.d.charged_rtc + " RTC.");
-          resultEl.innerHTML = '<audio controls autoplay src="' + res.d.media_url + '"></audio><div style="margin-top:8px"><a href="' + res.d.media_url + '" download>Download audio →</a></div>';
+          var audioUrl = safeHttpUrl(res.d.media_url);
+          if (audioUrl) renderAudioResult(audioUrl);
+          else say("Voice generated, but the returned media URL was invalid.");
         } else {
           say("✅ Charged " + res.d.charged_rtc + " RTC. Generating… this can take a couple minutes.");
-          poll(res.d.status_url);
+          var statusUrl = safeSameOriginUrl(res.d.status_url);
+          if (statusUrl) poll(statusUrl);
+          else { setBusy(false); say("Generation started, but the returned status URL was invalid."); }
         }
       })
       .catch(function(){ setBusy(false); say("Couldn't reach the studio. Try again."); });
@@ -262,16 +355,13 @@
         if (d.model_url) {
           clearInterval(iv); setBusy(false);
           say("🧊 Done! Charged successfully.");
-          resultEl.innerHTML =
-            '<model-viewer src="' + d.model_url + '" camera-controls auto-rotate ' +
-            'style="width:100%;height:360px;background:#111;border-radius:8px;" ' +
-            'ar shadow-intensity="1"></model-viewer>' +
-            '<div style="margin-top:8px"><a href="' + d.model_url + '" download>Download GLB →</a>' +
-            ((d.formats && d.formats.length) ? ' · formats: ' + d.formats.join(", ") : "") + '</div>';
+          var modelUrl = safeHttpUrl(d.model_url);
+          if (modelUrl) renderModelResult(modelUrl, d.formats);
+          else say("3D model generated, but the returned model URL was invalid.");
         } else if (d.status === "completed" || d.video_id) {
           clearInterval(iv); setBusy(false);
           var watch = d.watch_url || (d.video_id ? ("/watch/" + d.video_id) : null);
-          say(watch ? ("🎬 Done! <a href='" + watch + "'>Watch your video →</a>") : "🎬 Done — check your channel.");
+          watch ? sayWithWatchLink(watch) : say("🎬 Done — check your channel.");
         } else if (d.status === "failed" || d.error) {
           clearInterval(iv); setBusy(false);
           say("Generation failed: " + (d.error || "unknown") + ". (RTC for failed jobs is refunded.)");
