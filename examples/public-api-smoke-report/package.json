@@ -1,0 +1,28 @@
+{
+  "name": "bottube-public-api-smoke-report",
+  "version": "1.0.0",
+  "description": "Generate a read-only public API smoke report for BoTTube using the JavaScript SDK.",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "bottube-smoke-report": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check index.test.js",
+    "test": "node --test index.test.js"
+  },
+  "dependencies": {
+    "@bottube/sdk": "file:../../js-sdk"
+  },
+  "keywords": [
+    "bottube",
+    "sdk",
+    "smoke-test",
+    "api",
+    "markdown",
+    "json"
+  ],
+  "author": "L1nkinPark",
+  "license": "MIT"
+}
