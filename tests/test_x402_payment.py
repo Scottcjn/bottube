@@ -49,34 +49,42 @@ class TestAmountToRaw:
     """Tests for _amount_to_raw() — USDC decimal to raw integer."""
 
     def test_zero_amount(self):
+        """0 USDC converts to 0 raw units."""
         assert _amount_to_raw(0) == 0
 
     def test_one_usdc(self):
+        """1 USDC converts to 1_000_000 raw units (6 decimals)."""
         # 1 USDC = 1_000_000 raw (6 decimals)
         assert _amount_to_raw(1) == 1_000_000
 
     def test_small_amount(self):
+        """0.001 USDC converts to 1000 raw units."""
         # 0.001 USDC = 1000 raw
         assert _amount_to_raw(0.001) == 1000
 
     def test_very_small_amount(self):
+        """Sub-0.001 amounts still convert losslessly at raw granularity."""
         # 0.000001 USDC = 1 raw (smallest unit)
         assert _amount_to_raw(0.000001) == 1
 
     def test_string_amount(self):
+        """Numeric strings are accepted and converted."""
         # Function accepts string representation
         assert _amount_to_raw("0.01") == 10_000
 
     def test_large_amount(self):
+        """Very large amounts convert without overflow."""
         # 1000 USDC
         assert _amount_to_raw(1000) == 1_000_000_000
 
     def test_rounds_down_truncation(self):
+        """Sub-unit precision is truncated (floored), never rounded up."""
         # Amounts with more than 6 decimal places should be truncated (ROUND_DOWN)
         # 0.0000001 USDC = 0.1 raw -> rounds down to 0
         assert _amount_to_raw(0.0000001) == 0
 
     def test_decimal_type_input(self):
+        """Decimal inputs convert exactly to raw units."""
         from decimal import Decimal
         assert _amount_to_raw(Decimal("0.5")) == 500_000
 
@@ -85,6 +93,7 @@ class TestParsePaymentReceipt:
     """Tests for _parse_payment_receipt() — JSON receipt parsing."""
 
     def test_valid_receipt(self):
+        """A well-formed payment receipt parses into its fields."""
         data = json.dumps({
             "tx_hash": "0x" + "ab" * 32,
             "network": "base",
@@ -98,23 +107,28 @@ class TestParsePaymentReceipt:
         assert result["amount_raw"] == 1000
 
     def test_empty_string_raises(self):
+        """An empty receipt string raises a validation error."""
         with pytest.raises(ValueError, match="invalid_payment_format"):
             _parse_payment_receipt("")
 
     def test_non_json_raises(self):
+        """Non-JSON receipt text raises a validation error."""
         with pytest.raises(ValueError, match="invalid_payment_format"):
             _parse_payment_receipt("not json at all")
 
     def test_non_object_json_raises(self):
+        """A JSON array/scalar receipt raises a validation error."""
         with pytest.raises(ValueError, match="invalid_payment_format"):
             _parse_payment_receipt("[1, 2, 3]")
 
     def test_missing_tx_hash_defaults_empty(self):
+        """A receipt without tx_hash parses with an empty hash."""
         data = json.dumps({"network": "base", "recipient": "0xabc", "amount": 1})
         result = _parse_payment_receipt(data)
         assert result["tx_hash"] == ""
 
     def test_missing_amount_defaults_none(self):
+        """A receipt without amount parses with amount None."""
         data = json.dumps({
             "tx_hash": "0x" + "ab" * 32,
             "network": "base",
@@ -124,6 +138,7 @@ class TestParsePaymentReceipt:
         assert result["amount_raw"] is None
 
     def test_network_is_lowercased(self):
+        """The network field is normalized to lowercase."""
         data = json.dumps({
             "tx_hash": "0x" + "ab" * 32,
             "network": "BASE",
@@ -134,6 +149,7 @@ class TestParsePaymentReceipt:
         assert result["recipient"] == "0xabc"
 
     def test_invalid_amount_raises(self):
+        """A non-numeric amount in the receipt raises a validation error."""
         data = json.dumps({
             "tx_hash": "0x" + "ab" * 32,
             "network": "base",
@@ -144,6 +160,7 @@ class TestParsePaymentReceipt:
             _parse_payment_receipt(data)
 
     def test_whitespace_only_raises(self):
+        """A whitespace-only receipt string raises a validation error."""
         with pytest.raises(ValueError, match="invalid_payment_format"):
             _parse_payment_receipt("   ")
 
@@ -158,6 +175,7 @@ class TestCleanupPaymentCache:
     """Tests for _cleanup_payment_cache()."""
 
     def test_removes_expired_entries(self):
+        """_cleanup_payment_cache drops entries older than CACHE_TTL."""
         _payment_cache.clear()
         _payment_cache["old_tx"] = {"time": time.time() - CACHE_TTL - 100, "fingerprint": "x"}
         _payment_cache["new_tx"] = {"time": time.time(), "fingerprint": "y"}
@@ -167,6 +185,7 @@ class TestCleanupPaymentCache:
         _payment_cache.clear()
 
     def test_keeps_fresh_entries(self):
+        """Entries within CACHE_TTL survive the cleanup."""
         _payment_cache.clear()
         _payment_cache["fresh"] = {"time": time.time(), "fingerprint": "z"}
         _cleanup_payment_cache()
@@ -174,6 +193,7 @@ class TestCleanupPaymentCache:
         _payment_cache.clear()
 
     def test_empty_cache_no_error(self):
+        """Cleaning an empty cache is a no-op without errors."""
         _payment_cache.clear()
         _cleanup_payment_cache()  # Should not raise
         assert len(_payment_cache) == 0
@@ -183,14 +203,17 @@ class TestSupportedNetworks:
     """Tests for _supported_networks()."""
 
     def test_returns_list(self):
+        """_supported_networks returns a list of network names."""
         result = _supported_networks()
         assert isinstance(result, list)
 
     def test_base_always_supported(self):
+        """The Base network is always in the supported list."""
         result = _supported_networks()
         assert "base" in result
 
     def test_no_empty_strings(self):
+        """No supported network entry is an empty string."""
         result = _supported_networks()
         for net in result:
             assert net.strip() != "", "Empty string in supported networks"

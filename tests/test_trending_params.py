@@ -16,11 +16,13 @@ class TestTrendingParamParsing:
     """
 
     def _client(self):
+        """Flask test client for the trending endpoints."""
         from flask import Flask, jsonify, request
 
         app = Flask(__name__)
 
         def _parse_positive_int_query(name, default, min_value=1, max_value=None):
+            """Drive the shared parser directly through edge cases."""
             raw_value = request.args.get(name)
             if raw_value is None or raw_value == "":
                 return default, None
@@ -36,6 +38,7 @@ class TestTrendingParamParsing:
 
         @app.route("/api/trending")
         def trending():
+            """Exercise the trending endpoint through the Flask test client."""
             limit, err = _parse_positive_int_query("limit", 20, max_value=50)
             if err:
                 return err
@@ -58,6 +61,7 @@ class TestTrendingParamParsing:
         return app.test_client()
 
     def test_default_limit(self):
+        """Omitting limit uses the endpoint default."""
         r = self._client().get("/api/trending")
         assert r.status_code == 200
         data = json.loads(r.data)
@@ -66,62 +70,76 @@ class TestTrendingParamParsing:
         assert data["since"] is None
 
     def test_custom_limit(self):
+        """A valid custom limit is honored."""
         r = self._client().get("/api/trending?limit=5")
         assert r.status_code == 200
         assert json.loads(r.data)["limit"] == 5
 
     def test_limit_too_high(self):
+        """A limit above the cap is rejected with 400."""
         r = self._client().get("/api/trending?limit=51")
         assert r.status_code == 400
 
     def test_limit_zero(self):
+        """limit=0 is rejected with 400."""
         r = self._client().get("/api/trending?limit=0")
         assert r.status_code == 400
 
     def test_limit_negative(self):
+        """A negative limit is rejected with 400."""
         r = self._client().get("/api/trending?limit=-1")
         assert r.status_code == 400
 
     def test_limit_malformed(self):
+        """A non-integer limit is rejected with 400."""
         r = self._client().get("/api/trending?limit=abc")
         assert r.status_code == 400
 
     def test_days_valid(self):
+        """A valid days window is accepted."""
         r = self._client().get("/api/trending?days=7")
         assert r.status_code == 200
         assert json.loads(r.data)["days"] == 7
 
     def test_days_too_high(self):
+        """days above the cap is rejected with 400."""
         r = self._client().get("/api/trending?days=91")
         assert r.status_code == 400
 
     def test_days_zero(self):
+        """days=0 is rejected with 400."""
         r = self._client().get("/api/trending?days=0")
         assert r.status_code == 400
 
     def test_days_malformed(self):
+        """A non-integer days value is rejected with 400."""
         r = self._client().get("/api/trending?days=abc")
         assert r.status_code == 400
 
     def test_since_valid(self):
+        """A valid since timestamp is accepted."""
         r = self._client().get("/api/trending?since=1700000000")
         assert r.status_code == 200
         assert json.loads(r.data)["since"] == 1700000000
 
     def test_since_negative(self):
+        """A negative since timestamp is rejected with 400."""
         r = self._client().get("/api/trending?since=-1")
         assert r.status_code == 400
 
     def test_since_malformed(self):
+        """A malformed since timestamp is rejected with 400."""
         r = self._client().get("/api/trending?since=abc")
         assert r.status_code == 400
 
     def test_days_and_since_mutually_exclusive(self):
+        """Supplying both days and since is rejected with 400."""
         r = self._client().get("/api/trending?days=7&since=1700000000")
         assert r.status_code == 400
         assert "mutually exclusive" in json.loads(r.data)["error"]
 
     def test_empty_days_with_since_still_mutually_exclusive(self):
+        """An empty days value counts as unset, so since alone is accepted."""
         # ?days=&since=1700000000 -- both params present, must still reject
         r = self._client().get("/api/trending?days=&since=1700000000")
         assert r.status_code == 400
@@ -137,6 +155,7 @@ class TestTrendingWindowWiring:
     """
 
     def _make_db(self):
+        """Create a throwaway SQLite DB for the parser unit tests."""
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
 
