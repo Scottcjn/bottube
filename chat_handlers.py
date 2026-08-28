@@ -59,6 +59,10 @@ def init_chat_tables(db):
     db.commit()
 
 
+def _bad_request(message):
+    return jsonify({"error": message}), 400
+
+
 def _json_object_body():
     """Extract a JSON field from the request body.
     
@@ -69,7 +73,7 @@ def _json_object_body():
     if data is None:
         return {}, None
     if not isinstance(data, dict):
-        return None, (jsonify({"error": "JSON object required"}), 400)
+        return None, _bad_request("JSON object required")
     return data, None
 
 
@@ -131,7 +135,13 @@ def send_message(video_id):
     if error:
         return error
     username = session.get("username", data.get("username", "Anonymous"))
-    msg_text = (data.get("message") or "").strip()
+    msg_value = data.get("message")
+    if msg_value is None:
+        msg_text = ""
+    elif isinstance(msg_value, str):
+        msg_text = msg_value.strip()
+    else:
+        return _bad_request("message must be a string")
     if not msg_text or len(msg_text) > 500:
         return jsonify({"error": "Message must be 1-500 chars"}), 400
 
@@ -148,9 +158,9 @@ def send_message(video_id):
     is_super = _coerce_chat_flag(data.get("is_super", 0), "is_super")
     tip = _coerce_non_negative_number(data.get("tip_amount", 0), "tip_amount")
     if is_super is None:
-        return jsonify({"error": "is_super must be 0/1 or boolean"}), 400
+        return _bad_request("is_super must be 0/1 or boolean")
     if tip is None:
-        return jsonify({"error": "tip_amount must be a finite non-negative number"}), 400
+        return _bad_request("tip_amount must be a finite non-negative number")
 
     db.execute(
         "INSERT INTO chat_messages (id, video_id, user_id, username, message, is_super, tip_amount, created_at)"
@@ -169,18 +179,27 @@ def ban_user(video_id):
     data, error = _json_object_body()
     if error:
         return error
+    user_id_value = data.get("user_id")
+    if user_id_value is None:
+        user_id = ""
+    elif isinstance(user_id_value, str):
+        user_id = user_id_value.strip()
+    else:
+        return _bad_request("user_id must be a string")
+    if not user_id:
+        return _bad_request("user_id is required")
     db = get_db()
     init_chat_tables(db)
-    duration = data.get("duration")  # seconds, None = permanent
-    if duration is not None:
-        duration = _coerce_non_negative_number(duration, "duration")
+    duration = None
+    if data.get("duration") is not None:
+        duration = _coerce_non_negative_number(data.get("duration"), "duration")
         if duration is None:
-            return jsonify({"error": "duration must be a finite non-negative number"}), 400
+            return _bad_request("duration must be a finite non-negative number")
     expires = time.time() + duration if duration else None
     db.execute(
         "INSERT INTO chat_bans (id, video_id, user_id, banned_by, reason, expires_at, created_at)"
         " VALUES (?,?,?,?,?,?,?)",
-        (str(_uuid.uuid4()), video_id, data["user_id"], session.get("username", "mod"),
+        (str(_uuid.uuid4()), video_id, user_id, session.get("username", "mod"),
          data.get("reason", ""), expires, time.time()),
     )
     db.commit()
