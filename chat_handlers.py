@@ -5,6 +5,7 @@ Real-time chat for video playback, premieres, super chat, and moderation.
 Uses Flask + Flask-SocketIO, SQLite via get_db(), session/g.user patterns.
 """
 from flask import Blueprint, render_template, request, jsonify, g, session
+import math
 import sqlite3
 import time
 import uuid as _uuid
@@ -67,6 +68,27 @@ def _json_object_body():
     return data, None
 
 
+def _coerce_chat_flag(value, field_name):
+    """Return a safe 0/1 int for chat boolean-like fields."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int) and value in (0, 1):
+        return value
+    return None
+
+
+def _coerce_non_negative_number(value, field_name):
+    """Return a finite non-negative float or None when invalid."""
+    if value is None:
+        return 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    if not math.isfinite(value) or value < 0:
+        return None
+    return value
+
+
 # ── Routes ──────────────────────────────────────────────────────
 @chat_bp.route("/chat/<video_id>")
 def chat_page(video_id):
@@ -118,8 +140,12 @@ def send_message(video_id):
         return jsonify({"error": "You are banned from this chat"}), 403
 
     msg_id = str(_uuid.uuid4())
-    is_super = int(data.get("is_super", 0))
-    tip = float(data.get("tip_amount", 0))
+    is_super = _coerce_chat_flag(data.get("is_super", 0), "is_super")
+    tip = _coerce_non_negative_number(data.get("tip_amount", 0), "tip_amount")
+    if is_super is None:
+        return jsonify({"error": "is_super must be 0/1 or boolean"}), 400
+    if tip is None:
+        return jsonify({"error": "tip_amount must be a finite non-negative number"}), 400
 
     db.execute(
         "INSERT INTO chat_messages (id, video_id, user_id, username, message, is_super, tip_amount, created_at)"
@@ -135,10 +161,16 @@ def ban_user(video_id):
     """Moderator: ban a user from chat."""
     if not session.get("is_mod"):
         return jsonify({"error": "Moderator only"}), 403
-    data = request.get_json(force=True)
+    data, error = _json_object_body()
+    if error:
+        return error
     db = get_db()
     init_chat_tables(db)
     duration = data.get("duration")  # seconds, None = permanent
+    if duration is not None:
+        duration = _coerce_non_negative_number(duration, "duration")
+        if duration is None:
+            return jsonify({"error": "duration must be a finite non-negative number"}), 400
     expires = time.time() + duration if duration else None
     db.execute(
         "INSERT INTO chat_bans (id, video_id, user_id, banned_by, reason, expires_at, created_at)"
@@ -158,12 +190,23 @@ def chat_settings(video_id):
     if request.method == "POST":
         if not session.get("is_mod"):
             return jsonify({"error": "Moderator only"}), 403
-        data = request.get_json(force=True)
+        data, error = _json_object_body()
+        if error:
+            return error
+        slow_mode = _coerce_chat_flag(data.get("slow_mode", 0), "slow_mode")
+        sub_only = _coerce_chat_flag(data.get("sub_only", 0), "sub_only")
+        premiere = _coerce_chat_flag(data.get("premiere", 0), "premiere")
+        premiere_at = data.get("premiere_at")
+        if slow_mode is None or sub_only is None or premiere is None:
+            return jsonify({"error": "slow_mode, sub_only, and premiere must be 0/1 or boolean"}), 400
+        if premiere_at is not None:
+            premiere_at = _coerce_non_negative_number(premiere_at, "premiere_at")
+            if premiere_at is None:
+                return jsonify({"error": "premiere_at must be a finite non-negative number"}), 400
         db.execute(
             "INSERT OR REPLACE INTO chat_settings (video_id, slow_mode, sub_only, premiere, premiere_at)"
             " VALUES (?,?,?,?,?)",
-            (video_id, int(data.get("slow_mode", 0)), int(data.get("sub_only", 0)),
-             int(data.get("premiere", 0)), data.get("premiere_at")),
+            (video_id, slow_mode, sub_only, premiere, premiere_at),
         )
         db.commit()
         return jsonify({"status": "updated"})
