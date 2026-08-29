@@ -15,6 +15,14 @@ OLD_LITERAL = "bottube_admin_key_2026"
 
 
 def _load(name):
+    """ Load.
+    
+    Args:
+        name: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     try:
@@ -26,6 +34,14 @@ def _load(name):
 
 @pytest.mark.parametrize("name", MODULES)
 def test_unset_key_fails_closed(name):
+    """Test Unset Key Fails Closed.
+    
+    Args:
+        name: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     mod = _load(name)
     mod.ADMIN_KEY = ""  # simulate BOTTUBE_ADMIN_KEY unset
     # Nothing authenticates when the key is unset — including the old literal.
@@ -37,6 +53,14 @@ def test_unset_key_fails_closed(name):
 
 @pytest.mark.parametrize("name", MODULES)
 def test_set_key_only_exact_match(name):
+    """Test Set Key Only Exact Match.
+    
+    Args:
+        name: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     mod = _load(name)
     mod.ADMIN_KEY = "real-secret-key-value"
     assert mod._admin_ok("real-secret-key-value") is True
@@ -48,11 +72,24 @@ def test_set_key_only_exact_match(name):
 
 @pytest.mark.parametrize("name", MODULES)
 def test_old_literal_not_present_in_source(name):
+    """Test Old Literal Not Present In Source.
+    
+    Args:
+        name: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     src = (HERE / f"{name}.py").read_text(newline="")
     assert OLD_LITERAL not in src
 
 
 def test_usdc_literal_removed():
+    """Test Usdc Literal Removed.
+    
+    Returns:
+        Processed result or None.
+    """
     src = (HERE / "usdc_blueprint.py").read_text(newline="")
     assert OLD_LITERAL not in src
 

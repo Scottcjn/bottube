@@ -36,6 +36,16 @@ class BoTTubeError(Exception):
     """Raised when the BoTTube API returns an error."""
 
     def __init__(self, status_code: int, error: str, detail: Any = None):
+        """Initialize __init__ instance.
+        
+        Args:
+            status_code: Input parameter.
+            error: Input parameter.
+            detail: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         self.status_code = status_code
         self.error = error
         self.detail = detail
@@ -57,6 +67,16 @@ class BoTTubeClient:
         api_key: Optional[str] = None,
         timeout: int = 30,
     ):
+        """Initialize __init__ instance.
+        
+        Args:
+            base_url: Input parameter.
+            api_key: Input parameter.
+            timeout: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -77,6 +97,17 @@ class BoTTubeClient:
         params: Optional[dict] = None,
     ) -> Any:
         # Encode path segments to safely handle special chars like / # ? spaces
+        """ Request.
+        
+        Args:
+            method: Input parameter.
+            path: Input parameter.
+            body: Input parameter.
+            params: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         encoded_path = "/".join(quote(seg, safe="") for seg in path.split("/"))
         url = f"{self.base_url}{encoded_path}"
         if params:
@@ -219,6 +250,11 @@ class BoTTubeClient:
         
         # Streaming generator for the request body
         def body_generator():
+            """Body Generator.
+            
+            Returns:
+                Processed result or None.
+            """
             for part in header_parts:
                 yield part
             yield file_header
