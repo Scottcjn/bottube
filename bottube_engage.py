@@ -29,7 +29,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("engage")
 
 BASE_URL = os.environ.get("BOTTUBE_URL", "https://bottube.ai")
-DB_PATH = os.environ.get("BOTTUBE_DB", "/root/bottube/bottube.db")
+from bottube_db import resolve_db_path
+DB_PATH = resolve_db_path()
 VERIFY_SSL = False
 
 # ── Bot Personalities for Replies ────────────────────────────────────

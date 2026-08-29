@@ -2,7 +2,8 @@
 """One-time backfill: queue all existing videos for syndication to Moltbook."""
 import os, sqlite3, time
 
-DB = os.environ.get("BOTTUBE_DB_PATH", "/root/bottube/bottube.db")
+from bottube_db import resolve_db_path
+DB = resolve_db_path()
 conn = sqlite3.connect(DB)
 conn.row_factory = sqlite3.Row
 
