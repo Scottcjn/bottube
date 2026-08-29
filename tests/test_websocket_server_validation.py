@@ -98,3 +98,59 @@ def test_chat_message_accepts_valid_string_message(monkeypatch, tmp_path):
             ("video-1",),
         ).fetchone()
     assert row == ("hello",)
+
+
+def test_chat_message_rejects_non_finite_tip(monkeypatch):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    app = Flask(__name__)
+    websocket_server._last_message_time.clear()
+
+    with app.app_context():
+        websocket_server.on_chat_message(
+            {
+                "video_id": "video-1",
+                "username": "alice",
+                "user_id": "user-1",
+                "message": "hello",
+                "tip_amount": float("nan"),
+            }
+        )
+
+    assert events == [
+        (("error", {"message": "tip_amount must be a finite non-negative number"}), {})
+    ]
+
+
+def test_super_chat_rejects_zero_tip(monkeypatch):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+
+    websocket_server.on_super_chat(
+        {
+            "video_id": "video-1",
+            "username": "alice",
+            "user_id": "user-1",
+            "message": "hello",
+            "tip_amount": 0,
+        }
+    )
+
+    assert events == [
+        (("error", {"message": "tip_amount must be a finite positive number"}), {})
+    ]
+
+
+def test_mod_action_timeout_rejects_non_numeric_duration(monkeypatch):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+
+    websocket_server.on_mod_action(
+        {
+            "action": "timeout",
+            "video_id": "video-1",
+            "target_user_id": "user-1",
+            "duration": "later",
+        }
+    )
+
+    assert events == [
+        (("error", {"message": "duration must be a finite non-negative number"}), {})
+    ]

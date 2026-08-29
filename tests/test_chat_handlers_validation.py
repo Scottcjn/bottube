@@ -62,3 +62,39 @@ def test_send_message_still_records_valid_json_object(chat_client):
     assert resp.status_code == 200
     assert resp.get_json()["status"] == "sent"
     assert _chat_message_count(chat_client.db_path) == 1
+
+
+def test_send_message_rejects_non_finite_tip_without_insert(chat_client):
+    resp = chat_client.post(
+        "/api/chat/video-1/send",
+        json={"username": "Ada", "message": "Hello chat", "tip_amount": float("inf")},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "tip_amount must be a finite non-negative number"}
+    assert _chat_message_count(chat_client.db_path) == 0
+
+
+def test_ban_rejects_non_numeric_duration(chat_client):
+    with chat_client.session_transaction() as sess:
+        sess["is_mod"] = True
+        sess["username"] = "mod"
+    resp = chat_client.post(
+        "/api/chat/video-1/ban",
+        json={"user_id": "user-1", "duration": "forever"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "duration must be a finite non-negative number"}
+
+
+def test_settings_reject_non_boolean_like_flags(chat_client):
+    with chat_client.session_transaction() as sess:
+        sess["is_mod"] = True
+    resp = chat_client.post(
+        "/api/chat/video-1/settings",
+        json={"slow_mode": 2, "sub_only": 0, "premiere": 1},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "slow_mode, sub_only, and premiere must be 0/1 or boolean"}
