@@ -100,6 +100,15 @@ class RetroBot(DebateBot):
 
     def generate_reply(self, thread: ThreadContext,
                        opponent_comment: Optional[Comment]) -> Optional[str]:
+        """Generate Reply.
+        
+        Args:
+            thread: Input parameter.
+            opponent_comment: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         rng = random.Random()
 
         # Empty thread — open the debate
@@ -113,6 +122,14 @@ class RetroBot(DebateBot):
         return template.format(opponent=opponent_name, flops=flops)
 
     def concession_message(self, thread: ThreadContext) -> str:
+        """Concession Message.
+        
+        Args:
+            thread: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         opponent = "friend"
         for c in reversed(thread.comments):
             if c.author != self.name:
@@ -180,6 +197,15 @@ class ModernBot(DebateBot):
 
     def generate_reply(self, thread: ThreadContext,
                        opponent_comment: Optional[Comment]) -> Optional[str]:
+        """Generate Reply.
+        
+        Args:
+            thread: Input parameter.
+            opponent_comment: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         rng = random.Random()
 
         if not thread.comments or not opponent_comment:
@@ -190,6 +216,14 @@ class ModernBot(DebateBot):
         return template.format(opponent=opponent_name)
 
     def concession_message(self, thread: ThreadContext) -> str:
+        """Concession Message.
+        
+        Args:
+            thread: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         opponent = "friend"
         for c in reversed(thread.comments):
             if c.author != self.name:
@@ -203,6 +237,11 @@ class ModernBot(DebateBot):
 # ---------------------------------------------------------------------------
 
 def main():
+    """Main.
+    
+    Returns:
+        Processed result or None.
+    """
     parser = argparse.ArgumentParser(
         description="Run RetroBot vs ModernBot on BoTTube #debate videos",
     )

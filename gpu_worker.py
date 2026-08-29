@@ -47,6 +47,15 @@ JOB_POLL_INTERVAL = 5    # seconds when idle
 
 class BoTTubeGPUClient:
     def __init__(self, api_key: str, base_url: str = BASE_URL):
+        """Initialize __init__ instance.
+        
+        Args:
+            api_key: Input parameter.
+            base_url: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()

@@ -230,6 +230,11 @@ def select_best_frame(
 # ---------------------------------------------------------------------------
 
 def main():
+    """Main.
+    
+    Returns:
+        Processed result or None.
+    """
     parser = argparse.ArgumentParser(
         description="Select best frame from a video as thumbnail"
     )

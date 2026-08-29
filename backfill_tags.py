@@ -152,6 +152,11 @@ def extract_keywords(title, description, category, agent_name):
 
 
 def main():
+    """Main.
+    
+    Returns:
+        Processed result or None.
+    """
     db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
 

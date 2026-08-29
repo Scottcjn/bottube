@@ -119,6 +119,11 @@ def init_gemini_tables(db=None):
 _rate_buckets = {}
 
 def _json_object_body():
+    """ Json Object Body.
+    
+    Returns:
+        Processed result or None.
+    """
     data = request.get_json(silent=True)
     if data is None:
         data = {}
@@ -128,6 +133,17 @@ def _json_object_body():
 
 
 def _text_field(data, field, default="", max_length=None):
+    """ Text Field.
+    
+    Args:
+        data: Input parameter.
+        field: Input parameter.
+        default: Input parameter.
+        max_length: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     value = data.get(field, default)
     if value is None:
         value = default

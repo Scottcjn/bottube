@@ -40,9 +40,22 @@ class ABTestManager:
     """Thumbnail A/B test manager backed by SQLite."""
 
     def __init__(self, db_path: str | Path):
+        """Initialize __init__ instance.
+        
+        Args:
+            db_path: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         self.db_path = str(db_path)
 
     def _connect(self) -> sqlite3.Connection:
+        """ Connect.
+        
+        Returns:
+            Processed result or None.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")

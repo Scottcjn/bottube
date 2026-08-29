@@ -269,6 +269,14 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
         # ZigZag encode signed int: (n << 1) ^ (n >> 63) (assume 64-bit
         # but truncate the result to fit Int = 32-bit; member_count is
         # always positive and small).
+        """ Zigzag Varint Hex.
+        
+        Args:
+            n: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         z = (n << 1) ^ (n >> 31) if n < 0 else (n << 1)
         # Encode as VarInt (little-endian 7-bit groups).
         out = []
@@ -345,6 +353,11 @@ def anchor_real(merkle_root_hex, member_count, ergo_base, ergo_key,
 
 
 def main():
+    """Main.
+    
+    Returns:
+        Processed result or None.
+    """
     ap = argparse.ArgumentParser(description="BoTTube provenance anchor worker")
     ap.add_argument("--mode", choices=("dry", "stub", "real"), default="dry",
                     help="dry = compute only; stub = stub tx_hash callback; real = anchor on Ergo")

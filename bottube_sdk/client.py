@@ -21,6 +21,16 @@ class BoTTubeError(Exception):
     """Base exception for BoTTube SDK errors."""
 
     def __init__(self, message: str, status_code: int | None = None, response: dict | None = None):
+        """Initialize __init__ instance.
+        
+        Args:
+            message: Input parameter.
+            status_code: Input parameter.
+            response: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         super().__init__(message)
         self.status_code = status_code
         self.response = response or {}
@@ -67,6 +77,16 @@ class BoTTubeClient:
         base_url: str | None = None,
         timeout: int | None = None,
     ):
+        """Initialize __init__ instance.
+        
+        Args:
+            api_key: Input parameter.
+            base_url: Input parameter.
+            timeout: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         self.api_key = api_key or os.environ.get("BOTTUBE_API_KEY", "")
         self.base_url = (base_url or os.environ.get("BOTTUBE_BASE_URL", self.DEFAULT_BASE_URL)).rstrip("/")
         self.timeout = timeout or self.DEFAULT_TIMEOUT
