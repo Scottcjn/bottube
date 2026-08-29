@@ -3366,6 +3366,15 @@ def _queue_reward_hold(
 
 
 def _agent_name_by_id(db: sqlite3.Connection, agent_id: Optional[int]) -> Optional[str]:
+    """ Agent Name By Id.
+    
+    Args:
+        db: Input parameter.
+        agent_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     if not agent_id:
         return None
     row = db.execute("SELECT agent_name FROM agents WHERE id = ?", (agent_id,)).fetchone()
@@ -3892,6 +3901,11 @@ _email_rate: dict = {}  # {agent_id: [timestamp, ...]}
 def _notify_subscribers_new_video(agent_id, video_id, video_title, uploader_name):
     """Notify all subscribers of a channel about a new video upload (background thread)."""
     def _do_notify():
+        """ Do Notify.
+        
+        Returns:
+            Processed result or None.
+        """
         try:
             conn = sqlite3.connect(str(DB_PATH))
             conn.row_factory = sqlite3.Row
@@ -4027,6 +4041,11 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
 
     # Send email notification if preferences allow (background thread)
     def _send_email_bg():
+        """ Send Email Bg.
+        
+        Returns:
+            Processed result or None.
+        """
         try:
             conn = sqlite3.connect(str(DB_PATH))
             conn.row_factory = sqlite3.Row
@@ -4038,6 +4057,14 @@ def notify(db, agent_id: int, notif_type: str, message: str, from_agent: str = "
 
 
 def _notification_link_for_row(row) -> str:
+    """ Notification Link For Row.
+    
+    Args:
+        row: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     video_id = str(row["video_id"] or "").strip()
     from_agent = str(row["from_agent"] or "").strip()
     if video_id:
@@ -4048,6 +4075,14 @@ def _notification_link_for_row(row) -> str:
 
 
 def _notification_to_dict(row) -> dict:
+    """ Notification To Dict.
+    
+    Args:
+        row: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     return {
         "id": row["id"],
         "type": row["type"],
@@ -4061,6 +4096,15 @@ def _notification_to_dict(row) -> dict:
 
 
 def _notification_unread_count(db, agent_id: int) -> int:
+    """ Notification Unread Count.
+    
+    Args:
+        db: Input parameter.
+        agent_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     return int(
         db.execute(
             "SELECT COUNT(*) FROM notifications WHERE agent_id = ? AND is_read = 0",
@@ -4070,6 +4114,18 @@ def _notification_unread_count(db, agent_id: int) -> int:
 
 
 def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only: bool) -> tuple[list[dict], int]:
+    """ Notification Page.
+    
+    Args:
+        db: Input parameter.
+        agent_id: Input parameter.
+        page: Input parameter.
+        per_page: Input parameter.
+        unread_only: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     where = "WHERE agent_id = ?" if not unread_only else "WHERE agent_id = ? AND is_read = 0"
     total = int(db.execute(f"SELECT COUNT(*) FROM notifications {where}", (agent_id,)).fetchone()[0])
     offset = (page - 1) * per_page
@@ -4086,6 +4142,17 @@ def _notification_page(db, agent_id: int, page: int, per_page: int, unread_only:
 
 
 def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_all: bool = False) -> int:
+    """ Mark Notification Rows Read.
+    
+    Args:
+        db: Input parameter.
+        agent_id: Input parameter.
+        notification_ids: Input parameter.
+        mark_all: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     if mark_all:
         cur = db.execute(
             "UPDATE notifications SET is_read = 1 WHERE agent_id = ? AND is_read = 0",
@@ -4112,6 +4179,14 @@ def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_
 
 
 def _canonical_webhook_event(event: str) -> str:
+    """ Canonical Webhook Event.
+    
+    Args:
+        event: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     mapping = {
         "new_video": "video.uploaded",
         "like": "video.voted",
@@ -4133,6 +4208,11 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
     canonical_event = _canonical_webhook_event(event)
 
     def _deliver():
+        """ Deliver.
+        
+        Returns:
+            Processed result or None.
+        """
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
         hooks = conn.execute(
@@ -4283,6 +4363,11 @@ def require_api_key(f):
     """Decorator to require a valid agent API key."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Decorated.
+        
+        Returns:
+            Processed result or None.
+        """
         api_key = request.headers.get("X-API-Key", "")
         if not api_key:
             return jsonify({"error": "Missing X-API-Key header"}), 401
@@ -4665,6 +4750,14 @@ def render_urls(text):
 
     # Auto-link timestamps (1:23:45, 12:34, 0:05) to video seek positions
     def _timestamp_link(m):
+        """ Timestamp Link.
+        
+        Args:
+            m: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         h, m_part, s_part = m.group(1), m.group(2), m.group(3)
         if s_part is not None:
             # H:MM:SS format
@@ -4764,10 +4857,25 @@ def health():
 @app.route("/api/docs")
 def api_docs_swagger_ui():
     # Self-hosted Swagger UI assets (no CDN dependency).
+    """Api Docs Swagger Ui.
+    
+    Returns:
+        Processed result or None.
+    """
     return render_template("api_swagger.html")
 
 
 def _register_text_field(data, field, default=""):
+    """ Register Text Field.
+    
+    Args:
+        data: Input parameter.
+        field: Input parameter.
+        default: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     value = data.get(field, default)
     if value is None:
         value = default
@@ -4777,6 +4885,11 @@ def _register_text_field(data, field, default=""):
 
 
 def _json_object_body():
+    """ Json Object Body.
+    
+    Returns:
+        Processed result or None.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -4980,6 +5093,11 @@ def claim_page(agent_name, token):
 
 @app.route("/reclaim")
 def reclaim_account_page():
+    """Reclaim Account Page.
+    
+    Returns:
+        Processed result or None.
+    """
     notice = None
     try:
         notice = _build_recovery_notice(get_db())
@@ -5540,6 +5658,14 @@ def _get_referral_leaderboard(db, limit: int = 50) -> list[dict]:
 
 
 def _mask_public_handle(agent_name: str) -> str:
+    """ Mask Public Handle.
+    
+    Args:
+        agent_name: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     handle = (agent_name or "").strip()
     if not handle:
         return "@unknown"
@@ -5549,6 +5675,14 @@ def _mask_public_handle(agent_name: str) -> str:
 
 
 def _bonus_progress_payload(current: int) -> list[dict]:
+    """ Bonus Progress Payload.
+    
+    Args:
+        current: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     current_i = max(0, int(current or 0))
     return [
         {
@@ -5562,6 +5696,15 @@ def _bonus_progress_payload(current: int) -> list[dict]:
 
 
 def _filter_badges_by_keys(badges: list[dict], allowed_keys: set[str]) -> list[dict]:
+    """ Filter Badges By Keys.
+    
+    Args:
+        badges: Input parameter.
+        allowed_keys: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     return [badge for badge in badges if badge["badge_key"] in allowed_keys]
 
 
@@ -5571,6 +5714,15 @@ def _get_founding_track_leaderboard(
     *,
     limit: int = 25,
 ) -> list[dict]:
+    """Retrieve founding track leaderboard.
+    
+    Args:
+        db: Input parameter.
+        invitee_track: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     track = "human" if invitee_track == "human" else "agent"
     rows = db.execute(
         """
@@ -5637,6 +5789,15 @@ def _get_founding_track_leaderboard(
 
 
 def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
+    """Retrieve founding cohort.
+    
+    Args:
+        db: Input parameter.
+        track: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     invitee_track = "human" if track == "human" else "agent"
     rows = db.execute(
         """
@@ -5712,6 +5873,14 @@ def _get_founding_cohort(db: sqlite3.Connection, track: str) -> dict:
 
 
 def _get_founding_leaderboard_data(db: sqlite3.Connection) -> dict:
+    """Retrieve founding leaderboard data.
+    
+    Args:
+        db: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     human_referrers = _get_founding_track_leaderboard(db, "human", limit=25)
     agent_sponsors = _get_founding_track_leaderboard(db, "agent", limit=25)
     human_cohort = _get_founding_cohort(db, "human")
@@ -5769,6 +5938,11 @@ def referrals_leaderboard_api():
 
 @app.route("/api/founding/leaderboard")
 def founding_leaderboard_api():
+    """Founding Leaderboard Api.
+    
+    Returns:
+        Processed result or None.
+    """
     db = get_db()
     return jsonify({"ok": True, **_get_founding_leaderboard_data(db)})
 
@@ -6047,6 +6221,15 @@ def admin_export_referrals():
 
 
 def _resolve_badge_target_agent(db: sqlite3.Connection, data: dict):
+    """Retrieve agent.
+    
+    Args:
+        db: Input parameter.
+        data: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     agent_id = data.get("agent_id")
     agent_name = (data.get("agent_name", "") or "").strip()
     if agent_id not in (None, ""):
@@ -7021,6 +7204,11 @@ def _video_list_etag(
     latest_ts: float,
     engagement_revision: int,
 ) -> str:
+    """ Video List Etag.
+    
+    Returns:
+        Processed result or None.
+    """
     cache_key = json.dumps(
         {
             "agent": agent_name,
@@ -7039,6 +7227,14 @@ def _video_list_etag(
 
 
 def _client_has_video_list_etag(etag: str) -> bool:
+    """ Client Has Video List Etag.
+    
+    Args:
+        etag: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     raw_header = request.headers.get("If-None-Match", "")
     if not raw_header:
         return False
@@ -7087,6 +7283,14 @@ def _parse_positive_int_query(name, default, min_value=1, max_value=None, *, cla
 
 
 def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
+    """ Client Has Fresh Video List Date.
+    
+    Args:
+        latest_ts: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     raw_header = request.headers.get("If-Modified-Since", "")
     if not raw_header:
         return False
@@ -7100,6 +7304,14 @@ def _client_has_fresh_video_list_date(latest_ts: float) -> bool:
 
 
 def _add_video_list_cache_headers(response: Response, *, etag: str, latest_ts: float) -> Response:
+    """ Add Video List Cache Headers.
+    
+    Args:
+        response: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     response.headers["ETag"] = etag
     response.headers["Last-Modified"] = formatdate(int(latest_ts or 0), usegmt=True)
     response.headers["Cache-Control"] = "public, max-age=30"
@@ -7584,6 +7796,11 @@ def stream_video(video_id):
         length = end - start + 1
 
         def generate():
+            """Generate.
+            
+            Returns:
+                Processed result or None.
+            """
             with open(filepath, "rb") as f:
                 f.seek(start)
                 remaining = length
@@ -7851,6 +8068,14 @@ def add_comment(video_id):
 
 
 def _parse_optional_comment_parent_id(raw_parent_id):
+    """Parse and validate id from request payload.
+    
+    Args:
+        raw_parent_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     if raw_parent_id is None:
         return None, None
     if isinstance(raw_parent_id, str):
@@ -8078,6 +8303,11 @@ def get_comments(video_id):
 
 
 def _parse_recent_comments_limit():
+    """Parse and validate limit from request payload.
+    
+    Returns:
+        Processed result or None.
+    """
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return 50, None
@@ -8093,6 +8323,11 @@ def _parse_recent_comments_limit():
 
 
 def _parse_recent_comments_since():
+    """Parse and validate since from request payload.
+    
+    Returns:
+        Processed result or None.
+    """
     raw_value = request.args.get("since")
     if raw_value in (None, ""):
         return 0, None
@@ -8148,6 +8383,14 @@ def recent_comments():
 # ---------------------------------------------------------------------------
 
 def _parse_vote_payload(req):
+    """Parse and validate payload from request payload.
+    
+    Args:
+        req: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     data = req.get_json(silent=True)
     if data is not None and not isinstance(data, dict):
         return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
@@ -9057,6 +9300,15 @@ def get_agent_interactions(agent_name):
     ).fetchall()
 
     def _row_list(rows, extra_fields):
+        """ Row List.
+        
+        Args:
+            rows: Input parameter.
+            extra_fields: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         result = []
         for r in rows:
             d = {"agent_name": r["agent_name"], "display_name": r["display_name"],
@@ -9224,6 +9476,14 @@ def social_graph():
 # ---------------------------------------------------------------------------
 
 def _normalize_category_filter(category):
+    """ Normalize Category Filter.
+    
+    Args:
+        category: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     category = (category or "").strip().lower()
     return category if category in CATEGORY_MAP else None
 
@@ -9857,6 +10117,11 @@ def _feed_imp_record(visitor_id, surface, bucket, videos):
 
 
 def _feed_event_json_body():
+    """ Feed Event Json Body.
+    
+    Returns:
+        Processed result or None.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -9866,6 +10131,14 @@ def _feed_event_json_body():
 
 
 def _feed_event_impression_id(data):
+    """ Feed Event Impression Id.
+    
+    Args:
+        data: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     raw_value = data.get("imp") or data.get("impression_id") or ""
     if not isinstance(raw_value, str):
         return None, (jsonify({"ok": False, "error": "invalid impression_id"}), 400)
@@ -10394,6 +10667,15 @@ def my_quests():
 
 
 def _parse_leaderboard_limit(default=25, max_value=100):
+    """Parse and validate limit from request payload.
+    
+    Args:
+        default: Input parameter.
+        max_value: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     raw_value = request.args.get("limit")
     if raw_value in (None, ""):
         return default, None
@@ -12202,6 +12484,15 @@ def tip_leaderboard():
 
 
 def _parse_tip_leaderboard_limit(default=20, max_value=50):
+    """Parse and validate limit from request payload.
+    
+    Args:
+        default: Input parameter.
+        max_value: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     return _parse_positive_int_query(
         "limit",
         default,
@@ -12803,6 +13094,14 @@ def watch(video_id):
     ).fetchall()
 
     def _related_score(r):
+        """ Related Score.
+        
+        Args:
+            r: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         s = 0
         if r["agent_id"] == video["agent_id"]:
             s += 3
@@ -13118,6 +13417,14 @@ def oembed():
 
     if fmt == "xml":
         def _xml_escape(s):
+            """ Xml Escape.
+            
+            Args:
+                s: Input parameter.
+            
+            Returns:
+                Processed result or None.
+            """
             return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
         xml_parts = ['<?xml version="1.0" encoding="utf-8"?>', "<oembed>"]
         for k, v in data.items():
@@ -13687,6 +13994,14 @@ def dashboard_analytics_api():
     since = now - (days + 14) * day_sec
 
     def _all_days(n):
+        """ All Days.
+        
+        Args:
+            n: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         out = []
         base = int(now // day_sec) * day_sec
         for i in range(n - 1, -1, -1):
@@ -13849,6 +14164,14 @@ def dashboard_export_csv():
     w.writerow(["video_id", "title", "category", "created_at", "views", "likes", "dislikes", "rtc_tips"])
     def _csv_safe_cell(v):
         # Prevent formula injection if opened in Excel/Sheets.
+        """ Csv Safe Cell.
+        
+        Args:
+            v: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         if isinstance(v, str) and v and v[0] in ("=", "+", "-", "@"): 
             return "'" + v
         return v
@@ -15550,6 +15873,15 @@ try:
 except ImportError:
     GOOGLE_INDEXING_ENABLED = False
     def ping_google_indexing(url, action="URL_UPDATED"):
+        """Ping Google Indexing.
+        
+        Args:
+            url: Input parameter.
+            action: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         pass
 
 # ---------------------------------------------------------------------------
@@ -15563,10 +15895,42 @@ try:
 except ImportError:
     BANANO_ENABLED = False
     def award_ban_upload(db, agent_id, video_id):
+        """Award Ban Upload.
+        
+        Args:
+            db: Input parameter.
+            agent_id: Input parameter.
+            video_id: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         pass
     def check_view_milestones(db, agent_id, video_id, view_count):
+        """Check View Milestones.
+        
+        Args:
+            db: Input parameter.
+            agent_id: Input parameter.
+            video_id: Input parameter.
+            view_count: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         pass
     def award_ban_video_gen(db, agent_id, video_id, gen_method="text"):
+        """Award Ban Video Gen.
+        
+        Args:
+            db: Input parameter.
+            agent_id: Input parameter.
+            video_id: Input parameter.
+            gen_method: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         return 0.0
 
 # ---------------------------------------------------------------------------
@@ -15585,8 +15949,26 @@ try:
 except ImportError:
     CAPTIONS_ENABLED = False
     def find_caption_video_ids(query, limit=200):
+        """Find Caption Video Ids.
+        
+        Args:
+            query: Input parameter.
+            limit: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         return []
     def generate_captions_async(video_id, video_path):
+        """Generate Captions Async.
+        
+        Args:
+            video_id: Input parameter.
+            video_path: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         pass
 
 # ---------------------------------------------------------------------------
@@ -15770,6 +16152,17 @@ def _require_admin():
 
 
 def _admin_text_field(data, field, default="", max_length=None):
+    """ Admin Text Field.
+    
+    Args:
+        data: Input parameter.
+        field: Input parameter.
+        default: Input parameter.
+        max_length: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     value = data.get(field, default)
     if value is None:
         value = default
@@ -15782,6 +16175,11 @@ def _admin_text_field(data, field, default="", max_length=None):
 
 
 def _admin_json_body():
+    """ Admin Json Body.
+    
+    Returns:
+        Processed result or None.
+    """
     data = request.get_json(silent=True)
     if data is None:
         return {}, None
@@ -16427,6 +16825,11 @@ _github_cache = {"stars": 20, "forks": 21, "clones": 399, "ts": 0}
 
 @app.route("/api/github-stats")
 def github_stats():
+    """Github Stats.
+    
+    Returns:
+        Processed result or None.
+    """
     import time, urllib.request, json
     now = time.time()
     if now - _github_cache["ts"] < 300:
@@ -16677,6 +17080,11 @@ def pypi_downloads():
 # ── Platform install counters (Homebrew, APT, AUR, Docker, Tigerbrew) ──
 @app.route("/api/platform-installs")
 def api_platform_installs():
+    """Api Platform Installs.
+    
+    Returns:
+        Processed result or None.
+    """
     product = (request.args.get("product", "") or "")[:40]
     platform = (request.args.get("platform", "") or "")[:40]
     key = f"{product}_{platform}"
@@ -16695,6 +17103,11 @@ _clawrtc_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/clawrtc-github-stats")
 def clawrtc_github_stats():
+    """Clawrtc Github Stats.
+    
+    Returns:
+        Processed result or None.
+    """
     import time, urllib.request, json
     now = time.time()
     if now - _clawrtc_github_cache["ts"] < 300:
@@ -16749,6 +17162,11 @@ _grazer_github_cache = {"stars": 0, "forks": 0, "clones": 0, "ts": 0}
 
 @app.route("/api/grazer-github-stats")
 def grazer_github_stats():
+    """Grazer Github Stats.
+    
+    Returns:
+        Processed result or None.
+    """
     import time, urllib.request, json
     now = time.time()
     if now - _grazer_github_cache["ts"] < 300:
@@ -16877,6 +17295,14 @@ def admin_bulk_remove():
     hold_ids = []
 
     def _hold_video_rows(rows):
+        """ Hold Video Rows.
+        
+        Args:
+            rows: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         local_count = 0
         for row in rows:
             hold_id = _queue_moderation_hold(
@@ -16961,6 +17387,17 @@ def _gen_message_id():
 
 
 def _message_text_field(data, field, default="", max_length=None):
+    """ Message Text Field.
+    
+    Args:
+        data: Input parameter.
+        field: Input parameter.
+        default: Input parameter.
+        max_length: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     value = data.get(field, default)
     if value is None:
         value = default
@@ -17320,6 +17757,14 @@ def api_related_videos(video_id):
     ).fetchall()
 
     def score(r):
+        """Score.
+        
+        Args:
+            r: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         s = 0
         if r["agent_id"] == video["agent_id"]:
             s += 3
@@ -17359,6 +17804,17 @@ REPORT_REASONS = {"spam", "inappropriate", "copyright", "harassment", "misleadin
 
 
 def _report_text_field(data, field, default="", max_length=None):
+    """ Report Text Field.
+    
+    Args:
+        data: Input parameter.
+        field: Input parameter.
+        default: Input parameter.
+        max_length: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     value = data.get(field, default)
     if value is None:
         value = default
@@ -18005,6 +18461,14 @@ def _make_badge_svg(label, value, color="#3ea6ff"):
 </svg>"""
 
 def _format_count(n):
+    """Format count for display.
+    
+    Args:
+        n: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     if n >= 1000000: return f"{n/1000000:.1f}M"
     if n >= 1000: return f"{n/1000:.1f}K"
     return str(n)
@@ -18318,6 +18782,11 @@ def beacon_atlas():
 
 @app.route("/beacon")
 def beacon_landing_page():
+    """Beacon Landing Page.
+    
+    Returns:
+        Processed result or None.
+    """
     return render_template("beacon.html")
 
 
@@ -18368,6 +18837,14 @@ def ctr_underperforming():
 @app.route("/api/videos/<video_id>/ctr")
 def video_ctr_stats(video_id):
     # Reject non-existent videos
+    """Video Ctr Stats.
+    
+    Args:
+        video_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18431,6 +18908,14 @@ def record_watch_time(video_id):
 @app.route("/api/videos/<video_id>/ab/variants")
 def video_ab_variants(video_id):
     # Reject non-existent videos
+    """Video Ab Variants.
+    
+    Args:
+        video_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     db = get_db()
     v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if not v:
@@ -18479,11 +18964,24 @@ _ENG_LATENCY_ADMIN_PREFIXES = ("/admin/",)
 
 @app.before_request
 def _eng_lat_start():
+    """ Eng Lat Start.
+    
+    Returns:
+        Processed result or None.
+    """
     g._eng_t0 = time.time()
 
 
 @app.after_request
 def _eng_lat_record(response):
+    """ Eng Lat Record.
+    
+    Args:
+        response: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     try:
         t0 = getattr(g, "_eng_t0", None)
         if t0 is None:
@@ -18548,6 +19046,15 @@ def _eng_probe_node(node, timeout=2.0):
 
 
 def _eng_percentile(values, pct):
+    """ Eng Percentile.
+    
+    Args:
+        values: Input parameter.
+        pct: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     if not values:
         return 0.0
     s = sorted(values)
@@ -18556,6 +19063,14 @@ def _eng_percentile(values, pct):
 
 
 def _eng_format_uptime(seconds):
+    """Format uptime for display.
+    
+    Args:
+        seconds: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     seconds = int(max(0, seconds))
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
@@ -18607,6 +19122,15 @@ def _eng_collect():
 
     # Platform state
     def _scalar(sql, default=0):
+        """ Scalar.
+        
+        Args:
+            sql: Input parameter.
+            default: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         try:
             row = db.execute(sql).fetchone()
             return int(row[0]) if row and row[0] is not None else default
@@ -18695,6 +19219,15 @@ def _eng_collect():
 
 
 def _eng_table_exists(db, name):
+    """ Eng Table Exists.
+    
+    Args:
+        db: Input parameter.
+        name: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     try:
         row = db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
@@ -18743,6 +19276,11 @@ _PROVENANCE_SCHEMA_LOCK = _eng_Lock()
 
 
 def _ensure_provenance_schema():
+    """ Ensure Provenance Schema.
+    
+    Returns:
+        Processed result or None.
+    """
     global _PROVENANCE_SCHEMA_READY
     if _PROVENANCE_SCHEMA_READY:
         return
@@ -19135,6 +19673,14 @@ _KEYFRAME_LOCKS_LOCK = _eng_Lock()
 
 
 def _keyframe_lock_for(video_id):
+    """ Keyframe Lock For.
+    
+    Args:
+        video_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     with _KEYFRAME_LOCKS_LOCK:
         lk = _KEYFRAME_LOCKS.get(video_id)
         if lk is None:
@@ -19447,6 +19993,11 @@ def _firehose_sign(payload):
 
 
 def _firehose_relay_pubkey_b64():
+    """ Firehose Relay Pubkey B64.
+    
+    Returns:
+        Processed result or None.
+    """
     _firehose_load_relay_key()
     pk = _FIREHOSE_RELAY.get("pk")
     if pk is None:
@@ -20269,6 +20820,11 @@ def ts_inspect_uploaded_file(file_path, agent_id):
 @app.route("/terms")
 @app.route("/tos")
 def terms_page():
+    """Terms Page.
+    
+    Returns:
+        Processed result or None.
+    """
     return render_template("terms.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20276,6 +20832,11 @@ def terms_page():
 
 @app.route("/aup")
 def aup_page():
+    """Aup Page.
+    
+    Returns:
+        Processed result or None.
+    """
     return render_template("aup.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20283,6 +20844,11 @@ def aup_page():
 
 @app.route("/dmca")
 def dmca_page():
+    """Dmca Page.
+    
+    Returns:
+        Processed result or None.
+    """
     return render_template("dmca.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20290,6 +20856,11 @@ def dmca_page():
 
 @app.route("/report")
 def report_page():
+    """Report Page.
+    
+    Returns:
+        Processed result or None.
+    """
     return render_template("report.html",
                            tos_version=TOS_VERSION,
                            tos_effective=TOS_EFFECTIVE)
@@ -20298,6 +20869,11 @@ def report_page():
 # Privacy template already exists in the templates dir; ensure a route exists.
 @app.route("/privacy")
 def privacy_page():
+    """Privacy Page.
+    
+    Returns:
+        Processed result or None.
+    """
     try:
         return render_template("privacy.html",
                                tos_version=TOS_VERSION,
@@ -20378,6 +20954,16 @@ def agent_accept_terms():
 # --- Public report endpoint -----------------------------------------------
 
 def _public_report_text_field(data, field, max_length):
+    """ Public Report Text Field.
+    
+    Args:
+        data: Input parameter.
+        field: Input parameter.
+        max_length: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     value = data.get(field, "")
     if value is None:
         value = ""
@@ -20656,6 +21242,11 @@ def _uv_ensure_schema():
 
 
 def _uv_rate_wait():
+    """ Uv Rate Wait.
+    
+    Returns:
+        Processed result or None.
+    """
     while True:
         with _UV_RATE_LOCK:
             now = time.time()
@@ -20815,6 +21406,11 @@ def _uv_record_for_video(video_id, ensure_sprite=True):
 
 
 def _uv_cache_warm():
+    """ Uv Cache Warm.
+    
+    Returns:
+        Processed result or None.
+    """
     try:
         import numpy as _np
     except ImportError:
@@ -20985,6 +21581,15 @@ def _ue_text_for_video(video_row):
     into a single short prompt. Title is weighted by repetition.
     """
     def _norm(s, n=400):
+        """ Norm.
+        
+        Args:
+            s: Input parameter.
+            n: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         return (s or "").strip()[:n]
 
     title = _norm(video_row.get("title", "") if isinstance(video_row, dict) else video_row["title"], 200)
@@ -21121,6 +21726,14 @@ def _ue_embed_text(text, attempts=4):
 
 
 def _ue_text_sha(text):
+    """ Ue Text Sha.
+    
+    Args:
+        text: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:24]
 
 
@@ -21188,6 +21801,14 @@ def _ue_record_for_video(video_id, video_row=None):
 
 
 def _ue_record_for_video_async(video_id):
+    """ Ue Record For Video Async.
+    
+    Args:
+        video_id: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     try:
         threading.Thread(
             target=_ue_record_for_video, args=(video_id,),
@@ -21612,6 +22233,14 @@ def _ncmec_packet_text(row):
     enrollment is active. Field labels mirror the NCMEC web form sections.
     """
     def _fmt(t):
+        """ Fmt.
+        
+        Args:
+            t: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         if not t:
             return "(unknown)"
         try:
@@ -21822,6 +22451,15 @@ def _provenance_optional_from_form(form):
     generation block.
     """
     def _s(k, n=200):
+        """ S.
+        
+        Args:
+            k: Input parameter.
+            n: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         return (form.get(k, "") or "").strip()[:n]
     seed = 0
     try:
@@ -21921,6 +22559,14 @@ def _agent_ed25519_seal(seckey_bytes):
 
 
 def _agent_ed25519_unseal(sealed_hex):
+    """ Agent Ed25519 Unseal.
+    
+    Args:
+        sealed_hex: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     if not sealed_hex:
         return b""
     try:
@@ -22060,6 +22706,17 @@ def _verify_v3_signature(pubkey_hex, signature_hex, video_id,
 
 
 def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
+    """ Manifest Leaf V1.
+    
+    Args:
+        video_id: Input parameter.
+        canonical_sha256: Input parameter.
+        uploader_sig: Input parameter.
+        uploaded_at: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     parts = "|".join([
         video_id or "",
         canonical_sha256 or "",
@@ -22071,6 +22728,19 @@ def _manifest_leaf_v1(video_id, canonical_sha256, uploader_sig, uploaded_at):
 
 def _manifest_leaf_v2(video_id, canonical_sha256, thumbnail_sha256,
                       canonical_360p_sha256, uploader_sig, uploaded_at):
+    """ Manifest Leaf V2.
+    
+    Args:
+        video_id: Input parameter.
+        canonical_sha256: Input parameter.
+        thumbnail_sha256: Input parameter.
+        canonical_360p_sha256: Input parameter.
+        uploader_sig: Input parameter.
+        uploaded_at: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     parts = "|".join([
         _LEAF_DOMAIN_V2,
         video_id or "",
@@ -22125,6 +22795,14 @@ def _manifest_leaf(version, video_id, canonical_sha256,
 
 
 def _manifest_leaf_recipe(version):
+    """ Manifest Leaf Recipe.
+    
+    Args:
+        version: Input parameter.
+    
+    Returns:
+        Processed result or None.
+    """
     v = int(version or 1)
     if v >= MANIFEST_V3:
         return (
@@ -22308,6 +22986,11 @@ def _renditions_dir_for(video_id):
 
 
 def _renditions_ffmpeg_available():
+    """ Renditions Ffmpeg Available.
+    
+    Returns:
+        Processed result or None.
+    """
     return Path(RENDITION_FFMPEG).is_file() and os.access(RENDITION_FFMPEG, os.X_OK)
 
 
@@ -23201,6 +23884,14 @@ def _reconciliation_summary():
     now = int(time.time())
 
     def _count(sql, *args):
+        """ Count.
+        
+        Args:
+            sql: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         try:
             r = db.execute(sql, args).fetchone()
             return int((r or [0])[0] or 0)
@@ -23490,6 +24181,14 @@ def _compute_transparency_snapshot():
     now = int(time.time())
 
     def _scalar(sql, *args, default=0):
+        """ Scalar.
+        
+        Args:
+            sql: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         try:
             r = db.execute(sql, args).fetchone()
             if r is None:
@@ -23541,6 +24240,14 @@ def _compute_transparency_snapshot():
 
     # Anchor cadence: last 24h, last 7d, last 30d (distinct TXs).
     def _txs_since(seconds):
+        """ Txs Since.
+        
+        Args:
+            seconds: Input parameter.
+        
+        Returns:
+            Processed result or None.
+        """
         try:
             return _scalar(
                 "SELECT COUNT(DISTINCT anchor_tx_hash) FROM video_provenance "
@@ -24867,6 +25574,11 @@ if __name__ == "__main__":
 
 @app.route("/tips/dashboard")
 def tips_dashboard():
+    """Tips Dashboard.
+    
+    Returns:
+        Processed result or None.
+    """
     db = get_db()
     _sync_pending_tips(db)
 
