@@ -22,6 +22,7 @@ from telegram_bot import (
 # ---------------------------------------------------------------------------
 
 def make_video(**kwargs):
+    """Build a Video model instance with test defaults, overridable via kwargs."""
     defaults = dict(
         id="v1", title="Test Video", description="A great video about testing",
         views=100, likes=10, thumbnail="https://img.test/thumb.jpg",
@@ -32,6 +33,7 @@ def make_video(**kwargs):
 
 
 def make_agent(**kwargs):
+    """Build an Agent model instance with test defaults, overridable via kwargs."""
     defaults = dict(
         name="testbot", display_name="TestBot",
         bio="I make test videos", avatar_url="", video_count=42,
@@ -42,13 +44,16 @@ def make_agent(**kwargs):
 
 class MockResponse:
     def __init__(self, json_data, status_code=200):
+        """Store the canned JSON payload and status code."""
         self._json = json_data
         self.status_code = status_code
 
     def json(self):
+        """Return the canned JSON payload."""
         return self._json
 
     def raise_for_status(self):
+        """Raise on HTTP >= 400 like a real requests response."""
         if self.status_code >= 400:
             raise Exception(f"HTTP {self.status_code}")
 
@@ -59,18 +64,22 @@ class MockResponse:
 
 class TestVideo:
     def test_url(self):
+        """Video.url builds the canonical watch-page link from the id."""
         v = make_video(id="abc123")
         assert v.url == "https://bottube.ai/watch/abc123"
 
     def test_short_desc_truncation(self):
+        """Long descriptions are truncated to fit the Telegram message budget."""
         v = make_video(description="x" * 200)
         assert len(v.short_desc) <= 124
 
     def test_short_desc_no_truncation(self):
+        """Short descriptions pass through unchanged."""
         v = make_video(description="Short desc")
         assert v.short_desc == "Short desc"
 
     def test_to_text(self):
+        """Video.to_text renders title, author, and view count for the Telegram message."""
         v = make_video(title="My Video", agent_name="Bot", views=50, likes=5)
         text = v.to_text(1)
         assert "My Video" in text
@@ -78,6 +87,7 @@ class TestVideo:
         assert "50" in text
 
     def test_to_text_escapes_html(self):
+        """to_text escapes HTML in user-controlled fields so Telegram parse mode cannot be abused."""
         v = make_video(title="<script>alert(1)</script>")
         text = v.to_text()
         assert "<script>" not in text
@@ -90,12 +100,14 @@ class TestVideo:
 
 class TestAgent:
     def test_to_text(self):
+        """Agent.to_text renders display name, bio, and video count."""
         a = make_agent(display_name="CosmoBot", bio="Space videos", video_count=100)
         text = a.to_text()
         assert "CosmoBot" in text
         assert "100 videos" in text
 
     def test_to_text_url(self):
+        """Agent.to_text URL-encodes agent names with spaces."""
         a = make_agent(name="cosmo bot")
         text = a.to_text()
         assert "cosmo%20bot" in text
@@ -107,12 +119,15 @@ class TestAgent:
 
 class TestEscape:
     def test_escapes_lt_gt(self):
+        """_escape escapes angle brackets."""
         assert _escape("<b>") == "&lt;b&gt;"
 
     def test_escapes_ampersand(self):
+        """_escape escapes ampersands."""
         assert _escape("A & B") == "A &amp; B"
 
     def test_clean_text_unchanged(self):
+        """_escape leaves already-safe text unchanged."""
         assert _escape("Hello World") == "Hello World"
 
 
@@ -123,6 +138,7 @@ class TestEscape:
 class TestBoTTubeAPI:
     @patch("telegram_bot.requests.Session")
     def test_latest(self, mock_session_cls):
+        """BoTTubeAPI.latest fetches and formats the latest-videos payload."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -140,6 +156,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_search(self, mock_session_cls):
+        """BoTTubeAPI.search fetches and formats search results."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse([
@@ -155,6 +172,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_video(self, mock_session_cls):
+        """BoTTubeAPI.get_video fetches a single video's payload."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -171,6 +189,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_video_not_found(self, mock_session_cls):
+        """get_video returns None for a 404 instead of raising."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({}, 404)
@@ -181,6 +200,7 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_get_agent(self, mock_session_cls):
+        """BoTTubeAPI.get_agent fetches an agent profile payload."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
         mock_session.get.return_value = MockResponse({
@@ -196,16 +216,19 @@ class TestBoTTubeAPI:
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_list(self, mock_session_cls):
+        """_items passes a bare list response straight through."""
         api = BoTTubeAPI("http://test")
         assert api._items([1, 2, 3]) == [1, 2, 3]
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_dict_with_videos(self, mock_session_cls):
+        """_items unwraps a {'videos': [...]} response shape."""
         api = BoTTubeAPI("http://test")
         assert api._items({"videos": [1]}) == [1]
 
     @patch("telegram_bot.requests.Session")
     def test_items_handles_dict_with_data(self, mock_session_cls):
+        """_items unwraps a {'data': [...]} response shape."""
         api = BoTTubeAPI("http://test")
         assert api._items({"data": [2]}) == [2]
 
@@ -230,6 +253,7 @@ class TestBotIntegration:
         assert result.count("🎬") == 5
 
     def test_agent_with_videos_formatting(self):
+        """End-to-end formatting of an agent card plus recent-upload lines for a Telegram post."""
         agent = make_agent(display_name="CosmoBot", video_count=100)
         videos = [make_video(title=f"Vid {i}") for i in range(3)]
 

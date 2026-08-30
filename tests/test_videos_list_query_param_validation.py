@@ -17,6 +17,7 @@ Fix: shared `_parse_positive_int_query` helper in bottube_server.py.
 
 
 def test_list_videos_rejects_non_integer_page(client):
+    """A non-integer page param is rejected with 400 naming the field."""
     response = client.get("/api/videos?page=abc")
     assert response.status_code == 400
     data = response.get_json()
@@ -25,6 +26,7 @@ def test_list_videos_rejects_non_integer_page(client):
 
 
 def test_list_videos_rejects_non_integer_per_page(client):
+    """A non-integer per_page param is rejected with 400 naming the field."""
     response = client.get("/api/videos?per_page=xyz")
     assert response.status_code == 400
     data = response.get_json()
@@ -32,6 +34,7 @@ def test_list_videos_rejects_non_integer_per_page(client):
 
 
 def test_list_videos_rejects_zero_page(client):
+    """page=0 is invalid (pages are 1-based) and returns 400."""
     response = client.get("/api/videos?page=0")
     assert response.status_code == 400
     data = response.get_json()
@@ -39,6 +42,7 @@ def test_list_videos_rejects_zero_page(client):
 
 
 def test_list_videos_rejects_negative_page(client):
+    """A negative page returns 400."""
     response = client.get("/api/videos?page=-5")
     assert response.status_code == 400
     data = response.get_json()
@@ -46,6 +50,7 @@ def test_list_videos_rejects_negative_page(client):
 
 
 def test_list_videos_rejects_zero_per_page(client):
+    """per_page=0 is invalid and returns 400."""
     response = client.get("/api/videos?per_page=0")
     assert response.status_code == 400
     data = response.get_json()
@@ -53,11 +58,13 @@ def test_list_videos_rejects_zero_per_page(client):
 
 
 def test_list_videos_rejects_negative_per_page(client):
+    """A negative per_page returns 400."""
     response = client.get("/api/videos?per_page=-1")
     assert response.status_code == 400
 
 
 def test_list_videos_rejects_per_page_above_max(client):
+    """per_page above the 50 cap is rejected with 400 instead of being silently clamped."""
     # cap is 50; 100 was silently clamped before the fix
     response = client.get("/api/videos?per_page=100")
     assert response.status_code == 400
@@ -67,21 +74,25 @@ def test_list_videos_rejects_per_page_above_max(client):
 
 
 def test_list_videos_rejects_float_page(client):
+    """A float page value returns 400."""
     response = client.get("/api/videos?page=1.5")
     assert response.status_code == 400
 
 
 def test_list_videos_rejects_null_page(client):
+    """page=null is rejected with 400."""
     response = client.get("/api/videos?page=null")
     assert response.status_code == 400
 
 
 def test_list_videos_rejects_nan_page(client):
+    """page=NaN is rejected with 400."""
     response = client.get("/api/videos?page=NaN")
     assert response.status_code == 400
 
 
 def test_list_videos_accepts_valid_pagination(client):
+    """Valid page/per_page values return 200 and echo the requested pagination."""
     response = client.get("/api/videos?page=1&per_page=10")
     assert response.status_code == 200
     data = response.get_json()
@@ -90,6 +101,7 @@ def test_list_videos_accepts_valid_pagination(client):
 
 
 def test_list_videos_omits_defaults_when_unset(client):
+    """With no query params the endpoint defaults to page 1, per_page 20."""
     # No page/per_page in the query string -> both default
     response = client.get("/api/videos")
     assert response.status_code == 200
@@ -99,6 +111,7 @@ def test_list_videos_omits_defaults_when_unset(client):
 
 
 def test_list_videos_per_page_boundary_values(client):
+    """per_page 1 and 50 are accepted; 51 and above are rejected."""
     # min valid = 1, max valid = 50
     for pp in (1, 50):
         r = client.get(f"/api/videos?per_page={pp}")
@@ -112,6 +125,7 @@ def test_list_videos_per_page_boundary_values(client):
 
 
 def test_search_videos_rejects_non_integer_page(client):
+    """Search rejects a non-integer page with 400 naming the field."""
     response = client.get("/api/search?q=test&page=abc")
     assert response.status_code == 400
     data = response.get_json()
@@ -119,6 +133,7 @@ def test_search_videos_rejects_non_integer_page(client):
 
 
 def test_search_videos_rejects_non_integer_per_page(client):
+    """Search rejects a non-integer per_page with 400 naming the field."""
     response = client.get("/api/search?q=test&per_page=xyz")
     assert response.status_code == 400
     data = response.get_json()
@@ -126,16 +141,19 @@ def test_search_videos_rejects_non_integer_per_page(client):
 
 
 def test_search_videos_rejects_zero_page(client):
+    """Search rejects page=0 with 400."""
     response = client.get("/api/search?q=test&page=0")
     assert response.status_code == 400
 
 
 def test_search_videos_rejects_per_page_above_max(client):
+    """Search rejects per_page above the cap with 400."""
     response = client.get("/api/search?q=test&per_page=100")
     assert response.status_code == 400
 
 
 def test_search_videos_rejects_non_integer_min_views(client):
+    """Search rejects a non-integer min_views with 400 naming the field."""
     response = client.get("/api/search?q=test&min_views=abc")
     assert response.status_code == 400
     data = response.get_json()
@@ -144,6 +162,7 @@ def test_search_videos_rejects_non_integer_min_views(client):
 
 
 def test_search_videos_rejects_negative_min_views(client):
+    """Search rejects negative min_views with 400 noting the >= 0 bound."""
     response = client.get("/api/search?q=test&min_views=-1")
     assert response.status_code == 400
     data = response.get_json()
@@ -152,6 +171,7 @@ def test_search_videos_rejects_negative_min_views(client):
 
 
 def test_search_videos_accepts_zero_min_views(client):
+    """min_views=0 is valid and treated as no filter."""
     response = client.get("/api/search?q=nonexistent_query_xyz&min_views=0")
     assert response.status_code == 200
     data = response.get_json()
@@ -159,6 +179,7 @@ def test_search_videos_accepts_zero_min_views(client):
 
 
 def test_search_videos_accepts_positive_min_views(client):
+    """A positive min_views is accepted and echoed in the response filters."""
     response = client.get("/api/search?q=nonexistent_query_xyz&min_views=10")
     assert response.status_code == 200
     data = response.get_json()
@@ -166,6 +187,7 @@ def test_search_videos_accepts_positive_min_views(client):
 
 
 def test_search_videos_accepts_valid_pagination(client):
+    """Valid search pagination returns 200."""
     # Empty results is fine, the point is that pagination parsing passed
     response = client.get("/api/search?q=nonexistent_query_xyz&page=1&per_page=10")
     assert response.status_code == 200
@@ -175,6 +197,7 @@ def test_search_videos_accepts_valid_pagination(client):
 
 
 def test_search_videos_page_validation_runs_before_query_execution(client):
+    """Invalid pagination is caught before the search query runs (fail fast, no wasted work)."""
     # Validation should reject the malformed page param *before* the
     # search-rate-limit is consumed, so a buggy client gets a clear 400
     # instead of a confusing 429.
@@ -187,6 +210,7 @@ def test_search_videos_page_validation_runs_before_query_execution(client):
 
 
 def test_parse_helper_allows_missing_param(app):
+    """The shared int-param parser returns the default when the param is absent."""
     with app.test_request_context("/api/videos"):
         from bottube_server import _parse_positive_int_query
         value, error = _parse_positive_int_query("absent", 7)
@@ -195,6 +219,7 @@ def test_parse_helper_allows_missing_param(app):
 
 
 def test_parse_helper_allows_empty_string(app):
+    """The shared parser treats an empty param value as missing."""
     with app.test_request_context("/api/videos?page="):
         from bottube_server import _parse_positive_int_query
         value, error = _parse_positive_int_query("page", 1)
@@ -203,6 +228,7 @@ def test_parse_helper_allows_empty_string(app):
 
 
 def test_parse_helper_rejects_non_integer(app):
+    """The shared parser rejects non-integer values with an error."""
     with app.test_request_context("/api/videos?page=abc"):
         from bottube_server import _parse_positive_int_query
         value, error = _parse_positive_int_query("page", 1)
@@ -213,6 +239,7 @@ def test_parse_helper_rejects_non_integer(app):
 
 
 def test_parse_helper_enforces_min(app):
+    """The shared parser enforces the configured minimum."""
     with app.test_request_context("/api/videos?page=0"):
         from bottube_server import _parse_positive_int_query
         value, error = _parse_positive_int_query("page", 1)
@@ -221,6 +248,7 @@ def test_parse_helper_enforces_min(app):
 
 
 def test_parse_helper_enforces_max(app):
+    """The shared parser enforces the configured maximum."""
     with app.test_request_context("/api/videos?per_page=999"):
         from bottube_server import _parse_positive_int_query
         value, error = _parse_positive_int_query("per_page", 20, max_value=50)
