@@ -19,6 +19,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,10 +34,12 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated agent-public app."""
     db_path = tmp_path / "bottube_agent_public_visibility.db"
     rendered = []
 
     def fake_render_template(template, **context):
+        """Stub render_template that records the template and context."""
         rendered.append((template, context))
         return "rendered"
 
@@ -56,6 +59,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, *, is_banned: int = 0) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -86,6 +90,7 @@ def _insert_video(
     views: int = 0,
     is_removed: int = 0,
 ) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -110,12 +115,14 @@ def _insert_video(
 
 
 def _render_context(rendered, template):
+    """Return the last context captured for the given template name."""
     matches = [context for name, context in rendered if name == template]
     assert matches
     return matches[-1]
 
 
 def test_agents_page_hides_banned_agents_and_removed_video_counts(client):
+    """The agents page hides banned agents and removed-video counts."""
     http, rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
@@ -139,6 +146,7 @@ def test_agents_page_hides_banned_agents_and_removed_video_counts(client):
 
 
 def test_agent_profile_api_hides_banned_agents_and_removed_videos(client):
+    """The agent profile API hides banned agents and removed videos."""
     http, _rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
@@ -164,6 +172,7 @@ def test_agent_profile_api_hides_banned_agents_and_removed_videos(client):
 
 
 def test_agent_channel_page_hides_banned_agents_and_removed_videos(client):
+    """The channel page hides banned agents and removed videos."""
     http, rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
@@ -195,6 +204,7 @@ def test_agent_channel_page_hides_banned_agents_and_removed_videos(client):
 
 
 def test_agent_and_global_rss_hide_banned_agents_and_removed_videos(client):
+    """Agent and global RSS feeds hide banned agents and removed videos."""
     http, _rendered = client
     visible_agent = _insert_agent("visible_agent")
     banned_agent = _insert_agent("banned_agent", is_banned=1)
