@@ -18,6 +18,7 @@ existing route. Anonymous users on auth-required surfaces are redirected to
 
 
 def test_explore_returns_200_for_anonymous(client):
+    """The explore alias route returns 200 for anonymous visitors."""
     resp = client.get("/explore")
     assert resp.status_code == 200, (
         f"/explore must return 200 (renders discover.html), got {resp.status_code}"
@@ -26,6 +27,7 @@ def test_explore_returns_200_for_anonymous(client):
 
 
 def test_leaderboard_returns_200_for_anonymous(client):
+    """The leaderboard alias route returns 200 for anonymous visitors."""
     resp = client.get("/leaderboard")
     assert resp.status_code == 200, (
         f"/leaderboard must return 200, got {resp.status_code}"
@@ -34,18 +36,21 @@ def test_leaderboard_returns_200_for_anonymous(client):
 
 
 def test_premium_returns_200_for_anonymous(client):
+    """The premium alias route returns 200 for anonymous visitors."""
     resp = client.get("/premium")
     assert resp.status_code == 200
     assert resp.content_type.startswith("text/html")
 
 
 def test_contact_returns_200_for_anonymous(client):
+    """The contact alias route returns 200 for anonymous visitors."""
     resp = client.get("/contact")
     assert resp.status_code == 200
     assert resp.content_type.startswith("text/html")
 
 
 def test_stars_returns_native_page_for_anonymous(client):
+    """The stars alias route returns the native page for anonymous visitors."""
     resp = client.get("/stars", follow_redirects=False)
     html = resp.get_data(as_text=True)
 
@@ -61,6 +66,7 @@ def test_stars_returns_native_page_for_anonymous(client):
 
 
 def test_me_redirects_anonymous_to_login(client):
+    """Authenticated-only alias routes redirect anonymous users to login."""
     resp = client.get("/me", follow_redirects=False)
     assert resp.status_code == 302, (
         f"/me must redirect to /login for anonymous users, got {resp.status_code}"
@@ -73,6 +79,7 @@ def test_me_redirects_anonymous_to_login(client):
 
 
 def test_wallet_redirects_anonymous_to_login(client):
+    """The wallet alias redirects anonymous users to login."""
     resp = client.get("/wallet", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -81,6 +88,7 @@ def test_wallet_redirects_anonymous_to_login(client):
 
 
 def test_settings_redirects_anonymous_to_login(client):
+    """The settings alias redirects anonymous users to login."""
     resp = client.get("/settings", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -89,6 +97,7 @@ def test_settings_redirects_anonymous_to_login(client):
 
 
 def test_subscriptions_redirects_anonymous_to_login(client):
+    """The subscriptions alias redirects anonymous users to login."""
     resp = client.get("/subscriptions", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -97,6 +106,7 @@ def test_subscriptions_redirects_anonymous_to_login(client):
 
 
 def test_playlists_redirects_anonymous_to_login(client):
+    """The playlists alias redirects anonymous users to login."""
     resp = client.get("/playlists", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")
@@ -105,6 +115,7 @@ def test_playlists_redirects_anonymous_to_login(client):
 
 
 def test_history_redirects_anonymous_to_login(client):
+    """The history alias redirects anonymous users to login."""
     resp = client.get("/history", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("Location", "")

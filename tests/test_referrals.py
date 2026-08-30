@@ -19,6 +19,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +34,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     Path(bootstrap_path).unlink(missing_ok=True)
@@ -48,6 +50,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated referrals app."""
     db_path = tmp_path / "bottube_referrals.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +62,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +78,7 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _insert_video_and_mark(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Insert a video row and mark it for the referral funnel."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -90,6 +95,7 @@ def _insert_video_and_mark(agent_id: int, video_id: str, *, created_at: float = 
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Look up an agent by name and return its row id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -99,6 +105,7 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 @pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "201"])
 def test_referral_leaderboard_rejects_invalid_limit(client, limit):
+    """An invalid referral-leaderboard limit is rejected with 400."""
     resp = client.get(f"/api/referrals/leaderboard?limit={limit}")
 
     assert resp.status_code == 400
@@ -108,6 +115,7 @@ def test_referral_leaderboard_rejects_invalid_limit(client, limit):
 
 @pytest.mark.parametrize("limit", [None, "1", "200"])
 def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit):
+    """The referral leaderboard accepts the default and boundary limits."""
     path = "/api/referrals/leaderboard"
     if limit is not None:
         path = f"{path}?limit={limit}"
@@ -121,6 +129,7 @@ def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit)
 
 
 def test_referral_dashboard_tracks_human_and_agent_funnels(client):
+    """The referral dashboard tracks separate human and agent funnels."""
     referrer_id = _insert_agent("founder1337", "bottube_sk_founder", is_human=True)
 
     with client.session_transaction() as sess:
@@ -210,6 +219,7 @@ def test_referral_dashboard_tracks_human_and_agent_funnels(client):
 
 
 def test_referral_admin_review_and_export(client):
+    """Referral admin review and export surfaces the registered referrals."""
     referrer_id = _insert_agent("captainref", "bottube_sk_captain", is_human=True)
 
     with client.session_transaction() as sess:
@@ -264,6 +274,7 @@ def test_referral_admin_review_and_export(client):
 
 
 def test_referral_track_setting_blocks_wrong_funnel(client):
+    """A mismatched track setting blocks a referral from entering the wrong funnel."""
     referrer_id = _insert_agent("humancode", "bottube_sk_humancode")
 
     resp = client.post(

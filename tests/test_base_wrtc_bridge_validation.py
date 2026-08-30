@@ -15,6 +15,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
+    """Base-wRTC bridge app with an isolated test DB and wired get_db."""
     import base_wrtc_bridge_blueprint as bridge
 
     db_path = tmp_path / "base_bridge.db"
@@ -50,6 +51,7 @@ def app(tmp_path, monkeypatch):
     flask_app.register_blueprint(bridge.base_wrtc_bp)
 
     def _test_get_db():
+        """Per-test SQLite connection swapped in for the bridge's get_db."""
         if "test_db" in g:
             return g.test_db
         db = sqlite3.connect(str(db_path))
@@ -64,14 +66,17 @@ def app(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def client(app):
+    """Flask test client for the base-wRTC bridge app."""
     return app.test_client()
 
 
 def _auth_headers():
+    """Auth headers for the seeded test agent."""
     return {"X-API-Key": "bottube_sk_bridgeuser"}
 
 
 def _withdraw(client, payload):
+    """POST a base-wRTC withdrawal with the given amount/to-address."""
     return client.post(
         "/api/base-bridge/withdraw",
         json=payload,
@@ -80,6 +85,7 @@ def _withdraw(client, payload):
 
 
 def test_base_bridge_deposit_rejects_non_object_json(client):
+    """A non-object deposit body is rejected with 400 and no DB writes."""
     resp = client.post(
         "/api/base-bridge/deposit",
         json=["not", "an", "object"],
@@ -91,6 +97,7 @@ def test_base_bridge_deposit_rejects_non_object_json(client):
 
 
 def test_base_bridge_deposit_rejects_non_string_tx_hash(client):
+    """A non-string tx_hash is rejected with 400 and no DB writes."""
     resp = client.post(
         "/api/base-bridge/deposit",
         json={"tx_hash": ["0xabc"]},
@@ -102,6 +109,7 @@ def test_base_bridge_deposit_rejects_non_string_tx_hash(client):
 
 
 def test_base_bridge_withdraw_rejects_non_object_json(client):
+    """A non-object withdraw body is rejected with 400 and no DB writes."""
     resp = _withdraw(client, [{"to_address": "0x2222222222222222222222222222222222222222"}])
 
     assert resp.status_code == 400
@@ -109,6 +117,7 @@ def test_base_bridge_withdraw_rejects_non_object_json(client):
 
 
 def test_base_bridge_withdraw_rejects_non_string_to_address(client):
+    """A non-string to-address is rejected with 400 and no DB writes."""
     resp = _withdraw(
         client,
         {"to_address": ["0x2222222222222222222222222222222222222222"], "amount": 10},
@@ -120,6 +129,7 @@ def test_base_bridge_withdraw_rejects_non_string_to_address(client):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_base_bridge_withdraw_rejects_non_finite_amounts(client, amount):
+    """NaN/inf withdrawal amounts are rejected with 400."""
     resp = _withdraw(
         client,
         {"to_address": "0x2222222222222222222222222222222222222222", "amount": amount},
@@ -131,6 +141,7 @@ def test_base_bridge_withdraw_rejects_non_finite_amounts(client, amount):
 
 @pytest.mark.parametrize("limit", ["not-a-number", "0", "-5", "1.5", "true"])
 def test_base_bridge_history_rejects_invalid_limit(client, limit):
+    """A malformed history limit is rejected with 400."""
     resp = client.get(
         f"/api/base-bridge/history?limit={limit}",
         headers=_auth_headers(),
@@ -141,6 +152,7 @@ def test_base_bridge_history_rejects_invalid_limit(client, limit):
 
 
 def test_rejected_base_bridge_withdrawal_does_not_queue_or_debit(client):
+    """A rejected withdrawal neither queues a payout nor debits the balance (atomic fail-closed)."""
     resp = _withdraw(
         client,
         {"to_address": "0x2222222222222222222222222222222222222222", "amount": "NaN"},

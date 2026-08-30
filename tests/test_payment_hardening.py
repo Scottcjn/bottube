@@ -25,6 +25,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -39,6 +40,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -54,6 +56,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated payment-hardening app."""
     db_path = tmp_path / "bottube_payments_test.db"
     monkeypatch.setenv("BOTTUBE_DB_PATH", str(db_path))
     monkeypatch.setenv("BOTTUBE_DB", str(db_path))
@@ -69,6 +72,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, rtc_balance: float = 0.0) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -84,9 +88,11 @@ def _insert_agent(agent_name: str, api_key: str, *, rtc_balance: float = 0.0) ->
 
 
 def test_x402_requires_structured_receipt_and_blocks_cross_endpoint_replay(client, monkeypatch):
+    """x402 payment requires a structured receipt and blocks cross-endpoint replay."""
     tx_hash = "0x" + ("ab" * 32)
 
     def _fake_verify(tx_hash_arg, network, recipient):
+        """Stub verify returning a fixed receipt for replay/verification tests."""
         assert tx_hash_arg == tx_hash
         assert network == "base"
         assert recipient == x402_payment.USDC_RECEIVING_ADDRESS.lower()
@@ -145,9 +151,11 @@ def test_x402_requires_structured_receipt_and_blocks_cross_endpoint_replay(clien
     ],
 )
 def test_x402_video_list_rejects_invalid_pagination(client, monkeypatch, query, error):
+    """The x402 video-list pagination rejects invalid values with 400."""
     tx_hash = "0x" + ("cd" * 32)
 
     def _fake_verify(tx_hash_arg, network, recipient):
+        """Stub verify returning a fixed receipt for refund webhook tests."""
         return (
             {
                 "tx_hash": tx_hash_arg,
@@ -177,6 +185,7 @@ def test_x402_video_list_rejects_invalid_pagination(client, monkeypatch, query, 
 
 
 def test_store_capture_credits_agent_balance_and_earnings(client, monkeypatch):
+    """A store capture credits the agent's balance and earnings."""
     agent_id = _insert_agent("merchant", "bottube_sk_merchant")
 
     with sqlite3.connect(bottube_server.DB_PATH) as db:
@@ -245,6 +254,7 @@ def test_store_capture_credits_agent_balance_and_earnings(client, monkeypatch):
 
 
 def test_paypal_webhook_requires_signature_verification(client, monkeypatch):
+    """PayPal webhook events require signature verification before processing."""
     monkeypatch.setattr(
         paypal_packages,
         "verify_paypal_webhook_signature",
@@ -257,6 +267,7 @@ def test_paypal_webhook_requires_signature_verification(client, monkeypatch):
 
 
 def test_paypal_refund_webhook_reverses_rtc_balance_once(client, monkeypatch):
+    """A PayPal refund webhook reverses the RTC balance exactly once (idempotent)."""
     agent_id = _insert_agent("refundee", "bottube_sk_refundee", rtc_balance=1000.0)
 
     with sqlite3.connect(bottube_server.DB_PATH) as db:

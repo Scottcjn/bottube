@@ -11,8 +11,10 @@ import time
 if not hasattr(_dt, "utcfromtimestamp"):
     class _ShimDT:
         def __init__(self, ts):
+            """Store the timestamp the shim formats."""
             self._ts = ts
         def strftime(self, fmt):
+            """Shim strftime that renders the stored timestamp in UTC."""
             return time.strftime(fmt, time.gmtime(self._ts))
     _dt.utcfromtimestamp = lambda ts: _ShimDT(ts)
 
@@ -36,11 +38,13 @@ def _setup_agent(app):
 
 
 def _login(client, agent_id):
+    """Establish a session where the given agent id is logged in."""
     with client.session_transaction() as sess:
         sess["user_id"] = agent_id
 
 
 def test_days_default_when_omitted(app, client):
+    """The dashboard days window defaults when the param is omitted."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics")
@@ -50,6 +54,7 @@ def test_days_default_when_omitted(app, client):
 
 
 def test_days_non_integer_returns_400(app, client):
+    """A non-integer days value returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=abc")
@@ -58,6 +63,7 @@ def test_days_non_integer_returns_400(app, client):
 
 
 def test_days_below_minimum_returns_400(app, client):
+    """A days value below the minimum returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=6")
@@ -66,6 +72,7 @@ def test_days_below_minimum_returns_400(app, client):
 
 
 def test_days_above_maximum_returns_400(app, client):
+    """A days value above the maximum returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=91")
@@ -74,6 +81,7 @@ def test_days_above_maximum_returns_400(app, client):
 
 
 def test_days_at_lower_boundary(app, client):
+    """A days value at the lower boundary is accepted."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=7")
@@ -82,6 +90,7 @@ def test_days_at_lower_boundary(app, client):
 
 
 def test_days_at_upper_boundary(app, client):
+    """A days value at the upper boundary is accepted."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=90")
@@ -90,6 +99,7 @@ def test_days_at_upper_boundary(app, client):
 
 
 def test_days_zero_returns_400(app, client):
+    """days=0 returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=0")
@@ -97,6 +107,7 @@ def test_days_zero_returns_400(app, client):
 
 
 def test_days_negative_returns_400(app, client):
+    """A negative days value returns 400."""
     agent_id = _setup_agent(app)
     _login(client, agent_id)
     resp = client.get("/api/dashboard/analytics?days=-5")
