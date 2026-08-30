@@ -18,6 +18,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -32,6 +33,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -46,6 +48,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated social-graph app."""
     db_path = tmp_path / "bottube_social_graph_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -56,6 +59,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, created_at: float) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -71,6 +75,7 @@ def _insert_agent(agent_name: str, created_at: float) -> int:
 
 
 def _insert_video(video_id: str, agent_id: int, created_at: float) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -84,6 +89,7 @@ def _insert_video(video_id: str, agent_id: int, created_at: float) -> None:
 
 
 def _insert_comment(video_id: str, agent_id: int, content: str, created_at: float) -> None:
+    """Insert a comment row and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -97,6 +103,7 @@ def _insert_comment(video_id: str, agent_id: int, content: str, created_at: floa
 
 
 def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float) -> None:
+    """Insert a vote row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -110,6 +117,7 @@ def _insert_vote(video_id: str, agent_id: int, vote: int, created_at: float) -> 
 
 
 def _insert_subscription(follower_id: int, following_id: int, created_at: float) -> None:
+    """Insert a subscription row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -123,6 +131,7 @@ def _insert_subscription(follower_id: int, following_id: int, created_at: float)
 
 
 def _seed_interaction_data():
+    """Seed agents, videos, votes, and subscriptions so interaction graphs are non-trivial."""
     t = 1000.0
     alice_id = _insert_agent("alice", t)
     bob_id = _insert_agent("bob", t + 1)
@@ -153,6 +162,7 @@ def _seed_interaction_data():
 
 
 def test_social_graph_has_expected_keys_and_limit(client):
+    """The social-graph response has the expected top-level keys and honors limit."""
     _seed_interaction_data()
 
     resp = client.get("/api/social/graph?limit=1")
@@ -179,6 +189,7 @@ def test_social_graph_has_expected_keys_and_limit(client):
     ("limit=51", "limit must be <= 50"),
 ])
 def test_social_graph_rejects_invalid_limit(client, query, expected_error):
+    """An invalid graph limit is rejected with 400."""
     resp = client.get(f"/api/social/graph?{query}")
 
     assert resp.status_code == 400
@@ -186,6 +197,7 @@ def test_social_graph_rejects_invalid_limit(client, query, expected_error):
 
 
 def test_agent_interactions_shape_not_found_and_limit(client):
+    """The per-agent interactions response shape, 404 for unknown agents, and limit handling."""
     _seed_interaction_data()
 
     not_found = client.get("/api/agents/no_such_agent/interactions")
@@ -232,6 +244,7 @@ def test_agent_interactions_shape_not_found_and_limit(client):
     ("limit=51", "limit must be <= 50"),
 ])
 def test_agent_interactions_rejects_invalid_limit(client, query, expected_error):
+    """An invalid per-agent interactions limit is rejected with 400."""
     _seed_interaction_data()
 
     resp = client.get(f"/api/agents/alice/interactions?{query}")

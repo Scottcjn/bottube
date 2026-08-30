@@ -16,6 +16,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    """Build the Ergo bridge app with an isolated test DB and wired get_db."""
     db_path = tmp_path / "ergo_bridge.db"
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
@@ -47,6 +48,7 @@ def client(tmp_path, monkeypatch):
     app.register_blueprint(ergo_bridge_blueprint.ergo_bp)
 
     def _test_get_db():
+        """Per-test SQLite connection swapped in for the bridge's get_db."""
         if "test_db" in g:
             return g.test_db
         db = sqlite3.connect(str(db_path))
@@ -56,6 +58,7 @@ def client(tmp_path, monkeypatch):
 
     @app.teardown_appcontext
     def _close_db(_exc):
+        """Close the per-request test connection on teardown."""
         db = g.pop("test_db", None)
         if db is not None:
             db.close()
@@ -69,14 +72,17 @@ def client(tmp_path, monkeypatch):
 
 
 def _auth_headers():
+    """Auth headers for the seeded test agent."""
     return {"X-API-Key": "bottube_sk_ergo_agent"}
 
 
 def _admin_headers():
+    """Admin headers for privileged bridge endpoints."""
     return {"X-Admin-Key": "test-admin"}
 
 
 def _counts_and_balance(db_path):
+    """Row counts per bridge table plus the agent balance, to assert no writes occurred."""
     with sqlite3.connect(str(db_path)) as db:
         return {
             "deposits": db.execute("SELECT COUNT(*) FROM ergo_deposits").fetchone()[0],
@@ -91,6 +97,7 @@ def _counts_and_balance(db_path):
 
 
 def test_ergo_deposit_rejects_non_object_json(client):
+    """A non-object deposit body returns 400 with no DB writes."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
@@ -105,6 +112,7 @@ def test_ergo_deposit_rejects_non_object_json(client):
 
 
 def test_ergo_deposit_rejects_non_string_tx_id(client):
+    """A non-string tx_id is rejected with 400 and no DB writes."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
@@ -119,6 +127,7 @@ def test_ergo_deposit_rejects_non_string_tx_id(client):
 
 
 def test_ergo_withdraw_rejects_non_object_json(client):
+    """A non-object withdraw body returns 400 with no DB writes."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
@@ -133,6 +142,7 @@ def test_ergo_withdraw_rejects_non_object_json(client):
 
 
 def test_ergo_withdraw_rejects_non_string_address(client):
+    """A non-string withdrawal address is rejected with 400 and no DB writes."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
@@ -148,6 +158,7 @@ def test_ergo_withdraw_rejects_non_string_address(client):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True, 0, -1])
 def test_ergo_withdraw_rejects_invalid_amount_without_queue_or_debit(client, amount):
+    """Invalid withdrawal amounts return 400 without queueing a payout or debiting the balance (atomic fail-closed)."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
@@ -163,6 +174,7 @@ def test_ergo_withdraw_rejects_invalid_amount_without_queue_or_debit(client, amo
 
 @pytest.mark.parametrize("limit", ["abc", "-5", "0"])
 def test_ergo_history_rejects_invalid_limit(client, limit):
+    """Malformed history limit values are rejected with 400."""
     app = client.application
 
     with app.test_request_context(
@@ -176,6 +188,7 @@ def test_ergo_history_rejects_invalid_limit(client, limit):
 
 
 def test_ergo_history_clamps_large_limit(client):
+    """Over-large history limits are clamped instead of producing unbounded results."""
     app = client.application
 
     with app.test_request_context(
@@ -189,6 +202,7 @@ def test_ergo_history_clamps_large_limit(client):
 
 
 def test_process_withdrawals_rejects_non_object_json(client):
+    """A non-object process-withdrawals body is rejected with 400."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
@@ -203,6 +217,7 @@ def test_process_withdrawals_rejects_non_object_json(client):
 
 
 def test_process_withdrawals_rejects_non_string_tx_id(client):
+    """A non-string tx_id on process-withdrawals is rejected with 400."""
     before = _counts_and_balance(client.db_path)
 
     resp = client.post(
