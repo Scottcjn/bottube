@@ -21,11 +21,13 @@ from glitch_engine import (
 
 class TestGlitchTypes:
     def test_all_types_have_templates(self):
+        """Every glitch type maps to a template."""
         for gt in GlitchType:
             assert gt in GLITCH_TEMPLATES
             assert len(GLITCH_TEMPLATES[gt]) >= 2
 
     def test_all_personalities_have_weights(self):
+        """Every glitch personality has a defined weight."""
         for p in Personality:
             assert p in PERSONALITY_WEIGHTS
             weights = PERSONALITY_WEIGHTS[p]
@@ -33,6 +35,7 @@ class TestGlitchTypes:
                 assert gt in weights, f"{p} missing weight for {gt}"
 
     def test_template_count(self):
+        """The template registry has the expected number of entries."""
         total = sum(len(v) for v in GLITCH_TEMPLATES.values())
         assert total >= 10, f"Only {total} templates, need 10+"
 
@@ -63,6 +66,7 @@ class TestGlitchEngine:
         assert e2 is None  # cooldown active
 
     def test_reset_cooldown(self):
+        """The glitch cooldown resets as configured."""
         engine = GlitchEngine(
             glitch_probability=1.0,
             cooldown_seconds=9999,
@@ -74,6 +78,7 @@ class TestGlitchEngine:
         assert event is not None
 
     def test_wrong_draft_replaces_description(self):
+        """A mismatched draft replaces the existing description."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         _, desc, event = engine.force_glitch(
             "Title", "Original desc", "wrong_draft",
@@ -82,6 +87,7 @@ class TestGlitchEngine:
         assert event.glitch_type == GlitchType.WRONG_DRAFT
 
     def test_other_types_append_to_description(self):
+        """Non-glitch types append to the description instead of replacing it."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         for gt in GlitchType:
             if gt == GlitchType.WRONG_DRAFT:
@@ -92,6 +98,7 @@ class TestGlitchEngine:
             assert desc.startswith("Original desc"), f"{gt}: lost original"
 
     def test_topic_substitution(self):
+        """Glitch templates substitute the current topic into the output."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         _, desc, _ = engine.force_glitch(
             "T", "D", "meta_awareness", topic="blockchain",
@@ -100,6 +107,7 @@ class TestGlitchEngine:
         assert "{topic}" not in desc
 
     def test_history_tracking(self):
+        """All generated glitches are recorded in the history."""
         engine = GlitchEngine(
             glitch_probability=1.0,
             cooldown_seconds=0,
@@ -111,6 +119,7 @@ class TestGlitchEngine:
         assert len(engine.get_history()) == 2
 
     def test_invalid_personality_raises(self):
+        """An unknown personality raises an error."""
         with pytest.raises(ValueError):
             GlitchEngine(personality="nonexistent")
 
@@ -139,6 +148,7 @@ class TestPersonalityWeighting:
         )
 
     def test_funny_favors_tangent_and_offtopic(self):
+        """The funny personality weights tangent/off-topic behavior."""
         engine = GlitchEngine(
             personality="funny",
             glitch_probability=1.0,
@@ -227,6 +237,7 @@ class TestFrequencyDistribution:
 
 class TestEdgeCases:
     def test_empty_strings(self):
+        """Empty inputs are handled without crashing."""
         engine = GlitchEngine(glitch_probability=1.0, cooldown_seconds=0,
                               rng_seed=42)
         title, desc, event = engine.maybe_glitch("", "")
@@ -234,6 +245,7 @@ class TestEdgeCases:
         assert isinstance(desc, str)
 
     def test_force_glitch_all_types(self):
+        """Force-glitching works for every glitch type."""
         engine = GlitchEngine(rng_seed=42, cooldown_seconds=0)
         for gt in GlitchType:
             title, desc, event = engine.force_glitch(

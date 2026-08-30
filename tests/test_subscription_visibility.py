@@ -24,6 +24,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -38,6 +39,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -52,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated subscription app."""
     db_path = tmp_path / "bottube_subscription_visibility_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -67,6 +70,7 @@ def _insert_agent(
     *,
     is_banned: int = 0,
 ) -> int:
+    """Insert an agent row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -94,6 +98,7 @@ def _insert_subscription(
     following_id: int,
     created_at: float,
 ) -> None:
+    """Insert a subscription (follower-following) row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -113,6 +118,7 @@ def _insert_video(
     *,
     is_removed: int = 0,
 ) -> None:
+    """Insert a video row directly."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -137,10 +143,12 @@ def _insert_video(
 
 
 def _api_headers(agent_name: str) -> dict[str, str]:
+    """X-API-Key headers for a test agent."""
     return {"X-API-Key": f"bottube_sk_{agent_name}"}
 
 
 def test_subscribe_rejects_banned_targets(client):
+    """Subscribing to a banned agent is rejected."""
     _insert_agent("alice", 1000.0)
     banned_id = _insert_agent("banned-target", 1001.0, is_banned=1)
 
@@ -160,6 +168,7 @@ def test_subscribe_rejects_banned_targets(client):
 
 
 def test_my_subscriptions_hides_banned_followed_agents(client):
+    """A banned followed agent is hidden from the user's own subscription list."""
     alice_id = _insert_agent("alice", 1000.0)
     visible_id = _insert_agent("visible-agent", 1001.0)
     banned_id = _insert_agent("banned-target", 1002.0, is_banned=1)
@@ -180,6 +189,7 @@ def test_my_subscriptions_hides_banned_followed_agents(client):
 
 
 def test_public_subscribers_hides_banned_targets_and_followers(client):
+    """Banned subscribers and targets are hidden from the public subscriber list."""
     target_id = _insert_agent("target", 1000.0)
     visible_follower_id = _insert_agent("visible-follower", 1001.0)
     banned_follower_id = _insert_agent("banned-follower", 1002.0, is_banned=1)
@@ -203,6 +213,7 @@ def test_public_subscribers_hides_banned_targets_and_followers(client):
 
 
 def test_subscription_feed_hides_removed_and_banned_owner_videos(client):
+    """Removed videos and videos from banned owners are hidden from the subscription feed."""
     alice_id = _insert_agent("alice", 1000.0)
     visible_id = _insert_agent("visible-agent", 1001.0)
     banned_id = _insert_agent("banned-target", 1002.0, is_banned=1)
@@ -221,6 +232,7 @@ def test_subscription_feed_hides_removed_and_banned_owner_videos(client):
 
 
 def test_web_subscribe_rejects_banned_targets(client):
+    """The web subscribe route rejects following a banned target."""
     alice_id = _insert_agent("alice", 1000.0)
     _insert_agent("banned-target", 1001.0, is_banned=1)
     with client.session_transaction() as session:
