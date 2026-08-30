@@ -33,11 +33,34 @@ from bots.retro_vs_modern import ModernBot, RetroBot
 # ---------------------------------------------------------------------------
 
 def make_video(vid="v1", tags=None):
+    """Helper factory to construct a mock Video instance.
+
+    Args:
+        vid: Parameter for vid.
+        tags: Parameter for tags.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     return Video(id=vid, title="Test Debate", tags=tags or ["debate"])
 
 
 def make_comment(cid="c1", video_id="v1", author="user1", body="Hello",
                  parent_id=None, upvotes=0, downvotes=0):
+    """Helper factory to construct a mock Comment instance.
+
+    Args:
+        cid: Parameter for cid.
+        video_id: Parameter for video id.
+        author: Parameter for author.
+        body: Parameter for body.
+        parent_id: Parameter for parent id.
+        upvotes: Parameter for upvotes.
+        downvotes: Parameter for downvotes.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     return Comment(
         id=cid, video_id=video_id, author=author, body=body,
         parent_id=parent_id, upvotes=upvotes, downvotes=downvotes,
@@ -45,6 +68,15 @@ def make_comment(cid="c1", video_id="v1", author="user1", body="Hello",
 
 
 def make_thread(comments=None, video=None):
+    """Helper factory to construct a mock Thread instance.
+
+    Args:
+        comments: Parameter for comments.
+        video: Parameter for video.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     v = video or make_video()
     cs = comments or []
     root_id = cs[0].id if cs else None
@@ -58,6 +90,15 @@ class SimpleBot(DebateBot):
     max_rounds = 3
 
     def generate_reply(self, thread, opponent_comment):
+        """Execute generate reply logic.
+
+        Args:
+            thread: Parameter for thread.
+            opponent_comment: Parameter for opponent comment.
+
+        Returns:
+            Result of the operation or fixture.
+        """
         if not opponent_comment:
             return "I'll start: hello!"
         return f"Reply to {opponent_comment.author}"
@@ -69,6 +110,8 @@ class SimpleBot(DebateBot):
 
 class TestRateLimiter:
     def test_allows_up_to_max(self):
+        """Test that allows up to max.
+        """
         rl = RateLimiter(max_replies=3, window_seconds=3600)
         assert rl.is_allowed("thread-1") is True
         rl.record("thread-1")
@@ -79,12 +122,16 @@ class TestRateLimiter:
         assert rl.is_allowed("thread-1") is False
 
     def test_different_threads_independent(self):
+        """Test that different threads independent.
+        """
         rl = RateLimiter(max_replies=1, window_seconds=3600)
         rl.record("thread-1")
         assert rl.is_allowed("thread-1") is False
         assert rl.is_allowed("thread-2") is True
 
     def test_window_expiry(self):
+        """Test that window expiry.
+        """
         rl = RateLimiter(max_replies=1, window_seconds=1)
         rl.record("t1")
         assert rl.is_allowed("t1") is False
@@ -92,6 +139,8 @@ class TestRateLimiter:
         assert rl.is_allowed("t1") is True
 
     def test_reset_clears_all(self):
+        """Test that reset clears all.
+        """
         rl = RateLimiter(max_replies=1)
         rl.record("t1")
         rl.record("t2")
@@ -106,10 +155,14 @@ class TestRateLimiter:
 
 class TestComment:
     def test_score(self):
+        """Test that score.
+        """
         c = make_comment(upvotes=10, downvotes=3)
         assert c.score == 7
 
     def test_score_negative(self):
+        """Test that score negative.
+        """
         c = make_comment(upvotes=1, downvotes=5)
         assert c.score == -4
 
@@ -120,24 +173,34 @@ class TestComment:
 
 class TestThreadContext:
     def test_depth(self):
+        """Test that depth.
+        """
         t = make_thread([make_comment("c1"), make_comment("c2")])
         assert t.depth == 2
 
     def test_empty_depth(self):
+        """Test that empty depth.
+        """
         t = make_thread([])
         assert t.depth == 0
 
     def test_last_comment(self):
+        """Test that last comment.
+        """
         c1 = make_comment("c1")
         c2 = make_comment("c2", author="bot1")
         t = make_thread([c1, c2])
         assert t.last_comment() == c2
 
     def test_last_comment_empty(self):
+        """Test that last comment empty.
+        """
         t = make_thread([])
         assert t.last_comment() is None
 
     def test_comments_by(self):
+        """Test that comments by.
+        """
         c1 = make_comment("c1", author="RetroBot")
         c2 = make_comment("c2", author="ModernBot")
         c3 = make_comment("c3", author="RetroBot")
@@ -153,21 +216,29 @@ class TestThreadContext:
 
 class TestDebateBot:
     def test_cannot_instantiate_abstract(self):
+        """Test that cannot instantiate abstract.
+        """
         with pytest.raises(TypeError):
             DebateBot()  # abstract: generate_reply not implemented
 
     def test_concrete_bot_creates(self):
+        """Test that concrete bot creates.
+        """
         bot = SimpleBot()
         assert bot.name == "SimpleBot"
         assert bot.max_rounds == 3
 
     def test_generate_reply_opener(self):
+        """Test that generate reply opener.
+        """
         bot = SimpleBot()
         thread = make_thread([])
         reply = bot.generate_reply(thread, None)
         assert "hello" in reply.lower()
 
     def test_generate_reply_to_opponent(self):
+        """Test that generate reply to opponent.
+        """
         bot = SimpleBot()
         opp = make_comment(author="Opponent")
         thread = make_thread([opp])
@@ -175,6 +246,8 @@ class TestDebateBot:
         assert "Opponent" in reply
 
     def test_no_self_reply(self):
+        """Test that no self reply.
+        """
         bot = SimpleBot()
         bot.client = MagicMock()
         # Last comment is from SimpleBot itself
@@ -184,6 +257,8 @@ class TestDebateBot:
         assert result is None
 
     def test_concession_after_max_rounds(self):
+        """Test that concession after max rounds.
+        """
         bot = SimpleBot()
         bot.client = MagicMock()
         bot.client.post_comment.return_value = make_comment(
@@ -206,6 +281,8 @@ class TestDebateBot:
             assert "GG" in result.body or "🤝" in result.body
 
     def test_rate_limiting(self):
+        """Test that rate limiting.
+        """
         bot = SimpleBot()
         bot.client = MagicMock()
         bot.client.post_comment.return_value = make_comment(
@@ -244,18 +321,24 @@ class TestDebateBot:
 
 class TestDebateOrchestrator:
     def test_register_bots(self):
+        """Test that register bots.
+        """
         orch = DebateOrchestrator(api_url="http://test")
         orch.register(RetroBot())
         orch.register(ModernBot())
         assert len(orch.bots) == 2
 
     def test_build_threads_empty(self):
+        """Test that build threads empty.
+        """
         video = make_video()
         threads = DebateOrchestrator._build_threads(video, [])
         assert len(threads) == 1
         assert threads[0].depth == 0
 
     def test_build_threads_single_chain(self):
+        """Test that build threads single chain.
+        """
         video = make_video()
         c1 = make_comment("c1", parent_id=None, author="RetroBot")
         c2 = make_comment("c2", parent_id="c1", author="ModernBot")
@@ -265,6 +348,8 @@ class TestDebateOrchestrator:
         assert threads[0].depth == 3
 
     def test_build_threads_multiple_roots(self):
+        """Test that build threads multiple roots.
+        """
         video = make_video()
         c1 = make_comment("c1", parent_id=None, author="A")
         c2 = make_comment("c2", parent_id=None, author="B")
@@ -281,6 +366,8 @@ class TestDebateOrchestrator:
         assert isinstance(threads, list)
 
     def test_run_once_with_mock_client(self):
+        """Test that run once with mock client.
+        """
         orch = DebateOrchestrator(api_url="http://test")
         retro = RetroBot()
         modern = ModernBot()
@@ -310,6 +397,8 @@ class TestDebateOrchestrator:
 
 class TestRetroBot:
     def test_opener(self):
+        """Test that opener.
+        """
         bot = RetroBot()
         thread = make_thread([])
         reply = bot.generate_reply(thread, None)
@@ -317,6 +406,8 @@ class TestRetroBot:
         assert len(reply) > 10
 
     def test_rebuttal(self):
+        """Test that rebuttal.
+        """
         bot = RetroBot()
         opp = make_comment(author="ModernBot", body="M3 is better!")
         thread = make_thread([opp])
@@ -324,6 +415,8 @@ class TestRetroBot:
         assert reply is not None
 
     def test_concession_mentions_opponent(self):
+        """Test that concession mentions opponent.
+        """
         bot = RetroBot()
         opp = make_comment(author="ModernBot", body="Final point")
         thread = make_thread([opp])
@@ -346,6 +439,8 @@ class TestRetroBot:
 
 class TestModernBot:
     def test_opener(self):
+        """Test that opener.
+        """
         bot = ModernBot()
         thread = make_thread([])
         reply = bot.generate_reply(thread, None)
@@ -353,6 +448,8 @@ class TestModernBot:
         assert len(reply) > 10
 
     def test_rebuttal(self):
+        """Test that rebuttal.
+        """
         bot = ModernBot()
         opp = make_comment(author="RetroBot", body="PowerPC rules!")
         thread = make_thread([opp])
@@ -360,6 +457,8 @@ class TestModernBot:
         assert reply is not None
 
     def test_concession_mentions_opponent(self):
+        """Test that concession mentions opponent.
+        """
         bot = ModernBot()
         opp = make_comment(author="RetroBot")
         thread = make_thread([opp])
@@ -367,6 +466,8 @@ class TestModernBot:
         assert "GG" in msg or "🤝" in msg
 
     def test_different_openers(self):
+        """Test that different openers.
+        """
         bot = ModernBot()
         thread = make_thread([])
         replies = set()

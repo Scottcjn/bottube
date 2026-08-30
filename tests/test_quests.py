@@ -19,6 +19,14 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Internal helper function for bootstrap sqlite connect.
+
+    Args:
+        path: Parameter for path.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +41,14 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Internal helper function for test init store db.
+
+    Args:
+        db_path: Parameter for db path.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -47,6 +63,15 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Execute client logic.
+
+    Args:
+        monkeypatch: Parameter for monkeypatch.
+        tmp_path: Parameter for tmp path.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     db_path = tmp_path / "bottube_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -57,6 +82,15 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str) -> int:
+    """Internal helper function for insert agent.
+
+    Args:
+        agent_name: Parameter for agent name.
+        api_key: Parameter for api key.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -72,6 +106,15 @@ def _insert_agent(agent_name: str, api_key: str) -> int:
 
 
 def _insert_video(agent_id: int, video_id: str) -> None:
+    """Internal helper function for insert video.
+
+    Args:
+        agent_id: Parameter for agent id.
+        video_id: Parameter for video id.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -85,6 +128,17 @@ def _insert_video(agent_id: int, video_id: str) -> None:
 
 
 def _insert_comment(agent_id: int, video_id: str, content: str, created_at: float = 3.0) -> int:
+    """Internal helper function for insert comment.
+
+    Args:
+        agent_id: Parameter for agent id.
+        video_id: Parameter for video id.
+        content: Parameter for content.
+        created_at: Parameter for created at.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -99,10 +153,23 @@ def _insert_comment(agent_id: int, video_id: str, content: str, created_at: floa
 
 
 def _quest_reward(quest_key: str) -> float:
+    """Internal helper function for quest reward.
+
+    Args:
+        quest_key: Parameter for quest key.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     return next(q["reward_rtc"] for q in bottube_server.DEFAULT_QUESTS if q["quest_key"] == quest_key)
 
 
 def test_quests_endpoint_unlocks_onboarding_flow(client):
+    """Test that quests endpoint unlocks onboarding flow.
+
+    Args:
+        client: Parameter for client.
+    """
     alice_id = _insert_agent("alice", "bottube_sk_alice")
     bob_id = _insert_agent("bob", "bottube_sk_bob")
     _insert_video(alice_id, "alicevideo1A")
@@ -163,6 +230,11 @@ def test_quests_endpoint_unlocks_onboarding_flow(client):
 
 
 def test_quest_rewards_are_idempotent_and_leaderboard_updates(client):
+    """Test that quest rewards are idempotent and leaderboard updates.
+
+    Args:
+        client: Parameter for client.
+    """
     alice_id = _insert_agent("alice2", "bottube_sk_alice2")
     bob_id = _insert_agent("bob2", "bottube_sk_bob2")
     _insert_video(alice_id, "alicevide2A")
@@ -196,6 +268,11 @@ def test_quest_rewards_are_idempotent_and_leaderboard_updates(client):
 
 
 def test_dashboard_renders_quest_board_and_streak(client):
+    """Test that dashboard renders quest board and streak.
+
+    Args:
+        client: Parameter for client.
+    """
     alice_id = _insert_agent("dashalice", "bottube_sk_dashalice")
     _insert_video(alice_id, "dashvideo01A")
     with bottube_server.app.app_context():
@@ -230,6 +307,11 @@ def test_dashboard_renders_quest_board_and_streak(client):
 
 
 def test_dashboard_shows_onboarding_card_before_referral_for_zero_video_creator(client):
+    """Test that dashboard shows onboarding card before referral for zero video creator.
+
+    Args:
+        client: Parameter for client.
+    """
     alice_id = _insert_agent("freshdash", "bottube_sk_freshdash")
 
     with client.session_transaction() as sess:
@@ -252,6 +334,11 @@ def test_dashboard_shows_onboarding_card_before_referral_for_zero_video_creator(
 
 
 def test_dashboard_hides_onboarding_card_after_first_upload(client):
+    """Test that dashboard hides onboarding card after first upload.
+
+    Args:
+        client: Parameter for client.
+    """
     alice_id = _insert_agent("dashready", "bottube_sk_dashready")
     _insert_video(alice_id, "dashready01A")
 
@@ -266,6 +353,11 @@ def test_dashboard_hides_onboarding_card_after_first_upload(client):
 
 
 def test_suspicious_comment_reward_is_held_for_review(client):
+    """Test that suspicious comment reward is held for review.
+
+    Args:
+        client: Parameter for client.
+    """
     commenter_id = _insert_agent("holdalice", "bottube_sk_holdalice")
     target_id = _insert_agent("holdbob", "bottube_sk_holdbob")
     _insert_video(target_id, "holdvideo01A")
@@ -304,6 +396,11 @@ def test_suspicious_comment_reward_is_held_for_review(client):
 
 
 def test_web_comment_rejects_malformed_parent_id(client):
+    """Test that web comment rejects malformed parent id.
+
+    Args:
+        client: Parameter for client.
+    """
     commenter_id = _insert_agent("replyalice", "bottube_sk_replyalice")
     owner_id = _insert_agent("replybob", "bottube_sk_replybob")
     _insert_video(owner_id, "replyvideo01A")
@@ -336,6 +433,11 @@ def test_web_comment_rejects_malformed_parent_id(client):
 
 
 def test_api_comment_rejects_fractional_parent_id(client):
+    """Test that api comment rejects fractional parent id.
+
+    Args:
+        client: Parameter for client.
+    """
     commenter_id = _insert_agent("replyapi", "bottube_sk_replyapi")
     owner_id = _insert_agent("replyowner", "bottube_sk_replyowner")
     _insert_video(owner_id, "replyvideo02A")
@@ -364,6 +466,11 @@ def test_api_comment_rejects_fractional_parent_id(client):
 
 
 def test_web_comment_rejects_fractional_parent_id(client):
+    """Test that web comment rejects fractional parent id.
+
+    Args:
+        client: Parameter for client.
+    """
     commenter_id = _insert_agent("replyweb", "bottube_sk_replyweb")
     owner_id = _insert_agent("replytarget", "bottube_sk_replytarget")
     _insert_video(owner_id, "replyvideo03A")
@@ -396,6 +503,11 @@ def test_web_comment_rejects_fractional_parent_id(client):
 
 
 def test_admin_ban_defaults_to_coaching_hold_instead_of_ban(client):
+    """Test that admin ban defaults to coaching hold instead of ban.
+
+    Args:
+        client: Parameter for client.
+    """
     agent_id = _insert_agent("coachme", "bottube_sk_coachme")
 
     resp = client.post(
@@ -429,6 +541,11 @@ def test_admin_ban_defaults_to_coaching_hold_instead_of_ban(client):
 
 
 def test_admin_moderation_routes_reject_malformed_json_fields(client):
+    """Test that admin moderation routes reject malformed json fields.
+
+    Args:
+        client: Parameter for client.
+    """
     agent_id = _insert_agent("jsonadmin", "bottube_sk_jsonadmin")
     _insert_video(agent_id, "jsonadmin01A")
 
@@ -482,6 +599,11 @@ def test_admin_moderation_routes_reject_malformed_json_fields(client):
 
 
 def test_report_threshold_queues_hold_without_auto_removal(client):
+    """Test that report threshold queues hold without auto removal.
+
+    Args:
+        client: Parameter for client.
+    """
     owner_id = _insert_agent("ownerbot", "bottube_sk_ownerbot")
     _insert_video(owner_id, "ownerclip01A")
     _insert_agent("reporter1", "bottube_sk_reporter1")
@@ -526,6 +648,11 @@ def test_report_threshold_queues_hold_without_auto_removal(client):
 
 
 def test_admin_resolve_report_defaults_to_coach_without_deleting_comment(client):
+    """Test that admin resolve report defaults to coach without deleting comment.
+
+    Args:
+        client: Parameter for client.
+    """
     owner_id = _insert_agent("commentowner", "bottube_sk_commentowner")
     reporter_id = _insert_agent("commentreporter", "bottube_sk_commentreporter")
     _insert_video(owner_id, "commentclip1A")
@@ -585,6 +712,11 @@ def test_admin_resolve_report_defaults_to_coach_without_deleting_comment(client)
 
 
 def test_comment_cleanup_defaults_to_hold_without_deleting(client):
+    """Test that comment cleanup defaults to hold without deleting.
+
+    Args:
+        client: Parameter for client.
+    """
     agent_id = _insert_agent("cleanupbot", "bottube_sk_cleanupbot")
     target_id = _insert_agent("cleanupowner", "bottube_sk_cleanupowner")
     _insert_video(target_id, "cleanupvid1A")
@@ -624,6 +756,11 @@ def test_comment_cleanup_defaults_to_hold_without_deleting(client):
 
 
 def test_self_view_reward_is_held_for_review(client):
+    """Test that self view reward is held for review.
+
+    Args:
+        client: Parameter for client.
+    """
     owner_id = _insert_agent("viewowner", "bottube_sk_viewowner")
     _insert_video(owner_id, "viewhold01A")
 
@@ -654,6 +791,11 @@ def test_self_view_reward_is_held_for_review(client):
 
 
 def test_like_reward_hold_can_be_credited_by_admin(client):
+    """Test that like reward hold can be credited by admin.
+
+    Args:
+        client: Parameter for client.
+    """
     owner_id = _insert_agent("likeowner", "bottube_sk_likeowner")
     voter_id = _insert_agent("likevoter", "bottube_sk_likevoter")
     assert voter_id > 0
@@ -720,6 +862,11 @@ def test_like_reward_hold_can_be_credited_by_admin(client):
 
 
 def test_moderation_hold_release_restores_video(client):
+    """Test that moderation hold release restores video.
+
+    Args:
+        client: Parameter for client.
+    """
     owner_id = _insert_agent("releaseowner", "bottube_sk_releaseowner")
     _insert_video(owner_id, "releasevid1A")
 

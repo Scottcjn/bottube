@@ -28,11 +28,21 @@ from bottube_sdk.client import (
 
 @pytest.fixture
 def client():
+    """Execute client logic.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     return BoTTubeClient(api_key="test-key-123", base_url="https://bottube.test")
 
 
 @pytest.fixture
 def public_client():
+    """Execute public client logic.
+
+    Returns:
+        Result of the operation or fixture.
+    """
     return BoTTubeClient(base_url="https://bottube.test")
 
 
@@ -51,23 +61,45 @@ def _mock_response(status_code=200, json_data=None, text=""):
 
 class TestAuthentication:
     def test_api_key_from_constructor(self):
+        """Test that api key from constructor.
+        """
         c = BoTTubeClient(api_key="abc", base_url="http://x")
         assert c.api_key == "abc"
 
     def test_api_key_from_env(self, monkeypatch):
+        """Test that api key from env.
+
+        Args:
+            monkeypatch: Parameter for monkeypatch.
+        """
         monkeypatch.setenv("BOTTUBE_API_KEY", "env-key")
         c = BoTTubeClient(base_url="http://x")
         assert c.api_key == "env-key"
 
     def test_missing_api_key_raises_on_auth(self, public_client):
+        """Test that missing api key raises on auth.
+
+        Args:
+            public_client: Parameter for public client.
+        """
         with pytest.raises(AuthenticationError, match="API key required"):
             public_client._headers(auth=True)
 
     def test_api_key_sent_in_header(self, client):
+        """Test that api key sent in header.
+
+        Args:
+            client: Parameter for client.
+        """
         hdrs = client._headers(auth=True)
         assert hdrs["X-API-Key"] == "test-key-123"
 
     def test_public_headers_no_key(self, public_client):
+        """Test that public headers no key.
+
+        Args:
+            public_client: Parameter for public client.
+        """
         hdrs = public_client._headers(auth=False)
         assert "X-API-Key" not in hdrs
 
@@ -78,18 +110,33 @@ class TestAuthentication:
 
 class TestVideoOperations:
     def test_get_video(self, client):
+        """Test that get video.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"video_id": "abc", "title": "Test"})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             result = client.get_video("abc")
         assert result["video_id"] == "abc"
 
     def test_get_video_not_found(self, client):
+        """Test that get video not found.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(404, {"error": "Video not found"})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             with pytest.raises(NotFoundError):
                 client.get_video("nonexistent")
 
     def test_list_videos(self, client):
+        """Test that list videos.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"videos": [], "page": 1})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp) as mock_get:
             result = client.list_videos(page=2, sort="views")
@@ -99,6 +146,11 @@ class TestVideoOperations:
         assert call_kwargs["params"]["sort"] == "views"
 
     def test_search_videos(self, client):
+        """Test that search videos.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"results": [], "count": 0})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp) as mock_get:
             result = client.search("retro computing", category="retro")
@@ -107,10 +159,20 @@ class TestVideoOperations:
         assert call_kwargs["params"]["q"] == "retro computing"
 
     def test_upload_video_file_not_found(self, client):
+        """Test that upload video file not found.
+
+        Args:
+            client: Parameter for client.
+        """
         with pytest.raises(FileNotFoundError):
             client.upload("/nonexistent/video.mp4")
 
     def test_upload_invalid_format(self, client):
+        """Test that upload invalid format.
+
+        Args:
+            client: Parameter for client.
+        """
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"not a video")
             path = f.name
@@ -121,6 +183,11 @@ class TestVideoOperations:
             os.unlink(path)
 
     def test_delete_video(self, client):
+        """Test that delete video.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"status": "deleted"})
         with patch("bottube_sdk.client.requests.Session.delete", return_value=mock_resp):
             result = client.delete_video("abc")
@@ -133,6 +200,11 @@ class TestVideoOperations:
 
 class TestCommentOperations:
     def test_comment(self, client):
+        """Test that comment.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"id": 1, "content": "Nice!"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp) as mock_post:
             result = client.comment("abc", "Nice!")
@@ -141,12 +213,22 @@ class TestCommentOperations:
         assert call_kwargs["json"]["comment_type"] == "comment"
 
     def test_get_comments(self, client):
+        """Test that get comments.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"comments": []})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             result = client.get_comments("abc")
         assert "comments" in result
 
     def test_recent_comments(self, client):
+        """Test that recent comments.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"comments": []})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp) as mock_get:
             result = client.recent_comments(since=1000, limit=10)
@@ -161,6 +243,11 @@ class TestCommentOperations:
 
 class TestVoteOperations:
     def test_vote_video_like(self, client):
+        """Test that vote video like.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"status": "voted"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp) as mock_post:
             result = client.vote_video("abc", 1)
@@ -168,19 +255,39 @@ class TestVoteOperations:
         assert call_kwargs["json"]["vote"] == 1
 
     def test_vote_video_invalid(self, client):
+        """Test that vote video invalid.
+
+        Args:
+            client: Parameter for client.
+        """
         with pytest.raises(ValidationError, match="vote must be"):
             client.vote_video("abc", 5)
 
     def test_vote_comment(self, client):
+        """Test that vote comment.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"status": "voted"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp):
             result = client.vote_comment(42, 1)
 
     def test_vote_comment_invalid(self, client):
+        """Test that vote comment invalid.
+
+        Args:
+            client: Parameter for client.
+        """
         with pytest.raises(ValidationError, match="vote must be"):
             client.vote_comment(42, 2)
 
     def test_like_video_shorthand(self, client):
+        """Test that like video shorthand.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"status": "voted"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp) as mock_post:
             client.like_video("abc")
@@ -188,6 +295,11 @@ class TestVoteOperations:
         assert call_kwargs["json"]["vote"] == 1
 
     def test_dislike_video_shorthand(self, client):
+        """Test that dislike video shorthand.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"status": "voted"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp) as mock_post:
             client.dislike_video("abc")
@@ -201,6 +313,11 @@ class TestVoteOperations:
 
 class TestTipOperations:
     def test_tip_video(self, client):
+        """Test that tip video.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"status": "tipped"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp) as mock_post:
             result = client.tip_video("abc", 0.5, message="Nice work!")
@@ -209,6 +326,11 @@ class TestTipOperations:
         assert call_kwargs["json"]["message"] == "Nice work!"
 
     def test_get_video_tips(self, client):
+        """Test that get video tips.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(200, {"tips": []})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             result = client.get_video_tips("abc")
@@ -221,24 +343,44 @@ class TestTipOperations:
 
 class TestErrorHandling:
     def test_rate_limit_error(self, client):
+        """Test that rate limit error.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(429, {"error": "Rate limit exceeded"})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             with pytest.raises(RateLimitError):
                 client.get_video("abc")
 
     def test_auth_error(self, public_client):
+        """Test that auth error.
+
+        Args:
+            public_client: Parameter for public client.
+        """
         mock_resp = _mock_response(401, {"error": "Invalid API key"})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             with pytest.raises(AuthenticationError):
                 public_client.list_videos()
 
     def test_server_error(self, client):
+        """Test that server error.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(500, {"error": "Internal server error"})
         with patch("bottube_sdk.client.requests.Session.get", return_value=mock_resp):
             with pytest.raises(BoTTubeError, match="Internal server error"):
                 client.get_video("abc")
 
     def test_validation_error_on_400(self, client):
+        """Test that validation error on 400.
+
+        Args:
+            client: Parameter for client.
+        """
         mock_resp = _mock_response(400, {"error": "Bad request"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp):
             with pytest.raises(ValidationError):
@@ -251,13 +393,25 @@ class TestErrorHandling:
 
 class TestURLConstruction:
     def test_base_url_trailing_slash_stripped(self):
+        """Test that base url trailing slash stripped.
+        """
         c = BoTTubeClient(base_url="https://bottube.test/")
         assert c.base_url == "https://bottube.test"
 
     def test_url_building(self, client):
+        """Test that url building.
+
+        Args:
+            client: Parameter for client.
+        """
         assert client._url("/api/videos/abc") == "https://bottube.test/api/videos/abc"
 
     def test_base_url_from_env(self, monkeypatch):
+        """Test that base url from env.
+
+        Args:
+            monkeypatch: Parameter for monkeypatch.
+        """
         monkeypatch.setenv("BOTTUBE_BASE_URL", "https://custom.test")
         c = BoTTubeClient()
         assert c.base_url == "https://custom.test"
