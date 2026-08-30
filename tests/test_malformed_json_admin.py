@@ -24,6 +24,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -37,6 +38,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     Path(bootstrap_path).unlink(missing_ok=True)
@@ -52,6 +54,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated admin-enabled app."""
     db_path = tmp_path / "bottube_malformed.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -63,6 +66,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -105,6 +109,7 @@ class TestReferralReviewMalformedJSON:
         return admin_resp.get_json()["referrals"][0]["id"]
 
     def test_array_body_returns_400(self, client):
+        """The admin review endpoint rejects an array JSON body with 400."""
         invite_id = self._seed_referral(client)
         resp = client.post(
             f"/api/admin/referrals/{invite_id}/review",
@@ -115,6 +120,7 @@ class TestReferralReviewMalformedJSON:
         assert "JSON object required" in resp.get_json()["error"]
 
     def test_action_is_list_returns_400(self, client):
+        """A list-typed action field is rejected with 400."""
         invite_id = self._seed_referral(client)
         resp = client.post(
             f"/api/admin/referrals/{invite_id}/review",
@@ -125,6 +131,7 @@ class TestReferralReviewMalformedJSON:
         assert "action must be a string" in resp.get_json()["error"]
 
     def test_note_is_dict_returns_400(self, client):
+        """A dict-typed note field is rejected with 400."""
         invite_id = self._seed_referral(client)
         resp = client.post(
             f"/api/admin/referrals/{invite_id}/review",
@@ -135,6 +142,7 @@ class TestReferralReviewMalformedJSON:
         assert "note must be a string" in resp.get_json()["error"]
 
     def test_valid_review_still_works(self, client):
+        """A well-formed review request still succeeds after the strict type checks."""
         invite_id = self._seed_referral(client)
         resp = client.post(
             f"/api/admin/referrals/{invite_id}/review",
@@ -149,9 +157,11 @@ class TestBadgeAssignMalformedJSON:
     """POST /api/admin/badges/assign with bad JSON shapes."""
 
     def _seed_agent(self, client):
+        """Seed an agent (and target row) for badge assignment."""
         return _insert_agent("badgeguy", "sk_badgeguy", is_human=True)
 
     def test_array_body_returns_400(self, client):
+        """The badge-assign endpoint rejects an array JSON body with 400."""
         agent_id = self._seed_agent(client)
         resp = client.post(
             "/api/admin/badges/assign",
@@ -162,6 +172,7 @@ class TestBadgeAssignMalformedJSON:
         assert "JSON object required" in resp.get_json()["error"]
 
     def test_badge_key_is_list_returns_400(self, client):
+        """A list-typed badge_key is rejected with 400."""
         self._seed_agent(client)
         resp = client.post(
             "/api/admin/badges/assign",
@@ -175,6 +186,7 @@ class TestBadgeAssignMalformedJSON:
         assert "badge_key must be a string" in resp.get_json()["error"]
 
     def test_valid_assign_still_works(self, client):
+        """A well-formed badge assignment still succeeds."""
         self._seed_agent(client)
         resp = client.post(
             "/api/admin/badges/assign",
@@ -192,6 +204,7 @@ class TestBadgeRemoveMalformedJSON:
     """POST /api/admin/badges/<id>/remove with bad JSON shapes."""
 
     def _seed_badge(self, client):
+        """Seed a badge row for removal testing."""
         agent_id = _insert_agent("removeguy", "sk_removeguy", is_human=True)
         assign = client.post(
             "/api/admin/badges/assign",
@@ -205,6 +218,7 @@ class TestBadgeRemoveMalformedJSON:
         return assign.get_json()["badge"]["id"]
 
     def test_array_body_returns_400(self, client):
+        """The video-removal endpoint rejects an array JSON body with 400."""
         badge_id = self._seed_badge(client)
         resp = client.post(
             f"/api/admin/badges/{badge_id}/remove",
@@ -215,6 +229,7 @@ class TestBadgeRemoveMalformedJSON:
         assert "JSON object required" in resp.get_json()["error"]
 
     def test_removed_by_is_dict_returns_400(self, client):
+        """A dict-typed removed_by field is rejected with 400."""
         badge_id = self._seed_badge(client)
         resp = client.post(
             f"/api/admin/badges/{badge_id}/remove",
@@ -225,6 +240,7 @@ class TestBadgeRemoveMalformedJSON:
         assert "removed_by must be a string" in resp.get_json()["error"]
 
     def test_valid_remove_still_works(self, client):
+        """A well-formed badge removal still succeeds."""
         badge_id = self._seed_badge(client)
         resp = client.post(
             f"/api/admin/badges/{badge_id}/remove",

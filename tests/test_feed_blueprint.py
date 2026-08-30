@@ -21,6 +21,7 @@ import feed_blueprint
 
 
 def test_escape_xml_handles_none_and_all_special_characters():
+    """_escape_xml handles None and every XML special character."""
     assert feed_blueprint.escape_xml(None) == ""
     assert (
         feed_blueprint.escape_xml("Rock & <Roll> \"Mix\" 'Tape'")
@@ -29,6 +30,7 @@ def test_escape_xml_handles_none_and_all_special_characters():
 
 
 def test_timestamp_helpers_normalize_epoch_and_iso_values():
+    """Timestamp helpers normalize both epoch numbers and ISO strings."""
     expected = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 
     assert parsedate_to_datetime(feed_blueprint._to_rfc2822(0)) == expected
@@ -46,6 +48,7 @@ def test_timestamp_helpers_normalize_epoch_and_iso_values():
 
 
 def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
+    """normalize_videos drops non-dict entries across all supported response shapes."""
     video_a = {"id": "a"}
     video_b = {"id": "b"}
 
@@ -63,6 +66,7 @@ def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
 
 
 def test_vid_fields_applies_defaults_and_derived_urls():
+    """vid_fields applies field defaults and derives the watch/thumbnail URLs."""
     fields = feed_blueprint._vid_fields({"id": "vid123"})
 
     assert fields == {
@@ -88,6 +92,7 @@ def test_vid_fields_applies_defaults_and_derived_urls():
     ],
 )
 def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
+    """parse_limit applies the default and accepts valid values."""
     app = Flask(__name__)
     with app.test_request_context(path):
         assert feed_blueprint._parse_limit() == expected
@@ -105,6 +110,7 @@ def test_parse_limit_defaults_and_accepts_valid_values(path, expected):
     ],
 )
 def test_parse_limit_rejects_invalid_values(path, message):
+    """parse_limit rejects invalid values with an error."""
     app = Flask(__name__)
     with app.test_request_context(path), pytest.raises(ValueError, match=message):
         feed_blueprint._parse_limit()
@@ -120,10 +126,12 @@ def test_parse_limit_rejects_invalid_values(path, message):
     ],
 )
 def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, path):
+    """Feed routes reject an invalid limit before any upstream video fetch."""
     app = Flask(__name__)
     app.register_blueprint(feed_blueprint.feed_bp)
 
     def fail_fetch_videos(*args, **kwargs):
+        """Stub that fails the test if videos are fetched unexpectedly."""
         raise AssertionError("_fetch_videos should not run for invalid limits")
 
     monkeypatch.setattr(feed_blueprint, "_fetch_videos", fail_fetch_videos)
@@ -135,16 +143,20 @@ def test_feed_routes_reject_invalid_limit_without_fetching_videos(monkeypatch, p
 
 
 def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatch):
+    """fetch_videos builds the filtered upstream request and normalizes the response."""
     calls = []
 
     class FakeResponse:
         def raise_for_status(self):
+            """Raise like requests for non-2xx canned statuses."""
             calls.append(("raise_for_status",))
 
         def json(self):
+            """Return the canned JSON payload."""
             return {"items": [{"id": "one"}, "skip", {"id": "two"}]}
 
     def fake_get(url, params, timeout):
+        """Capture the upstream request and return a canned response."""
         calls.append((url, params, timeout))
         return FakeResponse()
 
@@ -165,7 +177,9 @@ def test_fetch_videos_builds_filtered_request_and_normalizes_response(monkeypatc
 
 
 def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
+    """An upstream request failure degrades to an empty list."""
     def fake_get(url, params, timeout):
+        """Return a failing response to exercise the error path."""
         raise RuntimeError("network unavailable")
 
     monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
@@ -174,10 +188,12 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
 
 
 def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
+    """Feed output escapes URL attributes and CDATA content against injection."""
     app = Flask(__name__)
     app.register_blueprint(feed_blueprint.feed_bp)
 
     def fake_fetch_videos(agent=None, category=None, limit=20):
+        """Stub fetch_videos returning canned normalized videos."""
         return [
             {
                 "video_id": "feedxml01",

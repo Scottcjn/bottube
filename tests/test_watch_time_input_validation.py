@@ -25,6 +25,7 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the bootstrap DB path to the per-test BOTTUBE_DB_PATH."""
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -39,6 +40,7 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Point init_store_db at the test DB path."""
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     return _orig_init_store_db(bootstrap_path)
@@ -53,14 +55,17 @@ sqlite3.connect = _orig_sqlite_connect
 
 class FakeCTRTracker:
     def __init__(self):
+        """Store the tracker under test."""
         self.watch_times = []
 
     def record_watch_time(self, video_id, seconds):
+        """Record watch seconds through the tracker, capturing success/failure."""
         self.watch_times.append((video_id, seconds))
 
 
 @pytest.fixture()
 def tracker(monkeypatch):
+    """A watch-time tracker wired to the test DB."""
     fake = FakeCTRTracker()
     monkeypatch.setattr(bottube_server, "_get_ctr_tracker", lambda: fake)
     return fake
@@ -68,6 +73,7 @@ def tracker(monkeypatch):
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Flask test client against the isolated test app."""
     db_path = tmp_path / "bottube_watch_time_input_test.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     bottube_server._rate_buckets.clear()
@@ -78,6 +84,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent():
+    """Insert an agent row directly and return its id."""
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -93,6 +100,7 @@ def _insert_agent():
 
 
 def _insert_video(video_id, *, is_removed=0):
+    """Insert a video row directly."""
     agent_id = _insert_agent()
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
@@ -109,6 +117,7 @@ def _insert_video(video_id, *, is_removed=0):
 
 
 def test_watch_time_rejects_non_object_json(client, tracker):
+    """A non-object JSON watch-time body is rejected with 400."""
     resp = client.post("/api/videos/video123/watch_time", json=["bad"])
 
     assert resp.status_code == 400
@@ -120,6 +129,7 @@ def test_watch_time_rejects_non_object_json(client, tracker):
 
 
 def test_watch_time_rejects_falsy_non_object_json(client, tracker):
+    """Falsy bodies (null/list) are rejected with 400."""
     resp = client.post("/api/videos/video123/watch_time", json=[])
 
     assert resp.status_code == 400
@@ -131,6 +141,7 @@ def test_watch_time_rejects_falsy_non_object_json(client, tracker):
 
 
 def test_watch_time_rejects_non_numeric_seconds(client, tracker):
+    """Non-numeric seconds values are rejected with 400."""
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": "not-a-number"},
@@ -145,6 +156,7 @@ def test_watch_time_rejects_non_numeric_seconds(client, tracker):
 
 
 def test_watch_time_rejects_negative_seconds(client, tracker):
+    """Negative seconds are rejected with 400."""
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": -5},
@@ -159,6 +171,7 @@ def test_watch_time_rejects_negative_seconds(client, tracker):
 
 
 def test_watch_time_rejects_non_finite_seconds(client, tracker):
+    """NaN/inf seconds are rejected with 400."""
     resp = client.post(
         "/api/videos/video123/watch_time",
         json={"seconds": "NaN"},
@@ -173,6 +186,7 @@ def test_watch_time_rejects_non_finite_seconds(client, tracker):
 
 
 def test_watch_time_null_seconds_is_noop(client, tracker):
+    """null seconds is treated as a no-op rather than an error."""
     _insert_video("video123")
 
     resp = client.post(
@@ -190,6 +204,7 @@ def test_watch_time_null_seconds_is_noop(client, tracker):
 
 
 def test_watch_time_records_positive_seconds(client, tracker):
+    """Valid positive watch seconds are recorded."""
     _insert_video("video123")
 
     resp = client.post(
@@ -207,6 +222,7 @@ def test_watch_time_records_positive_seconds(client, tracker):
 
 
 def test_watch_time_rejects_missing_video(client, tracker):
+    """Watch time for an unknown video is rejected."""
     resp = client.post(
         "/api/videos/missing-video/watch_time",
         json={"seconds": 12.5},
@@ -218,6 +234,7 @@ def test_watch_time_rejects_missing_video(client, tracker):
 
 
 def test_watch_time_rejects_removed_video(client, tracker):
+    """Watch time for a removed video is rejected."""
     _insert_video("removed-video", is_removed=1)
 
     resp = client.post(
