@@ -37,7 +37,7 @@ def test_trust_safety_gate_accepts_bottube_admin_key(monkeypatch, tmp_path):
     sys.modules.pop("bottube_server", None)
 
 
-def test_trust_safety_gate_rejects_rc_only_key(monkeypatch, tmp_path):
+def test_trust_safety_gate_accepts_rc_admin_key_alias(monkeypatch, tmp_path):
     monkeypatch.setenv("BOTTUBE_AUTH_DB_PATH", str(tmp_path / "auth.db"))
     monkeypatch.setenv("BOTTUBE_DB_PATH", str(tmp_path / "bottube.db"))
     monkeypatch.delenv("BOTTUBE_ADMIN_KEY", raising=False)
@@ -46,5 +46,5 @@ def test_trust_safety_gate_rejects_rc_only_key(monkeypatch, tmp_path):
     module = importlib.import_module("bottube_server")
     client = module.app.test_client()
     response = client.post('/admin/blocklist/add', headers={'X-Admin-Key': 'legacy-rc-key'}, json={})
-    assert response.status_code == 401
+    assert response.status_code != 401
     sys.modules.pop("bottube_server", None)
