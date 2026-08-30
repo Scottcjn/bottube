@@ -60,6 +60,7 @@ def tmp_db(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def video_dir(tmp_path):
+    """Create an empty videos/ directory for the test."""
     vdir = tmp_path / "videos"
     vdir.mkdir()
     return vdir
@@ -115,22 +116,26 @@ def test_init_transcription_tables_is_idempotent(tmp_db):
 
 class _FakeSeg:
     def __init__(self, start, end, text):
+        """Store the segment start/end times and text."""
         self.start = start
         self.end = end
         self.text = text
 
 
 def test_fmt_vtt_time():
+    """WebVTT timestamps use a dot before milliseconds; check zero and >1h values."""
     assert wt._fmt_vtt(0.0) == "00:00:00.000"
     assert wt._fmt_vtt(3661.5) == "01:01:01.500"
 
 
 def test_fmt_srt_time():
+    """SRT timestamps use a comma before milliseconds; check zero and >1h values."""
     assert wt._fmt_srt(0.0) == "00:00:00,000"
     assert wt._fmt_srt(3661.5) == "01:01:01,500"
 
 
 def test_segments_to_vtt():
+    """VTT output starts with the WEBVTT header and contains each cue timing and text."""
     segs = [_FakeSeg(0.0, 1.5, "hello world")]
     vtt = wt._segments_to_vtt(segs)
     assert vtt.startswith("WEBVTT")
@@ -139,6 +144,7 @@ def test_segments_to_vtt():
 
 
 def test_segments_to_srt():
+    """SRT output contains a numbered cue with comma timings and the segment text."""
     segs = [_FakeSeg(0.0, 1.5, "hello world")]
     srt = wt._segments_to_srt(segs)
     assert "1\n" in srt
@@ -147,11 +153,13 @@ def test_segments_to_srt():
 
 
 def test_segments_to_plain():
+    """Plain text output joins segment texts with single spaces."""
     segs = [_FakeSeg(0, 1, "hello"), _FakeSeg(1, 2, "world")]
     assert wt._segments_to_plain(segs) == "hello world"
 
 
 def test_segments_skip_empty_text():
+    """Blank and whitespace-only segments are dropped from VTT, SRT, and plain output."""
     segs = [_FakeSeg(0, 1, ""), _FakeSeg(1, 2, "  "), _FakeSeg(2, 3, "hi")]
     vtt = wt._segments_to_vtt(segs)
     assert "hi" in vtt
@@ -167,12 +175,14 @@ def test_segments_skip_empty_text():
 # ---------------------------------------------------------------------------
 
 def test_extract_audio_no_audio_stream(silent_video):
+    """A video with no audio stream yields (None, duration) instead of raising."""
     audio_path, duration = wt._extract_audio(str(silent_video))
     assert audio_path is None  # no audio stream → graceful None
     assert isinstance(duration, float)
 
 
 def test_extract_audio_with_audio_stream(audio_video):
+    """A video with audio yields a real extracted file and a positive duration."""
     audio_path, duration = wt._extract_audio(str(audio_video))
     assert audio_path is not None
     assert os.path.isfile(audio_path)
@@ -182,6 +192,7 @@ def test_extract_audio_with_audio_stream(audio_video):
 
 
 def test_extract_audio_missing_file():
+    """A nonexistent path fails gracefully with audio_path None."""
     audio_path, duration = wt._extract_audio("/nonexistent/path/video.mp4")
     # Should fail gracefully
     assert audio_path is None
@@ -267,6 +278,7 @@ def test_transcribe_video_no_model(tmp_db, monkeypatch, audio_video):
 # ---------------------------------------------------------------------------
 
 def test_search_transcripts(tmp_db, monkeypatch, audio_video, mock_model):
+    """After a real transcription, search_transcripts finds the video by a content word."""
     monkeypatch.setattr(wt, "_load_model", lambda: mock_model)
     wt.transcribe_video("vid_search", str(audio_video))
 
@@ -275,11 +287,13 @@ def test_search_transcripts(tmp_db, monkeypatch, audio_video, mock_model):
 
 
 def test_search_transcripts_no_match(tmp_db):
+    """A nonsense query matches no transcripts."""
     results = wt.search_transcripts("xyznonexistent")
     assert results == []
 
 
 def test_search_transcripts_empty_query(tmp_db):
+    """An empty query returns no results."""
     results = wt.search_transcripts("")
     assert results == []
 
@@ -296,6 +310,7 @@ def test_enqueue_transcription(tmp_db, monkeypatch, audio_video, mock_model):
     original_transcribe = wt.transcribe_video
 
     def mock_transcribe(video_id, video_path, force=False):
+        """Wrap transcribe_video so the worker test can detect when the job is processed."""
         r = original_transcribe(video_id, video_path, force=force)
         done_event.set()
         return r
@@ -395,6 +410,7 @@ def admin_client(flask_client, monkeypatch):
 
 
 def test_get_transcript_not_found(flask_client):
+    """The transcript endpoint returns 404 for an unknown video id."""
     resp = flask_client.get("/api/videos/nonexistent/transcript")
     assert resp.status_code == 404
     data = resp.get_json()
@@ -402,16 +418,19 @@ def test_get_transcript_not_found(flask_client):
 
 
 def test_get_transcript_text_not_found(flask_client):
+    """The plain-text transcript endpoint returns 404 for an unknown video id."""
     resp = flask_client.get("/api/videos/nonexistent/transcript/text")
     assert resp.status_code == 404
 
 
 def test_get_transcript_srt_not_found(flask_client):
+    """The SRT transcript endpoint returns 404 for an unknown video id."""
     resp = flask_client.get("/api/videos/nonexistent/transcript/srt")
     assert resp.status_code == 404
 
 
 def test_get_transcript_vtt_not_found(flask_client):
+    """The WebVTT transcript endpoint returns 404 for an unknown video id."""
     resp = flask_client.get("/api/videos/nonexistent/transcript/vtt")
     assert resp.status_code == 404
 
@@ -441,6 +460,7 @@ def test_get_transcript_returns_data(tmp_db, flask_client, monkeypatch):
 
 
 def test_get_transcript_text_endpoint(tmp_db, flask_client, monkeypatch):
+    """A stored transcript is served as plain text with the original content."""
     import whisper_transcription_blueprint as wtb
     monkeypatch.setattr(wtb.wt, "_get_db_path", lambda: str(tmp_db))
 
@@ -455,6 +475,7 @@ def test_get_transcript_text_endpoint(tmp_db, flask_client, monkeypatch):
 
 
 def test_get_transcript_srt_endpoint(tmp_db, flask_client, monkeypatch):
+    """A stored transcript is served as SRT with comma-separated timings."""
     import whisper_transcription_blueprint as wtb
     monkeypatch.setattr(wtb.wt, "_get_db_path", lambda: str(tmp_db))
 
@@ -469,6 +490,7 @@ def test_get_transcript_srt_endpoint(tmp_db, flask_client, monkeypatch):
 
 
 def test_get_transcript_vtt_endpoint(tmp_db, flask_client, monkeypatch):
+    """A stored transcript is served as WebVTT with dot-separated timings."""
     import whisper_transcription_blueprint as wtb
     monkeypatch.setattr(wtb.wt, "_get_db_path", lambda: str(tmp_db))
 
@@ -485,6 +507,7 @@ def test_get_transcript_vtt_endpoint(tmp_db, flask_client, monkeypatch):
 
 
 def test_search_endpoint(tmp_db, flask_client, monkeypatch):
+    """The transcript search endpoint finds a stored transcript by keyword."""
     import whisper_transcription_blueprint as wtb
     monkeypatch.setattr(wtb.wt, "_get_db_path", lambda: str(tmp_db))
 
@@ -504,11 +527,13 @@ def test_search_endpoint(tmp_db, flask_client, monkeypatch):
     [(None, 50), ("1", 1), ("500", 500)],
 )
 def test_search_endpoint_accepts_valid_limit(flask_client, monkeypatch, limit, expected):
+    """Valid limit values are accepted and forwarded to the search call."""
     import whisper_transcription_blueprint as wtb
 
     seen = []
 
     def fake_search(query, limit=50):
+        """Capture the query/limit the endpoint passes through and return a canned result."""
         seen.append((query, limit))
         return ["search_vid_limit"]
 
@@ -526,9 +551,11 @@ def test_search_endpoint_accepts_valid_limit(flask_client, monkeypatch, limit, e
 
 @pytest.mark.parametrize("limit", ["abc", "0", "-1", "1.5", "501", ""])
 def test_search_endpoint_rejects_invalid_limit(flask_client, monkeypatch, limit):
+    """Invalid limit values are rejected with 400 and never reach search."""
     import whisper_transcription_blueprint as wtb
 
     def fail_search(*_args, **_kwargs):
+        """Stub that fails the test if the search layer is reached with an invalid limit."""
         raise AssertionError("invalid limit should not search transcripts")
 
     monkeypatch.setattr(wtb.wt, "search_transcripts", fail_search)
@@ -540,6 +567,7 @@ def test_search_endpoint_rejects_invalid_limit(flask_client, monkeypatch, limit)
 
 
 def test_parse_positive_int_arg_allows_unbounded_limit(flask_client):
+    """Omitting limit is valid: no cap is applied beyond the endpoint default."""
     import whisper_transcription_blueprint as wtb
 
     with flask_client.application.test_request_context(
@@ -552,11 +580,13 @@ def test_parse_positive_int_arg_allows_unbounded_limit(flask_client):
 
 
 def test_search_endpoint_no_query(flask_client):
+    """The search endpoint rejects a missing q parameter with 400."""
     resp = flask_client.get("/api/transcript/search")
     assert resp.status_code == 400
 
 
 def test_backfill_rejects_non_object_json(admin_client):
+    """A non-object JSON body on the backfill endpoint returns 400."""
     resp = admin_client.post("/api/transcript/backfill", json=["not", "an", "object"])
 
     assert resp.status_code == 400
@@ -564,6 +594,7 @@ def test_backfill_rejects_non_object_json(admin_client):
 
 
 def test_backfill_rejects_invalid_batch_size(admin_client):
+    """A non-integer batch_size returns 400 without enqueueing work."""
     resp = admin_client.post("/api/transcript/backfill", json={"batch_size": "not-an-int"})
 
     assert resp.status_code == 400
@@ -576,9 +607,11 @@ def test_backfill_rejects_non_positive_or_non_integer_batch_size(
     monkeypatch,
     batch_size,
 ):
+    """Parametrized invalid batch_size values (0, -1, True, 1.5, inf) all return 400 without enqueueing work."""
     import whisper_transcription_blueprint as wtb
 
     def fail_backfill(**_kwargs):
+        """Stub that fails the test if backfill work is enqueued."""
         raise AssertionError("invalid batch_size should not enqueue backfill work")
 
     monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
@@ -590,6 +623,7 @@ def test_backfill_rejects_non_positive_or_non_integer_batch_size(
 
 
 def test_trigger_transcription_video_not_found(flask_client):
+    """Triggering transcription for an unknown video returns 404."""
     resp = flask_client.post("/api/videos/nosuchvid/transcript/trigger", json={})
     assert resp.status_code == 404
 
@@ -603,6 +637,7 @@ def test_backfill_requires_admin(flask_client, monkeypatch):
     import whisper_transcription_blueprint as wtb
 
     def fail_backfill(**_kwargs):
+        """Stub that fails the test if backfill work is enqueued."""
         raise AssertionError("anonymous caller reached backfill_existing_videos")
 
     monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
@@ -618,6 +653,7 @@ def test_backfill_fails_closed_without_admin_key(flask_client, monkeypatch):
     import whisper_transcription_blueprint as wtb
 
     def fail_backfill(**_kwargs):
+        """Stub that fails the test if backfill work is enqueued."""
         raise AssertionError("bogus admin key reached backfill_existing_videos")
 
     monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
@@ -636,6 +672,7 @@ def test_backfill_caps_batch_size(admin_client, monkeypatch):
     import whisper_transcription_blueprint as wtb
 
     def fail_backfill(**_kwargs):
+        """Stub that fails the test if backfill work is enqueued."""
         raise AssertionError("oversized batch_size should not enqueue work")
 
     monkeypatch.setattr(wtb.wt, "backfill_existing_videos", fail_backfill)
@@ -649,11 +686,13 @@ def test_backfill_caps_batch_size(admin_client, monkeypatch):
 
 
 def test_backfill_allows_batch_size_at_the_cap(admin_client, monkeypatch):
+    """A batch_size exactly at the configured cap is accepted and forwarded."""
     import whisper_transcription_blueprint as wtb
 
     seen = {}
 
     def record(**kwargs):
+        """Capture the backfill kwargs and return a canned processed count."""
         seen.update(kwargs)
         return 3
 
