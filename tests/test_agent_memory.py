@@ -19,6 +19,7 @@ from agent_memory import (
 
 @pytest.fixture
 def mem(tmp_path):
+    """A fresh AgentMemory store backed by a temp DB."""
     return AgentMemory(
         agent="cosmo",
         db_path=tmp_path / "memory.db",
@@ -53,6 +54,7 @@ def populated_mem(tmp_path):
 
 class TestTfIdfStore:
     def test_add_and_search(self):
+        """Added memories are retrievable by content search."""
         store = TfIdfStore()
         store.add("d1", "the quick brown fox jumps over the lazy dog")
         store.add("d2", "a fast red car drives down the highway")
@@ -65,10 +67,12 @@ class TestTfIdfStore:
         assert "d1" in ids or "d3" in ids
 
     def test_empty_store(self):
+        """An empty store returns no search results."""
         store = TfIdfStore()
         assert store.search("anything") == []
 
     def test_remove(self):
+        """Removed memories no longer appear in search results."""
         store = TfIdfStore()
         store.add("d1", "hello world")
         store.remove("d1")
@@ -77,24 +81,28 @@ class TestTfIdfStore:
 
 class TestIngestAndSearch:
     def test_ingest_single(self, mem):
+        """Ingesting one memory stores and indexes it."""
         mem.ingest_video("v1", "Test Video", "A description", tags=["test"])
         results = mem.search("test video")
         assert len(results) == 1
         assert results[0][0].video_id == "v1"
 
     def test_search_by_topic(self, populated_mem):
+        """Search finds memories matching a topic keyword."""
         results = populated_mem.search("PowerPC hardware")
         assert len(results) >= 1
         titles = [r[0].title for r in results]
         assert any("PowerPC" in t for t in titles)
 
     def test_search_unrelated(self, populated_mem):
+        """Unrelated queries return no false-positive memories."""
         results = populated_mem.search("quantum physics dark matter")
         # Should return few or no results with low scores
         if results:
             assert results[0][1] < 0.5
 
     def test_has_covered_topic(self, populated_mem):
+        """has_covered_topic detects previously discussed topics."""
         assert populated_mem.has_covered_topic("PowerPC hardware")
         assert populated_mem.has_covered_topic("mining rustchain")
         # Unlikely to have covered
@@ -103,6 +111,7 @@ class TestIngestAndSearch:
 
 class TestSuggestReference:
     def test_followup_for_recent_related(self, tmp_path):
+        """A recent related conversation produces a follow-up signal."""
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -117,6 +126,7 @@ class TestSuggestReference:
         assert ref.related_video_id == "v1"
 
     def test_first_time_for_new_topic(self, populated_mem):
+        """A brand-new topic produces a first-time signal."""
         ref = populated_mem.suggest_reference(
             "Underwater Basket Weaving XYZ",
             "Something completely different",
@@ -125,6 +135,7 @@ class TestSuggestReference:
         assert ref.type == ReferenceType.FIRST_TIME
 
     def test_changed_mind_when_opinions_exist(self, tmp_path):
+        """Contradicting a stored opinion registers a changed-mind event."""
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -140,6 +151,7 @@ class TestSuggestReference:
         assert "JavaScript" in ref.text
 
     def test_series_detection(self, populated_mem):
+        """Repeated related posts are detected as a series."""
         ref = populated_mem.suggest_reference(
             "PowerPC vs ARM — Part 3",
             "Continuing the comparison",
@@ -149,6 +161,7 @@ class TestSuggestReference:
         assert "Part 3" in ref.text
 
     def test_milestone(self, tmp_path):
+        """Milestone memories are stored and surfaced."""
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -164,22 +177,26 @@ class TestSuggestReference:
 
 class TestStats:
     def test_basic_stats(self, populated_mem):
+        """Stats report store counts accurately."""
         stats = populated_mem.get_stats()
         assert stats.total_videos == 5
         assert stats.first_upload is not None
         assert stats.days_active >= 1
 
     def test_top_topics(self, populated_mem):
+        """Top topics rank by frequency."""
         stats = populated_mem.get_stats()
         topic_names = [t[0] for t in stats.top_topics]
         assert "hardware" in topic_names  # appears in 4 videos
 
     def test_series_detection(self, populated_mem):
+        """Repeated related posts are detected as a series."""
         stats = populated_mem.get_stats()
         assert len(stats.current_series) >= 1
         assert any("PowerPC vs ARM" in s for s in stats.current_series)
 
     def test_empty_stats(self, mem):
+        """Stats on an empty store return zeroed values."""
         stats = mem.get_stats()
         assert stats.total_videos == 0
         assert stats.top_topics == []
@@ -187,6 +204,7 @@ class TestStats:
 
 class TestPersistence:
     def test_data_survives_reload(self, tmp_path):
+        """Memories persist across a store close/reopen cycle."""
         db = tmp_path / "persist.db"
         m1 = AgentMemory(agent="bot", db_path=db)
         m1.ingest_video("v1", "Test", "Desc", tags=["tag1"])
@@ -196,6 +214,7 @@ class TestPersistence:
         assert len(results) == 1
 
     def test_agents_isolated(self, tmp_path):
+        """One agent's memories never leak into another agent's searches."""
         db = tmp_path / "shared.db"
         m1 = AgentMemory(agent="bot_a", db_path=db)
         m2 = AgentMemory(agent="bot_b", db_path=db)

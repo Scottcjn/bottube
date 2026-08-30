@@ -16,6 +16,7 @@ if not hasattr(werkzeug, "__version__"):
 
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
+    """Build the bridge app with an isolated test DB."""
     import wrtc_bridge_blueprint as bridge
 
     db_path = tmp_path / "wrtc_bridge.db"
@@ -52,6 +53,7 @@ def app(tmp_path, monkeypatch):
     flask_app.register_blueprint(bridge.wrtc_bp)
 
     def _test_get_db():
+        """Per-test SQLite connection swapped in for the bridge's get_db."""
         if "test_db" in g:
             return g.test_db
         db = sqlite3.connect(str(db_path))
@@ -66,14 +68,17 @@ def app(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def client(app):
+    """Flask test client for the bridge app."""
     return app.test_client()
 
 
 def _auth_headers():
+    """Auth headers for an authenticated test agent."""
     return {"X-API-Key": "bottube_sk_bridgeuser"}
 
 
 def _withdraw(client, payload):
+    """POST a withdrawal request with the given amount/address."""
     return client.post(
         "/api/wrtc-bridge/withdraw",
         json=payload,
@@ -82,6 +87,7 @@ def _withdraw(client, payload):
 
 
 def test_wrtc_deposit_rejects_non_object_json(client):
+    """A non-object JSON deposit body is rejected with 400."""
     resp = client.post(
         "/api/wrtc-bridge/deposit",
         json=["not", "an", "object"],
@@ -93,6 +99,7 @@ def test_wrtc_deposit_rejects_non_object_json(client):
 
 
 def test_wrtc_deposit_rejects_non_string_tx_signature(client, monkeypatch):
+    """A non-string tx signature is rejected with 400."""
     import wrtc_bridge_blueprint as bridge
 
     monkeypatch.setattr(
@@ -112,6 +119,7 @@ def test_wrtc_deposit_rejects_non_string_tx_signature(client, monkeypatch):
 
 
 def test_wrtc_withdraw_rejects_non_object_json(client):
+    """A non-object JSON withdrawal body is rejected with 400."""
     resp = _withdraw(client, [{"to_address": "11111111111111111111111111111111"}])
 
     assert resp.status_code == 400
@@ -119,6 +127,7 @@ def test_wrtc_withdraw_rejects_non_object_json(client):
 
 
 def test_wrtc_withdraw_rejects_non_string_to_address(client):
+    """A non-string to-address is rejected with 400."""
     resp = _withdraw(
         client,
         {"to_address": ["11111111111111111111111111111111"], "amount": 10},
@@ -130,6 +139,7 @@ def test_wrtc_withdraw_rejects_non_string_to_address(client):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_wrtc_withdraw_rejects_non_finite_amounts(client, amount):
+    """NaN/inf withdrawal amounts are rejected with 400."""
     resp = _withdraw(
         client,
         {"to_address": "11111111111111111111111111111111", "amount": amount},
@@ -141,6 +151,7 @@ def test_wrtc_withdraw_rejects_non_finite_amounts(client, amount):
 
 @pytest.mark.parametrize("limit", ["not-a-number", "0", "-5", "1.5", "true"])
 def test_wrtc_history_rejects_invalid_limit(client, limit):
+    """A malformed history limit is rejected with 400."""
     resp = client.get(
         f"/api/wrtc-bridge/history?limit={limit}",
         headers=_auth_headers(),
@@ -151,6 +162,7 @@ def test_wrtc_history_rejects_invalid_limit(client, limit):
 
 
 def test_rejected_wrtc_withdrawal_does_not_queue_or_debit(client):
+    """A rejected withdrawal neither queues a payout nor debits the balance (atomic fail-closed)."""
     resp = _withdraw(
         client,
         {"to_address": "11111111111111111111111111111111", "amount": "NaN"},
@@ -182,6 +194,7 @@ def test_rejected_wrtc_withdrawal_does_not_queue_or_debit(client):
     ],
 )
 def test_wrtc_html_alias_routes_redirect_to_bridge_console(client, path):
+    """Legacy HTML alias routes redirect to the bridge console."""
     resp = client.get(path)
 
     assert resp.status_code == 302
@@ -200,6 +213,7 @@ def test_bridge_landing_passes_template_context_for_anonymous_user(monkeypatch):
     captured = {}
 
     def _fake_render(template_name, **kwargs):
+        """Stub render_template that captures the template and context."""
         captured["template_name"] = template_name
         captured["kwargs"] = kwargs
         return "<html>fake</html>"
@@ -235,6 +249,7 @@ def test_bridge_landing_uses_authenticated_user_balance_and_sol_address(monkeypa
     captured = {}
 
     def _fake_render(template_name, **kwargs):
+        """Stub render_template that captures the template and context."""
         captured["kwargs"] = kwargs
         return "<html>fake</html>"
 
@@ -246,6 +261,7 @@ def test_bridge_landing_uses_authenticated_user_balance_and_sol_address(monkeypa
 
     @flask_app.before_request
     def _seed_user():
+        """Seed an authenticated user row before the request runs."""
         g.user = {
             "id": 42,
             "agent_name": "alice",
@@ -268,6 +284,7 @@ def test_bridge_landing_handles_user_with_null_sol_address(monkeypatch):
     captured = {}
 
     def _fake_render(template_name, **kwargs):
+        """Stub render_template that captures the template and context."""
         captured["kwargs"] = kwargs
         return "<html>fake</html>"
 
@@ -279,6 +296,7 @@ def test_bridge_landing_handles_user_with_null_sol_address(monkeypatch):
 
     @flask_app.before_request
     def _seed_user():
+        """Seed an authenticated user row before the request runs."""
         g.user = {"id": 7, "agent_name": "bob", "sol_address": None, "rtc_balance": 0.0}
 
     client = flask_app.test_client()
