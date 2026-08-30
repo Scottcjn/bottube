@@ -82,6 +82,7 @@ def _withdraw(client, payload):
 
 
 def test_wrtc_deposit_rejects_non_object_json(client):
+    """Wrtc deposit rejects non object json."""
     resp = client.post(
         "/api/wrtc-bridge/deposit",
         json=["not", "an", "object"],
@@ -93,6 +94,7 @@ def test_wrtc_deposit_rejects_non_object_json(client):
 
 
 def test_wrtc_deposit_rejects_non_string_tx_signature(client, monkeypatch):
+    """Wrtc deposit rejects non string tx signature."""
     import wrtc_bridge_blueprint as bridge
 
     monkeypatch.setattr(
@@ -112,6 +114,7 @@ def test_wrtc_deposit_rejects_non_string_tx_signature(client, monkeypatch):
 
 
 def test_wrtc_withdraw_rejects_non_object_json(client):
+    """Wrtc withdraw rejects non object json."""
     resp = _withdraw(client, [{"to_address": "11111111111111111111111111111111"}])
 
     assert resp.status_code == 400
@@ -119,6 +122,7 @@ def test_wrtc_withdraw_rejects_non_object_json(client):
 
 
 def test_wrtc_withdraw_rejects_non_string_to_address(client):
+    """Wrtc withdraw rejects non string to address."""
     resp = _withdraw(
         client,
         {"to_address": ["11111111111111111111111111111111"], "amount": 10},
@@ -130,6 +134,7 @@ def test_wrtc_withdraw_rejects_non_string_to_address(client):
 
 @pytest.mark.parametrize("amount", ["abc", "NaN", "Infinity", True])
 def test_wrtc_withdraw_rejects_non_finite_amounts(client, amount):
+    """Wrtc withdraw rejects non finite amounts."""
     resp = _withdraw(
         client,
         {"to_address": "11111111111111111111111111111111", "amount": amount},
@@ -141,6 +146,7 @@ def test_wrtc_withdraw_rejects_non_finite_amounts(client, amount):
 
 @pytest.mark.parametrize("limit", ["not-a-number", "0", "-5", "1.5", "true"])
 def test_wrtc_history_rejects_invalid_limit(client, limit):
+    """Wrtc history rejects invalid limit."""
     resp = client.get(
         f"/api/wrtc-bridge/history?limit={limit}",
         headers=_auth_headers(),
@@ -151,6 +157,7 @@ def test_wrtc_history_rejects_invalid_limit(client, limit):
 
 
 def test_rejected_wrtc_withdrawal_does_not_queue_or_debit(client):
+    """Rejected wrtc withdrawal does not queue or debit."""
     resp = _withdraw(
         client,
         {"to_address": "11111111111111111111111111111111", "amount": "NaN"},
@@ -182,6 +189,7 @@ def test_rejected_wrtc_withdrawal_does_not_queue_or_debit(client):
     ],
 )
 def test_wrtc_html_alias_routes_redirect_to_bridge_console(client, path):
+    """Wrtc html alias routes redirect to bridge console."""
     resp = client.get(path)
 
     assert resp.status_code == 302
