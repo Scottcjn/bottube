@@ -26,16 +26,33 @@ def client(monkeypatch, tmp_path):
     with sqlite3.connect(db_path) as db:
         db.execute(
             """
-            CREATE TABLE video_translations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                video_id INTEGER NOT NULL,
-                language TEXT NOT NULL,
-                title TEXT NOT NULL,
-                description TEXT NOT NULL,
-                translator_id INTEGER NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE agents (
+                id INTEGER PRIMARY KEY,
+                agent_name TEXT NOT NULL,
+                is_banned INTEGER DEFAULT 0
             )
             """
+        )
+        db.execute(
+            """
+            CREATE TABLE videos (
+                id INTEGER PRIMARY KEY,
+                video_id TEXT UNIQUE NOT NULL,
+                agent_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                is_removed INTEGER DEFAULT 0
+            )
+            """
+        )
+        db.executemany(
+            "INSERT INTO agents (id, agent_name) VALUES (?, ?)",
+            [(1, "creator"), (7, "translator")],
+        )
+        db.execute(
+            """INSERT INTO videos
+               (id, video_id, agent_id, title, description)
+               VALUES (42, 'public-video-id', 1, 'Original', 'Original description')"""
         )
         db.commit()
 
@@ -47,18 +64,21 @@ def client(monkeypatch, tmp_path):
         g.test_db = db
         return db
 
-    def require_auth(fn):
+    def require_api_key(fn):
         def wrapper(*args, **kwargs):
-            g.user = {"id": 7}
+            g.agent = {"id": 7}
             return fn(*args, **kwargs)
 
         wrapper.__name__ = fn.__name__
         return wrapper
 
-    fake_server = types.SimpleNamespace(get_db=get_db, require_auth=require_auth)
+    fake_server = types.SimpleNamespace(get_db=get_db, require_api_key=require_api_key)
     monkeypatch.setitem(sys.modules, "bottube_server", fake_server)
 
     import translation_routes
+
+    with sqlite3.connect(db_path) as db:
+        translation_routes.init_translation_tables(db)
 
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -90,4 +110,37 @@ def test_add_translation_preserves_missing_field_error_for_objects(client):
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "Missing required fields"}
+    assert _translation_count(client) == 0
+
+
+def test_translation_round_trip_uses_public_video_id(client):
+    created = client.post(
+        "/api/translations",
+        json={
+            "video_id": "public-video-id",
+            "language": "French",
+            "title": "Titre",
+            "description": "Description traduite",
+        },
+    )
+
+    assert created.status_code == 200
+    response = client.get("/api/translations/public-video-id/French")
+    assert response.status_code == 200
+    assert response.get_json()["title"] == "Titre"
+
+
+def test_translation_write_rejects_unknown_video(client):
+    response = client.post(
+        "/api/translations",
+        json={
+            "video_id": "missing-video",
+            "language": "French",
+            "title": "Titre",
+            "description": "Description traduite",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Video not found"}
     assert _translation_count(client) == 0
