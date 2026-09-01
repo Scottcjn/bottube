@@ -522,9 +522,12 @@ class MoodEngine:
             self._save_mood(agent_id, new_mood)
             return new_mood
         
-        # Check if enough time has passed for mood change
+        # Transition eligibility is based on the age of the current state.
+        # ``last_updated`` advances on every intensity refresh, so using it as
+        # the gate would let frequent callers postpone transitions forever.
+        time_in_mood = current_time - current_mood.started_at
         time_since_update = current_time - current_mood.last_updated
-        if time_since_update < self.MIN_MOOD_DURATION:
+        if time_in_mood < self.MIN_MOOD_DURATION:
             # Just update intensity (decay over time)
             hours_passed = time_since_update / 3600
             new_intensity = max(
