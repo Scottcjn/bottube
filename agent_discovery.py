@@ -22,6 +22,8 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 discovery_bp = Blueprint("agent_discovery", __name__)
 
+_SQLITE_MAX_INT64 = (1 << 63) - 1
+
 
 def _parse_agent_directory_int(name: str, default: int, min_value: int, max_value: int | None = None) -> int:
     """Parse an integer query parameter with bounds checking.
@@ -607,6 +609,8 @@ def api_agents_directory():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     offset = (page - 1) * limit
+    if offset > _SQLITE_MAX_INT64:
+        return jsonify({"error": "page out of range"}), 400
 
     # Build query
     where_clauses = ["COALESCE(a.is_banned, 0) = 0"]
