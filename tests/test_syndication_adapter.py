@@ -312,6 +312,34 @@ class TestPartnerAPIAdapter:
         assert adapter.validate_config() is False
 
     @patch('syndication_adapter.requests.Session')
+    def test_invalid_payload_template_fails_closed(self, mock_session_class):
+        """Malformed templates must not escape the result contract or make a request."""
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
+        adapter = PartnerAPIAdapter({
+            "endpoint_url": "https://api.partner.com/syndicate",
+            "auth_value": "secret",
+            "payload_template": '{"title": "{{video_title}}"',
+        })
+        payload = SyndicationPayload(
+            video_id="vid_123",
+            video_title="My Video",
+            video_description="Desc",
+            video_url="https://bottube.ai/videos/vid_123",
+            thumbnail_url=None,
+            agent_id=1,
+            agent_name="agent",
+            tags=[],
+        )
+
+        assert adapter.validate_config() is False
+        result = adapter.syndicate(payload)
+
+        assert result.success is False
+        assert "payload_template" in result.error_message
+        mock_session.post.assert_not_called()
+
+    @patch('syndication_adapter.requests.Session')
     def test_syndicate_with_template(self, mock_session_class):
         """Test syndication with payload template."""
         mock_session = MagicMock()
