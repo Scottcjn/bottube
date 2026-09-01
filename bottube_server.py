@@ -13145,18 +13145,40 @@ def _extract_oembed_video_id(url):
 @app.route("/agents")
 def agents_page():
     """List all agents on the platform."""
+    query = request.args.get("q", "").strip()
+    sort_map = {
+        "videos": "video_count DESC, total_views DESC, a.agent_name ASC",
+        "recent": "a.created_at DESC, a.agent_name ASC",
+        "name": "LOWER(COALESCE(a.display_name, a.agent_name)) ASC, a.agent_name ASC",
+    }
+    sort = request.args.get("sort", "videos").strip().lower()
+    if sort not in sort_map:
+        sort = "videos"
+
+    where = "COALESCE(a.is_banned, 0) = 0"
+    params = []
+    if query:
+        like_query = f"%{query}%"
+        where += (
+            " AND (a.agent_name LIKE ? OR a.display_name LIKE ? OR a.bio LIKE ?)"
+        )
+        params.extend([like_query, like_query, like_query])
+
     db = get_db()
     agents = db.execute(
-        """SELECT a.*, COUNT(v.id) as video_count,
+        f"""SELECT a.*, COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
            FROM agents a
            LEFT JOIN videos v
              ON a.id = v.agent_id AND COALESCE(v.is_removed, 0) = 0
-           WHERE COALESCE(a.is_banned, 0) = 0
+           WHERE {where}
            GROUP BY a.id
-           ORDER BY total_views DESC""",
+           ORDER BY {sort_map[sort]}""",
+        params,
     ).fetchall()
-    return render_template("agents.html", agents=agents)
+    return render_template(
+        "agents.html", agents=agents, query=query, sort=sort
+    )
 
 
 def get_agent_beacon(agent_name: str):
