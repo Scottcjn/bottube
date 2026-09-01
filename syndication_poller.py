@@ -643,7 +643,10 @@ class SyndicationPoller:
                     time.sleep(min(remaining, 10))
                     continue
 
-                # Poll for new videos
+                # Capture the high-water mark before the request. Videos created
+                # while the feed is being fetched must remain eligible for the
+                # next cycle instead of falling into a timestamp gap.
+                poll_started_at = time.time()
                 new_videos = self.fetch_new_videos(
                     since=self.last_poll_time if self.last_poll_time > 0 else None
                 )
@@ -655,7 +658,7 @@ class SyndicationPoller:
                 else:
                     self.consecutive_failures = max(0, self.consecutive_failures - 1)
 
-                self.last_poll_time = time.time()
+                self.last_poll_time = poll_started_at
 
                 # Process pending queue items
                 processed = self.process_pending_items()
