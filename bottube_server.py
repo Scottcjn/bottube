@@ -15711,15 +15711,34 @@ except Exception as _forge3d_e:
 # ---------------------------------------------------------------------------
 
 @app.route("/api/push/subscribe", methods=["POST"])
+@require_api_key
 def push_subscribe():
     """Store a push notification subscription."""
-    if not g.get("agent"):
-        return jsonify({"error": "Login required"}), 401
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
     endpoint = data.get("endpoint", "")
+    if not isinstance(endpoint, str):
+        return jsonify({"error": "endpoint must be a string"}), 400
+    endpoint = endpoint.strip()
+
     keys = data.get("keys", {})
+    if not isinstance(keys, dict):
+        return jsonify({"error": "keys must be a JSON object"}), 400
+
     p256dh = keys.get("p256dh", "")
+    if not isinstance(p256dh, str):
+        return jsonify({"error": "p256dh must be a string"}), 400
+    p256dh = p256dh.strip()
+
     auth = keys.get("auth", "")
+    if not isinstance(auth, str):
+        return jsonify({"error": "auth must be a string"}), 400
+    auth = auth.strip()
+
     if not endpoint or not p256dh or not auth:
         return jsonify({"error": "Missing subscription data"}), 400
     db = get_db()
