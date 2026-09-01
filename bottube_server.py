@@ -5871,6 +5871,8 @@ def admin_referrals():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 20, type=int)))
     offset = (page - 1) * per_page
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     where = ["1 = 1"]
     params: list[object] = []
@@ -6080,6 +6082,8 @@ def admin_badges():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
     offset = (page - 1) * per_page
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     where = ["1 = 1"]
     params: list[object] = []
