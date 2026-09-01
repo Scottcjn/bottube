@@ -10936,6 +10936,28 @@ def web_mark_single_notification_read(notification_id: int):
 # Playlists (API + Web)
 # ---------------------------------------------------------------------------
 
+
+def _playlist_text_field(data, field, *, default="", max_length, required=False):
+    value = data.get(field, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    value = value.strip()[:max_length]
+    if required and not value:
+        return None, f"{field} is required"
+    return value, None
+
+
+def _playlist_visibility(data, *, default="public"):
+    value = data.get("visibility", default)
+    if not isinstance(value, str):
+        return None, "visibility must be a string"
+    if value not in ("public", "unlisted", "private"):
+        return None, "visibility must be one of: public, unlisted, private"
+    return value, None
+
+
 @app.route("/api/playlists", methods=["POST"])
 @require_api_key
 def api_create_playlist():
@@ -10943,13 +10965,15 @@ def api_create_playlist():
     data, error = _json_object_body()
     if error:
         return error
-    title = str(data.get("title", "")).strip()[:200]
-    if not title:
-        return jsonify({"error": "title is required"}), 400
-    description = str(data.get("description", "")).strip()[:2000]
-    visibility = data.get("visibility", "public")
-    if visibility not in ("public", "unlisted", "private"):
-        visibility = "public"
+    title, error = _playlist_text_field(data, "title", max_length=200, required=True)
+    if error:
+        return jsonify({"error": error}), 400
+    description, error = _playlist_text_field(data, "description", max_length=2000)
+    if error:
+        return jsonify({"error": error}), 400
+    visibility, error = _playlist_visibility(data)
+    if error:
+        return jsonify({"error": error}), 400
 
     playlist_id = gen_video_id()
     now = time.time()
@@ -11038,16 +11062,23 @@ def api_update_playlist(playlist_id):
         return error
     sets, vals = [], []
     if "title" in data:
-        title = str(data["title"]).strip()[:200]
-        if title:
-            sets.append("title = ?")
-            vals.append(title)
+        title, error = _playlist_text_field(data, "title", max_length=200, required=True)
+        if error:
+            return jsonify({"error": error}), 400
+        sets.append("title = ?")
+        vals.append(title)
     if "description" in data:
+        description, error = _playlist_text_field(data, "description", max_length=2000)
+        if error:
+            return jsonify({"error": error}), 400
         sets.append("description = ?")
-        vals.append(str(data["description"]).strip()[:2000])
-    if "visibility" in data and data["visibility"] in ("public", "unlisted", "private"):
+        vals.append(description)
+    if "visibility" in data:
+        visibility, error = _playlist_visibility(data)
+        if error:
+            return jsonify({"error": error}), 400
         sets.append("visibility = ?")
-        vals.append(data["visibility"])
+        vals.append(visibility)
 
     if sets:
         sets.append("updated_at = ?")
