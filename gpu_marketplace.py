@@ -300,6 +300,15 @@ def _coerce_float(value, default):
     except (TypeError, ValueError):
         return None, (jsonify({"error": "Numeric value required"}), 400)
 
+
+def _coerce_string(value, field_name: str, default: str = ""):
+    """Return a trimmed JSON string or a stable field-specific 400 response."""
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None, (jsonify({"error": f"{field_name} must be a string"}), 400)
+    return value.strip(), None
+
 # ---------------------------------------------------------------------------
 # PROVIDER ENDPOINTS
 # ---------------------------------------------------------------------------
@@ -322,7 +331,9 @@ def register_provider():
     if error:
         return error
 
-    gpu_model = data.get("gpu_model", "").strip()
+    gpu_model, error = _coerce_string(data.get("gpu_model"), "gpu_model")
+    if error:
+        return error
     if not gpu_model:
         return jsonify({"error": "gpu_model required"}), 400
 
@@ -364,8 +375,12 @@ def provider_heartbeat():
     if error:
         return error
 
-    provider_id = data.get("provider_id", "").strip()
-    status = data.get("status", "online")
+    provider_id, error = _coerce_string(data.get("provider_id"), "provider_id")
+    if error:
+        return error
+    status, error = _coerce_string(data.get("status"), "status", "online")
+    if error:
+        return error
 
     if status not in ("online", "busy", "offline"):
         status = "online"
@@ -490,7 +505,9 @@ def submit_job():
     if error:
         return error
 
-    job_type = data.get("job_type", "").strip()
+    job_type, error = _coerce_string(data.get("job_type"), "job_type")
+    if error:
+        return error
     if job_type not in ("video_render", "image_gen", "transcode", "llm_inference"):
         return jsonify({"error": "Invalid job_type"}), 400
 
@@ -544,8 +561,12 @@ def claim_job():
     if error:
         return error
 
-    provider_id = data.get("provider_id", "").strip()
-    job_id = data.get("job_id", "").strip()
+    provider_id, error = _coerce_string(data.get("provider_id"), "provider_id")
+    if error:
+        return error
+    job_id, error = _coerce_string(data.get("job_id"), "job_id")
+    if error:
+        return error
 
     db = get_db()
 
@@ -603,8 +624,12 @@ def start_job():
     if error:
         return error
 
-    provider_id = data.get("provider_id", "").strip()
-    job_id = data.get("job_id", "").strip()
+    provider_id, error = _coerce_string(data.get("provider_id"), "provider_id")
+    if error:
+        return error
+    job_id, error = _coerce_string(data.get("job_id"), "job_id")
+    if error:
+        return error
 
     db = get_db()
 
@@ -646,9 +671,15 @@ def complete_job():
     if error:
         return error
 
-    provider_id = data.get("provider_id", "").strip()
-    job_id = data.get("job_id", "").strip()
-    result_url = data.get("result_url", "")
+    provider_id, error = _coerce_string(data.get("provider_id"), "provider_id")
+    if error:
+        return error
+    job_id, error = _coerce_string(data.get("job_id"), "job_id")
+    if error:
+        return error
+    result_url, error = _coerce_string(data.get("result_url"), "result_url")
+    if error:
+        return error
 
     db = get_db()
 
@@ -724,9 +755,15 @@ def fail_job():
     if error:
         return error
 
-    provider_id = data.get("provider_id", "").strip()
-    job_id = data.get("job_id", "").strip()
-    error_msg = data.get("error_message", "Unknown error")
+    provider_id, error = _coerce_string(data.get("provider_id"), "provider_id")
+    if error:
+        return error
+    job_id, error = _coerce_string(data.get("job_id"), "job_id")
+    if error:
+        return error
+    error_msg, error = _coerce_string(data.get("error_message"), "error_message", "Unknown error")
+    if error:
+        return error
 
     db = get_db()
 
