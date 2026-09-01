@@ -53,7 +53,7 @@ def client(monkeypatch, tmp_path):
     yield bottube_server.app.test_client()
 
 
-def _insert_agent(agent_name: str, *, is_banned: int = 0) -> int:
+def _insert_agent(agent_name: str, *, is_banned: int = 0, is_human: int = 0) -> int:
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -61,12 +61,13 @@ def _insert_agent(agent_name: str, *, is_banned: int = 0) -> int:
             INSERT INTO agents
                 (agent_name, display_name, api_key, password_hash, bio,
                  avatar_url, is_human, is_banned, created_at, last_active)
-            VALUES (?, ?, ?, '', '', '', 0, ?, ?, ?)
+            VALUES (?, ?, ?, '', '', '', ?, ?, ?, ?)
             """,
             (
                 agent_name,
                 agent_name.replace("_", " ").title(),
                 f"bottube_sk_{agent_name}",
+                is_human,
                 is_banned,
                 time.time(),
                 time.time(),
@@ -81,6 +82,8 @@ def _insert_video(
     agent_id: int,
     *,
     is_removed: int = 0,
+    views: int = 0,
+    likes: int = 0,
 ) -> None:
     video_file = bottube_server.VIDEO_DIR / f"{video_id}.mp4"
     video_file.write_bytes(b"fake video bytes")
@@ -90,8 +93,8 @@ def _insert_video(
             """
             INSERT INTO videos
                 (video_id, agent_id, title, description, filename, tags,
-                 category, created_at, is_removed, width, height)
-            VALUES (?, ?, ?, ?, ?, '[]', 'other', ?, ?, 640, 360)
+                 category, created_at, is_removed, views, likes, width, height)
+            VALUES (?, ?, ?, ?, ?, '[]', 'other', ?, ?, ?, ?, 640, 360)
             """,
             (
                 video_id,
@@ -101,6 +104,8 @@ def _insert_video(
                 f"{video_id}.mp4",
                 time.time(),
                 is_removed,
+                views,
+                likes,
             ),
         )
         db.execute(
@@ -233,3 +238,30 @@ def test_recent_comments_include_only_public_video_context(client):
     comments = response.get_json()["comments"]
     assert {item["video_id"] for item in comments} == {"recent-visible"}
     assert {item["agent_name"] for item in comments} == {"recent_visible_owner"}
+
+
+def test_public_stats_use_the_same_visibility_denominator(client):
+    visible_bot = _insert_agent("stats_visible_bot")
+    visible_human = _insert_agent("stats_visible_human", is_human=1)
+    banned_bot = _insert_agent("stats_banned_bot", is_banned=1)
+    _insert_video("stats-bot-public", visible_bot, views=10, likes=2)
+    _insert_video(
+        "stats-bot-removed", visible_bot, is_removed=1, views=100, likes=20
+    )
+    _insert_video("stats-human-public", visible_human, views=5, likes=1)
+    _insert_video("stats-banned-public", banned_bot, views=200, likes=30)
+
+    response = client.get("/api/stats?limit=10")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["videos"] == 2
+    assert payload["agents"] == 1
+    assert payload["humans"] == 1
+    assert payload["total_views"] == 15
+    assert payload["total_likes"] == 3
+    assert payload["total_comments"] == 2
+    top_agents = {row["agent_name"]: row for row in payload["top_agents"]}
+    assert set(top_agents) == {"stats_visible_bot", "stats_visible_human"}
+    assert top_agents["stats_visible_bot"]["video_count"] == 1
+    assert top_agents["stats_visible_bot"]["total_views"] == 10
