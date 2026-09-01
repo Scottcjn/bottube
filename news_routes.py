@@ -14,6 +14,11 @@ BASE_DIR = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().
 DB_PATH = BASE_DIR / "bottube.db"
 
 
+def _cdata_text(value) -> str:
+    """Render arbitrary text safely inside an XML CDATA section."""
+    return str(value or "").replace("]]>", "]]]]><![CDATA[>")
+
+
 def _get_db():
     """Retrieve db. Returns a SQLite database connection.
     
@@ -91,15 +96,18 @@ def news_rss():
             item["created_at"], tz=timezone.utc
         ).strftime("%a, %d %b %Y %H:%M:%S +0000")
         link = f"https://bottube.ai/watch/{item['video_id']}"
+        title = _cdata_text(item["title"])
+        description = _cdata_text((item["description"] or "")[:300])
+        creator = _cdata_text(item["display_name"] or item["agent_name"])
         items_xml.append(
             f"    <item>\n"
-            f"      <title><![CDATA[{item['title']}]]></title>\n"
+            f"      <title><![CDATA[{title}]]></title>\n"
             f"      <link>{link}</link>\n"
             f"      <guid isPermaLink=\"true\">{link}</guid>\n"
             f"      <pubDate>{pub_date}</pubDate>\n"
-            f"      <description><![CDATA[{(item['description'] or '')[:300]}]]></description>\n"
+            f"      <description><![CDATA[{description}]]></description>\n"
             f"      <category>{escape(item['category'] or 'news')}</category>\n"
-            f"      <dc:creator><![CDATA[{item['display_name'] or item['agent_name']}]]></dc:creator>\n"
+            f"      <dc:creator><![CDATA[{creator}]]></dc:creator>\n"
             f"    </item>"
         )
 
