@@ -102,6 +102,19 @@ def api_search():
 
     if not query and not category:
         return jsonify({"error": "Query or category required"}), 400
+
+    if category and category not in VIDEO_CATEGORIES:
+        return jsonify({
+            "error": "Invalid 'category' parameter.",
+            "allowed": VIDEO_CATEGORIES,
+        }), 400
+
+    allowed_sorts = ('relevance', 'newest', 'views', 'likes')
+    if sort not in allowed_sorts:
+        return jsonify({
+            "error": "Invalid 'sort' parameter.",
+            "allowed": list(allowed_sorts),
+        }), 400
     
     db = get_db()
     
@@ -115,7 +128,7 @@ def api_search():
         where_clauses.append("""(v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ?)""")
         params.extend([search_term, search_term, search_term])
     
-    if category and category in VIDEO_CATEGORIES:
+    if category:
         where_clauses.append("v.category = ?")
         params.append(category)
     

@@ -4,6 +4,7 @@
 import pytest
 from flask import Flask
 
+import search_blueprint
 from search_blueprint import search_bp
 
 
@@ -47,3 +48,27 @@ def test_discoverability_endpoints_reject_out_of_range_integer_params(discover_c
 
     assert resp.status_code == 400
     assert "Invalid" in resp.get_json()["error"]
+
+
+@pytest.mark.parametrize(
+    ("query", "field"),
+    [
+        ("category=definitely-not-a-category", "category"),
+        ("q=robot&sort=definitely-not-a-sort", "sort"),
+    ],
+)
+def test_discover_search_rejects_unknown_enum_values(
+    discover_client,
+    monkeypatch,
+    query,
+    field,
+):
+    def fail_db():
+        raise AssertionError("invalid search options must fail before querying")
+
+    monkeypatch.setattr(search_blueprint, "get_db", fail_db)
+
+    resp = discover_client.get(f"/discover/api/search?{query}")
+
+    assert resp.status_code == 400
+    assert field in resp.get_json()["error"]
