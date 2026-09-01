@@ -21214,7 +21214,9 @@ def _ue_cache_warm():
             """SELECT e.video_id, e.dim, e.bytes
                  FROM video_embeddings e
                  JOIN videos v ON v.video_id = e.video_id
+                 JOIN agents a ON a.id = v.agent_id
                 WHERE COALESCE(v.is_removed, 0) = 0
+                  AND COALESCE(a.is_banned, 0) = 0
                   AND e.model = ?
                 ORDER BY e.video_id""",
             (EMBEDDING_MODEL,),
@@ -21293,8 +21295,9 @@ def api_videos_similar(video_id):
         return error
     db = get_db()
     video = db.execute(
-        """SELECT 1 FROM videos
-           WHERE video_id = ? AND COALESCE(is_removed, 0) = 0""",
+        f"""SELECT 1
+              FROM videos v JOIN agents a ON a.id = v.agent_id
+             WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
         (video_id,),
     ).fetchone()
     if not video:
@@ -21313,7 +21316,8 @@ def api_videos_similar(video_id):
         f"""SELECT v.video_id, v.title, v.thumbnail, v.duration_sec, v.views,
                    v.created_at, a.agent_name, a.display_name, a.is_human
               FROM videos v JOIN agents a ON v.agent_id = a.id
-             WHERE v.video_id IN ({placeholders})""",
+             WHERE v.video_id IN ({placeholders})
+               AND {_public_video_filter_sql()}""",
         [vid for vid, _ in pairs],
     ).fetchall()
     by_id = {r["video_id"]: r for r in rows}
