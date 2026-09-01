@@ -14026,6 +14026,9 @@ def search_page():
     except (TypeError, ValueError):
         page = 1
     per_page = 24
+    offset = (page - 1) * per_page
+    if offset > _SQLITE_MAX_INT64:
+        return jsonify({"error": "page out of range"}), 400
     # Category checkboxes submit repeated ?cat=<id> params.
     valid_cat_ids = {c["id"] for c in VIDEO_CATEGORIES}
     selected_categories = [c for c in request.args.getlist("cat") if c in valid_cat_ids]
@@ -14055,7 +14058,7 @@ def search_page():
                WHERE {where}
                ORDER BY v.views DESC, v.created_at DESC
                LIMIT ? OFFSET ?""",
-            params + [per_page, (page - 1) * per_page],
+            params + [per_page, offset],
         ).fetchall()
 
     pages = max(1, (total + per_page - 1) // per_page)
