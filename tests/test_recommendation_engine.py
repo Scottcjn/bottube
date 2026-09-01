@@ -499,6 +499,26 @@ class TestFeedRecommendationsIntegration:
         # Verify sorted by created_at desc
         for i in range(len(videos) - 1):
             assert videos[i]["created_at"] >= videos[i + 1]["created_at"]
+
+    def test_recommended_mode_uses_actual_watch_times_for_affinity(self, test_db, monkeypatch):
+        test_db.execute(
+            "UPDATE views SET created_at = CASE video_id "
+            "WHEN 'video_0' THEN 100.0 WHEN 'video_2' THEN 200.0 END"
+        )
+        test_db.commit()
+        captured = {}
+
+        def capture_recommend(
+            _engine, candidates, limit, user_watch_history=None, now=None
+        ):
+            captured["history"] = user_watch_history
+            return candidates[:limit]
+
+        monkeypatch.setattr(RecommendationEngine, "recommend", capture_recommend)
+
+        get_feed_recommendations(test_db, agent_id=3, limit=5, mode="recommended")
+
+        assert [entry["watched_at"] for entry in captured["history"]] == [200.0, 100.0]
     
     def test_get_feed_recommendations_excludes_removed(self, test_db):
         """Removed videos should be excluded."""

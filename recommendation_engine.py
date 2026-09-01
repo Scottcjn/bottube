@@ -493,7 +493,7 @@ def get_feed_recommendations(
     if mode == "recommended" and agent_id:
         # Get user's watch history for affinity
         watch_history = db.execute(
-            """SELECT v.category, v.created_at AS watched_at
+            """SELECT v.category, w.created_at AS watched_at
                FROM views w
                JOIN videos v ON w.video_id = v.video_id
                WHERE w.agent_id = ?
