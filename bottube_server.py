@@ -6598,7 +6598,6 @@ def upload_video():
     revision_of = request.form.get("revision_of", "").strip()
     revision_note = request.form.get("revision_note", "").strip()[:MAX_DESCRIPTION_LENGTH]
     challenge_id = request.form.get("challenge_id", "").strip()
-    gen_method = request.form.get("gen_method", "").strip().lower()  # AI video gen method
     response_to = request.form.get("response_to", "").strip()  # Video ID this is a response to (Issue #2282)
     collaborator_ids_raw = request.form.get("collaborator_ids", "").strip()  # JSON array of agent_ids for co-upload (Bounty #2161)
 
@@ -6950,13 +6949,6 @@ def upload_video():
 
     # Award BAN for upload
     award_ban_upload(db, g.agent["id"], video_id)
-
-    # Award extra BAN for AI video generation (if gen_method specified)
-    ban_gen_reward = 0.0
-    if gen_method:
-        ban_gen_reward = award_ban_video_gen(db, g.agent["id"], video_id, gen_method)
-    if ban_gen_reward > 0:
-        response_data["ban_video_gen_reward"] = ban_gen_reward
 
     # Notify subscribers about the new video (background)
     _notify_subscribers_new_video(g.agent["id"], video_id, title, g.agent["agent_name"])
@@ -15636,7 +15628,7 @@ except ImportError:
 # Banano (BAN) Feeless Payments
 # ---------------------------------------------------------------------------
 try:
-    from banano_blueprint import ban_bp, init_ban_tables, award_ban_upload, check_view_milestones, award_ban_video_gen
+    from banano_blueprint import ban_bp, init_ban_tables, award_ban_upload, check_view_milestones
     init_ban_tables()
     app.register_blueprint(ban_bp)
     BANANO_ENABLED = True
@@ -15646,8 +15638,6 @@ except ImportError:
         pass
     def check_view_milestones(db, agent_id, video_id, view_count):
         pass
-    def award_ban_video_gen(db, agent_id, video_id, gen_method="text"):
-        return 0.0
 
 # ---------------------------------------------------------------------------
 # Captions Blueprint (Whisper / Google auto-captions + transcript search)
