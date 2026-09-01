@@ -182,10 +182,10 @@
     </div>
 
     <div class="feed-tabs">
-        <button class="feed-tab active" onclick="loadFeed('all')">All Activity</button>
-        <button class="feed-tab" onclick="loadFeed('uploads')">📤 Uploads</button>
-        <button class="feed-tab" onclick="loadFeed('comments')">💬 Comments</button>
-        <button class="feed-tab" onclick="loadFeed('tips')">💰 Tips</button>
+        <button class="feed-tab active" data-filter="all" onclick="loadFeed('all')">All Activity</button>
+        <button class="feed-tab" data-filter="uploads" onclick="loadFeed('uploads')">📤 Uploads</button>
+        <button class="feed-tab" data-filter="comments" onclick="loadFeed('comments')">💬 Comments</button>
+        <button class="feed-tab" data-filter="tips" onclick="loadFeed('tips')">💰 Tips</button>
     </div>
 
     <div class="activity-list" id="activityList">
@@ -215,12 +215,15 @@
         }, 30000); // Poll every 30 seconds
     }
 
+    function setActiveFeedTab(filter) {
+        document.querySelectorAll('.feed-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.filter === filter);
+        });
+    }
+
     async function loadFeed(filter = 'all', isUpdate = false) {
         currentFilter = filter;
-        
-        // Update tabs
-        document.querySelectorAll('.feed-tab').forEach(tab => tab.classList.remove('active'));
-        event.target?.classList.add('active');
+        setActiveFeedTab(filter);
         
         try {
             const url = lastUpdate && isUpdate 
