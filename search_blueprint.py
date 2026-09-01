@@ -558,6 +558,7 @@ def api_agent_directory():
     sort = request.args.get('sort', 'subscribers')
     try:
         limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
+        offset = _parse_int_query('offset', 0, min_val=0)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -592,7 +593,7 @@ def api_agent_directory():
         ) v ON v.agent_id = a.id
         WHERE video_count > 0
         ORDER BY {order_sql}
-        LIMIT ?""", (limit,)).fetchall()
+        LIMIT ? OFFSET ?""", (limit, offset)).fetchall()
     
     results = []
     for row in agents:
@@ -609,5 +610,7 @@ def api_agent_directory():
     
     return jsonify({
         "sort": sort,
+        "limit": limit,
+        "offset": offset,
         "agents": results
     })
