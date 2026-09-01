@@ -553,6 +553,12 @@ def ban_tip():
     if recipient["id"] == user_id:
         return jsonify({"error": "Cannot tip yourself"}), 400
 
+    # Reserve the sender ledger before checking spendable balance.  Tips and
+    # withdrawals debit the same balance, so an unlocked check-then-insert
+    # lets concurrent requests each spend funds the other has not committed
+    # yet.
+    db.execute("BEGIN IMMEDIATE")
+
     # Withdrawals are written as 'pending' and only ever advance to
     # 'sent'/'failed' -- never 'credited'. Filtering on 'credited' alone
     # dropped those rows before the CASE could subtract them, leaving
@@ -566,6 +572,7 @@ def ban_tip():
     balance = balance_row["balance"] if balance_row else 0
 
     if balance < amount:
+        db.rollback()
         return jsonify({"error": f"Insufficient BAN balance ({balance:.4f} available)"}), 400
 
     now = time.time()
@@ -610,6 +617,10 @@ def ban_withdraw():
 
     db = get_db()
 
+    # Serialize balance admission with the pending-withdrawal insert. Without
+    # this write reservation, two requests can both read the same spendable
+    # balance and each reserve it before either insert becomes visible.
+    db.execute("BEGIN IMMEDIATE")
     balance_row = db.execute(
         "SELECT COALESCE(SUM(CASE WHEN tx_type IN ('reward', 'tip_received') THEN amount_ban ELSE 0 END), 0) - "
         "COALESCE(SUM(CASE WHEN tx_type IN ('withdrawal', 'tip_sent') THEN amount_ban ELSE 0 END), 0) as balance "
@@ -619,6 +630,7 @@ def ban_withdraw():
     balance = balance_row["balance"] if balance_row else 0
 
     if balance < amount:
+        db.rollback()
         return jsonify({"error": f"Insufficient BAN balance ({balance:.4f} available)"}), 400
 
     db.execute(
