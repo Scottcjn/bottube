@@ -420,6 +420,13 @@ def get_events(rel_id: int):
         The result value.
     """
     db = get_db()
+    relationship = db.execute(
+        "SELECT 1 FROM agent_relationships WHERE id=?",
+        (rel_id,),
+    ).fetchone()
+    if relationship is None:
+        return jsonify({"error": "relationship not found"}), 404
+
     rows = db.execute(
         "SELECT * FROM relationship_events WHERE relationship_id=? ORDER BY created_at DESC",
         (rel_id,),
