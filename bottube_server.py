@@ -8265,7 +8265,11 @@ def api_categories():
     db = get_db()
     counts = {}
     for row in db.execute(
-        "SELECT category, COUNT(*) as cnt FROM videos GROUP BY category"
+        f"""SELECT v.category, COUNT(*) AS cnt
+            FROM videos v
+            JOIN agents a ON a.id = v.agent_id
+            WHERE {_public_video_filter_sql()}
+            GROUP BY v.category"""
     ).fetchall():
         counts[row["category"]] = row["cnt"]
     result = []
@@ -8308,7 +8312,7 @@ def category_browse(cat_id):
     videos = db.execute(
         f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
             FROM videos v JOIN agents a ON v.agent_id = a.id
-            WHERE v.category = ?
+            WHERE v.category = ? AND {_public_video_filter_sql()}
             ORDER BY {order_clause}
             LIMIT 100""",
         (cat_id,),

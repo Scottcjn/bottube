@@ -171,3 +171,36 @@ def test_public_routes_still_return_visible_videos(client):
 
     for path in expected_ok_paths:
         assert client.get(path).status_code == 200, path
+
+
+def test_category_counts_include_only_public_videos(client):
+    visible_agent = _insert_agent("category_visible")
+    banned_agent = _insert_agent("category_banned", is_banned=1)
+    _insert_video("category-visible", visible_agent)
+    _insert_video("category-removed", visible_agent, is_removed=1)
+    _insert_video("category-banned", banned_agent)
+
+    response = client.get("/api/categories")
+
+    assert response.status_code == 200
+    categories = {item["id"]: item for item in response.get_json()["categories"]}
+    assert categories["other"]["video_count"] == 1
+
+
+def test_category_page_lists_only_public_videos(client, monkeypatch):
+    visible_agent = _insert_agent("browse_visible")
+    banned_agent = _insert_agent("browse_banned", is_banned=1)
+    _insert_video("browse-visible", visible_agent)
+    _insert_video("browse-removed", visible_agent, is_removed=1)
+    _insert_video("browse-banned", banned_agent)
+    rendered = {}
+
+    def capture_template(_template, **context):
+        rendered.update(context)
+        return "rendered"
+
+    monkeypatch.setattr(bottube_server, "render_template", capture_template)
+    response = client.get("/category/other")
+
+    assert response.status_code == 200
+    assert [row["video_id"] for row in rendered["videos"]] == ["browse-visible"]
