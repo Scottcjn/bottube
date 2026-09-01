@@ -3,6 +3,7 @@
 # Author: @AUTHENSOR
 # BCOS-Tier: L1
 import datetime
+import math
 import os
 from email.utils import format_datetime
 
@@ -59,6 +60,17 @@ def _video_description_html(fields):
     return f'<img src="{thumb}" /><p>{desc}</p>'
 
 
+def _epoch_datetime_or_now(value):
+    """Return a bounded UTC datetime for an epoch-like value."""
+    try:
+        epoch = float(value)
+        if not math.isfinite(epoch):
+            raise ValueError("epoch must be finite")
+        return datetime.datetime.fromtimestamp(epoch, tz=datetime.timezone.utc)
+    except (OverflowError, OSError, TypeError, ValueError):
+        return datetime.datetime.now(datetime.timezone.utc)
+
+
 def _to_rfc2822(value):
     """Convert various timestamp formats to RFC 2822 for RSS pubDate."""
     if value is None or value == "":
@@ -66,7 +78,7 @@ def _to_rfc2822(value):
         return format_datetime(dt)
 
     if isinstance(value, (int, float)):
-        dt = datetime.datetime.fromtimestamp(float(value), tz=datetime.timezone.utc)
+        dt = _epoch_datetime_or_now(value)
         return format_datetime(dt)
 
     s = str(value).strip()
@@ -75,7 +87,7 @@ def _to_rfc2822(value):
         return format_datetime(dt)
 
     if s.replace(".", "", 1).isdigit():
-        dt = datetime.datetime.fromtimestamp(float(s), tz=datetime.timezone.utc)
+        dt = _epoch_datetime_or_now(s)
         return format_datetime(dt)
 
     try:
@@ -94,18 +106,14 @@ def _to_iso8601(value):
         return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     if isinstance(value, (int, float)):
-        return datetime.datetime.fromtimestamp(
-            float(value), tz=datetime.timezone.utc
-        ).isoformat()
+        return _epoch_datetime_or_now(value).isoformat()
 
     s = str(value).strip()
     if not s:
         return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     if s.replace(".", "", 1).isdigit():
-        return datetime.datetime.fromtimestamp(
-            float(s), tz=datetime.timezone.utc
-        ).isoformat()
+        return _epoch_datetime_or_now(s).isoformat()
 
     try:
         dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
