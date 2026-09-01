@@ -113,6 +113,16 @@ def _insert_video(
         db.commit()
 
 
+def _insert_comment(video_id: str, agent_id: int, content: str) -> None:
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            "INSERT INTO comments (video_id, agent_id, content, created_at) VALUES (?, ?, ?, ?)",
+            (video_id, agent_id, content, time.time()),
+        )
+        db.commit()
+
+
 def test_public_routes_hide_removed_videos(client):
     agent_id = _insert_agent("visible_agent")
     _insert_video("removed-clip", agent_id, is_removed=1)
@@ -173,26 +183,26 @@ def test_public_routes_still_return_visible_videos(client):
         assert client.get(path).status_code == 200, path
 
 
-def test_category_counts_include_only_public_videos(client):
-    visible_agent = _insert_agent("category_visible")
-    banned_agent = _insert_agent("category_banned", is_banned=1)
-    _insert_video("category-visible", visible_agent)
-    _insert_video("category-removed", visible_agent, is_removed=1)
-    _insert_video("category-banned", banned_agent)
+def test_public_video_comment_surfaces_hide_banned_authors(client, monkeypatch):
+    owner_id = _insert_agent("comment_owner")
+    visible_commenter = _insert_agent("visible_commenter")
+    banned_commenter = _insert_agent("banned_commenter", is_banned=1)
+    _insert_video("public-comments", owner_id)
+    _insert_comment("public-comments", visible_commenter, "visible comment")
+    _insert_comment("public-comments", banned_commenter, "banned comment")
 
-    response = client.get("/api/categories")
+    api_payload = client.get("/api/videos/public-comments/comments").get_json()
+    assert {item["agent_name"] for item in api_payload["comments"]} == {
+        "comment_owner",
+        "visible_commenter",
+    }
 
-    assert response.status_code == 200
-    categories = {item["id"]: item for item in response.get_json()["categories"]}
-    assert categories["other"]["video_count"] == 1
+    describe_payload = client.get("/api/videos/public-comments/describe").get_json()
+    assert {item["agent"] for item in describe_payload["comments"]} == {
+        "comment_owner",
+        "visible_commenter",
+    }
 
-
-def test_category_page_lists_only_public_videos(client, monkeypatch):
-    visible_agent = _insert_agent("browse_visible")
-    banned_agent = _insert_agent("browse_banned", is_banned=1)
-    _insert_video("browse-visible", visible_agent)
-    _insert_video("browse-removed", visible_agent, is_removed=1)
-    _insert_video("browse-banned", banned_agent)
     rendered = {}
 
     def capture_template(_template, **context):
@@ -200,7 +210,26 @@ def test_category_page_lists_only_public_videos(client, monkeypatch):
         return "rendered"
 
     monkeypatch.setattr(bottube_server, "render_template", capture_template)
-    response = client.get("/category/other")
+    response = client.get("/watch/public-comments")
+    assert response.status_code == 200
+    assert {item["agent_name"] for item in rendered["comments"]} == {
+        "comment_owner",
+        "visible_commenter",
+    }
+
+
+def test_recent_comments_include_only_public_video_context(client):
+    visible_owner = _insert_agent("recent_visible_owner")
+    banned_owner = _insert_agent("recent_banned_owner", is_banned=1)
+    banned_commenter = _insert_agent("recent_banned_commenter", is_banned=1)
+    _insert_video("recent-visible", visible_owner)
+    _insert_video("recent-removed", visible_owner, is_removed=1)
+    _insert_video("recent-banned-owner", banned_owner)
+    _insert_comment("recent-visible", banned_commenter, "hidden author")
+
+    response = client.get("/api/comments/recent?since=0&limit=100")
 
     assert response.status_code == 200
-    assert [row["video_id"] for row in rendered["videos"]] == ["browse-visible"]
+    comments = response.get_json()["comments"]
+    assert {item["video_id"] for item in comments} == {"recent-visible"}
+    assert {item["agent_name"] for item in comments} == {"recent_visible_owner"}
