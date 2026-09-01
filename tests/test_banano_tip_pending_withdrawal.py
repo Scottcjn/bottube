@@ -79,6 +79,15 @@ def _pending_withdrawal_total(db_path):
         ).fetchone()[0]
 
 
+def _set_withdrawal_status(db_path, status):
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE ban_transactions SET status = ? WHERE tx_type = 'withdrawal'",
+            (status,),
+        )
+        db.commit()
+
+
 def test_tip_rejected_after_full_balance_is_withdrawn(ban_client):
     """Alice earns 10 BAN, withdraws all 10, then must not be able to tip it."""
     withdraw = ban_client.post(
@@ -107,3 +116,25 @@ def test_tip_still_allowed_within_the_unwithdrawn_remainder(ban_client):
 
     tip = ban_client.post("/ban/tip", json={"to_agent": "bob", "amount": 4.0})
     assert tip.status_code == 200, tip.get_json()
+
+
+@pytest.mark.parametrize("status", ["processing", "uncertain"])
+def test_inflight_or_ambiguous_withdrawal_stays_reserved(ban_client, status):
+    withdraw = ban_client.post(
+        "/ban/withdraw",
+        json={"amount": 10.0, "address": "ban_" + "1" * 60},
+    )
+    assert withdraw.status_code == 200, withdraw.get_json()
+    _set_withdrawal_status(ban_client.db_path, status)
+
+    tip = ban_client.post("/ban/tip", json={"to_agent": "bob", "amount": 10.0})
+    second_withdrawal = ban_client.post(
+        "/ban/withdraw",
+        json={"amount": 10.0, "address": "ban_" + "2" * 60},
+    )
+    balance = ban_client.get("/ban/balance/alice")
+
+    assert tip.status_code == 400, tip.get_json()
+    assert second_withdrawal.status_code == 400, second_withdrawal.get_json()
+    assert balance.status_code == 200
+    assert balance.get_json()["balance_ban"] == 0.0

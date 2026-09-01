@@ -80,6 +80,27 @@ def _ban_rpc(action_data: dict) -> dict:
     return {"error": "all RPC endpoints failed"}
 
 
+def _claim_withdrawal(db, tx_id: int) -> bool:
+    """Atomically claim one pending withdrawal for this payout worker.
+
+    The pending list is only discovery.  Multiple cron processes may discover
+    the same row, so the irreversible send edge must be guarded by a
+    compare-and-set under a SQLite write reservation.
+    """
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        claimed = db.execute(
+            "UPDATE ban_transactions SET status = 'processing', processed_at = ? "
+            "WHERE id = ? AND status = 'pending' AND tx_type = 'withdrawal'",
+            (time.time(), tx_id),
+        ).rowcount
+        db.commit()
+        return claimed == 1
+    except Exception:
+        db.rollback()
+        raise
+
+
 def process_withdrawals():
     """Process all pending BAN withdrawals."""
     if not BANANO_SEED:
@@ -154,6 +175,10 @@ def process_withdrawals():
                 f"({balance_ban:.4f} < {amount_ban:.4f}). Stopping.")
             break
 
+        if not _claim_withdrawal(db, tx_id):
+            log("INFO", f"TX#{tx_id}: Already claimed by another payout worker")
+            continue
+
         log("INFO", f"TX#{tx_id}: Sending {amount_ban} BAN to {to_address}")
 
         try:
@@ -168,7 +193,8 @@ def process_withdrawals():
 
             log("OK", f"TX#{tx_id}: Sent! Block: {block_hash}")
             db.execute(
-                "UPDATE ban_transactions SET status = 'sent', block_hash = ?, processed_at = ? WHERE id = ?",
+                "UPDATE ban_transactions SET status = 'sent', block_hash = ?, processed_at = ? "
+                "WHERE id = ? AND status = 'processing'",
                 (str(block_hash), time.time(), tx_id),
             )
             balance_ban -= amount_ban
@@ -180,10 +206,20 @@ def process_withdrawals():
             # Mark as failed only for permanent errors
             if any(kw in error_str.lower() for kw in ["insufficient", "invalid", "bad", "fork"]):
                 db.execute(
-                    "UPDATE ban_transactions SET status = 'failed', processed_at = ? WHERE id = ?",
+                    "UPDATE ban_transactions SET status = 'failed', processed_at = ? "
+                    "WHERE id = ? AND status = 'processing'",
                     (time.time(), tx_id),
                 )
-            # Otherwise leave as pending for retry on next cron run
+            else:
+                # The client may have submitted the block before the transport
+                # failed.  Automatic retry could therefore send a second
+                # irreversible payout.  Quarantine the uncertain attempt for
+                # chain reconciliation instead of silently replaying it.
+                db.execute(
+                    "UPDATE ban_transactions SET status = 'uncertain', processed_at = ? "
+                    "WHERE id = ? AND status = 'processing'",
+                    (time.time(), tx_id),
+                )
 
         db.commit()
         time.sleep(1)  # Rate limit between sends
