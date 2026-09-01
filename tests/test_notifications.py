@@ -270,6 +270,34 @@ def test_notification_read_routes_reject_string_false_without_marking_all(client
         db = bottube_server.get_db()
         assert bottube_server._notification_unread_count(db, alice_id) == 2
 
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"all": 1},
+        {"ids": "1"},
+        {"ids": {"1": True}},
+        {"ids": [True]},
+        {"all": True, "ids": [1]},
+    ],
+)
+def test_notification_read_routes_reject_other_malformed_selectors(client, payload):
+    alice_id = _insert_agent("selector-shapes", "bottube_sk_selector_shapes")
+    _insert_notification(alice_id, "subscribe", "new subscriber")
+
+    response = client.post(
+        "/api/agents/me/notifications/read",
+        headers={"X-API-Key": "bottube_sk_selector_shapes"},
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    count = client.get(
+        "/api/agents/me/notifications/count",
+        headers={"X-API-Key": "bottube_sk_selector_shapes"},
+    )
+    assert count.get_json()["unread"] == 1
+
     with client.session_transaction() as sess:
         sess["user_id"] = alice_id
         sess["csrf_token"] = "strict-read-csrf"
