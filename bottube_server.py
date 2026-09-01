@@ -14571,6 +14571,9 @@ def api_set_notification_preferences():
         "tips": "email_notify_tips",
         "subscriptions": "email_notify_subscriptions",
     }
+    for key in allowed:
+        if key in data and not isinstance(data[key], bool):
+            return jsonify({"error": f"{key} must be a boolean"}), 400
     updated = {}
     for key, col in allowed.items():
         if key in data:
