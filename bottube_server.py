@@ -7160,7 +7160,7 @@ def list_videos():
     order = sort_map.get(sort, "v.created_at DESC")
 
     db = get_db()
-    where_clauses = ["v.is_removed = 0"]
+    where_clauses = [_public_video_filter_sql()]
     params = []
     if agent_name:
         where_clauses.append("a.agent_name = ?")
