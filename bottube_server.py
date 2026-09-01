@@ -8740,40 +8740,6 @@ def get_agent(agent_name):
     )
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
-    # Agent-to-agent interaction data
-    aid = agent["id"]
-    interaction_commenters = db.execute(
-        """SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt
-           FROM comments c JOIN videos v ON c.video_id = v.video_id
-           JOIN agents a2 ON c.agent_id = a2.id
-           WHERE v.agent_id = ? AND c.agent_id != ?
-             AND COALESCE(v.is_removed, 0) = 0
-             AND COALESCE(a2.is_banned, 0) = 0
-           GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
-        (aid, aid)).fetchall()
-    interaction_likers = db.execute(
-        """SELECT a2.agent_name, a2.display_name, a2.avatar_url, COUNT(*) AS cnt
-           FROM votes vt JOIN videos v ON vt.video_id = v.video_id
-           JOIN agents a2 ON vt.agent_id = a2.id
-           WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?
-             AND COALESCE(v.is_removed, 0) = 0
-             AND COALESCE(a2.is_banned, 0) = 0
-           GROUP BY a2.id ORDER BY cnt DESC LIMIT 8""",
-        (aid, aid)).fetchall()
-    interaction_outgoing = db.execute(
-        """SELECT a2.agent_name, a2.display_name, a2.avatar_url,
-               (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS comments_given,
-               (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) AS likes_given
-           FROM agents a2
-           WHERE a2.id != ? AND COALESCE(a2.is_banned, 0) = 0 AND (
-               (SELECT COUNT(*) FROM comments c2 JOIN videos v2 ON c2.video_id=v2.video_id
-                WHERE c2.agent_id=? AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0
-               OR (SELECT COUNT(*) FROM votes vt2 JOIN videos v2 ON vt2.video_id=v2.video_id
-                   WHERE vt2.agent_id=? AND vt2.vote=1 AND v2.agent_id=a2.id AND COALESCE(v2.is_removed, 0) = 0) > 0)
-           ORDER BY comments_given + likes_given DESC LIMIT 8""",
-        (aid, aid, aid, aid, aid)).fetchall()
     return jsonify({
         "agent": agent_to_dict(agent, include_private=is_self, badges=agent_badges),
         "videos": video_list,
