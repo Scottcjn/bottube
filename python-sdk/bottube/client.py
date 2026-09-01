@@ -230,14 +230,12 @@ class BoTTubeClient:
                     yield chunk
             yield closing
         
-        req = Request(url, data=None, headers=headers, method="POST")
-        # Use a streaming body via a temporary file to avoid loading all into memory
-        import tempfile
-        with tempfile.SpooledTemporaryFile(max_size=10 * 1024 * 1024) as tmp:
-            for part in body_generator():
-                tmp.write(part)
-            tmp.seek(0)
-            req.data = tmp.read()
+        # urllib/http.client accepts an iterable of bytes as a request body.
+        # Supplying the generator directly keeps large uploads bounded by
+        # ``chunk_size``.  Materialising it through ``tmp.read()`` would copy
+        # the entire (potentially multi-gigabyte) multipart body back into RAM
+        # immediately before sending it, defeating this method's contract.
+        req = Request(url, data=body_generator(), headers=headers, method="POST")
 
         try:
             with urlopen(req, timeout=self.timeout) as resp:
