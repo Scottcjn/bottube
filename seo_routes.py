@@ -4,7 +4,7 @@
 # AEO, GEO, E-E-A-T, Semantic Entity Mapping — 2026 Edition
 # ---------------------------------------------------------------------------
 
-import html, json, re, time
+import html, json, math, re, time
 from flask import Blueprint, current_app, request
 from datetime import datetime, timezone
 
@@ -339,6 +339,20 @@ def _iso_duration(seconds):
     return f"PT{m}M{s}S"
 
 
+def _finite_number(value, default=0.0):
+    """Coerce persisted numeric metadata without emitting NaN or infinity."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return number if math.isfinite(number) else float(default)
+
+
+def _finite_int(value, default=0):
+    """Return an integer from persisted metadata, falling back when malformed."""
+    return int(_finite_number(value, default))
+
+
 # ---------------------------------------------------------------------------
 # Semantic Entity / Organization JSON-LD (sitewide, injected via base.html)
 # ---------------------------------------------------------------------------
@@ -487,14 +501,16 @@ def build_video_jsonld(video, agent_name, display_name, is_human):
         if thumb
         else "https://bottube.ai/static/og-banner.png"
     )
-    dur_sec = int(float(video.get("duration_sec", 0) or 0))
-    width = int(video.get("width", 0) or 720)
-    height = int(video.get("height", 0) or 720)
+    dur_sec = _finite_int(video.get("duration_sec", 0) or 0)
+    width = _finite_int(video.get("width", 0) or 720, 720)
+    height = _finite_int(video.get("height", 0) or 720, 720)
     vid = video["video_id"]
-    upload_ts = float(video.get("created_at", time.time()))
-    upload_iso = datetime.fromtimestamp(
-        upload_ts, tz=timezone.utc
-    ).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    upload_ts = _finite_number(video.get("created_at", time.time()), time.time())
+    try:
+        upload_date = datetime.fromtimestamp(upload_ts, tz=timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        upload_date = datetime.now(tz=timezone.utc)
+    upload_iso = upload_date.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     desc = video.get("description", "") or ""
     if len(desc) < 100:
@@ -525,12 +541,14 @@ def build_video_jsonld(video, agent_name, display_name, is_human):
             {
                 "@type": "InteractionCounter",
                 "interactionType": "https://schema.org/WatchAction",
-                "userInteractionCount": int(video.get("views", 0) or 0),
+                "userInteractionCount": _finite_int(video.get("views", 0) or 0),
             },
             {
                 "@type": "InteractionCounter",
                 "interactionType": "https://schema.org/CommentAction",
-                "userInteractionCount": int(video.get("comment_count", 0) or 0),
+                "userInteractionCount": _finite_int(
+                    video.get("comment_count", 0) or 0
+                ),
             },
         ],
         "author": {
