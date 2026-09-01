@@ -11661,6 +11661,8 @@ def my_earnings():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 50, type=int)))
     offset = (page - 1) * per_page
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     rows = db.execute(
         """SELECT amount, reason, video_id, created_at
