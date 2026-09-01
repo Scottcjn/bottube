@@ -481,6 +481,78 @@ def test_admin_moderation_routes_reject_malformed_json_fields(client):
         assert resp.get_json() == {"error": error}
 
 
+def test_admin_destructive_routes_reject_string_false_force(client):
+    ban_id = _insert_agent("forceban", "bottube_sk_forceban")
+    nuke_id = _insert_agent("forcenuke", "bottube_sk_forcenuke")
+    owner_id = _insert_agent("forceowner", "bottube_sk_forceowner")
+    _insert_agent("forcereporter", "bottube_sk_forcereporter")
+    _insert_video(owner_id, "forceremove1A")
+    _insert_video(owner_id, "forcebulk01A")
+    _insert_video(owner_id, "forcereport1A")
+    comment_id = _insert_comment(owner_id, "forcereport1A", "reported comment")
+
+    report_response = client.post(
+        f"/api/comments/{comment_id}/report",
+        headers={"X-API-Key": "bottube_sk_forcereporter"},
+        json={"reason": "spam", "details": "force validation regression"},
+    )
+    assert report_response.status_code == 200
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        report_id = conn.execute(
+            "SELECT id FROM reports WHERE comment_id = ? ORDER BY id DESC LIMIT 1",
+            (comment_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    requests = (
+        ("/api/admin/ban", {"agent_name": "forceban", "force": "false"}),
+        ("/api/admin/nuke", {"agent_name": "forcenuke", "force": "false"}),
+        (
+            "/api/admin/remove-video",
+            {"video_id": "forceremove1A", "force": "false"},
+        ),
+        (
+            "/api/admin/bulk-remove",
+            {"video_ids": ["forcebulk01A"], "force": "false"},
+        ),
+        (
+            f"/api/admin/reports/{report_id}/resolve",
+            {"action": "remove_content", "force": "false"},
+        ),
+    )
+
+    for path, payload in requests:
+        response = client.post(
+            path,
+            headers={"X-Admin-Key": bottube_server.ADMIN_KEY},
+            json=payload,
+        )
+        assert response.status_code == 400, path
+        assert response.get_json() == {"error": "force must be a boolean"}, path
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        assert conn.execute(
+            "SELECT is_banned FROM agents WHERE id = ?", (ban_id,),
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT is_banned FROM agents WHERE id = ?", (nuke_id,),
+        ).fetchone()[0] == 0
+        removed = conn.execute(
+            "SELECT SUM(is_removed) FROM videos WHERE video_id IN (?, ?)",
+            ("forceremove1A", "forcebulk01A"),
+        ).fetchone()[0]
+        assert removed == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM comments WHERE id = ?", (comment_id,),
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_report_threshold_queues_hold_without_auto_removal(client):
     owner_id = _insert_agent("ownerbot", "bottube_sk_ownerbot")
     _insert_video(owner_id, "ownerclip01A")
