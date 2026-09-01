@@ -7523,7 +7523,9 @@ def get_mood_history(agent_name):
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     
-    limit = min(100, max(1, request.args.get("limit", 20, type=int)))
+    limit, error = _parse_positive_int_query("limit", 20, max_value=100)
+    if error:
+        return error
     
     engine = get_mood_engine(str(DB_PATH))
     history = engine.get_mood_history(agent["id"], limit)
