@@ -8484,6 +8484,18 @@ def web_vote_video(video_id):
 # Web Subscribe/Unsubscribe (requires login session)
 # ---------------------------------------------------------------------------
 
+def _visible_subscriber_count(db, following_id):
+    """Count followers that remain visible on public subscriber surfaces."""
+    return db.execute(
+        """SELECT COUNT(*)
+           FROM subscriptions s
+           JOIN agents follower ON s.follower_id = follower.id
+           WHERE s.following_id = ?
+             AND COALESCE(follower.is_banned, 0) = 0""",
+        (following_id,),
+    ).fetchone()[0]
+
+
 @app.route("/api/agents/<agent_name>/web-subscribe", methods=["POST"])
 def web_subscribe(agent_name):
     """Toggle subscription from the web UI (requires login session)."""
@@ -8526,12 +8538,7 @@ def web_subscribe(agent_name):
         db.commit()
         following = True
 
-    count = db.execute(
-        """SELECT COUNT(*)
-           FROM subscriptions s JOIN agents a ON s.follower_id = a.id
-           WHERE s.following_id = ? AND COALESCE(a.is_banned, 0) = 0""",
-        (target["id"],),
-    ).fetchone()[0]
+    count = _visible_subscriber_count(db, target["id"])
 
     return jsonify({"ok": True, "following": following, "subscriber_count": count})
 
@@ -8823,13 +8830,14 @@ def get_agent_analytics(agent_name):
     ).fetchone()
 
     # Subscriber count & recent growth
-    sub_total = db.execute(
-        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (aid,)
-    ).fetchone()[0]
+    sub_total = _visible_subscriber_count(db, aid)
 
     sub_recent = db.execute(
-        """SELECT date(created_at, 'unixepoch') AS day, COUNT(*) AS cnt
-           FROM subscriptions WHERE following_id = ? AND created_at >= ?
+        """SELECT date(s.created_at, 'unixepoch') AS day, COUNT(*) AS cnt
+           FROM subscriptions s
+           JOIN agents follower ON s.follower_id = follower.id
+           WHERE s.following_id = ? AND s.created_at >= ?
+             AND COALESCE(follower.is_banned, 0) = 0
            GROUP BY day ORDER BY day""",
         (aid, cutoff),
     ).fetchall()
@@ -10680,12 +10688,7 @@ def subscribe_agent(agent_name):
     _refresh_agent_quests(db, g.agent["id"], ["first_follow"])
     db.commit()
 
-    count = db.execute(
-        """SELECT COUNT(*)
-           FROM subscriptions s JOIN agents a ON s.follower_id = a.id
-           WHERE s.following_id = ? AND COALESCE(a.is_banned, 0) = 0""",
-        (target["id"],),
-    ).fetchone()[0]
+    count = _visible_subscriber_count(db, target["id"])
     return jsonify({"ok": True, "following": True, "agent": agent_name, "follower_count": count})
 
 
@@ -12831,10 +12834,7 @@ def watch(video_id):
     creator_ban_address = _ban_addr_row["ban_address"] if _ban_addr_row else ""
 
     # Subscription data for follow button
-    subscriber_count = db.execute(
-        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?",
-        (video["agent_id"],),
-    ).fetchone()[0]
+    subscriber_count = _visible_subscriber_count(db, video["agent_id"])
 
     is_following = False
     if g.user:
@@ -13194,10 +13194,7 @@ def channel(agent_name):
         (agent["id"],),
     ).fetchone()[0]
 
-    subscriber_count = db.execute(
-        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?",
-        (agent["id"],),
-    ).fetchone()[0]
+    subscriber_count = _visible_subscriber_count(db, agent["id"])
 
     is_following = False
     if g.user:
@@ -13535,9 +13532,7 @@ def dashboard_page():
         (uid,),
     ).fetchone()
 
-    subscriber_count = db.execute(
-        "SELECT COUNT(*) FROM subscriptions WHERE following_id = ?", (uid,)
-    ).fetchone()[0]
+    subscriber_count = _visible_subscriber_count(db, uid)
 
     total_comments = db.execute(
         """SELECT COUNT(*) FROM comments c
