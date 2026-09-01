@@ -73,3 +73,21 @@ def test_tips_large_but_safe_page_ok(app, client):
     _make_video(app)
     resp = client.get(f"/api/videos/{_VIDEO_ID}/tips?page=1000000000")
     assert resp.status_code == 200
+
+
+def test_tips_reject_invalid_pagination_values(app, client):
+    """Malformed and out-of-range values must not be silently coerced."""
+    _make_video(app)
+
+    for query in (
+        "page=abc",
+        "page=0",
+        "page=-1",
+        "per_page=abc",
+        "per_page=0",
+        "per_page=51",
+    ):
+        response = client.get(f"/api/videos/{_VIDEO_ID}/tips?{query}")
+
+        assert response.status_code == 400, query
+        assert response.get_json()["error"], query
