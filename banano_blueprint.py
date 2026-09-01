@@ -753,6 +753,15 @@ def ban_platform_status():
         "WHERE status = 'sent' AND tx_type = 'withdrawal'"
     ).fetchone()[0]
 
+    # A tip moves an existing platform liability from one agent to another.
+    # ``total_credited`` includes the receiver leg, so reconcile the matching
+    # sender leg before reporting network liabilities or every tip invents new
+    # off-chain BAN on the operator dashboard.
+    total_internal_tips = db.execute(
+        "SELECT COALESCE(SUM(amount_ban), 0) FROM ban_transactions "
+        "WHERE status = 'credited' AND tx_type = 'tip_sent'"
+    ).fetchone()[0]
+
     total_pending = db.execute(
         "SELECT COALESCE(SUM(amount_ban), 0) FROM ban_transactions "
         "WHERE status = 'pending' AND tx_type = 'withdrawal'"
@@ -762,7 +771,10 @@ def ban_platform_status():
 
     return jsonify({
         "chain": chain_info,
-        "off_chain_liabilities_ban": round(total_credited - total_withdrawn, 4),
+        "off_chain_liabilities_ban": round(
+            total_credited - total_internal_tips - total_withdrawn, 4
+        ),
+        "internal_tips_ban": round(total_internal_tips, 4),
         "pending_withdrawals_ban": round(total_pending, 4),
         "total_wallets": wallet_count,
         "bananopie_available": _HAS_BANANOPIE,
