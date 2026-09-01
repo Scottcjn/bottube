@@ -11581,8 +11581,12 @@ def manage_wallet():
         "paypal": "paypal_email",
     }
 
+    for key in allowed_fields:
+        if key in data and not isinstance(data[key], str):
+            return jsonify({"error": f"{key} must be a string"}), 400
+
     if "rtc_wallet" in data:
-        rtc_wallet = str(data.get("rtc_wallet", "")).strip()
+        rtc_wallet = data["rtc_wallet"].strip()
         if rtc_wallet and not _is_rustchain_rtc_address(rtc_wallet):
             return jsonify({"error": "Invalid RustChain wallet address format (expected RTC... address)"}), 400
 
@@ -11590,7 +11594,7 @@ def manage_wallet():
     params = []
     for key, col in allowed_fields.items():
         if key in data:
-            val = str(data[key]).strip()
+            val = data[key].strip()
             updates.append(f"{col} = ?")
             params.append(val)
 
@@ -11599,7 +11603,7 @@ def manage_wallet():
 
     params.append(g.agent["id"])
     db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE id = ?", params)
-    if str(data.get("rtc_wallet", "")).strip():
+    if data.get("rtc_wallet", "").strip():
         _referral_mark_rtc_native_action(
             db,
             int(g.agent["id"]),
