@@ -17333,9 +17333,7 @@ def api_related_videos(video_id):
         return s
 
     scored = sorted(candidates, key=score, reverse=True)
-    return jsonify({
-        "ok": True,
-        "related": [
+    related_videos = [
             {
                 "video_id": r["video_id"],
                 "title": r["title"],
@@ -17347,7 +17345,16 @@ def api_related_videos(video_id):
                 "display_name": r["display_name"],
             }
             for r in scored[:limit]
-        ],
+        ]
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        # `related_videos` and `count` are the documented Issue #425 API
+        # contract. Keep `related` as an additive compatibility alias for
+        # clients built against the newer compact response.
+        "related_videos": related_videos,
+        "related": related_videos,
+        "count": len(related_videos),
     })
 
 

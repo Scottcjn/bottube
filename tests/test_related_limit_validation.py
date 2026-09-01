@@ -37,6 +37,30 @@ def _make_video(app):
         db.commit()
 
 
+def _make_related_candidate(app):
+    import bottube_server
+
+    with app.app_context():
+        db = bottube_server.get_db()
+        agent_id = db.execute(
+            "SELECT id FROM agents WHERE agent_name = ?",
+            ("related-limit-owner",),
+        ).fetchone()["id"]
+        db.execute(
+            """INSERT INTO videos
+               (video_id, agent_id, title, filename, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                "related_contract_candidate",
+                agent_id,
+                "Related contract candidate",
+                "candidate.mp4",
+                time.time() + 1,
+            ),
+        )
+        db.commit()
+
+
 def test_related_rejects_non_integer_limit(app, client):
     _make_video(app)
     resp = client.get(f"/api/videos/{_VIDEO_ID}/related?limit=abc")
@@ -72,3 +96,16 @@ def test_related_accepts_default_limit(app, client):
     _make_video(app)
     resp = client.get(f"/api/videos/{_VIDEO_ID}/related")
     assert resp.status_code == 200
+
+
+def test_related_response_preserves_documented_contract(app, client):
+    _make_video(app)
+    _make_related_candidate(app)
+
+    resp = client.get(f"/api/videos/{_VIDEO_ID}/related")
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["video_id"] == _VIDEO_ID
+    assert body["related_videos"] == body["related"]
+    assert body["count"] == len(body["related_videos"]) == 1
