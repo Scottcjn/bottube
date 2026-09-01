@@ -13,6 +13,7 @@ from bottube_validators.validators import (
     MAX_QUERY_TIMESTAMP,
     parse_enum,
     parse_positive_int,
+    parse_timestamp,
     parse_timestamp_iso,
 )
 
@@ -257,3 +258,25 @@ def test_shared_timestamp_parser_accepts_unix_and_iso_and_rejects_bounds():
         assert parse_timestamp_iso("since")[1][1] == 400
     with app.test_request_context(f"/?since={MAX_QUERY_TIMESTAMP + 1}"):
         assert parse_timestamp_iso("since")[1][1] == 400
+
+
+@pytest.mark.parametrize("parser", [parse_timestamp, parse_timestamp_iso])
+def test_shared_timestamp_parsers_preserve_fractional_unix_seconds(parser):
+    app = Flask(__name__)
+
+    with app.test_request_context("/?since=1700000000.125"):
+        value, error = parser("since")
+
+    assert error is None
+    assert value == 1_700_000_000.125
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
+def test_shared_timestamp_parser_rejects_non_finite_numbers(raw):
+    app = Flask(__name__)
+
+    with app.test_request_context(f"/?since={raw}"):
+        value, error = parse_timestamp_iso("since")
+
+    assert value is None
+    assert error[1] == 400
