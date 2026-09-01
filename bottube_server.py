@@ -23399,17 +23399,53 @@ def admin_provenance_anchor_result():
     if not _ts_admin_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     _provenance_ensure_anchor_columns()
-    data = request.get_json(silent=True) or {}
-    batch_id = (data.get("batch_id") or "").strip()
-    chain = (data.get("chain") or "ergo").strip()[:32]
-    tx_hash = (data.get("tx_hash") or "").strip()[:128]
+    data, body_error = _admin_json_body()
+    if body_error:
+        return jsonify({"ok": False, "error": body_error}), 400
+
+    batch_id, field_error = _admin_text_field(data, "batch_id")
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
+    chain, field_error = _admin_text_field(data, "chain", default="ergo", max_length=32)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
+    tx_hash, field_error = _admin_text_field(data, "tx_hash", max_length=128)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
     try:
         block_height = int(data.get("block_height", 0))
     except Exception:
         block_height = 0
-    manifest_hash = (data.get("merkle_root") or data.get("manifest_hash") or "").strip()[:128]
-    error_msg = (data.get("error") or "").strip()[:500]
-    video_ids = data.get("video_ids") or []
+    manifest_hash_field = "merkle_root" if "merkle_root" in data else "manifest_hash"
+    manifest_hash, field_error = _admin_text_field(
+        data, manifest_hash_field, max_length=128
+    )
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
+    error_msg, field_error = _admin_text_field(data, "error", max_length=500)
+    if field_error:
+        return jsonify({"ok": False, "error": field_error}), 400
+
+    # A successful anchor is only valid for the exact member set used to
+    # compute its Merkle root. Failure callbacks intentionally omit this list
+    # because they only release the worker's failed claim.
+    callback_video_ids = None
+    if not error_msg:
+        raw_video_ids = data.get("video_ids")
+        if not isinstance(raw_video_ids, list) or not raw_video_ids:
+            return jsonify({
+                "ok": False,
+                "error": "video_ids must be a non-empty array for a success result",
+            }), 400
+        if any(not isinstance(video_id, str) or not video_id.strip()
+               for video_id in raw_video_ids):
+            return jsonify({
+                "ok": False,
+                "error": "video_ids must contain only non-empty strings",
+            }), 400
+        callback_video_ids = [video_id.strip() for video_id in raw_video_ids]
+        if len(callback_video_ids) != len(set(callback_video_ids)):
+            return jsonify({"ok": False, "error": "video_ids must be unique"}), 400
 
     if not batch_id or not re.fullmatch(r"batch_[a-f0-9]{8,32}", batch_id):
         return jsonify({"ok": False, "error": "invalid batch_id"}), 400
@@ -23428,6 +23464,17 @@ def admin_provenance_anchor_result():
         if not existing:
             conn.execute("ROLLBACK")
             return jsonify({"ok": False, "error": "batch_id has no claimed rows"}), 404
+
+        if not error_msg:
+            claimed_video_ids = {row["video_id"] for row in existing}
+            if set(callback_video_ids) != claimed_video_ids:
+                conn.execute("ROLLBACK")
+                return jsonify({
+                    "ok": False,
+                    "error": "video_ids do not match claimed batch membership",
+                    "claimed_count": len(claimed_video_ids),
+                    "callback_count": len(callback_video_ids),
+                }), 409
 
         # Idempotency: if batch already anchored, return ok.
         already = [r for r in existing if r["anchor_tx_hash"]]
