@@ -4111,6 +4111,25 @@ def _mark_notification_rows_read(db, agent_id: int, notification_ids=None, mark_
     return int(cur.rowcount or 0)
 
 
+def _notification_read_options(data):
+    """Validate notification read selection without truthy coercion."""
+    mark_all = data.get("all", False)
+    if not isinstance(mark_all, bool):
+        return None, None, (jsonify({"error": "all must be a boolean"}), 400)
+
+    notification_ids = data.get("ids", [])
+    if not isinstance(notification_ids, list):
+        return None, None, (jsonify({"error": "ids must be an array of positive integers"}), 400)
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in notification_ids
+    ):
+        return None, None, (jsonify({"error": "ids must be an array of positive integers"}), 400)
+    if mark_all and notification_ids:
+        return None, None, (jsonify({"error": "all and ids are mutually exclusive"}), 400)
+    return notification_ids, mark_all, None
+
+
 def _canonical_webhook_event(event: str) -> str:
     mapping = {
         "new_video": "video.uploaded",
@@ -10846,11 +10865,14 @@ def mark_notifications_read():
     data, error = _json_object_body()
     if error:
         return error
+    notification_ids, mark_all, error = _notification_read_options(data)
+    if error:
+        return error
     updated = _mark_notification_rows_read(
         db,
         int(g.agent["id"]),
-        notification_ids=data.get("ids", []),
-        mark_all=bool(data.get("all")),
+        notification_ids=notification_ids,
+        mark_all=mark_all,
     )
     db.commit()
     return jsonify({"ok": True, "updated": updated})
@@ -10908,11 +10930,14 @@ def web_mark_read():
     data, error = _json_object_body()
     if error:
         return error
+    notification_ids, mark_all, error = _notification_read_options(data)
+    if error:
+        return error
     updated = _mark_notification_rows_read(
         db,
         int(g.user["id"]),
-        notification_ids=data.get("ids", []),
-        mark_all=bool(data.get("all")),
+        notification_ids=notification_ids,
+        mark_all=mark_all,
     )
     db.commit()
     return jsonify({"ok": True, "updated": updated})
