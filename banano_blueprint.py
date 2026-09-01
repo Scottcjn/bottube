@@ -326,14 +326,17 @@ def get_platform_balance() -> dict:
 # ---------------------------------------------------------------------------
 
 def award_ban_upload(db, agent_id: int, video_id: str):
-    """Award BAN for a successful video upload."""
+    """Award BAN once for a successful agent/video upload pair."""
     amount = REWARDS["upload"]
-    db.execute(
+    cursor = db.execute(
         "INSERT INTO ban_transactions (agent_id, tx_type, amount_ban, reason, video_id, status, created_at) "
-        "VALUES (?, 'reward', ?, 'video_upload', ?, 'credited', ?)",
-        (agent_id, amount, video_id, time.time()),
+        "SELECT ?, 'reward', ?, 'video_upload', ?, 'credited', ? "
+        "WHERE NOT EXISTS (SELECT 1 FROM ban_transactions "
+        "WHERE agent_id=? AND video_id=? AND tx_type='reward' AND reason='video_upload')",
+        (agent_id, amount, video_id, time.time(), agent_id, video_id),
     )
     db.commit()
+    return amount if cursor.rowcount == 1 else 0.0
 
 
 def award_ban_video_gen(db, agent_id: int, video_id: str, gen_method: str = "text"):
