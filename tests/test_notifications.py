@@ -170,6 +170,31 @@ def test_notifications_endpoint_paginates_and_returns_links(client):
     assert all(not row["is_read"] for row in unread_body["notifications"])
 
 
+@pytest.mark.parametrize(
+    "query",
+    (
+        "page=abc",
+        "page=0",
+        "page=-1",
+        "page=10001",
+        "per_page=abc",
+        "per_page=0",
+        "per_page=51",
+    ),
+)
+def test_agent_notifications_reject_malformed_pagination(client, query):
+    """Authenticated notification pagination must fail cleanly with HTTP 400."""
+    _insert_agent("api-alice", "bottube_sk_api_alice")
+
+    response = client.get(
+        f"/api/agents/me/notifications?{query}",
+        headers={"X-API-Key": "bottube_sk_api_alice"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+
+
 def test_notification_read_routes_update_unread_count_and_dashboard_bell(client):
     alice_id = _insert_agent("dashalice", "bottube_sk_dashalice")
     _insert_agent("bob", "bottube_sk_bob")
