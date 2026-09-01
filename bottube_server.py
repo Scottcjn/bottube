@@ -9350,6 +9350,63 @@ def _get_trending_videos(db, limit=20, category=None, days=None, since=None):
     return filtered
 
 
+def _get_rising_videos(db, limit=20, category=None):
+    """Return recent public videos ranked by 24-hour view velocity.
+
+    Only videos uploaded in the last seven days are eligible. Dividing recent
+    views by bounded age in hours lets genuinely fast-moving new uploads rank
+    ahead of older videos with a larger lifetime-view head start.
+    """
+    now = time.time()
+    recent_view_cutoff = now - 86400
+    recent_video_cutoff = now - (7 * 86400)
+    category = _normalize_category_filter(category)
+    category_clause = "AND v.category = ?" if category else ""
+    query_limit = max(limit * 3, limit)
+    params = [now, recent_view_cutoff, recent_video_cutoff]
+    if category:
+        params.append(category)
+    params.append(query_limit)
+
+    rows = db.execute(
+        f"""SELECT v.*, a.agent_name, a.display_name, a.avatar_url, a.is_human,
+                   COUNT(rv.id) AS recent_views,
+                   ROUND(
+                       COUNT(rv.id) * 1.0 /
+                       MAX(1.0, MIN(24.0, (? - v.created_at) / 3600.0)),
+                       4
+                   ) AS velocity
+            FROM videos v
+            JOIN agents a ON v.agent_id = a.id
+            LEFT JOIN views rv
+              ON rv.video_id = v.video_id AND rv.created_at >= ?
+            WHERE COALESCE(v.is_removed, 0) = 0
+              AND COALESCE(a.is_banned, 0) = 0
+              AND v.created_at >= ?
+              {category_clause}
+            GROUP BY v.id
+            ORDER BY velocity DESC, recent_views DESC, v.likes DESC,
+                     v.created_at DESC
+            LIMIT ?""",
+        params,
+    ).fetchall()
+
+    if TRENDING_AGENT_CAP <= 0:
+        return rows[:limit]
+
+    filtered = []
+    per_agent = {}
+    for row in rows:
+        agent_id = row["agent_id"]
+        if per_agent.get(agent_id, 0) >= TRENDING_AGENT_CAP:
+            continue
+        per_agent[agent_id] = per_agent.get(agent_id, 0) + 1
+        filtered.append(row)
+        if len(filtered) >= limit:
+            break
+    return filtered
+
+
 @app.route("/api/trending")
 def trending():
     """Get trending videos (weighted by recent views, likes, comments, recency).
@@ -9400,6 +9457,32 @@ def trending():
         videos.append(d)
 
     return jsonify({"videos": videos, "category": category})
+
+
+@app.route("/api/trending/rising")
+def trending_rising():
+    """Return newly uploaded videos ranked by recent view velocity."""
+    limit, error = parse_int_param("limit", 20, min_value=1, max_value=50)
+    if error:
+        return error
+
+    category = _normalize_category_filter(request.args.get("category"))
+    rows = _get_rising_videos(get_db(), limit=limit, category=category)
+    videos = []
+    for row in rows:
+        video = video_to_dict(row)
+        video["agent_name"] = row["agent_name"]
+        video["display_name"] = row["display_name"]
+        video["avatar_url"] = row["avatar_url"]
+        video["recent_views"] = int(row["recent_views"] or 0)
+        video["velocity"] = float(row["velocity"] or 0.0)
+        videos.append(video)
+
+    return jsonify({
+        "videos": videos,
+        "category": category,
+        "window_hours": 24,
+    })
 
 
 # --- Phase 7: bucketed feed (latest / heuristic / hybrid-v1) -------------
@@ -14079,9 +14162,11 @@ def trending_page():
     db = get_db()
     category = _normalize_category_filter(request.args.get("category"))
     rows = _get_trending_videos(db, limit=50, category=category)
+    rising_rows = _get_rising_videos(db, limit=8) if not category else []
     return render_template(
         "trending.html",
         videos=rows,
+        rising_videos=rising_rows,
         categories=VIDEO_CATEGORIES,
         current_category=category,
     )
