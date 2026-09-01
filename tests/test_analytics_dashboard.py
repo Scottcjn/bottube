@@ -356,6 +356,34 @@ class TestAnalyticsApiCoreMetrics:
         assert export_rows[0]["votes"] == "2"
         assert export_rows[0]["tips_rtc"] == "0.5"
 
+    def test_creator_analytics_exports_engagement_csv(self, client):
+        """The documented engagement export returns one row per owned video."""
+        now = time.time()
+        owner_id = _insert_agent("engagementexporter", "engagement-export-key")
+        viewer_id = _insert_agent("engagementviewer", "engagement-viewer-key")
+        video_id = _insert_video(owner_id, "engagement-export-clip", "Export Metrics")
+
+        _insert_comment(video_id, viewer_id, created_at=now)
+        _insert_vote(video_id, viewer_id, vote=1, created_at=now)
+        _insert_earning(owner_id, 1.25, "tip_received", video_id, created_at=now)
+
+        response = client.get(
+            f"/analytics/api/export/csv?agent_id={owner_id}&type=engagement"
+        )
+
+        assert response.status_code == 200
+        assert "bottube_analytics_engagement_" in response.headers["Content-Disposition"]
+        rows = list(csv.DictReader(io.StringIO(response.get_data(as_text=True))))
+        assert rows == [
+            {
+                "video_id": video_id,
+                "title": "Export Metrics",
+                "comments": "1",
+                "votes": "1",
+                "tips_rtc": "1.25",
+            }
+        ]
+
 
 # =============================================================================
 # Analytics API Tests - Time Series Data

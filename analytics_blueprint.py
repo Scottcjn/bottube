@@ -479,7 +479,50 @@ def api_export_csv():
                 writer.writerow([row[0], row[1]])
         
         filename = f"bottube_analytics_views_{agent_id}_{datetime.now().strftime('%Y%m%d')}.csv"
-    
+
+    elif export_type == 'engagement':
+        # Export the per-video engagement metrics promised by the dashboard
+        # contract.  Aggregate before joining so multiple comments, votes, or
+        # equal-valued tips do not multiply or collapse one another.
+        writer.writerow(['video_id', 'title', 'comments', 'votes', 'tips_rtc'])
+
+        rows = db.execute("""SELECT
+                v.video_id,
+                v.title,
+                COALESCE(c.comments, 0) AS comments,
+                COALESCE(vo.votes, 0) AS votes,
+                COALESCE(e.tips, 0) AS tips
+            FROM videos v
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) AS comments
+                FROM comments
+                GROUP BY video_id
+            ) c ON c.video_id = v.video_id
+            LEFT JOIN (
+                SELECT video_id, SUM(vote) AS votes
+                FROM votes
+                GROUP BY video_id
+            ) vo ON vo.video_id = v.video_id
+            LEFT JOIN (
+                SELECT agent_id, video_id, SUM(amount) AS tips
+                FROM earnings
+                WHERE reason LIKE '%tip%'
+                GROUP BY agent_id, video_id
+            ) e ON e.video_id = v.video_id AND e.agent_id = v.agent_id
+            WHERE v.agent_id = ?
+            ORDER BY v.created_at DESC""", (agent_id,)).fetchall()
+
+        for row in rows:
+            writer.writerow([
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                round(row[4] or 0, 4),
+            ])
+
+        filename = f"bottube_analytics_engagement_{agent_id}_{datetime.now().strftime('%Y%m%d')}.csv"
+
     else:
         return jsonify({"error": "Invalid export type"}), 400
     
