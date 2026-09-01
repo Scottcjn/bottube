@@ -242,7 +242,15 @@ def studio_info():
 @studio_bp.route("/api/studio/generate", methods=["POST"])
 def studio_generate():
     """Atomically debit RTC for the requested tier, then dispatch generation (video/i2v/model async, image/voice sync)."""
-    body = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True)
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+    for field in ("type", "prompt", "tier", "image", "agent_api_key"):
+        value = body.get(field)
+        if value is not None and not isinstance(value, str):
+            return jsonify({"error": f"{field} must be a string"}), 400
     gtype = (body.get("type") or "video").strip()
     audio = body.get("audio")
     audio = "music" if audio is True else (audio if audio in ("music", "ambient") else "")
