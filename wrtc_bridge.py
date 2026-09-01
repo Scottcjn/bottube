@@ -168,6 +168,17 @@ def _debit_rtc(db, agent_id: int, amount: float):
     return cursor.rowcount > 0
 
 
+def _claim_wrtc_withdrawal(db, withdrawal_id: int) -> bool:
+    """Atomically reserve a queued withdrawal for one payout worker."""
+    cursor = db.execute(
+        "UPDATE wrtc_withdrawals SET status = 'processing' "
+        "WHERE id = ? AND status = 'pending'",
+        (withdrawal_id,),
+    )
+    db.commit()
+    return cursor.rowcount == 1
+
+
 # ---------------------------------------------------------------------------
 # SOLANA TX VERIFICATION
 # ---------------------------------------------------------------------------
@@ -612,6 +623,8 @@ def process_withdrawals():
     results = []
     for w in pending:
         wid = w["id"]
+        if not _claim_wrtc_withdrawal(db, wid):
+            continue
         try:
             result = subprocess.run(
                 [
@@ -629,13 +642,9 @@ def process_withdrawals():
                 error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
                 results.append({"id": wid, "ok": False, "error": error_msg})
                 db.execute(
-                    "UPDATE wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                    "UPDATE wrtc_withdrawals SET status = 'uncertain' "
+                    "WHERE id = ? AND status = 'processing'",
                     (wid,),
-                )
-                # Refund the agent
-                db.execute(
-                    "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
-                    (w["net_wrtc"] + WITHDRAW_FEE, w["agent_id"]),
                 )
                 continue
 
@@ -643,7 +652,9 @@ def process_withdrawals():
             if out.get("ok"):
                 tx_sig = out.get("tx", "")
                 db.execute(
-                    "UPDATE wrtc_withdrawals SET status = 'completed', tx_signature = ?, completed_at = ? WHERE id = ?",
+                    "UPDATE wrtc_withdrawals SET status = 'completed', "
+                    "tx_signature = ?, completed_at = ? "
+                    "WHERE id = ? AND status = 'processing'",
                     (tx_sig, time.time(), wid),
                 )
                 results.append({"id": wid, "ok": True, "tx": tx_sig})
@@ -651,18 +662,24 @@ def process_withdrawals():
                 err = out.get("error", "Send failed")
                 results.append({"id": wid, "ok": False, "error": err})
                 db.execute(
-                    "UPDATE wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                    "UPDATE wrtc_withdrawals SET status = 'uncertain' "
+                    "WHERE id = ? AND status = 'processing'",
                     (wid,),
-                )
-                # Refund
-                db.execute(
-                    "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
-                    (w["net_wrtc"] + WITHDRAW_FEE, w["agent_id"]),
                 )
 
         except subprocess.TimeoutExpired:
+            db.execute(
+                "UPDATE wrtc_withdrawals SET status = 'uncertain' "
+                "WHERE id = ? AND status = 'processing'",
+                (wid,),
+            )
             results.append({"id": wid, "ok": False, "error": "Timeout"})
         except Exception as e:
+            db.execute(
+                "UPDATE wrtc_withdrawals SET status = 'uncertain' "
+                "WHERE id = ? AND status = 'processing'",
+                (wid,),
+            )
             results.append({"id": wid, "ok": False, "error": str(e)})
 
     db.commit()
