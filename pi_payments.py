@@ -244,6 +244,15 @@ def pi_complete():
             return jsonify({"error": "payment settled but entitlement failed; will reconcile",
                             "payment_id": payment_id, "status": "completed_ungranted"}), 500
     except requests.RequestException as e:
+        # The row was already claimed as ``completing`` before the remote
+        # request.  Release that claim on transport failure so the client's
+        # retry can actually resume instead of returning 202 forever.
+        conn.execute(
+            "UPDATE pi_payments SET status='approved', updated_at=? "
+            "WHERE payment_id=? AND status='completing'",
+            (time.time(), payment_id),
+        )
+        conn.commit()
         print(f"[pi] complete error: {e}", flush=True)
         return jsonify({"error": "Pi complete failed, try again"}), 502
     finally:
