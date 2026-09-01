@@ -13085,14 +13085,20 @@ def oembed():
 
     source_w = max(1, int(video["width"] or 560))
     source_h = max(1, int(video["height"] or 315))
-    max_w = request.args.get("maxwidth", type=int)
-    max_h = request.args.get("maxheight", type=int)
+    max_w, error = parse_int_param(
+        "maxwidth", None, min_value=1, max_value=1920, clamp_bounds=True
+    )
+    if error:
+        return error
+    max_h, error = parse_int_param(
+        "maxheight", None, min_value=1, max_value=1080, clamp_bounds=True
+    )
+    if error:
+        return error
     if max_w is None:
         max_w = source_w
     if max_h is None:
         max_h = source_h
-    max_w = max(1, min(max_w, 1920))
-    max_h = max(1, min(max_h, 1080))
     scale = min(max_w / source_w, max_h / source_h, 1)
     w = max(1, int(round(source_w * scale)))
     h = max(1, int(round(source_h * scale)))

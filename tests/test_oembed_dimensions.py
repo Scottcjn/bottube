@@ -115,3 +115,18 @@ def test_oembed_xml_uses_scaled_dimensions(client):
     assert "<width>400</width>" in xml
     assert "<height>225</height>" in xml
     assert 'width=&quot;400&quot; height=&quot;225&quot;' in xml
+
+
+@pytest.mark.parametrize("dimension", ("maxwidth", "maxheight"))
+def test_oembed_rejects_malformed_dimension(client, dimension):
+    """A supplied non-integer bound must not be mistaken for an omission."""
+    video_id = _insert_video(f"oembedBad{dimension[-1]}01")
+
+    response = client.get(
+        f"/oembed?url=https://bottube.ai/watch/{video_id}&{dimension}=not-a-number"
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["param"] == dimension
+    assert "integer" in payload["error"]
