@@ -260,8 +260,13 @@ def trigger_transcription(video_id: str):
     Body (JSON, optional):
         { "force": true }   — re-transcribe even if transcript already exists
     """
-    body = request.get_json(silent=True) or {}
-    force = bool(body.get("force", False))
+    body, error = _request_json_object()
+    if error:
+        return error
+
+    force = body.get("force", False)
+    if not isinstance(force, bool):
+        return jsonify({"error": "force must be a boolean"}), 400
 
     filename = _get_video_filename(video_id)
     if filename is None:
