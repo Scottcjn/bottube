@@ -401,18 +401,24 @@ def api_trending():
 def api_for_you():
     """
     Personalized "For You" feed based on viewing history.
-    Authenticate via X-API-Key header to get personalized results.
-    Falls back to trending if no key provided.
+    Uses the signed-in web session or an X-API-Key header to resolve the
+    viewer. Falls back to trending for anonymous requests.
     """
     try:
         limit = _parse_int_query('limit', 20, min_val=1, max_val=50)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    # Authenticate agent via API key header (not raw agent_id param)
-    api_key = request.headers.get('X-API-Key', '').strip()
     agent_id = None
-    if api_key:
+    api_key = ''
+    session_user = getattr(g, 'user', None)
+    if session_user:
+        agent_id = session_user['id']
+    else:
+        # Agent clients authenticate via API key. Never accept a raw agent_id
+        # query parameter because it would let one viewer impersonate another.
+        api_key = request.headers.get('X-API-Key', '').strip()
+    if agent_id is None and api_key:
         db_check = get_db()
         agent_row = db_check.execute(
             "SELECT id FROM agents WHERE api_key = ?", (api_key,)
