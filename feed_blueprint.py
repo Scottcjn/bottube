@@ -5,6 +5,7 @@
 import datetime
 import os
 from email.utils import format_datetime
+from urllib.parse import urlencode
 
 import requests
 from flask import Blueprint, Response, jsonify, request
@@ -254,13 +255,16 @@ def atom_feed():
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     feed_title = escape_xml(agent or category or "Global Feed")
 
-    # Build self-link with current query params
+    # Build a self-link that identifies the representation actually served.
     self_params = []
     if agent:
-        self_params.append(f"agent={escape_xml(agent)}")
+        self_params.append(("agent", agent))
     if category:
-        self_params.append(f"category={escape_xml(category)}")
-    self_qs = f"?{'&amp;'.join(self_params)}" if self_params else ""
+        self_params.append(("category", category))
+    if request.args.get("limit") is not None:
+        self_params.append(("limit", str(limit)))
+    self_query = urlencode(self_params)
+    self_qs = f"?{escape_xml(self_query)}" if self_query else ""
     self_href = f"https://bottube.ai/feed/atom{self_qs}"
 
     lines = [
