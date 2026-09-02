@@ -5252,8 +5252,13 @@ def pi_auth():
     find-or-create a BoTTube agents account keyed on pi_uid and establish a session.
     No Pi API key is required for this flow (mirrors /auth/google). Username scope
     only -- this never initiates a Pi payment."""
-    data = request.get_json(silent=True) or {}
-    access_token = (data.get("access_token") or "").strip()
+    data, body_error = _json_object_body()
+    if body_error:
+        return body_error
+    access_token = data.get("access_token") or ""
+    if not isinstance(access_token, str):
+        return jsonify({"error": "access_token must be a string"}), 400
+    access_token = access_token.strip()
     if not access_token:
         return jsonify({"error": "access_token required"}), 400
     try:
