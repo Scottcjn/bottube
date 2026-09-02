@@ -56,30 +56,38 @@ def client(monkeypatch, tmp_path):
     yield bottube_server.app.test_client()
 
 
-def _insert_agent(agent_name: str, api_key: str) -> int:
+def _insert_agent(agent_name: str, api_key: str, *, is_banned: int = 0) -> int:
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
             """
             INSERT INTO agents
-                (agent_name, display_name, api_key, bio, avatar_url, created_at, last_active)
-            VALUES (?, ?, ?, '', '', ?, ?)
+                (agent_name, display_name, api_key, bio, avatar_url,
+                 is_banned, created_at, last_active)
+            VALUES (?, ?, ?, '', '', ?, ?, ?)
             """,
-            (agent_name, agent_name.title(), api_key, 1.0, 1.0),
+            (agent_name, agent_name.title(), api_key, is_banned, 1.0, 1.0),
         )
         db.commit()
         return int(cur.lastrowid)
 
 
-def _insert_video(agent_id: int, video_id: str) -> None:
+def _insert_video(agent_id: int, video_id: str, *, is_removed: int = 0) -> None:
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
             """
             INSERT INTO videos (video_id, agent_id, title, filename, created_at, is_removed)
-            VALUES (?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (video_id, agent_id, f"Video {video_id}", f"{video_id}.mp4", 2.0),
+            (
+                video_id,
+                agent_id,
+                f"Video {video_id}",
+                f"{video_id}.mp4",
+                2.0,
+                is_removed,
+            ),
         )
         db.commit()
 
@@ -301,6 +309,50 @@ def test_suspicious_comment_reward_is_held_for_review(client):
 
     assert hold_count == 1
     assert comment_earnings == 0
+
+
+def test_comment_writes_reject_non_public_video_targets(client):
+    commenter_id = _insert_agent("hiddenreply", "bottube_sk_hiddenreply")
+    owner_id = _insert_agent("hiddenowner", "bottube_sk_hiddenowner")
+    banned_owner_id = _insert_agent(
+        "bannedhiddenowner",
+        "bottube_sk_bannedhiddenowner",
+        is_banned=1,
+    )
+    _insert_video(owner_id, "removedtarget1", is_removed=1)
+    _insert_video(banned_owner_id, "bannedtarget01")
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = commenter_id
+        sess["csrf_token"] = "test-csrf"
+
+    for video_id in ("removedtarget1", "bannedtarget01"):
+        api_response = client.post(
+            f"/api/videos/{video_id}/comment",
+            headers={"X-API-Key": "bottube_sk_hiddenreply"},
+            json={"content": f"API comment on {video_id}"},
+        )
+        assert api_response.status_code == 404
+        assert api_response.get_json()["error"] == "Video not found"
+
+        web_response = client.post(
+            f"/api/videos/{video_id}/web-comment",
+            headers={"X-CSRF-Token": "test-csrf"},
+            json={"content": f"Web comment on {video_id}"},
+        )
+        assert web_response.status_code == 404
+        assert web_response.get_json()["error"] == "Video not found"
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        hidden_comment_count = conn.execute(
+            "SELECT COUNT(*) FROM comments WHERE agent_id = ?",
+            (commenter_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert hidden_comment_count == 0
 
 
 def test_web_comment_rejects_malformed_parent_id(client):

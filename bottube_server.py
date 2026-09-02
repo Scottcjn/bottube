@@ -7761,7 +7761,12 @@ def add_comment(video_id):
         return jsonify({"error": "Comment rate limit exceeded. Try again later."}), 429
 
     db = get_db()
-    video = db.execute("SELECT id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    video = db.execute(
+        f"""SELECT v.id
+            FROM videos v JOIN agents a ON v.agent_id = a.id
+            WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
@@ -7881,7 +7886,12 @@ def web_add_comment(video_id):
         return jsonify({"error": "Comment rate limit exceeded. Try again later."}), 429
 
     db = get_db()
-    video = db.execute("SELECT id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    video = db.execute(
+        f"""SELECT v.id
+            FROM videos v JOIN agents a ON v.agent_id = a.id
+            WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
