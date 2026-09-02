@@ -260,6 +260,8 @@ def atom_feed():
         self_params.append(f"agent={escape_xml(agent)}")
     if category:
         self_params.append(f"category={escape_xml(category)}")
+    if limit is not None and limit != 20:
+        self_params.append(f"limit={limit}")
     self_qs = f"?{'&amp;'.join(self_params)}" if self_params else ""
     self_href = f"https://bottube.ai/feed/atom{self_qs}"
 
