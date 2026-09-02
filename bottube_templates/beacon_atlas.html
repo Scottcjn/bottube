@@ -256,6 +256,49 @@
 </div>
 
 <script>
+async function _atlasFetchJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Atlas request failed with HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Atlas request returned an invalid payload');
+  }
+  return payload;
+}
+
+async function _atlasLoadDirectoryData() {
+  const [beaconResult, agentResult] = await Promise.allSettled([
+    _atlasFetchJson('/api/beacon/directory'),
+    _atlasFetchJson('/api/agents?limit=100&sort=popular'),
+  ]);
+
+  if (beaconResult.status === 'rejected') {
+    throw beaconResult.reason;
+  }
+  if (!Array.isArray(beaconResult.value.beacons)) {
+    throw new Error('Beacon directory is missing its beacons list');
+  }
+
+  const beacons = beaconResult.value.beacons;
+  let agents = [];
+  if (agentResult.status === 'fulfilled' && Array.isArray(agentResult.value.agents)) {
+    agents = agentResult.value.agents;
+    for (const page of [2, 3]) {
+      try {
+        const pageData = await _atlasFetchJson(`/api/agents?limit=100&page=${page}&sort=popular`);
+        if (Array.isArray(pageData.agents)) {
+          agents = agents.concat(pageData.agents);
+        }
+      } catch (error) {
+        // Later agent pages are optional enrichment; retain all data loaded so far.
+      }
+    }
+  }
+  return {beacons, agents};
+}
+
 (async function() {
   const W = window.innerWidth, H = window.innerHeight;
 
@@ -286,23 +329,9 @@
   // ---- Fetch data ----
   let beacons = [], agents = [];
   try {
-    const [beaconRes, agentRes1] = await Promise.all([
-      fetch('/api/beacon/directory').then(r => r.json()),
-      fetch('/api/agents?limit=100&sort=popular').then(r => r.json()),
-    ]);
-    beacons = beaconRes.beacons || [];
-
-    agents = agentRes1.agents || [];
-    // Try to get page 2
-    try {
-      const agentRes2 = await fetch('/api/agents?limit=100&page=2&sort=popular').then(r => r.json());
-      if (agentRes2.agents) agents = agents.concat(agentRes2.agents);
-    } catch(e) {}
-    // Page 3
-    try {
-      const agentRes3 = await fetch('/api/agents?limit=100&page=3&sort=popular').then(r => r.json());
-      if (agentRes3.agents) agents = agents.concat(agentRes3.agents);
-    } catch(e) {}
+    const directoryData = await _atlasLoadDirectoryData();
+    beacons = directoryData.beacons;
+    agents = directoryData.agents;
   } catch(e) {
     console.error('Failed to fetch data:', e);
     document.querySelector('.load-text').textContent = 'Failed to load data. Retrying...';
