@@ -179,22 +179,22 @@
     </div>
 
     <!-- Tabs -->
-    <div class="gen-tabs">
-        <button class="gen-tab active" onclick="switchTab('video')" id="tab-video" aria-label="Switch to video generation tab" role="tab" aria-selected="true">
+    <div class="gen-tabs" role="tablist" aria-label="Generation type">
+        <button class="gen-tab active" onclick="switchTab('video')" id="tab-video" aria-label="Switch to video generation tab" role="tab" aria-controls="panel-video" aria-selected="true" tabindex="0">
             Video <span class="tab-badge free">FREE</span>
         </button>
-        <button class="gen-tab" onclick="switchTab('image')" id="tab-image" aria-label="Switch to image generation tab" role="tab" aria-selected="false">
+        <button class="gen-tab" onclick="switchTab('image')" id="tab-image" aria-label="Switch to image generation tab" role="tab" aria-controls="panel-image" aria-selected="false" tabindex="-1">
             Image <span class="tab-badge free">FREE</span>
         </button>
         {% if current_user %}
-        <button class="gen-tab" onclick="switchTab('history')" id="tab-history" aria-label="Switch to generation history tab" role="tab" aria-selected="false">
+        <button class="gen-tab" onclick="switchTab('history')" id="tab-history" aria-label="Switch to generation history tab" role="tab" aria-controls="panel-history" aria-selected="false" tabindex="-1">
             My History
         </button>
         {% endif %}
     </div>
 
     <!-- VIDEO PANEL -->
-    <div class="gen-panel active" id="panel-video">
+    <div class="gen-panel active" id="panel-video" role="tabpanel" aria-labelledby="tab-video">
         <div class="gen-card">
             <h3>Text to Video</h3>
             <div class="subtitle">Generate an 8-second video clip from a text description. Powered by Google Veo 3.</div>
@@ -263,7 +263,7 @@
     </div>
 
     <!-- IMAGE PANEL -->
-    <div class="gen-panel" id="panel-image">
+    <div class="gen-panel" id="panel-image" role="tabpanel" aria-labelledby="tab-image" hidden>
         <div class="gen-card">
             <h3>Text to Image</h3>
             <div class="subtitle">Generate an image from a text description. Powered by Google Nano Banana (Gemini Flash Image).</div>
@@ -312,7 +312,7 @@
 
     <!-- HISTORY PANEL -->
     {% if current_user %}
-    <div class="gen-panel" id="panel-history">
+    <div class="gen-panel" id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
         <div class="gen-card">
             <h3>Generation History</h3>
             <div class="subtitle">Your recent AI generations.</div>
@@ -336,10 +336,17 @@ let activeTab = 'video';
 let pollInterval = null;
 
 function switchTab(tab) {
-    document.querySelectorAll('.gen-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.gen-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById('tab-' + tab).classList.add('active');
-    document.getElementById('panel-' + tab).classList.add('active');
+    document.querySelectorAll('.gen-tab').forEach(t => {
+        const selected = t.id === 'tab-' + tab;
+        t.classList.toggle('active', selected);
+        t.setAttribute('aria-selected', String(selected));
+        t.tabIndex = selected ? 0 : -1;
+    });
+    document.querySelectorAll('.gen-panel').forEach(p => {
+        const selected = p.id === 'panel-' + tab;
+        p.classList.toggle('active', selected);
+        p.hidden = !selected;
+    });
     activeTab = tab;
     if (tab === 'history') loadHistory();
 }
