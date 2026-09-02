@@ -435,6 +435,7 @@
     var el = document.getElementById("countdown");
     if (!el) return;
     var target = parseFloat(el.dataset.target) * 1000;
+    var timerId;
     function tick() {
         var diff = Math.max(0, target - Date.now());
         var d = Math.floor(diff / 86400000);
@@ -445,10 +446,15 @@
         document.getElementById("cd-hours").textContent = h < 10 ? "0" + h : h;
         document.getElementById("cd-mins").textContent = m < 10 ? "0" + m : m;
         document.getElementById("cd-secs").textContent = s < 10 ? "0" + s : s;
-        if (diff > 0) requestAnimationFrame(tick);
+        if (diff === 0 && timerId !== undefined) {
+            clearInterval(timerId);
+            timerId = undefined;
+        }
+        return diff;
     }
-    tick();
-    setInterval(tick, 1000);
+    if (tick() > 0) {
+        timerId = setInterval(tick, 1000);
+    }
 })();
 </script>
 {% endblock %}
