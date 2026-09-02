@@ -20954,21 +20954,102 @@ def _uv_cache_warm():
     return True
 
 
+def _parse_admin_media_batch_request(
+    *,
+    default_limit,
+    max_limit,
+    default_concurrency=None,
+    max_concurrency=None,
+):
+    """Validate the shared request contract for media backfill operators."""
+    data, error = _json_object_body()
+    if error:
+        return None, error
+
+    def positive_int(field, default, maximum):
+        value = data.get(field, default)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None, (
+                jsonify({"ok": False, "error": f"{field} must be an integer"}),
+                400,
+            )
+        if value < 1 or value > maximum:
+            return None, (
+                jsonify({
+                    "ok": False,
+                    "error": f"{field} must be between 1 and {maximum}",
+                }),
+                400,
+            )
+        return value, None
+
+    limit, error = positive_int("limit", default_limit, max_limit)
+    if error:
+        return None, error
+
+    concurrency = None
+    if default_concurrency is not None:
+        concurrency, error = positive_int(
+            "concurrency", default_concurrency, max_concurrency,
+        )
+        if error:
+            return None, error
+
+    raw_since = data.get("since_video_id", "")
+    if raw_since is None:
+        since = ""
+    elif not isinstance(raw_since, str):
+        return None, (
+            jsonify({
+                "ok": False,
+                "error": "since_video_id must be a string or null",
+            }),
+            400,
+        )
+    else:
+        since = raw_since.strip()
+
+    return {
+        "data": data,
+        "limit": limit,
+        "concurrency": concurrency,
+        "since_video_id": since,
+    }, None
+
+
 @app.route("/admin/visual/backfill", methods=["POST"])
 def admin_visual_backfill():
     """Generate visual embeddings for videos missing them. Resumable."""
     if not _ts_admin_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
+    parsed, error = _parse_admin_media_batch_request(
+        default_limit=10, max_limit=50,
+    )
+    if error:
+        return error
+    data = parsed["data"]
+    limit = parsed["limit"]
+    since = parsed["since_video_id"]
+
+    targeted = data.get("video_ids")
+    if targeted is not None and not isinstance(targeted, list):
+        return jsonify({
+            "ok": False, "error": "video_ids must be an array",
+        }), 400
+    if targeted and any(
+        not isinstance(value, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", value)
+        for value in targeted
+    ):
+        return jsonify({
+            "ok": False,
+            "error": "video_ids must contain only valid video IDs",
+        }), 400
+
     _uv_ensure_schema()
-    data = request.get_json(silent=True) or {}
-    try:
-        limit = max(1, min(50, int(data.get("limit", 10))))
-    except Exception:
-        limit = 10
-    since = (data.get("since_video_id") or "").strip()
 
     db = get_db()
-    targeted = data.get("video_ids") or []
+    targeted = targeted or []
     if isinstance(targeted, list) and targeted:
         # Targeted mode: explicit video_ids to (re)embed. Useful for seeding
         # specific anchors or refreshing after a sprite changes.
@@ -21447,17 +21528,19 @@ def admin_embeddings_backfill():
     """Backfill embeddings for videos missing one. Resumable, batched."""
     if not _ts_admin_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
+    parsed, error = _parse_admin_media_batch_request(
+        default_limit=50,
+        max_limit=200,
+        default_concurrency=2,
+        max_concurrency=8,
+    )
+    if error:
+        return error
+    limit = parsed["limit"]
+    since = parsed["since_video_id"]
+    concurrency = parsed["concurrency"]
+
     _ue_ensure_schema()
-    data = request.get_json(silent=True) or {}
-    try:
-        limit = max(1, min(200, int(data.get("limit", 50))))
-    except Exception:
-        limit = 50
-    since = (data.get("since_video_id") or "").strip()
-    try:
-        concurrency = max(1, min(8, int(data.get("concurrency", 2))))
-    except Exception:
-        concurrency = 2
 
     db = get_db()
     if since:
@@ -22743,19 +22826,21 @@ def admin_renditions_backfill():
     """
     if not _ts_admin_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
+    parsed, error = _parse_admin_media_batch_request(
+        default_limit=20,
+        max_limit=100,
+        default_concurrency=2,
+        max_concurrency=4,
+    )
+    if error:
+        return error
+    limit = parsed["limit"]
+    concurrency = parsed["concurrency"]
+    since = parsed["since_video_id"]
+
     if not _renditions_ffmpeg_available():
         return jsonify({"ok": False, "error": "ffmpeg-vmaf not installed"}), 503
     _ensure_provenance_schema()
-    data = request.get_json(silent=True) or {}
-    try:
-        limit = max(1, min(100, int(data.get("limit", 20))))
-    except Exception:
-        limit = 20
-    try:
-        concurrency = max(1, min(4, int(data.get("concurrency", 2))))
-    except Exception:
-        concurrency = 2
-    since = (data.get("since_video_id") or "").strip()
 
     db = get_db()
     if since:
