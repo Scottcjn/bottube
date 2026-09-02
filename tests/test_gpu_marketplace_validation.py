@@ -135,3 +135,70 @@ def test_submit_job_non_numeric_max_price_rejected(client):
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "Numeric value required"}
+
+def test_concurrent_complete_job_credits_only_once(client):
+    import concurrent.futures
+    import sqlite3
+    import os
+
+    reg_resp = client.post(
+        "/api/gpu/providers/register",
+        headers=AUTH,
+        json={"gpu_model": "RTX 4090", "gpu_vram_gb": 24, "price_per_min": 0.1},
+    )
+    assert reg_resp.status_code == 200
+    provider_id = reg_resp.get_json()["provider_id"]
+
+    sub_resp = client.post(
+        "/api/gpu/jobs/submit",
+        headers=AUTH,
+        json={"job_type": "video_render", "estimated_mins": 2, "max_price_per_min": 0.2},
+    )
+    assert sub_resp.status_code == 200
+    job_id = sub_resp.get_json()["job_id"]
+
+    claim_resp = client.post(
+        "/api/gpu/jobs/claim",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id},
+    )
+    assert claim_resp.status_code == 200
+
+    start_resp = client.post(
+        "/api/gpu/jobs/start",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id},
+    )
+    assert start_resp.status_code == 200
+
+    def do_complete():
+        return client.post(
+            "/api/gpu/jobs/complete",
+            headers=AUTH,
+            json={"provider_id": provider_id, "job_id": job_id, "result_url": "https://example.com/out.mp4"},
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(do_complete)
+        f2 = executor.submit(do_complete)
+        r1 = f1.result()
+        r2 = f2.result()
+
+    codes = [r1.status_code, r2.status_code]
+    assert codes.count(200) == 1, f"Expected exactly one 200, got {codes}"
+
+    db_path = os.environ.get("BOTTUBE_DB_PATH")
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+
+    # Check total_jobs
+    cur.execute("SELECT total_jobs, total_rtc_earned FROM gpu_providers WHERE id = ?", (provider_id,))
+    prow = cur.fetchone()
+    assert prow[0] == 1, f"Expected total_jobs == 1, got {prow[0]}"
+
+    # Check history count
+    cur.execute("SELECT COUNT(*) FROM gpu_job_history WHERE job_id = ?", (job_id,))
+    hcount = cur.fetchone()[0]
+    assert hcount == 1, f"Expected 1 history row, got {hcount}"
+    conn.close()
+
