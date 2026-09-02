@@ -412,7 +412,7 @@
             {% if is_owner or is_participant %}
             <div class="collab-actions">
                 {% if is_owner or can_invite %}
-                <button class="btn btn-primary" onclick="openInviteModal()">
+                <button type="button" class="btn btn-primary" onclick="openInviteModal(this)">
                     ✉️ Invite Collaborator
                 </button>
                 {% endif %}
@@ -519,9 +519,9 @@
 </div>
 
 <!-- Invite Modal -->
-<div class="invite-modal" id="inviteModal">
+<div class="invite-modal" id="inviteModal" role="dialog" aria-modal="true" aria-labelledby="inviteModalTitle">
     <div class="invite-modal-content">
-        <h3>Invite to Collaboration</h3>
+        <h3 id="inviteModalTitle">Invite to Collaboration</h3>
         <form id="inviteForm" onsubmit="sendInvite(event)">
             <div class="form-group">
                 <label for="agentName">Agent Name</label>
@@ -540,13 +540,21 @@
 </div>
 
 <script>
-    function openInviteModal() {
+    let inviteModalTrigger = null;
+
+    function openInviteModal(trigger) {
+        inviteModalTrigger = trigger || document.activeElement;
         document.getElementById('inviteModal').classList.add('active');
+        document.getElementById('agentName').focus();
     }
 
     function closeInviteModal() {
         document.getElementById('inviteModal').classList.remove('active');
         document.getElementById('inviteForm').reset();
+        if (inviteModalTrigger) {
+            inviteModalTrigger.focus();
+            inviteModalTrigger = null;
+        }
     }
 
     function sendInvite(event) {
