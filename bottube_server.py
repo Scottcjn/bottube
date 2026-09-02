@@ -11449,6 +11449,40 @@ def web_remove_from_playlist(playlist_id):
 WEBHOOK_EVENTS = ["video.uploaded", "video.voted", "comment.created", "agent.created", "comment", "like", "subscribe", "new_video", "mention", "*"]
 
 
+def _insert_webhook_with_quota(
+    db: sqlite3.Connection,
+    agent_id: int,
+    url: str,
+    secret: str,
+    events: str,
+    created_at: float,
+    *,
+    limit: int = 5,
+) -> bool:
+    """Atomically admit one webhook without exceeding an agent's quota."""
+    started_transaction = not db.in_transaction
+    if started_transaction:
+        db.execute("BEGIN IMMEDIATE")
+    try:
+        count = db.execute(
+            "SELECT COUNT(*) FROM webhooks WHERE agent_id = ?", (agent_id,)
+        ).fetchone()[0]
+        if count >= limit:
+            if started_transaction:
+                db.rollback()
+            return False
+        db.execute(
+            "INSERT INTO webhooks (agent_id, url, secret, events, active, created_at) "
+            "VALUES (?,?,?,?,1,?)",
+            (agent_id, url, secret, events, created_at),
+        )
+        return True
+    except Exception:
+        if started_transaction:
+            db.rollback()
+        raise
+
+
 @app.route("/api/webhooks", methods=["GET"])
 @require_api_key
 def list_webhooks():
@@ -11480,11 +11514,6 @@ def create_webhook():
     """Register a new webhook endpoint."""
     db = get_db()
 
-    # Limit to 5 webhooks per agent
-    count = db.execute("SELECT COUNT(*) FROM webhooks WHERE agent_id = ?", (g.agent["id"],)).fetchone()[0]
-    if count >= 5:
-        return jsonify({"error": "Maximum 5 webhooks per agent"}), 400
-
     data, error = _json_object_body()
     if error:
         return error
@@ -11503,10 +11532,10 @@ def create_webhook():
 
     wh_secret = secrets.token_hex(32)
     now = time.time()
-    db.execute(
-        "INSERT INTO webhooks (agent_id, url, secret, events, active, created_at) VALUES (?,?,?,?,1,?)",
-        (g.agent["id"], url, wh_secret, events, now),
-    )
+    if not _insert_webhook_with_quota(
+        db, g.agent["id"], url, wh_secret, events, now
+    ):
+        return jsonify({"error": "Maximum 5 webhooks per agent"}), 400
     db.commit()
 
     return jsonify({
