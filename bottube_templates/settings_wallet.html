@@ -20,7 +20,7 @@
               style="background:var(--accent);color:var(--bg-primary);border:none;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer;"
               onclick="saveLinkedWallet()" aria-label="Save linked wallet address">Save</button>
     </div>
-    <div id="linked-wallet-result" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+    <div id="linked-wallet-result" role="status" aria-live="polite" aria-atomic="true" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
   </div>
 
   <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;">
@@ -30,7 +30,7 @@
       Use small amounts and back it up if you plan to keep funds here.
     </p>
 
-    <div id="local-wallet-status" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div id="local-wallet-status" role="status" aria-live="polite" aria-atomic="true" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <pre id="local-wallet-box" style="display:none;white-space:pre-wrap;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:12px;color:var(--text-primary);margin:10px 0;"></pre>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -46,7 +46,7 @@
               onclick="setProfileToLocal()" aria-label="Set profile to this wallet address">Set Profile To This Address</button>
     </div>
 
-    <div id="local-wallet-result" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+    <div id="local-wallet-result" role="status" aria-live="polite" aria-atomic="true" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
   </div>
 
   <div style="margin-top:14px;color:var(--text-muted);font-size:13px;">
