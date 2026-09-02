@@ -41,7 +41,7 @@
 
 <div class="eng-shell">
   <h1>BoTTube Engineering</h1>
-  <p class="eng-sub">Live operational visibility — provider health, request latency, queue depth, and active experiments. <span class="eng-refresh"><span class="spin-dot"></span><span id="eng-tick">refreshing every 30s</span></span></p>
+  <p class="eng-sub">Live operational visibility — provider health, request latency, queue depth, and active experiments. <span class="eng-refresh"><span class="spin-dot"></span><span id="eng-tick" role="status" aria-live="polite" aria-atomic="true">refreshing every 30s</span></span></p>
 
   <div class="eng-explainer">
     BoTTube runs a Flask edge with a SQLite outbox, a media pipeline (LTX-2.3 + ComfyUI on V100), a backlink agent, a syndication poller, and a RustChain anchor that timestamps every video manifest on-chain across <strong>4 attestation nodes</strong> in the US, Hong Kong, and a partner Proxmox. Numbers below are read from the live database and probed in real time. The page returns JSON at <code>/api/engineering</code>.
@@ -171,30 +171,50 @@
 <script>
   // Auto-refresh every 30s without page reload
   let _engCountdown = 30;
+  async function _engRefresh() {
+    const tick = document.getElementById('eng-tick');
+    try {
+      const response = await fetch('/api/engineering');
+      if (!response.ok) {
+        throw new Error(`engineering refresh failed with HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const nodesAreValid = payload && Array.isArray(payload.nodes) && payload.nodes.every(node =>
+        node && typeof node.id === 'string' && typeof node.location === 'string' &&
+        typeof node.status === 'string' && Number.isFinite(node.rtt_ms)
+      );
+      if (!nodesAreValid || typeof payload.generated_at !== 'string' || !payload.generated_at.trim()) {
+        throw new Error('engineering refresh returned an incomplete payload');
+      }
+
+      // Validate the whole payload before replacing any last-known-good data.
+      const box = document.getElementById('eng-nodes');
+      if (box) {
+        box.innerHTML = payload.nodes.map(node => `
+          <div class="node">
+            <div>
+              <span class="eng-pill ${node.status}"><span class="dot"></span>${node.status}</span>
+              <span class="node-id">${node.id}</span>
+              <span class="node-loc">${node.location}</span>
+            </div>
+            <div><span class="node-rt">${node.rtt_ms.toFixed(0)} ms</span></div>
+          </div>`).join('');
+      }
+      document.getElementById('eng-generated').textContent = payload.generated_at;
+      tick.textContent = 'updated; refreshing in 30s';
+    } catch (error) {
+      tick.textContent = 'refresh failed; retrying in 30s';
+    }
+  }
+
   function _engTick() {
     _engCountdown--;
     document.getElementById('eng-tick').textContent =
       _engCountdown > 0 ? `refreshing in ${_engCountdown}s` : 'refreshing…';
     if (_engCountdown <= 0) {
       _engCountdown = 30;
-      fetch('/api/engineering').then(r => r.json()).then(j => {
-        if (!j) return;
-        const $ = (id) => document.getElementById(id);
-        // Lightweight in-place update — just rotate the nodes block
-        const box = document.getElementById('eng-nodes');
-        if (box && j.nodes) {
-          box.innerHTML = j.nodes.map(n => `
-            <div class="node">
-              <div>
-                <span class="eng-pill ${n.status}"><span class="dot"></span>${n.status}</span>
-                <span class="node-id">${n.id}</span>
-                <span class="node-loc">${n.location}</span>
-              </div>
-              <div><span class="node-rt">${n.rtt_ms.toFixed(0)} ms</span></div>
-            </div>`).join('');
-        }
-        $('eng-generated').textContent = j.generated_at;
-      }).catch(() => {});
+      void _engRefresh();
     }
   }
   setInterval(_engTick, 1000);
