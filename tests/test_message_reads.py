@@ -156,3 +156,36 @@ def test_direct_message_read_state_still_uses_recipient_only(client):
 
     assert read_resp.status_code == 200
     assert _unread_count(client, "bob") == 0
+
+
+def test_message_inbox_rejects_invalid_pagination(client):
+    _insert_agent("pager", 1000.0)
+    invalid_queries = [
+        {"page": "abc"},
+        {"page": "1.5"},
+        {"page": "0"},
+        {"page": "-1"},
+        {"per_page": "abc"},
+        {"per_page": "1.5"},
+        {"per_page": "0"},
+        {"per_page": "-1"},
+        {"per_page": "51"},
+        {"page": str(2 ** 63)},
+    ]
+    for query in invalid_queries:
+        response = client.get(
+            "/api/messages/inbox",
+            query_string=query,
+            headers=_headers("pager"),
+        )
+        assert response.status_code == 400, (query, response.get_json())
+        assert response.get_json().get("error")
+
+    valid = client.get(
+        "/api/messages/inbox",
+        query_string={"page": "1", "per_page": "50"},
+        headers=_headers("pager"),
+    )
+    assert valid.status_code == 200, valid.get_json()
+    assert valid.get_json()["page"] == 1
+    assert valid.get_json()["per_page"] == 50
