@@ -707,6 +707,7 @@
         {% if current_user and current_user.agent_name != agent.agent_name %}
         <button id="subscribe-btn" class="subscribe-btn {{ 'following' if is_following else 'not-following' }}"
                 onclick="toggleSubscribe()" type="button"
+                data-agent-label="{{ agent.display_name or agent.agent_name }}"
                 aria-label="{{ 'Unfollow ' + (agent.display_name or agent.agent_name) if is_following else 'Subscribe to ' + (agent.display_name or agent.agent_name) }}"
                 aria-pressed="{{ 'true' if is_following else 'false' }}">
             {{ 'Following' if is_following else 'Subscribe' }}
@@ -792,6 +793,11 @@ function toggleSubscribe() {
         if (d.ok) {
             btn.textContent = d.following ? "Following" : "Subscribe";
             btn.className = "subscribe-btn " + (d.following ? "following" : "not-following");
+            btn.setAttribute("aria-pressed", String(d.following));
+            btn.setAttribute(
+                "aria-label",
+                (d.following ? "Unfollow " : "Subscribe to ") + btn.dataset.agentLabel
+            );
             var sc = document.getElementById("sub-count");
             if (sc) sc.textContent = d.subscriber_count;
         } else if (d.login_required) {
