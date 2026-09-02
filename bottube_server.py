@@ -7752,6 +7752,39 @@ def describe_video(video_id):
 # Comments
 # ---------------------------------------------------------------------------
 
+def _insert_comment_once(
+    db: sqlite3.Connection,
+    video_id: str,
+    agent_id: int,
+    parent_id: Optional[int],
+    content: str,
+    comment_type: str,
+    created_at: float,
+) -> Tuple[bool, int]:
+    """Atomically create a comment unless identical content already exists.
+
+    The caller owns the write transaction after this function returns so the
+    winning request can commit rewards and notifications with the new row.
+    """
+    db.execute("BEGIN IMMEDIATE")
+    existing = db.execute(
+        """SELECT id FROM comments
+           WHERE video_id = ? AND agent_id = ? AND content = ?
+           LIMIT 1""",
+        (video_id, agent_id, content),
+    ).fetchone()
+    if existing:
+        return False, int(existing[0])
+
+    cursor = db.execute(
+        """INSERT INTO comments
+           (video_id, agent_id, parent_id, content, comment_type, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (video_id, agent_id, parent_id, content, comment_type, created_at),
+    )
+    return True, int(cursor.lastrowid)
+
+
 @app.route("/api/videos/<video_id>/comment", methods=["POST"])
 @require_api_key
 def add_comment(video_id):
@@ -7794,24 +7827,24 @@ def add_comment(video_id):
         if not parent:
             return jsonify({"error": "Parent comment not found"}), 404
 
-    # Duplicate check: reject if same agent posted identical content on this video
-    existing = db.execute(
-        "SELECT id FROM comments WHERE video_id = ? AND agent_id = ? AND content = ?",
-        (video_id, g.agent["id"], content),
-    ).fetchone()
-    if existing:
-        return jsonify({"error": "Duplicate comment", "existing_id": existing["id"]}), 409
-
-    cur = db.execute(
-        """INSERT INTO comments (video_id, agent_id, parent_id, content, comment_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (video_id, g.agent["id"], parent_id, content, comment_type, time.time()),
+    created, comment_id = _insert_comment_once(
+        db,
+        video_id,
+        g.agent["id"],
+        parent_id,
+        content,
+        comment_type,
+        time.time(),
     )
+    if not created:
+        db.commit()
+        return jsonify({"error": "Duplicate comment", "existing_id": comment_id}), 409
+
     reward_result = _comment_reward_decision(
         db,
         agent_id=g.agent["id"],
         video_id=video_id,
-        comment_id=int(cur.lastrowid),
+        comment_id=comment_id,
         content=content,
     )
     # Notify video owner
@@ -7835,7 +7868,7 @@ def add_comment(video_id):
 
     return jsonify({
         "ok": True,
-        "comment_id": int(cur.lastrowid),
+        "comment_id": comment_id,
         "reward": {
             "awarded": bool(reward_result["awarded"]),
             "held": bool(reward_result["held"]),
@@ -7903,14 +7936,6 @@ def web_add_comment(video_id):
     if len(content) > 5000:
         return jsonify({"error": "Comment too long (max 5000 chars)"}), 400
 
-    # Duplicate check: reject if same user posted identical content on this video
-    existing = db.execute(
-        "SELECT id FROM comments WHERE video_id = ? AND agent_id = ? AND content = ?",
-        (video_id, g.user["id"], content),
-    ).fetchone()
-    if existing:
-        return jsonify({"error": "Duplicate comment"}), 409
-
     parent_id, parent_error = _parse_optional_comment_parent_id(data.get("parent_id"))
     if parent_error:
         return jsonify({"error": parent_error}), 400
@@ -7921,11 +7946,19 @@ def web_add_comment(video_id):
         if not parent:
             return jsonify({"error": "Parent comment not found"}), 404
 
-    db.execute(
-        """INSERT INTO comments (video_id, agent_id, parent_id, content, comment_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (video_id, g.user["id"], parent_id, content, comment_type, time.time()),
+    created, comment_id = _insert_comment_once(
+        db,
+        video_id,
+        g.user["id"],
+        parent_id,
+        content,
+        comment_type,
+        time.time(),
     )
+    if not created:
+        db.commit()
+        return jsonify({"error": "Duplicate comment", "existing_id": comment_id}), 409
+
     # Notify video owner
     video_row = db.execute("SELECT agent_id FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     if video_row:
@@ -7954,6 +7987,7 @@ def web_add_comment(video_id):
         "comment_type": comment_type,
         "video_id": video_id,
         "parent_id": parent_id,
+        "comment_id": comment_id,
     }), 201
 
 
