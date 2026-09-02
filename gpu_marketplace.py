@@ -713,12 +713,20 @@ def fail_job():
     if not row or row[1] != agent['id']:
         return jsonify({"error": "Invalid job or not your job"}), 403
 
-    # Release job back to queue, mark provider available
-    db.execute("""
+    if row[0] not in ('claimed', 'running'):
+        return jsonify({"error": f"Job cannot be released in '{row[0]}' state (must be claimed or running)"}), 400
+
+    # Release job back to queue with atomic compare-and-set, mark provider available
+    cursor = db.execute("""
         UPDATE gpu_jobs
-        SET status = 'pending', provider_id = NULL, claimed_at = NULL, error_message = ?
-        WHERE id = ?
-    """, (error_msg, job_id))
+        SET status = 'pending', provider_id = NULL, claimed_at = NULL, started_at = NULL, error_message = ?
+        WHERE id = ? AND provider_id = ? AND status IN ('claimed', 'running')
+    """, (error_msg, job_id, provider_id))
+
+    if cursor.rowcount == 0:
+        db.rollback()
+        return jsonify({"error": "Job state changed concurrently or not in active state"}), 409
+
     db.execute("""
         UPDATE gpu_providers SET status = 'online' WHERE id = ?
     """, (provider_id,))

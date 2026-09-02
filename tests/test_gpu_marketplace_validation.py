@@ -135,3 +135,114 @@ def test_submit_job_non_numeric_max_price_rejected(client):
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "Numeric value required"}
+
+def _setup_provider_and_job(client):
+    reg_resp = client.post(
+        "/api/gpu/providers/register",
+        headers=AUTH,
+        json={"gpu_model": "RTX 4090", "gpu_vram_gb": 24, "price_per_min": 0.1},
+    )
+    assert reg_resp.status_code == 200
+    provider_id = reg_resp.get_json()["provider_id"]
+
+    sub_resp = client.post(
+        "/api/gpu/jobs/submit",
+        headers=AUTH,
+        json={"job_type": "video_render", "estimated_mins": 2, "max_price_per_min": 0.2},
+    )
+    assert sub_resp.status_code == 200
+    job_id = sub_resp.get_json()["job_id"]
+
+    claim_resp = client.post(
+        "/api/gpu/jobs/claim",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id},
+    )
+    assert claim_resp.status_code == 200
+
+    start_resp = client.post(
+        "/api/gpu/jobs/start",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id},
+    )
+    assert start_resp.status_code == 200
+
+    return provider_id, job_id
+
+
+def test_completed_job_cannot_be_failed_or_reopened(client):
+    provider_id, job_id = _setup_provider_and_job(client)
+
+    comp_resp = client.post(
+        "/api/gpu/jobs/complete",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id, "result_url": "https://example.com/out.mp4"},
+    )
+    assert comp_resp.status_code == 200
+    assert comp_resp.get_json()["ok"] is True
+
+    status_resp = client.get(f"/api/gpu/jobs/{job_id}")
+    assert status_resp.status_code == 200
+    assert status_resp.get_json()["status"] == "completed"
+
+    fail_resp = client.post(
+        "/api/gpu/jobs/fail",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id, "error_message": "late failure"},
+    )
+
+    assert fail_resp.status_code in (400, 409)
+    assert fail_resp.get_json().get("ok") is not True
+
+    status_resp2 = client.get(f"/api/gpu/jobs/{job_id}")
+    assert status_resp2.get_json()["status"] == "completed"
+
+
+def test_active_running_job_can_be_failed_and_released(client):
+    provider_id, job_id = _setup_provider_and_job(client)
+
+    fail_resp = client.post(
+        "/api/gpu/jobs/fail",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id, "error_message": "OOM error"},
+    )
+    assert fail_resp.status_code == 200
+    assert fail_resp.get_json()["ok"] is True
+
+    status_resp = client.get(f"/api/gpu/jobs/{job_id}")
+    assert status_resp.get_json()["status"] == "pending"
+
+
+def test_active_claimed_job_can_be_failed_and_released(client):
+    reg_resp = client.post(
+        "/api/gpu/providers/register",
+        headers=AUTH,
+        json={"gpu_model": "RTX 4090", "gpu_vram_gb": 24, "price_per_min": 0.1},
+    )
+    provider_id = reg_resp.get_json()["provider_id"]
+
+    sub_resp = client.post(
+        "/api/gpu/jobs/submit",
+        headers=AUTH,
+        json={"job_type": "video_render", "estimated_mins": 2, "max_price_per_min": 0.2},
+    )
+    job_id = sub_resp.get_json()["job_id"]
+
+    claim_resp = client.post(
+        "/api/gpu/jobs/claim",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id},
+    )
+    assert claim_resp.status_code == 200
+
+    fail_resp = client.post(
+        "/api/gpu/jobs/fail",
+        headers=AUTH,
+        json={"provider_id": provider_id, "job_id": job_id, "error_message": "Driver crash"},
+    )
+    assert fail_resp.status_code == 200
+    assert fail_resp.get_json()["ok"] is True
+
+    status_resp = client.get(f"/api/gpu/jobs/{job_id}")
+    assert status_resp.get_json()["status"] == "pending"
+
