@@ -166,6 +166,39 @@ def _headers(agent_name: str) -> dict[str, str]:
     return {"X-API-Key": f"bottube_sk_{agent_name}"}
 
 
+def test_playlist_item_insert_is_atomic_and_allocates_consecutive_positions(client):
+    owner_id = _insert_agent("atomic-playlist-owner", 1000.0)
+    creator_id = _insert_agent("atomic-video-owner", 1001.0)
+    playlist_db_id = _insert_playlist("atomicplaylist1", owner_id, "Atomic Mix")
+    _insert_video("atomicvideo01", creator_id, "First Video", 1002.0)
+    _insert_video("atomicvideo02", creator_id, "Second Video", 1003.0)
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        first_position = bottube_server._add_playlist_item_atomically(
+            db, playlist_db_id, "atomicvideo01", added_at=1004.0
+        )
+        duplicate_position = bottube_server._add_playlist_item_atomically(
+            db, playlist_db_id, "atomicvideo01", added_at=1005.0
+        )
+        second_position = bottube_server._add_playlist_item_atomically(
+            db, playlist_db_id, "atomicvideo02", added_at=1006.0
+        )
+        db.commit()
+        rows = db.execute(
+            "SELECT video_id, position FROM playlist_items WHERE playlist_id = ? ORDER BY position",
+            (playlist_db_id,),
+        ).fetchall()
+
+    assert first_position == 1
+    assert duplicate_position is None
+    assert second_position == 2
+    assert [(row["video_id"], row["position"]) for row in rows] == [
+        ("atomicvideo01", 1),
+        ("atomicvideo02", 2),
+    ]
+
+
 def test_public_playlist_hides_removed_and_banned_owner_videos(client):
     owner_id = _insert_agent("playlist-owner", 1000.0)
     visible_creator_id = _insert_agent("visible-creator", 1001.0)
@@ -278,3 +311,29 @@ def test_add_playlist_item_rejects_hidden_videos(client):
     assert removed_resp.status_code == 400
     assert banned_resp.status_code == 400
     assert visible_resp.status_code == 201
+
+
+def test_web_playlist_add_preserves_duplicate_conflict_contract(client):
+    owner_id = _insert_agent("web-playlist-owner", 1000.0)
+    creator_id = _insert_agent("web-video-owner", 1001.0)
+    _insert_playlist("webplaylist1", owner_id, "Web Mix")
+    _insert_video("webvideo001", creator_id, "Web Video", 1002.0)
+
+    with client.session_transaction() as session:
+        session["user_id"] = owner_id
+        session["csrf_token"] = "test-csrf"
+    first = client.post(
+        "/playlist/webplaylist1/add",
+        headers={"X-CSRF-Token": "test-csrf"},
+        json={"video_id": "webvideo001"},
+    )
+    duplicate = client.post(
+        "/playlist/webplaylist1/add",
+        headers={"X-CSRF-Token": "test-csrf"},
+        json={"video_id": "webvideo001"},
+    )
+
+    assert first.status_code == 200
+    assert first.get_json() == {"ok": True}
+    assert duplicate.status_code == 409
+    assert duplicate.get_json() == {"error": "Already in playlist"}
