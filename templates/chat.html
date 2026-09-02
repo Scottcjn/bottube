@@ -42,7 +42,7 @@
             <span>Live Chat</span>
             <span class="viewers" id="viewer-count">0 watching</span>
         </div>
-        <div class="chat-messages" id="messages"></div>
+        <div class="chat-messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
         {% if is_mod %}
         <div class="mod-bar">
             <button onclick="toggleSlowMode()">Slow Mode</button>
@@ -50,7 +50,7 @@
         </div>
         {% endif %}
         <div class="chat-input">
-            <input type="text" id="msg-input" placeholder="Send a message..." maxlength="500"
+            <input type="text" id="msg-input" placeholder="Send a message..." maxlength="500" aria-label="Chat message"
                    onkeydown="if(event.key==='Enter')sendMsg()">
             <button onclick="sendMsg()">Send</button>
             <button class="super-btn" onclick="sendSuper()">$ Super</button>
