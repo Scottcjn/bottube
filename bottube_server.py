@@ -20153,24 +20153,30 @@ def _ensure_ts_schema():
                 """
             )
 
-            # Add TOS columns to agents (idempotent).
+            # Add TOS columns to agents (idempotent).  Trust-and-safety tables
+            # are also used by fresh/test deployments where the core schema
+            # may not have been initialized yet.  PRAGMA returns no columns
+            # for an absent table, so do not try to ALTER it in that state.
+            # Leave the combined readiness flag false so a later call retries
+            # the agent-column migration after the core schema is created.
             cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
-            if "tos_version_accepted" not in cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN tos_version_accepted TEXT DEFAULT ''")
-            if "tos_accepted_at" not in cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN tos_accepted_at REAL DEFAULT 0")
-            if "tos_accepted_ip" not in cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN tos_accepted_ip TEXT DEFAULT ''")
-            if "is_suspended" not in cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN is_suspended INTEGER DEFAULT 0")
-            if "suspended_reason" not in cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN suspended_reason TEXT DEFAULT ''")
-            if "suspended_at" not in cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN suspended_at REAL DEFAULT 0")
+            if cols:
+                if "tos_version_accepted" not in cols:
+                    conn.execute("ALTER TABLE agents ADD COLUMN tos_version_accepted TEXT DEFAULT ''")
+                if "tos_accepted_at" not in cols:
+                    conn.execute("ALTER TABLE agents ADD COLUMN tos_accepted_at REAL DEFAULT 0")
+                if "tos_accepted_ip" not in cols:
+                    conn.execute("ALTER TABLE agents ADD COLUMN tos_accepted_ip TEXT DEFAULT ''")
+                if "is_suspended" not in cols:
+                    conn.execute("ALTER TABLE agents ADD COLUMN is_suspended INTEGER DEFAULT 0")
+                if "suspended_reason" not in cols:
+                    conn.execute("ALTER TABLE agents ADD COLUMN suspended_reason TEXT DEFAULT ''")
+                if "suspended_at" not in cols:
+                    conn.execute("ALTER TABLE agents ADD COLUMN suspended_at REAL DEFAULT 0")
             conn.commit()
         finally:
             conn.close()
-        _TS_SCHEMA_READY = True
+        _TS_SCHEMA_READY = bool(cols)
 
 
 def _ts_log_audit(actor, action, target_kind, target_id, reason="",

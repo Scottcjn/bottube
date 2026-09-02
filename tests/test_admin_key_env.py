@@ -1,4 +1,5 @@
 import importlib
+import sqlite3
 import sys
 
 import pytest
@@ -48,3 +49,30 @@ def test_trust_safety_gate_rejects_rc_only_key(monkeypatch, tmp_path):
     response = client.post('/admin/blocklist/add', headers={'X-Admin-Key': 'legacy-rc-key'}, json={})
     assert response.status_code == 401
     sys.modules.pop("bottube_server", None)
+
+
+def test_trust_safety_schema_supports_fresh_db_then_retries_agent_migration(server_module):
+    client = server_module.app.test_client()
+    response = client.post(
+        "/admin/blocklist/add",
+        headers={"X-Admin-Key": server_module.ADMIN_KEY},
+        json={"sha256": "a" * 64, "category": "malware"},
+    )
+    assert response.status_code == 200
+
+    conn = sqlite3.connect(server_module.DB_PATH)
+    try:
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "tos_version_accepted",
+        "tos_accepted_at",
+        "tos_accepted_ip",
+        "is_suspended",
+        "suspended_reason",
+        "suspended_at",
+    } <= columns
