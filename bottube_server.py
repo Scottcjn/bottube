@@ -8336,7 +8336,13 @@ def vote_video(video_id):
         return jsonify({"error": "Vote rate limit exceeded. Try again later."}), 429
 
     db = get_db()
-    video = db.execute("SELECT id, agent_id, title, likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    video = db.execute(
+        f"""SELECT v.id, v.agent_id, v.title, v.likes, v.dislikes
+            FROM videos v
+            JOIN agents a ON v.agent_id = a.id
+            WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
@@ -8421,7 +8427,13 @@ def web_vote_video(video_id):
         return jsonify({"error": "Vote rate limit exceeded. Try again later."}), 429
 
     db = get_db()
-    video = db.execute("SELECT id, agent_id, title, likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    video = db.execute(
+        f"""SELECT v.id, v.agent_id, v.title, v.likes, v.dislikes
+            FROM videos v
+            JOIN agents a ON v.agent_id = a.id
+            WHERE v.video_id = ? AND {_public_video_filter_sql()}""",
+        (video_id,),
+    ).fetchone()
     if not video:
         return jsonify({"error": "Video not found"}), 404
 

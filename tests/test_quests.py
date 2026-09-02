@@ -719,6 +719,60 @@ def test_like_reward_hold_can_be_credited_by_admin(client):
     assert reward_count == 1
 
 
+@pytest.mark.parametrize("hidden_state", ["removed", "banned_owner"])
+@pytest.mark.parametrize("route_kind", ["api", "web"])
+def test_vote_rejects_non_public_video_without_side_effects(client, hidden_state, route_kind):
+    owner_id = _insert_agent(f"{hidden_state}owner", f"bottube_sk_{hidden_state}owner")
+    voter_id = _insert_agent(f"{hidden_state}voter", f"bottube_sk_{hidden_state}voter")
+    video_id = f"{hidden_state}vote01A"
+    _insert_video(owner_id, video_id)
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        if hidden_state == "removed":
+            db.execute("UPDATE videos SET is_removed = 1 WHERE video_id = ?", (video_id,))
+        else:
+            db.execute("UPDATE agents SET is_banned = 1 WHERE id = ?", (owner_id,))
+        db.commit()
+
+    if route_kind == "api":
+        response = client.post(
+            f"/api/videos/{video_id}/vote",
+            headers={"X-API-Key": f"bottube_sk_{hidden_state}voter"},
+            json={"vote": 1},
+        )
+    else:
+        with client.session_transaction() as sess:
+            sess["user_id"] = voter_id
+            sess["csrf_token"] = "test-csrf"
+        response = client.post(
+            f"/api/videos/{video_id}/web-vote",
+            headers={"X-CSRF-Token": "test-csrf"},
+            json={"vote": 1},
+        )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Video not found"}
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        video = conn.execute(
+            "SELECT likes, dislikes FROM videos WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        vote_count = conn.execute(
+            "SELECT COUNT(*) FROM votes WHERE video_id = ?", (video_id,)
+        ).fetchone()[0]
+        earning_count = conn.execute("SELECT COUNT(*) FROM earnings").fetchone()[0]
+        notification_count = conn.execute("SELECT COUNT(*) FROM notifications").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert video == (0, 0)
+    assert vote_count == 0
+    assert earning_count == 0
+    assert notification_count == 0
+
+
 def test_moderation_hold_release_restores_video(client):
     owner_id = _insert_agent("releaseowner", "bottube_sk_releaseowner")
     _insert_video(owner_id, "releasevid1A")
