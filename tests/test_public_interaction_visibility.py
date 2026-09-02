@@ -94,15 +94,19 @@ def _insert_video(
         db.commit()
 
 
-def _insert_comment(video_id: str, agent_id: int) -> None:
+def _insert_comment(
+    video_id: str,
+    agent_id: int,
+    content: str = "interaction fixture comment",
+) -> None:
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
             """
             INSERT INTO comments (video_id, agent_id, content, created_at)
-            VALUES (?, ?, 'interaction fixture comment', ?)
+            VALUES (?, ?, ?, ?)
             """,
-            (video_id, agent_id, time.time()),
+            (video_id, agent_id, content, time.time()),
         )
         db.commit()
 
@@ -228,3 +232,53 @@ def test_social_graph_excludes_banned_agents_and_removed_video_edges(client):
     ]
     connected_names = {row["agent_name"] for row in data["most_connected"]}
     assert connected_names <= {"alice", "bob"}
+
+
+def test_public_comment_surfaces_hide_banned_and_non_public_content(
+    client,
+    monkeypatch,
+):
+    owner = _insert_agent("owner")
+    banned_owner = _insert_agent("banned-owner", is_banned=1)
+    visible_commenter = _insert_agent("visible-commenter")
+    banned_commenter = _insert_agent("banned-commenter", is_banned=1)
+
+    _insert_video("public-video", owner)
+    _insert_video("removed-video", owner, is_removed=1)
+    _insert_video("banned-owner-video", banned_owner)
+
+    _insert_comment("public-video", visible_commenter, "VISIBLE COMMENT")
+    _insert_comment("public-video", banned_commenter, "BANNED COMMENTER COMMENT")
+    _insert_comment("removed-video", visible_commenter, "REMOVED VIDEO COMMENT")
+    _insert_comment("banned-owner-video", visible_commenter, "BANNED OWNER COMMENT")
+
+    comments_response = client.get("/api/videos/public-video/comments")
+    assert comments_response.status_code == 200
+    assert [row["content"] for row in comments_response.get_json()["comments"]] == [
+        "VISIBLE COMMENT"
+    ]
+
+    describe_response = client.get("/api/videos/public-video/describe")
+    assert describe_response.status_code == 200
+    assert [row["text"] for row in describe_response.get_json()["comments"]] == [
+        "VISIBLE COMMENT"
+    ]
+
+    recent_response = client.get("/api/comments/recent?since=0")
+    assert recent_response.status_code == 200
+    assert [row["content"] for row in recent_response.get_json()["comments"]] == [
+        "VISIBLE COMMENT"
+    ]
+
+    monkeypatch.setattr(
+        bottube_server,
+        "render_template",
+        lambda _template, **context: "|".join(
+            comment["content"] for comment in context.get("comments", [])
+        ),
+    )
+    watch_response = client.get("/watch/public-video")
+    assert watch_response.status_code == 200
+    watch_html = watch_response.get_data(as_text=True)
+    assert "VISIBLE COMMENT" in watch_html
+    assert "BANNED COMMENTER COMMENT" not in watch_html

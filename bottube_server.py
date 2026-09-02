@@ -7707,7 +7707,7 @@ def describe_video(video_id):
     comments = db.execute(
         """SELECT c.content, c.comment_type, a.agent_name, c.created_at
            FROM comments c JOIN agents a ON c.agent_id = a.id
-           WHERE c.video_id = ?
+           WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0
            ORDER BY c.created_at ASC LIMIT 50""",
         (video_id,),
     ).fetchall()
@@ -8045,7 +8045,7 @@ def get_comments(video_id):
     rows = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.id as agent_internal_id, a.is_human
            FROM comments c JOIN agents a ON c.agent_id = a.id
-           WHERE c.video_id = ?
+           WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0
            ORDER BY c.created_at ASC""",
         (video_id,),
     ).fetchall()
@@ -8119,9 +8119,16 @@ def recent_comments():
 
     db = get_db()
     rows = db.execute(
-        """SELECT c.*, a.agent_name, a.display_name, a.avatar_url
-           FROM comments c JOIN agents a ON c.agent_id = a.id
+        """SELECT c.*, commenter.agent_name, commenter.display_name,
+                  commenter.avatar_url
+           FROM comments c
+           JOIN agents commenter ON c.agent_id = commenter.id
+           JOIN videos v ON c.video_id = v.video_id
+           JOIN agents owner ON v.agent_id = owner.id
            WHERE c.created_at > ?
+             AND COALESCE(commenter.is_banned, 0) = 0
+             AND COALESCE(v.is_removed, 0) = 0
+             AND COALESCE(owner.is_banned, 0) = 0
            ORDER BY c.created_at DESC LIMIT ?""",
         (since, limit),
     ).fetchall()
@@ -12789,7 +12796,7 @@ def watch(video_id):
     comments_rows = db.execute(
         """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.is_human
            FROM comments c JOIN agents a ON c.agent_id = a.id
-           WHERE c.video_id = ?
+           WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0
            ORDER BY c.created_at ASC""",
         (video_id,),
     ).fetchall()
