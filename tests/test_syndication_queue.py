@@ -7,6 +7,7 @@ Run with: pytest tests/test_syndication_queue.py -v
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -142,6 +143,77 @@ class TestSyndicationItem:
         assert data["priority"] == 10
         assert "created_at" in data
         assert "updated_at" in data
+
+
+class _TransitionCursor:
+    def __init__(self, *, row=None, rowcount=0):
+        self._row = row
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._row
+
+
+class _ConcurrentTransitionState:
+    def __init__(self):
+        self.state = QueueState.PROCESSING.value
+        self.reads = threading.Barrier(2)
+        self.lock = threading.Lock()
+
+
+class _ConcurrentTransitionConnection:
+    def __init__(self, shared):
+        self.shared = shared
+
+    def execute(self, sql, params=()):
+        normalized = " ".join(sql.split()).lower()
+        if normalized.startswith("select state, retry_count, metadata"):
+            stale_state = self.shared.state
+            self.shared.reads.wait(timeout=2)
+            return _TransitionCursor(
+                row={"state": stale_state, "retry_count": 0, "metadata": "{}"}
+            )
+        if normalized.startswith("update syndication_queue set"):
+            guarded = "where id = ? and state = ?" in normalized
+            expected = params[-1] if guarded else None
+            with self.shared.lock:
+                if guarded and self.shared.state != expected:
+                    return _TransitionCursor(rowcount=0)
+                self.shared.state = params[0]
+                return _TransitionCursor(rowcount=1)
+        raise AssertionError(f"unexpected SQL in transition harness: {normalized}")
+
+    def commit(self):
+        return None
+
+    def close(self):
+        return None
+
+
+def test_concurrent_terminal_transitions_have_exactly_one_winner(queue, monkeypatch):
+    shared = _ConcurrentTransitionState()
+    monkeypatch.setattr(
+        queue,
+        "_get_connection",
+        lambda: _ConcurrentTransitionConnection(shared),
+    )
+    results = []
+
+    def transition(target):
+        results.append(queue.update_state(1, target))
+
+    workers = [
+        threading.Thread(target=transition, args=(target,))
+        for target in (QueueState.COMPLETED, QueueState.FAILED)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=3)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert sorted(results) == [False, True]
+    assert shared.state in {QueueState.COMPLETED.value, QueueState.FAILED.value}
 
 
 class TestSyndicationQueue:
