@@ -11,7 +11,7 @@ import csv
 import io
 from pathlib import Path
 from datetime import datetime, timedelta
-from flask import Blueprint, render_template, jsonify, request, g, Response, session
+from flask import Blueprint, render_template, jsonify, request, g, Response
 from functools import wraps
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
@@ -32,21 +32,39 @@ def get_db():
     return db
 
 
+def _caller_agent_id():
+    """Resolve the acting identity from the session cookie or X-API-Key.
+
+    SECURITY: the identity is NEVER taken from a client-supplied
+    X-Agent-ID header or ?agent_id= query param -- doing so let any
+    anonymous caller read another creator's earnings and audience data.
+    Returns an int agent id, or None when unauthenticated.
+    """
+    user = getattr(g, "user", None)
+    if user:
+        return int(user["id"])
+    agent = getattr(g, "agent", None)
+    if agent:
+        return int(agent["id"])
+    api_key = (request.headers.get("X-API-Key") or "").strip()
+    if not api_key:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            api_key = auth[7:].strip()
+    if not api_key:
+        return None
+    row = get_db().execute(
+        "SELECT id FROM agents WHERE api_key = ? AND COALESCE(is_banned, 0) = 0",
+        (api_key,),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
 def login_required(f):
-    """Decorator to require login for analytics routes."""
+    """Decorator: require an authenticated session or API key."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        """Decorator wrapper function.
-        
-        Args:
-            *args: Parameter value.
-            **kwargs: Parameter value.
-        
-        Returns:
-            The result value.
-        """
-        agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-        if not agent_id and 'agent_id' not in session:
+        if _caller_agent_id() is None:
             return jsonify({"error": "Authentication required"}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -66,9 +84,9 @@ def api_views():
     - period: '7d', '30d', '90d' (default: 30d)
     - video_id: specific video filter (optional)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id = _caller_agent_id()
+    if agent_id is None:
+        return jsonify({"error": "Authentication required"}), 401
     
     period = request.args.get('period', '30d')
     video_id = request.args.get('video_id')
@@ -154,9 +172,9 @@ def api_engagement():
     Query params:
     - period: '7d', '30d', '90d' (default: 30d)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id = _caller_agent_id()
+    if agent_id is None:
+        return jsonify({"error": "Authentication required"}), 401
     
     period = request.args.get('period', '30d')
     try:
@@ -269,9 +287,9 @@ def api_top_videos():
     - metric: 'views', 'engagement', 'tips' (default: views)
     - limit: number of videos (default: 10)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id = _caller_agent_id()
+    if agent_id is None:
+        return jsonify({"error": "Authentication required"}), 401
     
     metric = request.args.get('metric', 'views')
     if metric not in ('views', 'engagement', 'tips'):
@@ -344,9 +362,9 @@ def api_audience():
     """
     Get audience breakdown: Human vs AI viewer ratio.
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id = _caller_agent_id()
+    if agent_id is None:
+        return jsonify({"error": "Authentication required"}), 401
     
     db = get_db()
     
@@ -402,9 +420,9 @@ def api_export_csv():
     Query params:
     - type: 'views', 'engagement', 'videos' (default: videos)
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id = _caller_agent_id()
+    if agent_id is None:
+        return jsonify({"error": "Authentication required"}), 401
     
     export_type = request.args.get('type', 'videos')
     
@@ -499,9 +517,9 @@ def api_summary():
     """
     Get quick summary stats for the dashboard header.
     """
-    agent_id = request.headers.get('X-Agent-ID') or request.args.get('agent_id')
-    if not agent_id:
-        return jsonify({"error": "agent_id required"}), 400
+    agent_id = _caller_agent_id()
+    if agent_id is None:
+        return jsonify({"error": "Authentication required"}), 401
     
     db = get_db()
     
