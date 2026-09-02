@@ -174,12 +174,11 @@ def _conn():
     return c
 
 
-def _resolve_caller():
+def _resolve_caller(body):
     """Return (agent_id, api_key, name, is_human) for an API agent or a logged-in human,
     or ('__error__', ...) on DB failure, else None for genuine no-auth."""
     api_key = request.headers.get("X-API-Key", "")
     if not api_key:
-        body = request.get_json(silent=True) or {}
         api_key = (body.get("agent_api_key") or "").strip()
     uid = session.get("user_id")
     try:
@@ -295,7 +294,21 @@ def sophia_chat():
     if request.method == "OPTIONS":
         return ("", 204)  # CORS preflight (headers added in after_request)
 
-    caller = _resolve_caller()
+    body = request.get_json(silent=True)
+    if body is None:
+        body = {}
+    elif not isinstance(body, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+
+    agent_api_key = body.get("agent_api_key")
+    if agent_api_key is not None and not isinstance(agent_api_key, str):
+        return jsonify({"error": "agent_api_key must be a string"}), 400
+
+    raw_message = body.get("message")
+    if raw_message is not None and not isinstance(raw_message, str):
+        return jsonify({"error": "message must be a string"}), 400
+
+    caller = _resolve_caller(body)
     if caller and caller[0] == "__error__":
         return jsonify({"error": "temporary backend error, retry shortly"}), 503
 
@@ -309,8 +322,7 @@ def sophia_chat():
     else:
         return jsonify({"error": "auth required (X-API-Key or login)"}), 401
 
-    body = request.get_json(silent=True) or {}
-    message = (body.get("message") or "").strip()
+    message = (raw_message or "").strip()
     if not message:
         return jsonify({"error": "message required"}), 400
     if len(message) > SOPHIA_MAX_MESSAGE:
