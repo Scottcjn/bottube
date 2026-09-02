@@ -117,3 +117,21 @@ def test_bridge_known_inputs_have_explicit_name_attribute():
         assert pattern.search(html), (
             f"Expected <input id='{input_id}' name='{expected_name}'> in bridge.html"
         )
+
+
+def test_bridge_tabs_synchronize_visible_and_accessible_selection():
+    """Chain changes must not leave aria-selected on the old tab."""
+    html = _load_template()
+    tabs = re.findall(r'<button\b[^>]*class="chain-tab[^>]*>', html)
+    assert len(tabs) == 6
+    for tab in tabs:
+        assert 'data-chain=' in tab
+        assert 'role="tab"' in tab
+        assert 'aria-selected=' in tab
+        assert 'tabindex=' in tab
+
+    assert 'const selected = tab.dataset.chain === chain;' in html
+    assert 'tab.classList.toggle("active", selected);' in html
+    assert 'tab.setAttribute("aria-selected", String(selected));' in html
+    assert 'tab.tabIndex = selected ? 0 : -1;' in html
+    assert 'onclick.toString()' not in html

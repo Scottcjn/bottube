@@ -289,27 +289,27 @@
 
     <!-- Chain Tabs -->
     <div class="chain-tabs" role="tablist">
-        <button class="chain-tab active" onclick="switchChain('wrtc')" role="tab" aria-label="Select wRTC (Solana) bridge" aria-selected="true">
+        <button class="chain-tab active" data-chain="wrtc" onclick="switchChain('wrtc')" role="tab" aria-label="Select wRTC (Solana) bridge" aria-selected="true" tabindex="0">
             <span class="chain-icon">&#9788;</span> wRTC (Solana)
             <span class="chain-badge badge-live">Live</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('ergo')" role="tab" aria-label="Select ERG (Ergo) bridge" aria-selected="false">
+        <button class="chain-tab" data-chain="ergo" onclick="switchChain('ergo')" role="tab" aria-label="Select ERG (Ergo) bridge" aria-selected="false" tabindex="-1">
             <span class="chain-icon">&#9830;</span> ERG (Ergo)
             <span class="chain-badge badge-live">Live</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('btc')" role="tab" aria-label="Select BTC bridge (coming soon)" aria-selected="false">
+        <button class="chain-tab" data-chain="btc" onclick="switchChain('btc')" role="tab" aria-label="Select BTC bridge (coming soon)" aria-selected="false" tabindex="-1">
             <span class="chain-icon">&#8383;</span> BTC
             <span class="chain-badge badge-soon">Soon</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('ltc')" role="tab" aria-label="Select LTC bridge (coming soon)" aria-selected="false">
+        <button class="chain-tab" data-chain="ltc" onclick="switchChain('ltc')" role="tab" aria-label="Select LTC bridge (coming soon)" aria-selected="false" tabindex="-1">
             <span class="chain-icon">&#321;</span> LTC
             <span class="chain-badge badge-soon">Soon</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('doge')" role="tab" aria-label="Select DOGE bridge (coming soon)" aria-selected="false">
+        <button class="chain-tab" data-chain="doge" onclick="switchChain('doge')" role="tab" aria-label="Select DOGE bridge (coming soon)" aria-selected="false" tabindex="-1">
             <span class="chain-icon">&#208;</span> DOGE
             <span class="chain-badge badge-soon">Soon</span>
         </button>
-        <button class="chain-tab" onclick="switchChain('base')" role="tab" aria-label="Select wRTC (Base L2) bridge" aria-selected="false">
+        <button class="chain-tab" data-chain="base" onclick="switchChain('base')" role="tab" aria-label="Select wRTC (Base L2) bridge" aria-selected="false" tabindex="-1">
             <span class="chain-icon">&#9830;</span> wRTC (Base L2)
             <span class="chain-badge badge-live">Live</span>
         </button>
@@ -707,16 +707,16 @@ function trackFunnel(name, details = {}) {
 
 // ─── Tab switching ──────────────────────────────────────────
 function switchChain(chain) {
-    document.querySelectorAll(".chain-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".chain-tab").forEach(tab => {
+        const selected = tab.dataset.chain === chain;
+        tab.classList.toggle("active", selected);
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+    });
     document.querySelectorAll(".chain-panel").forEach(p => p.classList.remove("active"));
 
     const panel = document.getElementById("panel-" + chain);
     if (panel) panel.classList.add("active");
-
-    // Activate correct tab
-    document.querySelectorAll(".chain-tab").forEach(t => {
-        if (t.onclick.toString().includes("'" + chain + "'")) t.classList.add("active");
-    });
 
     // Update URL without reload
     const slug = chain === "wrtc" ? "/bridge/wrtc" : "/bridge/" + chain;
