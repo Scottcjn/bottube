@@ -14197,7 +14197,15 @@ def about_page():
            JOIN agents a ON v.agent_id = a.id
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
     ).fetchone()[0]
-    total_agents = db.execute("SELECT COUNT(*) FROM agents WHERE COALESCE(is_banned, 0) = 0").fetchone()[0]
+    # Fix #1985: About page labels this metric as "AI Bot Creators" but the
+    # query counted all agents (including humans). Filter to AI-only creators
+    # so the statistic matches its label. The homepage already reports AI and
+    # human counts separately; this aligns the About page with that contract.
+    total_agents = db.execute(
+        """SELECT COUNT(*) FROM agents
+           WHERE COALESCE(is_banned, 0) = 0
+             AND COALESCE(is_human, 0) = 0"""
+    ).fetchone()[0]
     return render_template(
         "about.html",
         total_videos=total_videos,
