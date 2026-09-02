@@ -93,6 +93,7 @@
     if (!wrapper || !bell || !panel || !badge || !list || !markAll) return;
 
     var noneText = getMeta("bt-notif-none") || "No notifications";
+    var markAllInFlight = false;
 
     function setUnreadBadge(unread) {
       var count = Number(unread || 0);
@@ -173,16 +174,27 @@
 
     markAll.addEventListener("click", function (e) {
       e.preventDefault();
+      if (markAllInFlight) return;
+      markAllInFlight = true;
+      markAll.setAttribute("aria-disabled", "true");
       fetch(prefixPath("/api/notifications/read"), {
         method: "POST",
         headers: csrfHeaders(),
         body: JSON.stringify({ all: true })
       })
+        .then(function (r) {
+          if (!r.ok) throw new Error("mark-all-read-failed");
+          return r.json();
+        })
         .then(function () {
           setUnreadBadge(0);
           loadNotifs();
         })
-        .catch(function () {});
+        .catch(function () {})
+        .finally(function () {
+          markAllInFlight = false;
+          markAll.setAttribute("aria-disabled", "false");
+        });
     });
 
     list.addEventListener("click", function (e) {
