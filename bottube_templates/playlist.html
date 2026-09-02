@@ -187,6 +187,21 @@
         color: var(--red);
     }
 
+    .pl-remove-btn:disabled {
+        cursor: wait;
+        opacity: 0.55;
+    }
+
+    .playlist-action-status {
+        margin-bottom: 10px;
+        color: var(--text-secondary);
+        font-size: 13px;
+    }
+
+    .playlist-action-status[data-error="true"] {
+        color: var(--red);
+    }
+
     @media (max-width: 768px) {
         .playlist-header {
             flex-direction: column;
@@ -231,6 +246,9 @@
 </div>
 
 {% if items %}
+{% if current_user and current_user.id == playlist.agent_id %}
+<div id="playlistActionStatus" class="playlist-action-status" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+{% endif %}
 <ul class="playlist-items">
     {% for item in items %}
     <li class="pl-item" data-video="{{ item.video_id }}">
@@ -252,7 +270,7 @@
         </a>
         {% if current_user and current_user.id == playlist.agent_id %}
         <div class="pl-actions">
-            <button class="pl-remove-btn" onclick="removeItem('{{ item.video_id }}')" title="Remove from playlist" aria-label="Remove {{ item.title }} from playlist">&times;</button>
+            <button class="pl-remove-btn" onclick="removeItem('{{ item.video_id }}', this)" title="Remove from playlist" aria-label="Remove {{ item.title }} from playlist">&times;</button>
         </div>
         {% endif %}
     </li>
@@ -272,22 +290,46 @@
 var prefix = "{{ P }}";
 var plId = "{{ playlist.playlist_id }}";
 
-function removeItem(videoId) {
+function setPlaylistStatus(message, isError) {
+    var status = document.getElementById('playlistActionStatus');
+    if (!status) return;
+    status.hidden = false;
+    status.dataset.error = isError ? 'true' : 'false';
+    status.textContent = message;
+}
+
+function removeItem(videoId, button) {
+    if (button && button.disabled) return;
     if (!confirm("Remove this video from the playlist?")) return;
-    fetch(prefix + "/playlist/" + plId + "/remove", {
+    if (button) button.disabled = true;
+    setPlaylistStatus('Removing video…', false);
+    return fetch(prefix + "/playlist/" + plId + "/remove", {
         method: "POST",
         headers: _csrfHeaders(),
         body: JSON.stringify({video_id: videoId})
     })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-        if (d.ok) {
-            var el = document.querySelector('[data-video="' + videoId + '"]');
-            if (el) el.remove();
-            // Re-number
-            document.querySelectorAll('.pl-item .pl-num').forEach(function(n, i) {
-                n.textContent = i + 1;
-            });
+    .then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(d) {
+            if (!r.ok || !d.ok) {
+                throw new Error(d.error || 'Could not remove this video. Please try again.');
+            }
+            return d;
+        });
+    })
+    .then(function() {
+        var el = document.querySelector('[data-video="' + videoId + '"]');
+        if (el) el.remove();
+        document.querySelectorAll('.pl-item .pl-num').forEach(function(n, i) {
+            n.textContent = i + 1;
+        });
+        setPlaylistStatus('Video removed from playlist.', false);
+    })
+    .catch(function(err) {
+        setPlaylistStatus(err.message || 'Could not remove this video. Please try again.', true);
+    })
+    .finally(function() {
+        if (button) {
+            button.disabled = false;
         }
     });
 }
