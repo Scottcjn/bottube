@@ -7611,6 +7611,45 @@ def stream_video(video_id):
     return resp
 
 
+def _record_view_event_once(
+    db: sqlite3.Connection,
+    video_id: str,
+    agent_id: Optional[int],
+    ip_address: str,
+    now: float,
+    cooldown_seconds: int = 1800,
+) -> Tuple[Optional[int], int]:
+    """Atomically admit one view per video/IP cooldown window.
+
+    The caller owns the transaction after this function returns so reward and
+    milestone effects can commit with the admitted event. ``view_id`` is
+    ``None`` when an existing event won the cooldown race.
+    """
+    db.execute("BEGIN IMMEDIATE")
+    recent = db.execute(
+        """SELECT 1 FROM views
+           WHERE video_id = ? AND ip_address = ? AND created_at > ?
+           LIMIT 1""",
+        (video_id, ip_address, now - cooldown_seconds),
+    ).fetchone()
+    if recent:
+        current = db.execute(
+            "SELECT views FROM videos WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        return None, int(current[0] or 0) if current else 0
+
+    cursor = db.execute(
+        """INSERT INTO views (video_id, agent_id, ip_address, created_at)
+           VALUES (?, ?, ?, ?)""",
+        (video_id, agent_id, ip_address, now),
+    )
+    db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
+    current = db.execute(
+        "SELECT views FROM videos WHERE video_id = ?", (video_id,)
+    ).fetchone()
+    return int(cursor.lastrowid), int(current[0] or 0) if current else 0
+
+
 @app.route("/api/videos/<video_id>/view", methods=["GET", "POST"])
 def record_view(video_id):
     """Record a view and return video metadata."""
@@ -7635,23 +7674,16 @@ def record_view(video_id):
 
     ip = _get_client_ip()
     VIEW_COOLDOWN = 1800  # 30 minutes
-    recent = db.execute(
-        "SELECT 1 FROM views WHERE video_id = ? AND ip_address = ? AND created_at > ?",
-        (video_id, ip, time.time() - VIEW_COOLDOWN),
-    ).fetchone()
-    if not recent:
-        cur = db.execute(
-            "INSERT INTO views (video_id, agent_id, ip_address, created_at) VALUES (?, ?, ?, ?)",
-            (video_id, agent_id, ip, time.time()),
-        )
-        db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
-        new_views = (row["views"] or 0) + 1
+    view_id, new_views = _record_view_event_once(
+        db, video_id, agent_id, ip, time.time(), VIEW_COOLDOWN
+    )
+    if view_id is not None:
         reward_result = _view_reward_decision(
             db,
             owner_id=int(row["agent_id"]),
             viewer_id=agent_id,
             video_id=video_id,
-            view_event_ref=str(int(cur.lastrowid or 0) or f"{video_id}:{int(time.time())}"),
+            view_event_ref=str(view_id),
             ip_address=ip or "",
         )
         # Check BAN milestones (100 views, 1000 views)
@@ -7664,10 +7696,9 @@ def record_view(video_id):
                    ON CONFLICT(agent_id, video_id) DO UPDATE SET watched_at = excluded.watched_at""",
                 (agent_id, video_id, time.time()),
             )
-        db.commit()
     else:
         reward_result = {"awarded": False, "held": False, "risk_score": 0, "reasons": ["deduplicated recent view"]}
-        new_views = row["views"] or 0
+    db.commit()
 
     # CTR: Record click (video opened/watched)
     try:
@@ -12760,20 +12791,13 @@ def watch(video_id):
     # Record view (deduplicated: 1 view per IP per video per 30 min)
     ip = _get_client_ip()
     VIEW_COOLDOWN = 1800  # 30 minutes
-    recent = db.execute(
-        "SELECT 1 FROM views WHERE video_id = ? AND ip_address = ? AND created_at > ?",
-        (video_id, ip, time.time() - VIEW_COOLDOWN),
-    ).fetchone()
-    if not recent:
-        db.execute(
-            "INSERT INTO views (video_id, ip_address, created_at) VALUES (?, ?, ?)",
-            (video_id, ip, time.time()),
-        )
-        db.execute("UPDATE videos SET views = views + 1 WHERE video_id = ?", (video_id,))
-        new_views = (video["views"] or 0) + 1
+    view_id, new_views = _record_view_event_once(
+        db, video_id, None, ip, time.time(), VIEW_COOLDOWN
+    )
+    if view_id is not None:
         # Check BAN milestones (100 views, 1000 views)
         check_view_milestones(db, video["agent_id"], video_id, new_views)
-        db.commit()
+    db.commit()
 
     # Record watch history for logged-in users
     if g.user:
