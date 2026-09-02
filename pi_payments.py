@@ -140,7 +140,12 @@ def pi_approve():
     """Server-side approval leg: re-verify the payment against Pi and our product table, then call Pi /approve."""
     if not PI_API_KEY:
         return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
-    payment_id = ((request.get_json(silent=True) or {}).get("payment_id") or "").strip()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
+    payment_id = (data.get("payment_id") or "").strip()
     if not payment_id:
         return jsonify({"error": "payment_id required"}), 400
     try:
@@ -184,7 +189,11 @@ def pi_complete():
     """Server-side completion leg: re-verify, call Pi /complete, then grant the entitlement idempotently."""
     if not PI_API_KEY:
         return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     payment_id = (data.get("payment_id") or "").strip()
     txid = (data.get("txid") or "").strip()
     if not payment_id or not txid:
