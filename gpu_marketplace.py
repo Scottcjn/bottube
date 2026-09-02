@@ -677,12 +677,16 @@ def complete_job():
     # Pay for actual time, capped at escrow
     payment = min(duration_mins * price_per_min, row[3])
 
-    # Update job
-    db.execute("""
+    # Update job with atomic compare-and-set
+    cursor = db.execute("""
         UPDATE gpu_jobs
         SET status = 'completed', completed_at = ?, actual_mins = ?, rtc_paid = ?, result_url = ?
-        WHERE id = ?
-    """, (now, duration_mins, payment, result_url, job_id))
+        WHERE id = ? AND provider_id = ? AND status = 'running'
+    """, (now, duration_mins, payment, result_url, job_id, provider_id))
+
+    if cursor.rowcount == 0:
+        db.rollback()
+        return jsonify({"error": "Job state changed concurrently or not running"}), 409
 
     # Update provider stats
     db.execute("""
