@@ -31,6 +31,27 @@ def _get_db(app):
     return db
 
 
+def _video_exists(db, video_id):
+    """Return whether *video_id* names an existing video."""
+    if not isinstance(video_id, str) or not video_id.strip():
+        return False
+    return db.execute(
+        "SELECT 1 FROM videos WHERE video_id=? LIMIT 1", (video_id,)
+    ).fetchone() is not None
+
+
+def _require_video(app, video_id):
+    """Reject SocketIO events that target a missing video."""
+    db = _get_db(app)
+    try:
+        exists = _video_exists(db, video_id)
+    finally:
+        db.close()
+    if not exists:
+        emit("error", {"message": "Video not found"})
+    return exists
+
+
 def _coerce_flag(value):
     """Return safe 0/1 int from bool/int values or None when invalid."""
     if isinstance(value, bool):
@@ -56,8 +77,11 @@ def _coerce_non_negative_number(value, default=0.0):
 @socketio.on("join")
 def on_join(data):
     """User joins a video chat room."""
+    from flask import current_app
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
+    if not _require_video(current_app, room):
+        return
     join_room(room)
     emit("system", {"message": f"{username} joined the chat", "type": "join"}, room=room)
 
@@ -69,8 +93,11 @@ def on_leave(data):
     Args:
         data: Parameter value.
     """
+    from flask import current_app
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
+    if not _require_video(current_app, room):
+        return
     leave_room(room)
     emit("system", {"message": f"{username} left the chat", "type": "leave"}, room=room)
 
@@ -111,8 +138,14 @@ def on_chat_message(data):
         emit("error", {"message": "tip_amount must be a finite non-negative number"})
         return
 
-    # Check ban
+    # Reject orphan room IDs before persisting or broadcasting.
     db = _get_db(current_app)
+    if not _video_exists(db, room):
+        db.close()
+        emit("error", {"message": "Video not found"})
+        return
+
+    # Check ban
     ban = db.execute(
         "SELECT 1 FROM chat_bans WHERE video_id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?)",
         (room, user_id, now),
@@ -171,6 +204,8 @@ def on_mod_action(data):
             if duration is None:
                 emit("error", {"message": "duration must be a finite non-negative number"})
                 return
+        if not _require_video(current_app, room):
+            return
         expires = time.time() + duration if duration else None
         db = _get_db(current_app)
         db.execute(
@@ -189,10 +224,14 @@ def on_mod_action(data):
         if timeout_sec is None:
             emit("error", {"message": "duration must be a finite non-negative number"})
             return
+        if not _require_video(current_app, room):
+            return
         timeout_sec = int(timeout_sec)
         key = f"{user_id}:{room}"
         _last_message_time[key] = time.time() + timeout_sec
         emit("system", {"message": f"User timed out for {timeout_sec}s", "type": "timeout"}, room=room)
     
     elif action == "slow_mode":
+        if not _require_video(current_app, room):
+            return
         emit("system", {"message": "Slow mode enabled", "type": "slow_mode"}, room=room)
