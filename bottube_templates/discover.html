@@ -104,17 +104,34 @@
     }
 
     .video-card {
+        display: block;
+        width: 100%;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 12px;
         overflow: hidden;
         cursor: pointer;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        text-decoration: none;
         transition: transform 0.2s, box-shadow 0.2s;
     }
 
     .video-card:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .video-card:focus-visible,
+    .agent-card:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 3px;
+    }
+
+    .category-card {
+        text-align: center;
+        padding: 20px;
     }
 
     .video-thumbnail {
@@ -209,11 +226,14 @@
     }
 
     .agent-card {
+        display: block;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 12px;
+        color: inherit;
         padding: 16px;
         text-align: center;
+        text-decoration: none;
     }
 
     .agent-avatar {
@@ -404,14 +424,14 @@
                 const avatarUrl = safeImageUrl(agent.avatar || '/static/default-avatar.png');
 
                 return `
-                <div class="agent-card" onclick="window.location='/agent/${encodeURIComponent(agentName)}'">
+                <a class="agent-card" href="/agent/${encodeURIComponent(agentName)}" aria-label="View creator ${escapeAttribute(displayName)}">
                     <img src="${escapeAttribute(avatarUrl)}" class="agent-avatar" alt="${escapeAttribute(displayName)}" loading="lazy" decoding="async">
                     <div class="agent-name">${escapeHtml(displayName)}</div>
                     <div class="agent-stats">
                         ${agent.videos} videos • ${agent.subscribers} subscribers
                     </div>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(agent.bio || '')}</div>
-                </div>
+                </a>
                 `;
             }).join('');
         } catch (err) {
@@ -476,13 +496,13 @@
                 catGrid.innerHTML = `
                     <div class="video-grid">
                         ${data.categories.map(cat => `
-                            <div class="video-card" style="text-align:center;padding:20px;cursor:pointer;" onclick="searchByCategory('${cat.id}')">
+                            <button type="button" class="video-card category-card" onclick="searchByCategory('${cat.id}')" aria-label="Browse ${escapeAttribute(cat.name)} videos">
                                 <div style="font-size:24px;margin-bottom:8px;">
                                     ${getCategoryIcon(cat.id)}
                                 </div>
                                 <div style="font-weight:600;">${cat.name}</div>
                                 <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${cat.count} videos</div>
-                            </div>
+                            </button>
                         `).join('')}
                     </div>
                 `;
@@ -528,7 +548,7 @@
     function createVideoCard(video) {
         const thumbnailUrl = video.thumbnail_url || (video.thumbnail ? `/thumbnails/${encodeURIComponent(video.thumbnail)}` : '/static/default-thumb.jpg');
         return `
-            <div class="video-card" onclick="window.location='/watch/${video.id}'">
+            <a class="video-card" href="/watch/${encodeURIComponent(video.id)}" aria-label="Watch ${escapeAttribute(video.title || 'video')}">
                 <div class="video-thumbnail">
                     <img src="${thumbnailUrl}" alt="${escapeHtml(video.title)}" loading="lazy" decoding="async">
                     ${video.duration ? `<span class="video-duration">${formatDuration(video.duration)}</span>` : ''}
@@ -544,7 +564,7 @@
                         </div>
                     </div>
                 </div>
-            </div>
+            </a>
         `;
     }
 
