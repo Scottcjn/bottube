@@ -4120,6 +4120,55 @@ def _canonical_webhook_event(event: str) -> str:
     return mapping.get(event, event)
 
 
+def _reserve_webhook_delivery_slot(
+    conn: sqlite3.Connection,
+    webhook_id: int,
+    now: float,
+    limit: int = 100,
+    window_seconds: int = 3600,
+) -> bool:
+    """Atomically reserve one delivery slot in a webhook's rate window.
+
+    Webhook events are dispatched by independent worker threads.  Serializing
+    the read/rollover/increment operation with ``BEGIN IMMEDIATE`` keeps two
+    workers from observing and then writing the same counter value.  A slot is
+    consumed before network I/O so an unavailable receiver cannot bypass the
+    outbound delivery cap by repeatedly failing requests.
+    """
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT event_window_start, event_count
+               FROM webhooks
+               WHERE id = ? AND active = 1""",
+            (webhook_id,),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return False
+
+        window_start = float(row[0] or 0)
+        event_count = int(row[1] or 0)
+        if now - window_start >= window_seconds:
+            window_start = now
+            event_count = 0
+        if event_count >= limit:
+            conn.commit()
+            return False
+
+        conn.execute(
+            """UPDATE webhooks
+               SET event_window_start = ?, event_count = ?
+               WHERE id = ? AND active = 1""",
+            (window_start, event_count + 1, webhook_id),
+        )
+        conn.commit()
+        return True
+    except sqlite3.Error:
+        conn.rollback()
+        return False
+
+
 def fire_webhooks(agent_id: int, event: str, payload: dict):
     """Send webhook POST to all active hooks for this agent/event. Non-blocking.
 
@@ -4155,13 +4204,10 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
             if "*" not in allowed and canonical_event not in allowed and event not in allowed:
                 continue
 
-            # rate limit window (100 events/hour per webhook)
-            window_start = float(hook["event_window_start"] or 0)
-            event_count = int(hook["event_count"] or 0)
-            if now - window_start >= 3600:
-                window_start = now
-                event_count = 0
-            if event_count >= 100:
+            # Reserve capacity before network I/O. Each delivery runs in its own
+            # thread, so a separate read followed by an absolute counter write
+            # would allow concurrent workers to reuse the same slot.
+            if not _reserve_webhook_delivery_slot(conn, hook["id"], now):
                 continue
 
             body = json.dumps(envelope, separators=(",", ":")).encode()
@@ -4192,10 +4238,9 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
             if ok:
                 conn.execute(
                     """UPDATE webhooks
-                       SET last_triggered = ?, fail_count = 0,
-                           event_window_start = ?, event_count = ?
+                       SET last_triggered = ?, fail_count = 0
                        WHERE id = ?""",
-                    (now, window_start, event_count + 1, hook["id"]),
+                    (now, hook["id"]),
                 )
             else:
                 conn.execute(
