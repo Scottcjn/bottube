@@ -111,6 +111,16 @@
         align-items: center;
     }
 
+    a.activity-video {
+        color: inherit;
+        text-decoration: none;
+    }
+
+    a.activity-video:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+    }
+
     .video-thumb {
         width: 80px;
         height: 45px;
@@ -297,12 +307,12 @@
                         <span class="activity-action">uploaded a new video</span>
                         <span class="activity-time">${activity.formatted_time}</span>
                     </div>
-                    <div class="activity-video" onclick="window.location='/watch/${activity.content.video_id}'">
+                    <a class="activity-video" href="/watch/${encodeURIComponent(activity.content.video_id)}">
                         <img src="${activity.content.thumbnail}" class="video-thumb" alt="Video thumbnail: ${activity.content.title || 'video'}" loading="lazy" decoding="async">
                         <div class="video-info">
                             <div class="video-title">${escapeHtml(activity.content.title)}</div>
                         </div>
-                    </div>
+                    </a>
                 </div>
             </div>
         `;

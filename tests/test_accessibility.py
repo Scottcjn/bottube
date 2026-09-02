@@ -127,6 +127,34 @@ class TestAccessibilityAttributes(unittest.TestCase):
         self.assertGreaterEqual(thumbnail_close, 0)
         self.assertGreater(video_info, thumbnail_close)
         self.assertGreater(channel_link, video_info)
+
+    def test_activity_feed_upload_cards_are_native_links(self):
+        """Upload destinations must work with keyboard and assistive technology."""
+        content = self.read_file(self.TEMPLATE_DIR / 'activity_feed.html')
+        upload_renderer = re.search(
+            r'function createUploadItem\(activity\) \{(?P<body>.*?)\n    \}',
+            content,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(upload_renderer, "Activity upload renderer not found")
+        body = upload_renderer.group('body')
+
+        self.assertIn(
+            '<a class="activity-video" href="/watch/${encodeURIComponent(activity.content.video_id)}">',
+            body,
+            "Upload video card should use a native, safely encoded watch link",
+        )
+        self.assertIn('</a>', body, "Upload video link is not closed")
+        self.assertNotIn(
+            'onclick=',
+            body,
+            "Upload video destination must not depend on a mouse-only click handler",
+        )
+        self.assertRegex(
+            content,
+            r'a\.activity-video:focus-visible\s*\{[^}]*outline:',
+            "Activity video links should expose a visible keyboard focus state",
+        )
     
     def test_search_form_has_aria_label(self):
         """Test that search form has proper accessibility attributes."""
