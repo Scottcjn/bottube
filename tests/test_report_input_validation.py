@@ -111,6 +111,100 @@ def _report_count() -> int:
         return int(db.execute("SELECT COUNT(*) FROM reports").fetchone()[0])
 
 
+def test_report_insert_is_atomic_per_reporter_and_target(client):
+    owner_id = _insert_agent("atomicowner", "bottube_sk_atomicowner")
+    reporter_id = _insert_agent("atomicreporter", "bottube_sk_atomicreporter")
+    _insert_video(owner_id, "atomicreport01A")
+    comment_id = _insert_comment(owner_id, "atomicreport01A", "report target")
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        first_video = bottube_server._insert_report_once(
+            db,
+            reporter_id=reporter_id,
+            video_id="atomicreport01A",
+            reason="spam",
+            details="first",
+            created_at=10.0,
+        )
+        duplicate_video = bottube_server._insert_report_once(
+            db,
+            reporter_id=reporter_id,
+            video_id="atomicreport01A",
+            reason="harassment",
+            details="retry",
+            created_at=11.0,
+        )
+        first_comment = bottube_server._insert_report_once(
+            db,
+            reporter_id=reporter_id,
+            comment_id=comment_id,
+            reason="spam",
+            details="first",
+            created_at=12.0,
+        )
+        duplicate_comment = bottube_server._insert_report_once(
+            db,
+            reporter_id=reporter_id,
+            comment_id=comment_id,
+            reason="harassment",
+            details="retry",
+            created_at=13.0,
+        )
+        db.commit()
+        rows = db.execute(
+            "SELECT video_id, comment_id, reason FROM reports ORDER BY id"
+        ).fetchall()
+
+    assert (first_video, duplicate_video, first_comment, duplicate_comment) == (
+        True,
+        False,
+        True,
+        False,
+    )
+    assert [(row["video_id"], row["comment_id"], row["reason"]) for row in rows] == [
+        ("atomicreport01A", None, "spam"),
+        (None, comment_id, "spam"),
+    ]
+
+
+def test_report_routes_preserve_duplicate_conflicts(client):
+    owner_id = _insert_agent("routeowner", "bottube_sk_routeowner")
+    _insert_agent("routereporter", "bottube_sk_routereporter")
+    _insert_video(owner_id, "routereport01A")
+    comment_id = _insert_comment(owner_id, "routereport01A", "report target")
+    headers = {"X-API-Key": "bottube_sk_routereporter"}
+
+    first_video = client.post(
+        "/api/videos/routereport01A/report",
+        headers=headers,
+        json={"reason": "spam"},
+    )
+    duplicate_video = client.post(
+        "/api/videos/routereport01A/report",
+        headers=headers,
+        json={"reason": "spam"},
+    )
+    first_comment = client.post(
+        f"/api/comments/{comment_id}/report",
+        headers=headers,
+        json={"reason": "spam"},
+    )
+    duplicate_comment = client.post(
+        f"/api/comments/{comment_id}/report",
+        headers=headers,
+        json={"reason": "spam"},
+    )
+
+    assert first_video.status_code == 200
+    assert duplicate_video.status_code == 409
+    assert duplicate_video.get_json() == {"error": "You have already reported this video"}
+    assert first_comment.status_code == 200
+    assert duplicate_comment.status_code == 409
+    assert duplicate_comment.get_json() == {"error": "You have already reported this comment"}
+    assert _report_count() == 2
+
+
 def test_video_report_null_reason_uses_existing_invalid_reason_error(client):
     owner_id = _insert_agent("ownerbot", "bottube_sk_owner")
     _insert_agent("reporter", "bottube_sk_reporter")
