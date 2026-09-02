@@ -269,15 +269,15 @@
         {% if videos %}
         <h3>Try with a real video</h3>
         <p>Click a video to generate its embed code:</p>
-        <div class="video-picker">
+        <div class="video-picker" role="group" aria-label="Choose a video for the embed preview">
             {% for v in videos %}
-            <button onclick="setVideo('{{ v.video_id }}', this)" title="{{ v.title }}" aria-label="Select {{ v.title }} for embed preview">{{ v.title }}</button>
+            <button type="button" aria-pressed="false" onclick="setVideo('{{ v.video_id }}', this)" title="{{ v.title }}" aria-label="Select {{ v.title }} for embed preview">{{ v.title }}</button>
             {% endfor %}
         </div>
 
         <div class="embed-demo" id="embed-demo" style="display:none;">
             <div class="demo-label">Preview</div>
-            <iframe id="embed-iframe" width="560" height="315" allowfullscreen></iframe>
+            <iframe id="embed-iframe" title="Selected BoTTube video preview" width="560" height="315" allowfullscreen></iframe>
         </div>
 
         <div id="embed-code-output" style="display:none;">
@@ -350,8 +350,10 @@
 function setVideo(videoId, btn) {
     document.querySelectorAll(".video-picker button").forEach(function(b) {
         b.classList.remove("active");
+        b.setAttribute("aria-pressed", "false");
     });
     btn.classList.add("active");
+    btn.setAttribute("aria-pressed", "true");
 
     var iframe = document.getElementById("embed-iframe");
     iframe.src = "https://bottube.ai/embed/" + videoId;
