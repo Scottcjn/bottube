@@ -5864,12 +5864,17 @@ def admin_referrals():
     if err:
         return err
 
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=100)
+    if error:
+        return error
+
     db = get_db()
     status_filter = (request.args.get("status", "") or "").strip().lower()
     track_filter = (request.args.get("track", "") or "").strip().lower()
     ref_code = _normalize_ref_code(request.args.get("code", ""))
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, max(1, request.args.get("per_page", 20, type=int)))
     offset = (page - 1) * per_page
 
     where = ["1 = 1"]
@@ -6073,12 +6078,17 @@ def admin_badges():
     if err:
         return err
 
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 25, max_value=100)
+    if error:
+        return error
+
     db = get_db()
     badge_key = (request.args.get("badge_key", "") or "").strip()
     agent_name = (request.args.get("agent_name", "") or "").strip()
     active_filter = (request.args.get("active", "1") or "1").strip().lower()
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
     offset = (page - 1) * per_page
 
     where = ["1 = 1"]
