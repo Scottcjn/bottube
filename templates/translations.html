@@ -93,14 +93,14 @@
     </div>
 
     <div class="search-box">
-        <input type="text" placeholder="Search translations by language or content..." id="searchInput">
+        <input type="text" placeholder="Search translations by language or content..." id="searchInput" aria-label="Search translations">
     </div>
 
     <div id="translationsContainer">
         {% for translation in translations %}
         <div class="translation-card">
             <div class="language-tag">{{ translation.language }}</div>
-            <p><strong>Video:</strong> <a href="{{ translation.video_url }}" class="video-link" target="_blank">{{ translation.video_url }}</a></p>
+            <p><strong>Video:</strong> <a href="{{ translation.video_url }}" class="video-link" target="_blank" rel="noopener noreferrer">{{ translation.video_url }}</a></p>
             
             <div class="original">
                 <div class="title">Original (English):</div>
