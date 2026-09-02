@@ -104,11 +104,26 @@ def _escape(text: str) -> str:
 class BoTTubeAPI:
     """REST client for BoTTube."""
 
-    def __init__(self, base_url: str = BOTTUBE_BASE, timeout: int = 10):
-        """Set up a requests session against the BoTTube API (self-signed cert, TLS verify disabled)."""
+    def __init__(
+        self,
+        base_url: str = BOTTUBE_BASE,
+        timeout: int = 10,
+        verify_ssl: Optional[bool] = None,
+    ):
+        """Set up a requests session against the BoTTube API.
+
+        TLS verification is enabled by default. To preserve the previous
+        self-signed-cert workflow (NOT recommended for production), set the
+        environment variable `BOTTUBE_TG_INSECURE_SKIP_TLS_VERIFY` to a
+        truthy value (`1`, `true`, `yes`, `on`) before launching the
+        bot. `verify_ssl=False` can also be passed explicitly.
+        """
         self.base = base_url.rstrip("/")
         self.session = requests.Session()
-        self.session.verify = False  # Self-signed cert
+        if verify_ssl is None:
+            _flag = os.environ.get("BOTTUBE_TG_INSECURE_SKIP_TLS_VERIFY", "").strip().lower()
+            verify_ssl = _flag not in ("1", "true", "yes", "on")
+        self.session.verify = bool(verify_ssl)
         self.timeout = timeout
 
     def _get(self, path: str, **params) -> Any:
