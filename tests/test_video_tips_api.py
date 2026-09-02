@@ -9,6 +9,35 @@ def test_video_tips_returns_404_for_unknown_video(client):
     assert response.get_json() == {"error": "Video not found"}
 
 
+def test_video_tips_rejects_invalid_pagination_before_lookup(client):
+    cases = [
+        ({"page": "abc"}, "page must be an integer"),
+        ({"page": "0"}, "page must be >= 1"),
+        ({"page": "-3"}, "page must be >= 1"),
+        ({"per_page": "abc"}, "per_page must be an integer"),
+        ({"per_page": "0"}, "per_page must be >= 1"),
+        ({"per_page": "-3"}, "per_page must be >= 1"),
+        ({"per_page": "51"}, "per_page must be <= 50"),
+    ]
+    for query, error in cases:
+        response = client.get(
+            "/api/videos/no_such_video_codex_1102/tips",
+            query_string=query,
+        )
+        assert response.status_code == 400
+        assert response.get_json() == {
+            "error": error,
+            "param": next(iter(query)),
+        }
+
+    valid = client.get(
+        "/api/videos/no_such_video_codex_1102/tips",
+        query_string={"page": "2", "per_page": "50"},
+    )
+    assert valid.status_code == 404
+    assert valid.get_json() == {"error": "Video not found"}
+
+
 def test_video_tips_returns_empty_totals_for_existing_video(app, client):
     import bottube_server
 
