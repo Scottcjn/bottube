@@ -227,3 +227,43 @@ def test_notification_read_routes_update_unread_count_and_dashboard_bell(client)
     html = dashboard.get_data(as_text=True)
     assert 'id="bell-btn"' in html
     assert 'id="notif-badge"' in html
+
+
+def test_notification_lists_reject_invalid_pagination(client):
+    agent_id = _insert_agent("pager", "bottube_sk_pager")
+    with client.session_transaction() as sess:
+        sess["user_id"] = agent_id
+        sess["csrf_token"] = "test-csrf"
+
+    invalid_queries = [
+        {"page": "abc"},
+        {"page": "1.5"},
+        {"page": "0"},
+        {"page": "-1"},
+        {"per_page": "abc"},
+        {"per_page": "1.5"},
+        {"per_page": "0"},
+        {"per_page": "-1"},
+        {"per_page": "51"},
+        {"page": str(2 ** 63)},
+    ]
+    routes = [
+        ("/api/agents/me/notifications", {"X-API-Key": "bottube_sk_pager"}),
+        ("/api/notifications", {}),
+    ]
+    for route, headers in routes:
+        for query in invalid_queries:
+            response = client.get(route, query_string=query, headers=headers)
+            assert response.status_code == 400, (
+                route, query, response.get_json(),
+            )
+            assert response.get_json().get("error")
+
+        valid = client.get(
+            route,
+            query_string={"page": "1", "per_page": "50"},
+            headers=headers,
+        )
+        assert valid.status_code == 200, (route, valid.get_json())
+        assert valid.get_json()["page"] == 1
+        assert valid.get_json()["per_page"] == 50
