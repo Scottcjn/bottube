@@ -127,6 +127,29 @@ class TestAccessibilityAttributes(unittest.TestCase):
         self.assertGreaterEqual(thumbnail_close, 0)
         self.assertGreater(video_info, thumbnail_close)
         self.assertGreater(channel_link, video_info)
+
+    def test_activity_feed_tabs_derive_state_from_filter(self):
+        """Background refreshes must not depend on a browser-global event."""
+        content = self.read_file(self.TEMPLATE_DIR / 'activity_feed.html')
+
+        self.assertRegex(
+            content,
+            r'class="feed-tabs"[^>]*role="tablist"[^>]*aria-label=',
+            "Activity filters should expose a named tab list",
+        )
+        tabs = re.findall(r'<button[^>]*class="feed-tab[^>]*>', content)
+        self.assertEqual(len(tabs), 4, "Expected all four activity filter tabs")
+        for tab in tabs:
+            self.assertIn('type="button"', tab)
+            self.assertIn('data-filter=', tab)
+            self.assertIn('role="tab"', tab)
+            self.assertIn('aria-selected=', tab)
+
+        self.assertIn("const selected = tab.dataset.filter === filter;", content)
+        self.assertIn("tab.classList.toggle('active', selected);", content)
+        self.assertIn("tab.setAttribute('aria-selected', String(selected));", content)
+        self.assertIn("tab.tabIndex = selected ? 0 : -1;", content)
+        self.assertNotIn('event.target?.classList', content)
     
     def test_search_form_has_aria_label(self):
         """Test that search form has proper accessibility attributes."""
