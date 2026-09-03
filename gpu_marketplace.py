@@ -580,26 +580,32 @@ def start_job():
 
     db = get_db()
 
-    # Verify ownership and job state
-    row = db.execute("""
-        SELECT j.status, j.provider_id, p.agent_id
-        FROM gpu_jobs j
-        JOIN gpu_providers p ON j.provider_id = p.id
-        WHERE j.id = ?
-    """, (job_id,)).fetchone()
+    # Verify ownership via provider -> agent link
+    prov = db.execute(
+        "SELECT agent_id FROM gpu_providers WHERE id = ?", (provider_id,)
+    ).fetchone()
+    if not prov or prov[0] != agent['id']:
+        return jsonify({"error": "Not your provider"}), 403
 
-    if not row:
-        return jsonify({"error": "Job not found"}), 404
-    if row[2] != agent['id']:
-        return jsonify({"error": "Not your job"}), 403
-    if row[0] != "claimed":
-        return jsonify({"error": f"Job not in claimed state (status: {row[0]})"}), 400
+    # Atomic CAS: transition from claimed -> running only if still owned by this provider
+    now = int(time.time())
+    cur = db.execute("""
+        UPDATE gpu_jobs
+        SET status = 'running', started_at = ?
+        WHERE id = ? AND status = 'claimed' AND provider_id = ?
+    """, (now, job_id, provider_id))
 
-    db.execute("""
-        UPDATE gpu_jobs SET status = 'running', started_at = ? WHERE id = ?
-    """, (int(time.time()), job_id))
+    if cur.rowcount == 0:
+        db.rollback()
+        # Distinguish between not-found and stale/race
+        row = db.execute(
+            "SELECT status, provider_id FROM gpu_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify({"error": "Stale or duplicate start; job no longer in claimed state for this provider"}), 409
+
     db.commit()
-
     return jsonify({"ok": True, "status": "running"})
 
 
