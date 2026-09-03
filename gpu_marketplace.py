@@ -702,7 +702,7 @@ def fail_job():
 
     db = get_db()
 
-    # Verify ownership
+    # Verify ownership and active state atomically
     row = db.execute("""
         SELECT j.status, p.agent_id
         FROM gpu_jobs j
@@ -713,12 +713,21 @@ def fail_job():
     if not row or row[1] != agent['id']:
         return jsonify({"error": "Invalid job or not your job"}), 403
 
-    # Release job back to queue, mark provider available
-    db.execute("""
+    if row[0] not in ("claimed", "running"):
+        return jsonify({"error": f"Job cannot be failed from status: {row[0]}"}), 409
+
+    # Atomic compare-and-set: only release if still in active state
+    cur = db.execute("""
         UPDATE gpu_jobs
-        SET status = 'pending', provider_id = NULL, claimed_at = NULL, error_message = ?
-        WHERE id = ?
-    """, (error_msg, job_id))
+        SET status = 'pending', provider_id = NULL, claimed_at = NULL, started_at = NULL, error_message = ?
+        WHERE id = ? AND status IN ('claimed', 'running') AND provider_id = ?
+    """, (error_msg, job_id, provider_id))
+
+    if cur.rowcount == 0:
+        db.rollback()
+        return jsonify({"error": "Job state changed concurrently; release aborted"}), 409
+
+    # Release provider only when this transaction won the release
     db.execute("""
         UPDATE gpu_providers SET status = 'online' WHERE id = ?
     """, (provider_id,))
