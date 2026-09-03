@@ -76,6 +76,19 @@ class TestAccessibilityAttributes(unittest.TestCase):
                           "Notification bell missing aria-label")
             self.assertIn('role="button"', context,
                           "Notification bell should have role='button'")
+
+    def test_badge_code_tabs_expose_selected_panel_state(self):
+        """Badge format selectors must implement a complete tabs contract."""
+        content = self.read_file(self.TEMPLATE_DIR / 'badges.html')
+        self.assertIn('function initCodeTabs()', content)
+        self.assertIn('tablist.setAttribute("role", "tablist")', content)
+        self.assertIn('tab.setAttribute("role", "tab")', content)
+        self.assertIn('tab.setAttribute("aria-controls", panel.id)', content)
+        self.assertIn('panel.setAttribute("role", "tabpanel")', content)
+        self.assertIn('panel.setAttribute("aria-labelledby", tab.id)', content)
+        self.assertIn('btn.setAttribute("aria-selected", "true")', content)
+        self.assertIn('t.setAttribute("aria-selected", "false")', content)
+        self.assertIn('panel.hidden = false', content)
     
     def test_subscribe_button_has_aria_label(self):
         """Test that subscribe button has aria-label attribute."""

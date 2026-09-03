@@ -408,10 +408,43 @@
 <script>
 function showTab(btn, panelId) {
     var parent = btn.closest(".badge-card");
-    parent.querySelectorAll(".code-tab").forEach(function(t) { t.classList.remove("active"); });
-    parent.querySelectorAll(".code-panel").forEach(function(p) { p.classList.remove("active"); });
+    parent.querySelectorAll(".code-tab").forEach(function(t) {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+    });
+    parent.querySelectorAll(".code-panel").forEach(function(p) {
+        p.classList.remove("active");
+        p.hidden = true;
+    });
     btn.classList.add("active");
-    document.getElementById(panelId).classList.add("active");
+    btn.setAttribute("aria-selected", "true");
+    var panel = document.getElementById(panelId);
+    panel.classList.add("active");
+    panel.hidden = false;
+}
+
+function initCodeTabs() {
+    document.querySelectorAll(".badge-card").forEach(function(card, cardIndex) {
+        var tablist = card.querySelector(".code-tabs");
+        if (!tablist) return;
+        tablist.setAttribute("role", "tablist");
+        tablist.setAttribute("aria-label", "Badge code format");
+
+        var tabs = Array.from(tablist.querySelectorAll(".code-tab"));
+        var panels = Array.from(card.querySelectorAll(".code-panel"));
+        tabs.forEach(function(tab, tabIndex) {
+            var panel = panels[tabIndex];
+            if (!panel) return;
+            tab.type = "button";
+            tab.id = tab.id || "badge-code-tab-" + cardIndex + "-" + tabIndex;
+            tab.setAttribute("role", "tab");
+            tab.setAttribute("aria-controls", panel.id);
+            tab.setAttribute("aria-selected", tab.classList.contains("active") ? "true" : "false");
+            panel.setAttribute("role", "tabpanel");
+            panel.setAttribute("aria-labelledby", tab.id);
+            panel.hidden = !panel.classList.contains("active");
+        });
+    });
 }
 
 function copyCode(btn) {
@@ -424,6 +457,7 @@ function copyCode(btn) {
 }
 
 document.addEventListener("DOMContentLoaded", function() {
+    initCodeTabs();
     btTrack("badges-page-view");
 });
 </script>
