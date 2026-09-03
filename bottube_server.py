@@ -957,32 +957,75 @@ def _referral_apply_signup(db, new_agent_id: int, code: str, *, source: str = "s
 
 
 def _referral_mark_first_upload(db, agent_id: int):
-    """If agent was referred, count their first upload exactly once (best-effort)."""
+    """If agent was referred, count their first upload exactly once (best-effort).
+
+    Issue #2153: the previous SELECT-then-UPDATE pattern let two concurrent
+    first-upload requests both observe `referral_first_upload_counted = 0`,
+    both flip the flag, and both increment `referral_codes.first_uploads` —
+    inflating the referral leaderboard and activation evidence.
+
+    Fix: the flag transition is expressed as a conditional UPDATE
+    (`... WHERE referral_first_upload_counted = 0`) so only the request that
+    actually flips 0->1 may proceed to the counter bump. The first_uploads
+    increment is gated on cursor.rowcount == 1 — if the conditional update
+    affected 0 rows we know another request already won the race and we
+    exit without touching the counter.
+
+    Why this is enough without an explicit ``BEGIN IMMEDIATE``: with the
+    conditional WHERE, two concurrent writers will both attempt the UPDATE,
+    but SQLite's write lock serializes them. The first writer sees
+    ``flag = 0`` and updates (rowcount 1); the second writer then sees
+    ``flag = 1`` and the WHERE clause no longer matches, so its UPDATE
+    affects 0 rows. No race window exists because the WHERE clause
+    participates in the write lock check.
+
+    Idempotent return value: ``{"applied": True}`` when this caller flipped
+    the flag, ``{"applied": False}`` when the agent was already counted or
+    had no referred_by_code, or the row was concurrently claimed by another
+    request. Callers do not currently consume the return value, but it is
+    useful for tests and for future audit logging.
+    """
     try:
-        row = db.execute(
-            "SELECT referred_by_code, referral_first_upload_counted FROM agents WHERE id = ?",
+        code_row = db.execute(
+            "SELECT referred_by_code FROM agents WHERE id = ?",
             (agent_id,),
         ).fetchone()
-        if not row:
-            return
-        code = _normalize_ref_code(row["referred_by_code"] or "")
+        if not code_row:
+            return {"applied": False, "reason": "no_agent_row"}
+        code = _normalize_ref_code(code_row["referred_by_code"] or "")
         if not code:
-            return
-        if int(row["referral_first_upload_counted"] or 0) != 0:
-            return
-        now = time.time()
-        db.execute(
-            "UPDATE agents SET referral_first_upload_counted = 1 WHERE id = ?",
+            return {"applied": False, "reason": "no_referred_by_code"}
+        # Atomic flag transition: only the row whose flag is still 0 gets
+        # updated. The conditional WHERE is what makes this safe under
+        # concurrency — the second concurrent writer will see the flag is
+        # already 1 and the WHERE clause will match 0 rows.
+        cur = db.execute(
+            "UPDATE agents SET referral_first_upload_counted = 1 "
+            "WHERE id = ? AND referral_first_upload_counted = 0",
             (agent_id,),
         )
+        if cur.rowcount != 1:
+            # Either this agent was already counted, or another concurrent
+            # caller won the race and flipped the flag before us. Either
+            # way, the counter has already been (or will be, by the winner)
+            # incremented exactly once — we must not touch it.
+            return {"applied": False, "reason": "race_lost_or_already_counted"}
+        now = time.time()
         db.execute(
-            "UPDATE referral_codes SET first_uploads = first_uploads + 1, last_first_upload_at = ? WHERE code = ?",
+            "UPDATE referral_codes SET first_uploads = first_uploads + 1, "
+            "last_first_upload_at = ? WHERE code = ?",
             (now, code),
         )
         _referral_refresh_invite_state(db, agent_id)
         db.commit()
+        return {"applied": True}
     except Exception:
-        pass
+        # Best-effort: never let referral accounting break the calling route.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"applied": False, "reason": "exception"}
 def _badge_catalog_entry(badge_key: str) -> dict:
     meta = dict(BADGE_CATALOG.get(badge_key, {}))
     label = meta.get("label") or badge_key.replace("_", " ").title()
