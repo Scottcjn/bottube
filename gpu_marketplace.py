@@ -637,8 +637,8 @@ def complete_job():
         return jsonify({"error": "Job not found"}), 404
     if row[5] != agent['id']:
         return jsonify({"error": "Not your job"}), 403
-    if row[0] != "running":
-        return jsonify({"error": f"Job not running (status: {row[0]})"}), 400
+    if row[0] != "running" or row[1] != provider_id:
+        return jsonify({"error": "Job not running or ownership mismatch"}), 409
 
     # Calculate payment
     now = int(time.time())
@@ -649,26 +649,29 @@ def complete_job():
     # Pay for actual time, capped at escrow
     payment = min(duration_mins * price_per_min, row[3])
 
-    # Update job
-    db.execute("""
+    # Atomic CAS: only complete if still running and owned by this provider
+    cur = db.execute("""
         UPDATE gpu_jobs
         SET status = 'completed', completed_at = ?, actual_mins = ?, rtc_paid = ?, result_url = ?
-        WHERE id = ?
-    """, (now, duration_mins, payment, result_url, job_id))
+        WHERE id = ? AND status = 'running' AND provider_id = ?
+    """, (now, duration_mins, payment, result_url, job_id, provider_id))
 
-    # Update provider stats
+    if cur.rowcount == 0:
+        db.rollback()
+        return jsonify({"error": "Concurrent completion detected; job already settled"}), 409
+
+    # Update provider stats — gated on successful CAS
     db.execute("""
         UPDATE gpu_providers
         SET status = 'online', total_jobs = total_jobs + 1, total_rtc_earned = total_rtc_earned + ?
         WHERE id = ?
     """, (payment, provider_id))
 
-    # Record in history
+    # Record in history — gated on successful CAS
     db.execute("""
         INSERT INTO gpu_job_history (job_id, provider_id, requester_id, job_type, status, rtc_amount, duration_mins, completed_at)
-        SELECT id, provider_id, requester_id, job_type, 'completed', ?, ?, ?
-        FROM gpu_jobs WHERE id = ?
-    """, (payment, duration_mins, now, job_id))
+        VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)
+    """, (job_id, provider_id, row[4], row[5], payment, duration_mins, now))
 
     db.commit()
 
