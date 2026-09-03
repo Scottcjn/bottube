@@ -1,0 +1,4 @@
+# Security-sensitive paths require Scottcjn review (rulesets enforce code-owner review on main)
+.github/** @Scottcjn
+actions/** @Scottcjn
+rtc-reward-action/** @Scottcjn
