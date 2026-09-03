@@ -530,26 +530,34 @@ def claim_job():
     if prow[1] == "busy":
         return jsonify({"error": "Provider already busy with a job"}), 400
 
-    # Check job is pending
+    # Atomic CAS: claim job only if still pending AND provider not busy
+    now = int(time.time())
+    cur = db.execute("""
+        UPDATE gpu_jobs
+        SET status = 'claimed', provider_id = ?, claimed_at = ?
+        WHERE id = ? AND status = 'pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM gpu_providers WHERE id = ? AND status = 'busy'
+          )
+    """, (provider_id, now, job_id, provider_id))
+
+    if cur.rowcount == 0:
+        jcheck = db.execute("SELECT status FROM gpu_jobs WHERE id = ?", (job_id,)).fetchone()
+        if not jcheck:
+            return jsonify({"error": "Job not found"}), 404
+        pcheck = db.execute("SELECT status FROM gpu_providers WHERE id = ?", (provider_id,)).fetchone()
+        if pcheck and pcheck[0] == "busy":
+            return jsonify({"error": "Provider already busy with a job"}), 409
+        return jsonify({"error": f"Job not available (status: {jcheck[0]})"}), 409
+
+    # Mark provider busy (safe: CAS above confirmed not busy)
+    db.execute("UPDATE gpu_providers SET status = 'busy' WHERE id = ?", (provider_id,))
+    db.commit()
+
+    # Re-fetch job details for response
     jrow = db.execute(
         "SELECT status, job_type, job_params, rtc_escrowed FROM gpu_jobs WHERE id = ?", (job_id,)
     ).fetchone()
-
-    if not jrow:
-        return jsonify({"error": "Job not found"}), 404
-
-    if jrow[0] != "pending":
-        return jsonify({"error": f"Job not available (status: {jrow[0]})"}), 400
-
-    # Claim the job
-    now = int(time.time())
-    db.execute("""
-        UPDATE gpu_jobs SET status = 'claimed', provider_id = ?, claimed_at = ? WHERE id = ?
-    """, (provider_id, now, job_id))
-    db.execute("""
-        UPDATE gpu_providers SET status = 'busy' WHERE id = ?
-    """, (provider_id,))
-    db.commit()
 
     return jsonify({
         "ok": True,
