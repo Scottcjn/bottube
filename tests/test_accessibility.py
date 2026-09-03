@@ -76,6 +76,18 @@ class TestAccessibilityAttributes(unittest.TestCase):
                           "Notification bell missing aria-label")
             self.assertIn('role="button"', context,
                           "Notification bell should have role='button'")
+
+    def test_embed_picker_exposes_selection_and_preview_name(self):
+        """The embed chooser must announce both selection and preview content."""
+        content = self.read_file(self.TEMPLATE_DIR / 'embed_guide.html')
+        self.assertIn('class="video-picker" role="group"', content)
+        self.assertIn('type="button" aria-pressed="false"', content)
+        self.assertIn('b.setAttribute("aria-pressed", "false")', content)
+        self.assertIn('btn.setAttribute("aria-pressed", "true")', content)
+        self.assertRegex(
+            content,
+            r'<iframe[^>]*id="embed-iframe"[^>]*title="[^"]+"',
+        )
     
     def test_subscribe_button_has_aria_label(self):
         """Test that subscribe button has aria-label attribute."""
