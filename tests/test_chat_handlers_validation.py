@@ -34,6 +34,9 @@ def chat_client(tmp_path):
         db.row_factory = sqlite3.Row
         g.db = db
         chat_handlers.init_chat_tables(db)
+        db.execute("CREATE TABLE videos (video_id TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO videos (video_id) VALUES ('video-1')")
+        db.commit()
 
     client = app.test_client()
     client.db_path = db_path
@@ -98,3 +101,39 @@ def test_settings_reject_non_boolean_like_flags(chat_client):
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "slow_mode, sub_only, and premiere must be 0/1 or boolean"}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("get", "/api/chat/ghost/history", None),
+        ("post", "/api/chat/ghost/send", {"message": "orphan"}),
+        ("get", "/api/chat/ghost/settings", None),
+    ],
+)
+def test_chat_routes_reject_nonexistent_video(chat_client, method, path, payload):
+    resp = getattr(chat_client, method)(path, json=payload)
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "Video not found"}
+    assert _chat_message_count(chat_client.db_path) == 0
+
+
+def test_moderator_routes_do_not_create_orphan_chat_state(chat_client):
+    with chat_client.session_transaction() as sess:
+        sess["is_mod"] = True
+        sess["username"] = "mod"
+
+    ban = chat_client.post(
+        "/api/chat/ghost/ban", json={"user_id": "user-1"}
+    )
+    settings = chat_client.post(
+        "/api/chat/ghost/settings",
+        json={"slow_mode": 1, "sub_only": 0, "premiere": 0},
+    )
+
+    assert ban.status_code == 404
+    assert settings.status_code == 404
+    with sqlite3.connect(chat_client.db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM chat_bans").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM chat_settings").fetchone()[0] == 0

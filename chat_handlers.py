@@ -4,7 +4,7 @@ BoTTube Live Chat - Flask Blueprint
 Real-time chat for video playback, premieres, super chat, and moderation.
 Uses Flask + Flask-SocketIO, SQLite via get_db(), session/g.user patterns.
 """
-from flask import Blueprint, render_template, request, jsonify, g, session
+from flask import Blueprint, abort, render_template, request, jsonify, g, session
 import math
 import sqlite3
 import time
@@ -94,12 +94,25 @@ def _coerce_non_negative_number(value, field_name):
     return value
 
 
+def _chat_video_exists(db, video_id):
+    """Return whether a chat target refers to an existing video."""
+    return db.execute(
+        "SELECT 1 FROM videos WHERE video_id = ? LIMIT 1", (video_id,)
+    ).fetchone() is not None
+
+
+def _missing_chat_video_response():
+    return jsonify({"error": "Video not found"}), 404
+
+
 # ── Routes ──────────────────────────────────────────────────────
 @chat_bp.route("/chat/<video_id>")
 def chat_page(video_id):
     """Render the live-chat sidebar/page for a video."""
     db = get_db()
     init_chat_tables(db)
+    if not _chat_video_exists(db, video_id):
+        abort(404)
     username = session.get("username", "Anonymous")
     is_mod = session.get("is_mod", False)
     return render_template(
@@ -115,6 +128,8 @@ def chat_history(video_id):
     """Return recent chat messages (last 100)."""
     db = get_db()
     init_chat_tables(db)
+    if not _chat_video_exists(db, video_id):
+        return _missing_chat_video_response()
     rows = db.execute(
         "SELECT * FROM chat_messages WHERE video_id = ? ORDER BY created_at DESC LIMIT 100",
         (video_id,),
@@ -127,6 +142,8 @@ def send_message(video_id):
     """REST fallback for sending a chat message (non-WebSocket clients)."""
     db = get_db()
     init_chat_tables(db)
+    if not _chat_video_exists(db, video_id):
+        return _missing_chat_video_response()
     data, error = _json_object_body()
     if error:
         return error
@@ -171,6 +188,8 @@ def ban_user(video_id):
         return error
     db = get_db()
     init_chat_tables(db)
+    if not _chat_video_exists(db, video_id):
+        return _missing_chat_video_response()
     duration = data.get("duration")  # seconds, None = permanent
     if duration is not None:
         duration = _coerce_non_negative_number(duration, "duration")
@@ -192,6 +211,8 @@ def chat_settings(video_id):
     """Get or update chat settings (slow mode, sub-only, premiere)."""
     db = get_db()
     init_chat_tables(db)
+    if not _chat_video_exists(db, video_id):
+        return _missing_chat_video_response()
     if request.method == "POST":
         if not session.get("is_mod"):
             return jsonify({"error": "Moderator only"}), 403
