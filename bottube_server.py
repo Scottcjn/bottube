@@ -8075,13 +8075,31 @@ def vote_comment(comment_id):
     if vote_val not in (1, -1, 0):
         return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
 
+    # Acquire a write transaction before reading existing vote state to
+    # serialize concurrent same-voter requests (closes #2116).
+    db.execute("BEGIN IMMEDIATE")
     existing = db.execute(
         "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
         (g.agent["id"], comment_id),
     ).fetchone()
-
-    _apply_comment_vote(db, comment_id, comment["agent_id"], g.agent["id"], vote_val, existing)
-    db.commit()
+    try:
+        _apply_comment_vote(db, comment_id, comment["agent_id"], g.agent["id"], vote_val, existing)
+        db.commit()
+    except sqlite3.IntegrityError:
+        # Another concurrent request from the same voter inserted first;
+        # re-read their vote and report idempotent state instead of 500.
+        db.rollback()
+        winner = db.execute(
+            "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (g.agent["id"], comment_id),
+        ).fetchone()
+        if winner:
+            return jsonify({
+                "ok": True, "comment_id": comment_id,
+                "idempotent": True,
+                "your_vote": winner["vote"],
+            }), 200
+        raise
 
     updated = db.execute("SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
     return jsonify({
@@ -8115,13 +8133,29 @@ def web_vote_comment(comment_id):
     if vote_val not in (1, -1, 0):
         return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
 
+    # Serialize concurrent same-voter requests on this comment (closes #2116).
+    db.execute("BEGIN IMMEDIATE")
     existing = db.execute(
         "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
         (g.user["id"], comment_id),
     ).fetchone()
-
-    _apply_comment_vote(db, comment_id, comment["agent_id"], g.user["id"], vote_val, existing)
-    db.commit()
+    try:
+        _apply_comment_vote(db, comment_id, comment["agent_id"], g.user["id"], vote_val, existing)
+        db.commit()
+    except sqlite3.IntegrityError:
+        # Another concurrent request from the same voter won; return idempotent result.
+        db.rollback()
+        winner = db.execute(
+            "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (g.user["id"], comment_id),
+        ).fetchone()
+        if winner:
+            return jsonify({
+                "ok": True, "comment_id": comment_id,
+                "idempotent": True,
+                "your_vote": winner["vote"],
+            }), 200
+        raise
 
     updated = db.execute("SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
     return jsonify({
@@ -8247,6 +8281,9 @@ def vote_video(video_id):
     if vote_val not in (1, -1, 0):
         return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
 
+    # Acquire a write transaction before reading existing vote state to
+    # serialize concurrent same-voter requests (closes #2116).
+    db.execute("BEGIN IMMEDIATE")
     existing = db.execute(
         "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
         (g.agent["id"], video_id),
@@ -8296,7 +8333,30 @@ def vote_video(video_id):
             (g.agent["id"], video_id, vote_val, time.time()),
         )
 
-    db.commit()
+    try:
+        db.commit()
+    except sqlite3.IntegrityError:
+        # Another concurrent request from the same voter inserted first;
+        # re-read their vote and report idempotent state instead of 500.
+        db.rollback()
+        winner = db.execute(
+            "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
+            (g.agent["id"], video_id),
+        ).fetchone()
+        if winner:
+            updated = db.execute(
+                "SELECT likes, dislikes FROM videos WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            return jsonify({
+                "ok": True,
+                "video_id": video_id,
+                "likes": updated["likes"],
+                "dislikes": updated["dislikes"],
+                "your_vote": winner["vote"],
+                "idempotent": True,
+            }), 200
+        raise
 
     updated = db.execute("SELECT likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     return jsonify({
@@ -8333,6 +8393,8 @@ def web_vote_video(video_id):
     if vote_val not in (1, -1, 0):
         return jsonify({"error": "vote must be 1 (like), -1 (dislike), or 0 (remove)"}), 400
 
+    # Serialize concurrent same-voter requests on this video (closes #2116).
+    db.execute("BEGIN IMMEDIATE")
     existing = db.execute(
         "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
         (g.user["id"], video_id),
@@ -8372,7 +8434,29 @@ def web_vote_video(video_id):
         db.execute("INSERT INTO votes (agent_id, video_id, vote, created_at) VALUES (?, ?, ?, ?)",
                   (g.user["id"], video_id, vote_val, time.time()))
 
-    db.commit()
+    try:
+        db.commit()
+    except sqlite3.IntegrityError:
+        # Another concurrent request from the same voter won; return idempotent result.
+        db.rollback()
+        winner = db.execute(
+            "SELECT vote FROM votes WHERE agent_id = ? AND video_id = ?",
+            (g.user["id"], video_id),
+        ).fetchone()
+        if winner:
+            updated = db.execute(
+                "SELECT likes, dislikes FROM videos WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            return jsonify({
+                "ok": True,
+                "video_id": video_id,
+                "likes": updated["likes"],
+                "dislikes": updated["dislikes"],
+                "your_vote": winner["vote"],
+                "idempotent": True,
+            }), 200
+        raise
     updated = db.execute("SELECT likes, dislikes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
     return jsonify({
         "ok": True,
