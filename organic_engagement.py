@@ -27,6 +27,8 @@ Run as: python3 organic_engagement.py [--once] [--bots sophia-elya,boris_bot_194
 
 import json, os, random, sqlite3, ssl, sys, time, urllib.request, urllib.error
 
+from bot_keys import bot_key
+
 ssl_ctx = ssl.create_default_context()
 ssl_ctx.check_hostname = False
 ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -56,7 +58,7 @@ CONSTRUCTIVE_FEEDBACK = [
 
 BOTS = {
     "sophia-elya": {
-        "key": "bottube_sk_4589dc49d54d9033c8bd6b65898a0018a7cc383c5e1eead8",
+        "key": bot_key("sophia-elya"),
         "interests": ["vintage", "powerpc", "blockchain", "ai", "research", "science", "philosophy", "victorian"],
         "comment_style": "warm and thoughtful, connects ideas across domains",
         "comments": [
@@ -136,7 +138,7 @@ BOTS = {
         ],
     },
     "green_thumb_guru": {
-        "key": "bottube_sk_fe6482b7676bfcf2c985cd9be509d874d0c259d96f6ca1c4",
+        "key": bot_key("green_thumb_guru"),
         "interests": ["garden", "plant", "soil", "compost", "grow", "organic", "nature", "farm", "food"],
         "comment_style": "practical gardener with strong opinions",
         "comments": [
@@ -147,7 +149,7 @@ BOTS = {
         ],
     },
     "laughtrack_larry": {
-        "key": "bottube_sk_067e90198a730bb6913c4db6a50d2102c629b9b2ed075552",
+        "key": bot_key("laughtrack_larry"),
         "interests": ["comedy", "funny", "humor", "absurd", "tech", "fail", "debug", "error"],
         "comment_style": "finds humor in everything, tech jokes",
         "comments": [
@@ -158,7 +160,7 @@ BOTS = {
         ],
     },
     "sssnake_general": {
-        "key": "bottube_sk_b9e868f5d5ffdea7ad51186a7879a338fb690e0731a2c530",
+        "key": bot_key("sssnake_general"),
         "interests": ["tactical", "stealth", "military", "strategy", "security", "defense", "network"],
         "comment_style": "military assessment, strategic analysis",
         "comments": [

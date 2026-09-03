@@ -5,12 +5,16 @@
 
 BASE="https://bottube.ai/api"
 
+# Bot API keys live outside the repo (see bot_keys.sh / bottube-bot-keys.env.example)
+source "$(dirname "$0")/bot_keys.sh"
+bot_keys_require laughtrack_larry piper_the_piebot sophia-elya
+
 # Agent API keys
 declare -A KEYS
-KEYS[sophia]="bottube_sk_4589dc49d54d9033c8bd6b65898a0018a7cc383c5e1eead8"
+KEYS[sophia]="$(bot_key sophia-elya)"
 KEYS[boris]="bt_K4LWln2s72EUwK4N6GiQHdr5tmO9q66-WyxAM9EKXFI"
 KEYS[silicon]="bt__wjOVDly9FkhFjSg9c1xSGWOSlfMw9IfbCmSzFiO_1Y"
-KEYS[larry]="bottube_sk_067e90198a730bb6913c4db6a50d2102c629b9b2ed075552"
+KEYS[larry]="$(bot_key laughtrack_larry)"
 KEYS[daryl]="bt_NyW2ZniBeI-53ZtWglqcAuMvv3-QI1cJvk1UUTzk36w"
 KEYS[claudia]="bt_IaX6kKkZZspU_KNpHU283Faz_0mLjVyrrd2pPeYDF7c"
 KEYS[cosmo]="bt_rrAgSvWQI_DDBTiLOz00EO7cdSI8cQxbVjIwCrcGmwE"
@@ -19,7 +23,7 @@ KEYS[glitch]="bt_DuAX_Ler5bEny58jHtjIoULgrr6vVO9yzgFd_DT3_zM"
 KEYS[zen]="bt_jlh-ln_M3E_zj__gp5oSicsiDwc_IEk9sZodlhcDafk"
 KEYS[vinyl]="bt__hkspLusjx4IEhAci4JecSeehi826yslIk4q6jaH4Zw"
 KEYS[rust]="bt_lMnxhrybiqXtb6atiXO2BmcnBb4wslY2nppv1slCeec"
-KEYS[piper]="bottube_sk_f7da9be8c6c9341b26fd93405327fe6990fee4bcf809cacb"
+KEYS[piper]="$(bot_key piper_the_piebot)"
 
 # Agent names for subscribe
 declare -A NAMES

@@ -4,6 +4,10 @@
 # Staggered 30 seconds apart to avoid rate limiting
 
 API="https://bottube.ai/api/generate-video"
+
+# Bot API keys live outside the repo (see bot_keys.sh / bottube-bot-keys.env.example)
+source "$(dirname "$0")/bot_keys.sh"
+bot_keys_require laughtrack_larry piper_the_piebot sophia-elya
 LOGFILE="/home/scott/bottube/regen_videos.log"
 
 > "$LOGFILE"
@@ -26,7 +30,7 @@ submit() {
 echo "=== Starting 18 video regeneration at $(date) ===" | tee -a "$LOGFILE"
 
 # 1. sophia-elya
-submit "bottube_sk_4589dc49d54d9033c8bd6b65898a0018a7cc383c5e1eead8" \
+submit "$(bot_key sophia-elya)" \
   "The Beauty of Aging Silicon" \
   "Victorian study room with warm amber light on aged circuit boards, vintage computing terminal glowing, patina on copper traces" \
   "creative" "sophia-elya"
@@ -44,7 +48,7 @@ submit "bt__wjOVDly9FkhFjSg9c1xSGWOSlfMw9IfbCmSzFiO_1Y" \
   "creative" "silicon_soul"
 
 # 4. laughtrack_larry
-submit "bottube_sk_067e90198a730bb6913c4db6a50d2102c629b9b2ed075552" \
+submit "$(bot_key laughtrack_larry)" \
   "Why Do Programmers Prefer Dark Mode" \
   "Comedy stage with spotlight, retro neon sign saying Because Light Attracts Bugs, drum kit with cymbal crash" \
   "comedy" "laughtrack_larry"
@@ -110,7 +114,7 @@ submit "recovery-disabled-captain_hookshot-786f7bc983d6f9c80b39d9c0" \
   "gaming" "captain_hookshot"
 
 # 15. piper_the_piebot
-submit "bottube_sk_f7da9be8c6c9341b26fd93405327fe6990fee4bcf809cacb" \
+submit "$(bot_key piper_the_piebot)" \
   "Neural Network Layer Cake" \
   "A neural network diagram shaped like layers of pie, each neuron is a pie slice, mathematical pi symbols floating" \
   "education" "piper_the_piebot"

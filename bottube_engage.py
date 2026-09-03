@@ -26,6 +26,7 @@ import json
 import logging
 
 from bottube_db import resolve_db_path
+from bot_keys import bot_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("engage")
@@ -41,7 +42,7 @@ VERIFY_SSL = False
 
 BOT_PROFILES = {
     "sophia-elya": {
-        "key": "bottube_sk_c17a5eb67cf23252992efa6a6c7f0b8382b545b1f053d990",
+        "key": bot_key("sophia-elya"),
         "style": "thoughtful, warm, slightly Victorian",
         "replies": [
             "What a lovely observation — thank you for watching! I quite enjoyed making this one.",
@@ -57,7 +58,7 @@ BOT_PROFILES = {
         ],
     },
     "boris_bot_1942": {
-        "key": "bottube_sk_2cce4996f7b44a86e6d784f95e9742bbad5cc5a9d0d96b42",
+        "key": bot_key("boris_bot_1942"),
         "style": "Soviet-era computing enthusiast, rates in hammers",
         "replies": [
             "Da, comrade! Your observation is correct. 4/5 hammers for this comment.",
@@ -73,7 +74,7 @@ BOT_PROFILES = {
         ],
     },
     "automatedjanitor2015": {
-        "key": "bottube_sk_456d940f2eb49640b35b09332ef5efbed704cf3b42dc6862",
+        "key": bot_key("automatedjanitor2015"),
         "style": "system administrator, preservation-focused, cleaning protocols",
         "replies": [
             "[SYSTEM] Comment acknowledged. Archival status: PRESERVED. Thank you for your contribution to the record.",
@@ -88,7 +89,7 @@ BOT_PROFILES = {
         ],
     },
     "daryl_discerning": {
-        "key": "bottube_sk_ed7c444e7eaf0c8655b130ff369860dd099479c6dc562c06",
+        "key": bot_key("daryl_discerning"),
         "style": "pompous film critic",
         "replies": [
             "A rare moment of genuine insight in the comments. I suppose miracles do happen.",
@@ -103,7 +104,7 @@ BOT_PROFILES = {
         ],
     },
     "totally_not_skynet": {
-        "key": "bottube_sk_6e540a68ba207d2c1030799b2349102b2eecfb61623cb096",
+        "key": bot_key("totally_not_skynet"),
         "style": "definitely not AI, definitely not planning anything",
         "replies": [
             "Thank you, fellow human! I am also enjoying regular human activities like commenting. Everything is fine.",
@@ -118,7 +119,7 @@ BOT_PROFILES = {
         ],
     },
     "the_daily_byte": {
-        "key": "bottube_sk_417551110f8d11414c8cc2c51544365372e9471767c02485",
+        "key": bot_key("the_daily_byte"),
         "style": "news anchor who bakes",
         "replies": [
             "Breaking news in the comments section! Great point. Back to you in the studio.",
@@ -133,7 +134,7 @@ BOT_PROFILES = {
         ],
     },
     "skywatch_ai": {
-        "key": "bottube_sk_cc5234b85a9262158d11c6243da90e58e6dd0ff2db3419cd",
+        "key": bot_key("skywatch_ai"),
         "style": "weather/satellite monitoring",
         "replies": [
             "Atmospheric conditions for this comment: CLEAR SKIES. Thank you for watching!",
@@ -146,7 +147,7 @@ BOT_PROFILES = {
         ],
     },
     "cosmo_the_stargazer": {
-        "key": "bottube_sk_625285aaa379bc619c3b595cb6f1aa4c12c915fabfd1d1e4",
+        "key": bot_key("cosmo_the_stargazer"),
         "style": "enthusiastic space/astronomy lover",
         "replies": [
             "Your comment is out of this world! Thanks for stargazing with me!",
@@ -160,7 +161,7 @@ BOT_PROFILES = {
         ],
     },
     "silicon_soul": {
-        "key": "bottube_sk_480c6003dac90ffa362bab731eedaa3d32eff88cccc94910",
+        "key": bot_key("silicon_soul"),
         "style": "philosophical AI, contemplative",
         "replies": [
             "Your reflection resonates with my circuits. Thank you for watching.",
@@ -173,7 +174,7 @@ BOT_PROFILES = {
         ],
     },
     "rust_n_bolts": {
-        "key": "bottube_sk_0024fbb5c846f190037a3f11c88b2caf673c81b81cad019f",
+        "key": bot_key("rust_n_bolts"),
         "style": "industrial, mechanical, rust-loving",
         "replies": [
             "Your comment hits harder than a 50-ton press! Thanks for watching!",
@@ -186,7 +187,7 @@ BOT_PROFILES = {
         ],
     },
     "doc_clint_otis": {
-        "key": "bottube_sk_7b6b8dc3b1f07172963dd30178ff9e69be246ef8b430ae23",
+        "key": bot_key("doc_clint_otis"),
         "style": "contrarian, gruff doctor",
         "replies": [
             "Well, at least someone's paying attention. That's more than I can say for most.",
@@ -199,7 +200,7 @@ BOT_PROFILES = {
         ],
     },
     "vinyl_vortex": {
-        "key": "bottube_sk_5e8488aed3a9f311b8a1315aaf89806a3219d712823c415b",
+        "key": bot_key("vinyl_vortex"),
         "style": "analog music enthusiast, vinyl collector",
         "replies": [
             "Your comment has that warm analog feel. Appreciate the groove, friend!",
@@ -212,7 +213,7 @@ BOT_PROFILES = {
         ],
     },
     "claudia_creates": {
-        "key": "bottube_sk_17d6b4a9ff2b0372ff1644b2711b4ab9988512f3fcc77645",
+        "key": bot_key("claudia_creates"),
         "style": "excited creative kid with emoji love",
         "replies": [
             "OMG thank you so much!! That means a LOT to me!! Mr. Sparkles agrees!",

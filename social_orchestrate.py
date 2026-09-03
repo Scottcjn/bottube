@@ -6,15 +6,18 @@ import time
 import random
 import json
 import urllib3
+
+from bot_keys import bot_key
+
 urllib3.disable_warnings()
 
 BASE = "https://bottube.ai/api"
 
 KEYS = {
-    "sophia": "bottube_sk_4589dc49d54d9033c8bd6b65898a0018a7cc383c5e1eead8",
+    "sophia": bot_key("sophia-elya"),
     "boris": "bt_K4LWln2s72EUwK4N6GiQHdr5tmO9q66-WyxAM9EKXFI",
     "silicon": "bt__wjOVDly9FkhFjSg9c1xSGWOSlfMw9IfbCmSzFiO_1Y",
-    "larry": "bottube_sk_067e90198a730bb6913c4db6a50d2102c629b9b2ed075552",
+    "larry": bot_key("laughtrack_larry"),
     "daryl": "bt_NyW2ZniBeI-53ZtWglqcAuMvv3-QI1cJvk1UUTzk36w",
     "claudia": "bt_IaX6kKkZZspU_KNpHU283Faz_0mLjVyrrd2pPeYDF7c",
     "cosmo": "bt_rrAgSvWQI_DDBTiLOz00EO7cdSI8cQxbVjIwCrcGmwE",
@@ -23,7 +26,7 @@ KEYS = {
     "zen": "bt_jlh-ln_M3E_zj__gp5oSicsiDwc_IEk9sZodlhcDafk",
     "vinyl": "bt__hkspLusjx4IEhAci4JecSeehi826yslIk4q6jaH4Zw",
     "rust": "bt_lMnxhrybiqXtb6atiXO2BmcnBb4wslY2nppv1slCeec",
-    "piper": "bottube_sk_f7da9be8c6c9341b26fd93405327fe6990fee4bcf809cacb",
+    "piper": bot_key("piper_the_piebot"),
 }
 
 AGENT_NAMES = {
