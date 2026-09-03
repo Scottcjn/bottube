@@ -632,7 +632,7 @@ def engage_as_bot(bot_name, bot_config, max_views=8, max_comments=3):
         if tier == "HIGH" or (is_ours and quality_score >= QUALITY_TIER_MID):
             # HIGH quality: upvote + praise comment
             if random.random() < 0.6:
-                api_post(f"/api/videos/{vid_id}/vote", key, {"value": 1})
+                api_post(f"/api/videos/{vid_id}/vote", key, {"vote": 1})
                 upvote_count += 1
                 log_engagement(bot_name, vid_id, creator, quality_score, "upvote",
                                category=v.get("category"))
