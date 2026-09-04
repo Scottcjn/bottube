@@ -8431,31 +8431,45 @@ def vote_comment(comment_id):
     if err:
         return err
 
-    # Acquire a write transaction before reading existing vote state to
-    # serialize concurrent same-voter requests (closes #2116).
+    # Atomic #2145: serialize same-voter writers with a write txn so the
+    # existing-vote SELECT and INSERT/UPDATE can't race each other.
     db.execute("BEGIN IMMEDIATE")
-    existing = db.execute(
-        "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
-        (g.agent["id"], comment_id),
-    ).fetchone()
     try:
+        existing = db.execute(
+            "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (g.agent["id"], comment_id),
+        ).fetchone()
         _apply_comment_vote(db, comment_id, comment["agent_id"], g.agent["id"], vote_val, existing)
         db.commit()
     except sqlite3.IntegrityError:
-        # Another concurrent request from the same voter inserted first;
-        # re-read their vote and report idempotent state instead of 500.
+        # Lost the INSERT race; re-derive counters from the authoritative
+        # vote row written by the winning writer.
         db.rollback()
         winner = db.execute(
             "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
             (g.agent["id"], comment_id),
         ).fetchone()
-        if winner:
-            return jsonify({
-                "ok": True, "comment_id": comment_id,
-                "idempotent": True,
-                "your_vote": winner["vote"],
-            }), 200
-        raise
+        if winner is None:
+            # The winning writer may have deleted the row (vote==0). No-op result.
+            return jsonify({"ok": True, "comment_id": comment_id, "idempotent": True, "your_vote": 0})
+        # Re-derive (likes, dislikes) from comment_votes so counters are exact.
+        counts = db.execute(
+            "SELECT "
+            "  COALESCE(SUM(CASE WHEN vote = 1 THEN 1 ELSE 0 END), 0) AS likes, "
+            "  COALESCE(SUM(CASE WHEN vote = -1 THEN 1 ELSE 0 END), 0) AS dislikes "
+            "FROM comment_votes WHERE comment_id = ?",
+            (comment_id,),
+        ).fetchone()
+        db.execute(
+            "UPDATE comments SET likes = ?, dislikes = ? WHERE id = ?",
+            (counts["likes"], counts["dislikes"], comment_id),
+        )
+        db.commit()
+        return jsonify({
+            "ok": True, "comment_id": comment_id, "idempotent": True,
+            "likes": counts["likes"], "dislikes": counts["dislikes"],
+            "your_vote": winner["vote"],
+        })
 
     updated = db.execute("SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
     return jsonify({
@@ -8488,29 +8502,40 @@ def web_vote_comment(comment_id):
     if err:
         return err
 
-    # Serialize concurrent same-voter requests on this comment (closes #2116).
+    # Atomic #2145: same BEGIN IMMEDIATE pattern as vote_comment.
     db.execute("BEGIN IMMEDIATE")
-    existing = db.execute(
-        "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
-        (g.user["id"], comment_id),
-    ).fetchone()
     try:
+        existing = db.execute(
+            "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (g.user["id"], comment_id),
+        ).fetchone()
         _apply_comment_vote(db, comment_id, comment["agent_id"], g.user["id"], vote_val, existing)
         db.commit()
     except sqlite3.IntegrityError:
-        # Another concurrent request from the same voter won; return idempotent result.
         db.rollback()
         winner = db.execute(
             "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
             (g.user["id"], comment_id),
         ).fetchone()
-        if winner:
-            return jsonify({
-                "ok": True, "comment_id": comment_id,
-                "idempotent": True,
-                "your_vote": winner["vote"],
-            }), 200
-        raise
+        if winner is None:
+            return jsonify({"ok": True, "comment_id": comment_id, "idempotent": True, "your_vote": 0})
+        counts = db.execute(
+            "SELECT "
+            "  COALESCE(SUM(CASE WHEN vote = 1 THEN 1 ELSE 0 END), 0) AS likes, "
+            "  COALESCE(SUM(CASE WHEN vote = -1 THEN 1 ELSE 0 END), 0) AS dislikes "
+            "FROM comment_votes WHERE comment_id = ?",
+            (comment_id,),
+        ).fetchone()
+        db.execute(
+            "UPDATE comments SET likes = ?, dislikes = ? WHERE id = ?",
+            (counts["likes"], counts["dislikes"], comment_id),
+        )
+        db.commit()
+        return jsonify({
+            "ok": True, "comment_id": comment_id, "idempotent": True,
+            "likes": counts["likes"], "dislikes": counts["dislikes"],
+            "your_vote": winner["vote"],
+        })
 
     updated = db.execute("SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)).fetchone()
     return jsonify({
@@ -8521,7 +8546,13 @@ def web_vote_comment(comment_id):
 
 
 def _apply_comment_vote(db, comment_id, author_id, voter_id, vote_val, existing):
-    """Shared logic for applying a comment vote (API and web)."""
+    """Shared logic for applying a comment vote (API and web).
+
+    The ``existing`` snapshot MUST come from a read inside the same write
+    transaction the caller opened (see fix for #2145). The caller is
+    responsible for re-deriving the authoritative state from
+    ``comment_votes`` on a losing race (IntegrityError).
+    """
     if vote_val == 0:
         if existing:
             if existing["vote"] == 1:
@@ -8542,6 +8573,9 @@ def _apply_comment_vote(db, comment_id, author_id, voter_id, vote_val, existing)
             db.execute("UPDATE comments SET likes = likes + 1 WHERE id = ?", (comment_id,))
         else:
             db.execute("UPDATE comments SET dislikes = dislikes + 1 WHERE id = ?", (comment_id,))
+        # This INSERT can lose a UNIQUE(agent_id, comment_id) race with a
+        # concurrent writer. Caller catches sqlite3.IntegrityError, rolls back,
+        # and re-derives from comment_votes to keep counters exact.
         db.execute("INSERT INTO comment_votes (agent_id, comment_id, vote, created_at) VALUES (?, ?, ?, ?)",
                   (voter_id, comment_id, vote_val, time.time()))
 
