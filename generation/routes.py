@@ -268,7 +268,11 @@ def cancel_generation_job(job_id: str):
         return jsonify({"error": "Job not found"}), 404
     if job.get("owner_user_id") != str(g.agent["id"]):
         return jsonify({"error": "Not your job"}), 403
-    if job["status"] in (JobStatus.completed.value, JobStatus.canceled.value):
+    if job["status"] in (
+        JobStatus.completed.value,
+        JobStatus.failed.value,
+        JobStatus.canceled.value,
+    ):
         return jsonify({"error": f"Job already {job['status']}"}), 409
 
     update_job(job_id, status=JobStatus.canceled.value)

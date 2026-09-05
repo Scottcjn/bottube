@@ -172,3 +172,34 @@ def test_legacy_generate_video_rejects_non_string_body_api_key(
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "agent_api_key must be a string"}
+
+
+def test_failed_generation_job_cannot_be_canceled(
+    generation_client,
+    monkeypatch,
+):
+    """A failed job must remain retryable instead of becoming canceled."""
+    import generation.routes as routes
+
+    monkeypatch.setattr(
+        routes,
+        "get_job",
+        lambda _job_id: {
+            "job_id": "failed-job",
+            "owner_user_id": "1",
+            "status": "failed",
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "update_job",
+        lambda *_args, **_kwargs: pytest.fail("terminal job was mutated"),
+    )
+
+    resp = generation_client.post(
+        "/api/generation/jobs/failed-job/cancel",
+        headers={"X-API-Key": "test-key"},
+    )
+
+    assert resp.status_code == 409
+    assert resp.get_json() == {"error": "Job already failed"}
