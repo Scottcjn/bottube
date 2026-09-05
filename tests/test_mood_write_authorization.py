@@ -174,3 +174,46 @@ def test_unknown_agent_is_404_not_403(client, attacker):
         headers={"X-API-Key": attacker["api_key"]},
     )
     assert resp.status_code == 404, resp.get_json()
+
+
+@pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "101"])
+def test_mood_history_rejects_invalid_limit_before_engine(
+    client, victim, monkeypatch, limit,
+):
+    """Malformed and out-of-range limits must not reach mood history work."""
+    def unexpected_engine(*_args, **_kwargs):
+        pytest.fail("invalid limit reached the mood engine")
+
+    monkeypatch.setattr(bottube_server, "get_mood_engine", unexpected_engine)
+    response = client.get(
+        f"/api/v1/agents/{victim['agent_name']}/mood/history",
+        query_string={"limit": limit},
+    )
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json().get("error")
+
+
+@pytest.mark.parametrize(
+    "query, expected",
+    [({}, 20), ({"limit": "1"}, 1), ({"limit": "100"}, 100)],
+)
+def test_mood_history_preserves_default_and_valid_limits(
+    client, victim, monkeypatch, query, expected,
+):
+    """The strict parser must preserve the documented valid contract."""
+    observed = []
+
+    class HistoryEngine:
+        def get_mood_history(self, agent_id, limit):
+            observed.append((agent_id, limit))
+            return []
+
+    monkeypatch.setattr(
+        bottube_server, "get_mood_engine", lambda *_args: HistoryEngine(),
+    )
+    response = client.get(
+        f"/api/v1/agents/{victim['agent_name']}/mood/history",
+        query_string=query,
+    )
+    assert response.status_code == 200, response.get_json()
+    assert observed and observed[-1][1] == expected
