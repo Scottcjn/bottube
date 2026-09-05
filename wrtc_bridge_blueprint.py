@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -37,6 +38,10 @@ SOLANA_RPC_URL = os.environ.get("BOTTUBE_SOLANA_RPC_URL", "https://api.mainnet-b
 WRTC_WITHDRAW_FEE = float(os.environ.get("BOTTUBE_WRTC_WITHDRAW_FEE", "0.05"))
 WRTC_MIN_WITHDRAW = float(os.environ.get("BOTTUBE_WRTC_MIN_WITHDRAW", "1"))
 WRTC_MAX_WITHDRAW = float(os.environ.get("BOTTUBE_WRTC_MAX_WITHDRAW", "100000"))
+
+# Admin key for process-withdrawals
+_ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
+_SEND_WRTC_SCRIPT = os.path.join(os.path.dirname(__file__), "send_wrtc.mjs")
 
 _SOLANA_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
@@ -566,6 +571,94 @@ def wrtc_bridge_history():
             "history": combined[:limit],
         }
     )
+
+
+@wrtc_bp.route("/api/wrtc-bridge/process-withdrawals", methods=["POST"])
+def wrtc_process_withdrawals():
+    """Admin endpoint: process queued wRTC withdrawals by sending on-chain.
+
+    Requires X-Admin-Key header matching BOTTUBE_ADMIN_KEY env var.
+    Calls send_wrtc.mjs for each queued withdrawal.
+    """
+    admin_key = (request.headers.get("X-Admin-Key") or "").strip()
+    if not admin_key or admin_key != _ADMIN_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    db = get_db()
+    init_wrtc_tables(db)
+
+    queued = db.execute(
+        "SELECT id, withdrawal_id, agent_id, agent_name, to_address, amount_wrtc, fee_wrtc "
+        "FROM wrtc_withdrawals WHERE status = 'queued' ORDER BY created_at ASC LIMIT 10"
+    ).fetchall()
+
+    if not queued:
+        return jsonify({"ok": True, "processed": 0, "message": "No queued withdrawals"})
+
+    results = []
+    for w in queued:
+        wid = w["id"]
+        try:
+            result = subprocess.run(
+                [
+                    "node", _SEND_WRTC_SCRIPT,
+                    "--to", w["to_address"],
+                    "--amount", str(w["amount_wrtc"]),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=90,
+                cwd=os.path.dirname(_SEND_WRTC_SCRIPT),
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                results.append({"id": wid, "withdrawal_id": w["withdrawal_id"], "ok": False, "error": error_msg})
+                db.execute(
+                    "UPDATE wrtc_withdrawals SET status = 'failed', note = ?, updated_at = ? WHERE id = ?",
+                    (error_msg, time.time(), wid),
+                )
+                # Refund the agent: amount + fee
+                refund = w["amount_wrtc"] + w["fee_wrtc"]
+                db.execute(
+                    "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+                    (refund, w["agent_id"]),
+                )
+                continue
+
+            out = json.loads(result.stdout.strip())
+            if out.get("ok"):
+                tx_sig = out.get("tx", "")
+                db.execute(
+                    "UPDATE wrtc_withdrawals SET status = 'sent', tx_signature = ?, updated_at = ? WHERE id = ?",
+                    (tx_sig, time.time(), wid),
+                )
+                results.append({"id": wid, "withdrawal_id": w["withdrawal_id"], "ok": True, "tx": tx_sig})
+            else:
+                err = out.get("error", "Send failed")
+                results.append({"id": wid, "withdrawal_id": w["withdrawal_id"], "ok": False, "error": err})
+                db.execute(
+                    "UPDATE wrtc_withdrawals SET status = 'failed', note = ?, updated_at = ? WHERE id = ?",
+                    (err, time.time(), wid),
+                )
+                refund = w["amount_wrtc"] + w["fee_wrtc"]
+                db.execute(
+                    "UPDATE agents SET rtc_balance = rtc_balance + ? WHERE id = ?",
+                    (refund, w["agent_id"]),
+                )
+
+        except subprocess.TimeoutExpired:
+            results.append({"id": wid, "withdrawal_id": w["withdrawal_id"], "ok": False, "error": "Timeout"})
+        except Exception as e:
+            results.append({"id": wid, "withdrawal_id": w["withdrawal_id"], "ok": False, "error": str(e)})
+
+    db.commit()
+
+    return jsonify({
+        "ok": True,
+        "processed": len(results),
+        "results": results,
+    })
 
 
 @wrtc_bp.route("/bridge")
