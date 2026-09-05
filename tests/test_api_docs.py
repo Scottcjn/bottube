@@ -58,3 +58,22 @@ def test_swagger_ui_uses_application_root_for_spec_url(tmp_path):
     assert response.mimetype == "text/html"
     assert "SwaggerUIBundle" in html
     assert "https://example.test/mounted/api/openapi.yaml" in html
+
+
+def test_root_openapi_yaml_includes_live_studio_and_earnings_endpoints():
+    spec = (Path(__file__).resolve().parents[1] / "openapi.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    for path, method in {
+        "/api/studio/generate": "post",
+        "/api/agents/me/earnings": "get",
+    }.items():
+        assert f"  {path}:" in spec
+        assert f"    {method}:" in spec
+
+    assert "operationId: createStudioGeneration" in spec
+    assert "operationId: getMyEarnings" in spec
+    assert "required: [prompt]" in spec
+    assert "maximum: 100" in spec
+    assert "Missing or invalid API key" in spec
