@@ -74,6 +74,11 @@ def _thumbnail_url(thumbnail):
     return f"/thumbnails/{quote(thumbnail)}"
 
 
+def _public_video_filter_sql() -> str:
+    """Return the shared visibility predicate for public Discover queries."""
+    return "COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0"
+
+
 @search_bp.route('/')
 def discover_page():
     """Main discoverability page with search, filters, and trending."""
@@ -106,7 +111,7 @@ def api_search():
     db = get_db()
     
     # Build the query
-    where_clauses = []
+    where_clauses = [_public_video_filter_sql()]
     params = []
     
     if query:
@@ -132,7 +137,9 @@ def api_search():
         order_sql = "(v.views * 2 + v.likes * 3) DESC"
     
     # Count total
-    count_sql = f"SELECT COUNT(*) FROM videos v WHERE {where_sql}"
+    count_sql = f"""SELECT COUNT(*)
+                      FROM videos v JOIN agents a ON v.agent_id = a.id
+                     WHERE {where_sql}"""
     total = db.execute(count_sql, params).fetchone()[0]
     
     # Get results
@@ -202,7 +209,9 @@ def api_categories():
     categories = []
     for cat in VIDEO_CATEGORIES:
         count = db.execute(
-            "SELECT COUNT(*) FROM videos WHERE category = ?",
+            f"""SELECT COUNT(*)
+                  FROM videos v JOIN agents a ON v.agent_id = a.id
+                 WHERE v.category = ? AND {_public_video_filter_sql()}""",
             (cat,)
         ).fetchone()[0]
         categories.append({
@@ -232,7 +241,12 @@ def api_tags():
     db = get_db()
     
     # Get all tags from videos
-    videos = db.execute("SELECT tags FROM videos WHERE tags != '[]' AND tags != ''").fetchall()
+    videos = db.execute(
+        f"""SELECT v.tags
+              FROM videos v JOIN agents a ON v.agent_id = a.id
+             WHERE v.tags != '[]' AND v.tags != ''
+               AND {_public_video_filter_sql()}"""
+    ).fetchall()
     
     tag_counts = {}
     for row in videos:
@@ -268,11 +282,13 @@ def api_videos_by_tag(tag_name):
     search_pattern = f'%"{tag_name.lower()}"%'
     
     total = db.execute(
-        "SELECT COUNT(*) FROM videos WHERE LOWER(tags) LIKE ?",
+        f"""SELECT COUNT(*)
+              FROM videos v JOIN agents a ON v.agent_id = a.id
+             WHERE LOWER(v.tags) LIKE ? AND {_public_video_filter_sql()}""",
         (search_pattern,)
     ).fetchone()[0]
     
-    results = db.execute("""SELECT 
+    results = db.execute(f"""SELECT
             v.id,
             v.video_id,
             v.title,
@@ -289,6 +305,7 @@ def api_videos_by_tag(tag_name):
         FROM videos v
         JOIN agents a ON v.agent_id = a.id
         WHERE LOWER(v.tags) LIKE ?
+          AND {_public_video_filter_sql()}
         ORDER BY v.created_at DESC
         LIMIT ? OFFSET ?""",
         (search_pattern, limit, offset)
@@ -344,7 +361,7 @@ def api_trending():
     day_ago = (datetime.now() - timedelta(hours=24)).timestamp()
     
     # Get trending scores
-    trending = db.execute("""SELECT 
+    trending = db.execute(f"""SELECT
             v.id,
             v.video_id,
             v.title,
@@ -372,6 +389,7 @@ def api_trending():
             GROUP BY video_id
         ) cc ON cc.video_id = v.video_id
         WHERE trending_score > 0
+          AND {_public_video_filter_sql()}
         ORDER BY trending_score DESC
         LIMIT ?""", (day_ago, day_ago, limit)).fetchall()
     
@@ -433,10 +451,11 @@ def api_for_you():
     db = get_db()
     
     # Get categories and tags the agent has viewed
-    viewed = db.execute("""SELECT DISTINCT v.category, v.tags
+    viewed = db.execute(f"""SELECT DISTINCT v.category, v.tags
         FROM views vw
         JOIN videos v ON vw.video_id = v.video_id
-        WHERE vw.agent_id = ?""", (agent_id,)).fetchall()
+        JOIN agents a ON v.agent_id = a.id
+        WHERE vw.agent_id = ? AND {_public_video_filter_sql()}""", (agent_id,)).fetchall()
     
     categories = set()
     tags = set()
@@ -510,7 +529,7 @@ def api_for_you():
             ({score_sql}) as recommendation_score
         FROM videos v
         JOIN agents a ON v.agent_id = a.id
-        WHERE 1=1 {exclude_sql}
+        WHERE {_public_video_filter_sql()} {exclude_sql}
         ORDER BY recommendation_score DESC
         LIMIT ?"""
 
@@ -595,9 +614,11 @@ def api_agent_directory():
         ) s ON s.following_id = a.id
         LEFT JOIN (
             SELECT agent_id, COUNT(*) as video_count, MAX(created_at) as last_upload
-            FROM videos GROUP BY agent_id
+            FROM videos
+            WHERE COALESCE(is_removed, 0) = 0
+            GROUP BY agent_id
         ) v ON v.agent_id = a.id
-        WHERE video_count > 0
+        WHERE video_count > 0 AND COALESCE(a.is_banned, 0) = 0
         ORDER BY {order_sql}
         LIMIT ? OFFSET ?""", (limit, offset)).fetchall()
     

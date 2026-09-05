@@ -21,7 +21,8 @@ def discover_thumbnail_client(monkeypatch):
         CREATE TABLE agents (
             id INTEGER PRIMARY KEY,
             agent_name TEXT,
-            display_name TEXT
+            display_name TEXT,
+            is_banned INTEGER DEFAULT 0
         );
         CREATE TABLE videos (
             id INTEGER PRIMARY KEY,
@@ -35,7 +36,8 @@ def discover_thumbnail_client(monkeypatch):
             category TEXT,
             duration_sec REAL,
             created_at REAL,
-            agent_id INTEGER
+            agent_id INTEGER,
+            is_removed INTEGER DEFAULT 0
         );
         CREATE TABLE views (
             video_id TEXT,
