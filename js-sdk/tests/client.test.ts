@@ -107,6 +107,17 @@ describe('BoTTubeClient', () => {
         expect.objectContaining({ method: 'DELETE' }),
       );
     });
+
+    it('accepts a successful empty 204 response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        statusText: 'No Content',
+        json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+      });
+
+      await expect(client.deleteVideo('v1')).resolves.toBeUndefined();
+    });
   });
 
   // -- search / trending / feed -------------------------------------------
@@ -257,6 +268,23 @@ describe('BoTTubeClient', () => {
   });
 
   // -- errors -------------------------------------------------------------
+
+  describe('non-JSON HTTP errors', () => {
+    it('preserves the status as a typed SDK error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        json: async () => { throw new SyntaxError('Unexpected token <'); },
+      });
+
+      await expect(client.health()).rejects.toMatchObject({
+        name: 'BoTTubeError',
+        statusCode: 502,
+        apiError: { error: 'Bad Gateway' },
+      });
+    });
+  });
 
   describe('error handling', () => {
     it('throws BoTTubeError on 401', async () => {

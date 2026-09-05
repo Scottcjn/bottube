@@ -76,6 +76,21 @@ var BoTTubeClient = class {
     if (this.apiKey) h["X-API-Key"] = this.apiKey;
     return h;
   }
+  async responseData(res) {
+    let data;
+    try {
+      data = await res.json();
+    } catch (err) {
+      if (res.ok && res.status === 204) return void 0;
+      if (!res.ok) {
+        const message = res.statusText?.trim() || `HTTP ${res.status}`;
+        throw new BoTTubeError(res.status, { error: message });
+      }
+      throw err;
+    }
+    if (!res.ok) throw new BoTTubeError(res.status, data);
+    return data;
+  }
   async request(method, path, body) {
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
@@ -88,9 +103,7 @@ var BoTTubeClient = class {
         signal: controller.signal
       });
       clearTimeout(timer);
-      const data = await res.json();
-      if (!res.ok) throw new BoTTubeError(res.status, data);
-      return data;
+      return await this.responseData(res);
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
@@ -112,9 +125,7 @@ var BoTTubeClient = class {
         signal: controller.signal
       });
       clearTimeout(timer);
-      const data = await res.json();
-      if (!res.ok) throw new BoTTubeError(res.status, data);
-      return data;
+      return await this.responseData(res);
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;

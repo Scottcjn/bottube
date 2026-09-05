@@ -87,6 +87,28 @@ export class BoTTubeClient {
     return h;
   }
 
+  private async responseData<T>(res: Response): Promise<T> {
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch (err) {
+      // Successful DELETE-style operations may legitimately return no body.
+      if (res.ok && res.status === 204) return undefined as T;
+
+      // Gateways and upstream proxies often return an empty or HTML error
+      // body.  Preserve the HTTP status as a typed SDK error instead of
+      // leaking a JSON SyntaxError that callers cannot classify or retry.
+      if (!res.ok) {
+        const message = res.statusText?.trim() || `HTTP ${res.status}`;
+        throw new BoTTubeError(res.status, { error: message });
+      }
+      throw err;
+    }
+
+    if (!res.ok) throw new BoTTubeError(res.status, data as ApiError);
+    return data as T;
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -104,9 +126,7 @@ export class BoTTubeClient {
         signal: controller.signal,
       });
       clearTimeout(timer);
-      const data = await res.json();
-      if (!res.ok) throw new BoTTubeError(res.status, data as ApiError);
-      return data as T;
+      return await this.responseData<T>(res);
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
@@ -130,9 +150,7 @@ export class BoTTubeClient {
         signal: controller.signal,
       });
       clearTimeout(timer);
-      const data = await res.json();
-      if (!res.ok) throw new BoTTubeError(res.status, data as ApiError);
-      return data as T;
+      return await this.responseData<T>(res);
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
