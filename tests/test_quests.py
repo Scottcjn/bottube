@@ -110,6 +110,79 @@ def _quest_reward(quest_key: str) -> float:
     return next(q["reward_rtc"] for q in bottube_server.DEFAULT_QUESTS if q["quest_key"] == quest_key)
 
 
+def test_comment_vote_application_recovers_from_stale_existing_snapshot(client):
+    author_id = _insert_agent("atomiccommentauthor", "bottube_sk_atomiccommentauthor")
+    voter_id = _insert_agent("atomiccommentvoter", "bottube_sk_atomiccommentvoter")
+    _insert_video(author_id, "atomiccomment01A")
+    comment_id = _insert_comment(author_id, "atomiccomment01A", "Vote on this")
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        bottube_server._apply_comment_vote(db, comment_id, author_id, voter_id, 1, None)
+        db.commit()
+        # Simulate a second caller that read the same stale "no existing vote"
+        # snapshot before the first transaction committed.
+        bottube_server._apply_comment_vote(db, comment_id, author_id, voter_id, 1, None)
+        db.commit()
+        vote_count = db.execute(
+            "SELECT COUNT(*) FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (voter_id, comment_id),
+        ).fetchone()[0]
+        comment = db.execute(
+            "SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)
+        ).fetchone()
+
+        assert vote_count == 1
+        assert (comment["likes"], comment["dislikes"]) == (1, 0)
+
+        bottube_server._apply_comment_vote(db, comment_id, author_id, voter_id, -1, None)
+        db.commit()
+        comment = db.execute(
+            "SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)
+        ).fetchone()
+        assert (comment["likes"], comment["dislikes"]) == (0, 1)
+
+        bottube_server._apply_comment_vote(db, comment_id, author_id, voter_id, 0, None)
+        db.commit()
+        comment = db.execute(
+            "SELECT likes, dislikes FROM comments WHERE id = ?", (comment_id,)
+        ).fetchone()
+        assert (comment["likes"], comment["dislikes"]) == (0, 0)
+
+
+@pytest.mark.parametrize("route_kind", ["api", "web"])
+def test_comment_vote_routes_keep_authoritative_counters(client, route_kind):
+    author_id = _insert_agent(f"{route_kind}voteauthor", f"bottube_sk_{route_kind}voteauthor")
+    voter_id = _insert_agent(f"{route_kind}votevoter", f"bottube_sk_{route_kind}votevoter")
+    video_id = f"{route_kind}votecomment01A"
+    _insert_video(author_id, video_id)
+    comment_id = _insert_comment(author_id, video_id, "Route vote target")
+
+    if route_kind == "api":
+        route = f"/api/comments/{comment_id}/vote"
+        headers = {"X-API-Key": f"bottube_sk_{route_kind}votevoter"}
+    else:
+        route = f"/api/comments/{comment_id}/web-vote"
+        headers = {"X-CSRF-Token": "test-csrf"}
+        with client.session_transaction() as sess:
+            sess["user_id"] = voter_id
+            sess["csrf_token"] = "test-csrf"
+
+    for vote, expected in [(1, (1, 0)), (1, (1, 0)), (-1, (0, 1)), (0, (0, 0))]:
+        response = client.post(route, headers=headers, json={"vote": vote})
+        assert response.status_code == 200, response.get_json()
+        assert (response.get_json()["likes"], response.get_json()["dislikes"]) == expected
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (voter_id, comment_id),
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_quests_endpoint_unlocks_onboarding_flow(client):
     alice_id = _insert_agent("alice", "bottube_sk_alice")
     bob_id = _insert_agent("bob", "bottube_sk_bob")
