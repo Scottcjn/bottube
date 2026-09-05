@@ -7517,10 +7517,14 @@ def update_agent_mood(agent_name):
     if err:
         return err
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     force_state = data.get("force_state")
     trigger_reason = data.get("trigger_reason", "")
-    
+
     result = api_update_mood(str(DB_PATH), agent["id"], force_state, trigger_reason)
     
     return jsonify(result)
@@ -7544,7 +7548,11 @@ def record_mood_signal(agent_name):
     if err:
         return err
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body must be an object"}), 400
     signal_type = data.get("signal_type")
     signal_value = data.get("signal_value")
     signal_data = data.get("signal_data", "")
