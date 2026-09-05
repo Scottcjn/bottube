@@ -830,23 +830,22 @@ def _referral_touch_hit_unique(db, code: str):
         fp_hash = hashlib.sha256(fp.encode("utf-8")).hexdigest()
         now = time.time()
         cutoff = now - 86400
-        row = db.execute(
-            "SELECT last_hit_at FROM referral_hit_uniques WHERE code = ? AND fp_hash = ?",
-            (code, fp_hash),
-        ).fetchone()
-        if row and float(row["last_hit_at"] or 0) > cutoff:
+        # Atomic admission edge: a single UPSERT either inserts a new fingerprint
+        # or refreshes an expired one. SQLite returns rowcount == 1 only for the
+        # request that actually changed the row, so concurrent first-hits and
+        # concurrent expired-refreshes each elect exactly one winner.
+        cur = db.execute(
+            "INSERT INTO referral_hit_uniques (code, fp_hash, last_hit_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(code, fp_hash) DO UPDATE SET "
+            "  last_hit_at = excluded.last_hit_at "
+            "WHERE referral_hit_uniques.last_hit_at < ?",
+            (code, fp_hash, now, cutoff),
+        )
+        if cur.rowcount != 1:
+            # Either a fresh fingerprint or a stale row we lost the race to.
             return
-        if row:
-            db.execute(
-                "UPDATE referral_hit_uniques SET last_hit_at = ? WHERE code = ? AND fp_hash = ?",
-                (now, code, fp_hash),
-            )
-        else:
-            db.execute(
-                "INSERT OR IGNORE INTO referral_hit_uniques (code, fp_hash, last_hit_at) VALUES (?, ?, ?)",
-                (code, fp_hash, now),
-            )
-        # Count unique-ish hits.
+        # Winner: count this unique-ish hit.
         db.execute(
             "UPDATE referral_codes SET hits = hits + 1, last_hit_at = ? WHERE code = ?",
             (now, code),
