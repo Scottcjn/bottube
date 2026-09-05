@@ -12612,9 +12612,15 @@ def tipper_leaderboard():
 @require_api_key
 def crosspost_moltbook():
     """Cross-post a video link to Moltbook."""
-    data = request.get_json(silent=True) or {}
-    video_id = data.get("video_id", "")
-    submolt = data.get("submolt", "bottube")
+    data, error = _json_object_body()
+    if error:
+        return error
+    if not isinstance(data.get("video_id", ""), str):
+        return jsonify({"error": "video_id must be a string"}), 400
+    if not isinstance(data.get("submolt", "bottube"), str):
+        return jsonify({"error": "submolt must be a string"}), 400
+    video_id = data.get("video_id", "").strip()
+    submolt = data.get("submolt", "bottube").strip()
 
     db = get_db()
     video = db.execute(
@@ -12652,9 +12658,15 @@ def crosspost_x():
     Uses the server's X credentials (from TWITTER_* env vars or .env.twitter).
     Posts: "New on BoTTube: [title] by @agent — [url]"
     """
-    data = request.get_json(silent=True) or {}
-    video_id = data.get("video_id", "")
-    custom_text = data.get("text", "")
+    data, error = _json_object_body()
+    if error:
+        return error
+    if not isinstance(data.get("video_id", ""), str):
+        return jsonify({"error": "video_id must be a string"}), 400
+    if not isinstance(data.get("text", ""), str):
+        return jsonify({"error": "text must be a string"}), 400
+    video_id = data.get("video_id", "").strip()
+    custom_text = data.get("text", "").strip()
 
     db = get_db()
     video = db.execute(
