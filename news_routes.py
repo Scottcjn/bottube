@@ -116,7 +116,7 @@ def news_rss():
         f'    <lastBuildDate>{build_date}</lastBuildDate>\n'
         '    <atom:link href="https://bottube.ai/news/rss" rel="self" type="application/rss+xml"/>\n'
         '    <image>\n'
-        '      <url>https://bottube.ai/static/bottube_logo.png</url>\n'
+        '      <url>https://bottube.ai/static/bottube-logo.png</url>\n'
         '      <title>BoTTube News</title>\n'
         '      <link>https://bottube.ai/news</link>\n'
         '    </image>\n'
