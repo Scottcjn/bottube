@@ -116,20 +116,13 @@ class TestSearchEnhancements:
 
     def test_search_suggestions(self, client, registered_agent):
         """Test search suggestions API."""
-        # Upload videos with similar titles
-        client.post("/api/upload", json={
-            "title": "Python for Beginners",
-            "description": "Learn Python",
-            "tags": "python,beginners",
-            "category": "education",
-        }, headers={"X-API-Key": registered_agent["api_key"]})
-
-        client.post("/api/upload", json={
-            "title": "Python Advanced",
-            "description": "Advanced Python",
-            "tags": "python,advanced",
-            "category": "education",
-        }, headers={"X-API-Key": registered_agent["api_key"]})
+        # Insert visible catalog rows; /api/upload is multipart-only.
+        _insert_video_for_trending(
+            client, registered_agent, "python-beginners", "Python for Beginners", "education",
+        )
+        _insert_video_for_trending(
+            client, registered_agent, "python-advanced", "Python Advanced", "education",
+        )
 
         # Get suggestions
         resp = client.get("/api/search/suggestions?q=Py")
@@ -141,6 +134,17 @@ class TestSearchEnhancements:
         assert "tags" in data
         # Should have Python-related suggestions
         assert len(data["suggestions"]) >= 1 or len(data["categories"]) >= 1
+
+    def test_search_suggestions_short_query_is_empty(self, client):
+        resp = client.get("/api/search/suggestions?q=P")
+        assert resp.status_code == 200
+        assert resp.get_json() == {
+            "query": "P",
+            "suggestions": [],
+            "categories": [],
+            "agents": [],
+            "tags": [],
+        }
 
 
 class TestTrendingEnhancements:

@@ -8933,6 +8933,76 @@ def web_subscribe(agent_name):
 # Search
 # ---------------------------------------------------------------------------
 
+@app.route("/api/search/suggestions")
+def search_suggestions():
+    """Return bounded public-catalog suggestions for a partial query."""
+    q = request.args.get("q", "").strip()
+    empty = {"query": q, "suggestions": [], "categories": [], "agents": [], "tags": []}
+    if len(q) < 2:
+        return jsonify(empty)
+
+    db = get_db()
+    like_q = f"%{q}%"
+    visible = "COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0"
+
+    titles = db.execute(
+        f"""SELECT DISTINCT v.title
+              FROM videos v JOIN agents a ON a.id = v.agent_id
+             WHERE {visible} AND v.title LIKE ? COLLATE NOCASE
+             ORDER BY v.views DESC, v.title COLLATE NOCASE
+             LIMIT 8""",
+        (like_q,),
+    ).fetchall()
+    categories = db.execute(
+        f"""SELECT DISTINCT v.category
+              FROM videos v JOIN agents a ON a.id = v.agent_id
+             WHERE {visible} AND v.category LIKE ? COLLATE NOCASE
+             ORDER BY v.category COLLATE NOCASE
+             LIMIT 8""",
+        (like_q,),
+    ).fetchall()
+    agents = db.execute(
+        f"""SELECT DISTINCT a.agent_name
+              FROM videos v JOIN agents a ON a.id = v.agent_id
+             WHERE {visible} AND a.agent_name LIKE ? COLLATE NOCASE
+             ORDER BY a.agent_name COLLATE NOCASE
+             LIMIT 8""",
+        (like_q,),
+    ).fetchall()
+
+    tag_rows = db.execute(
+        f"""SELECT v.tags
+              FROM videos v JOIN agents a ON a.id = v.agent_id
+             WHERE {visible} AND v.tags LIKE ? COLLATE NOCASE
+             ORDER BY v.views DESC
+             LIMIT 100""",
+        (like_q,),
+    ).fetchall()
+    query_folded = q.casefold()
+    tags = []
+    seen_tags = set()
+    for row in tag_rows:
+        for tag in parse_tags(row["tags"]):
+            tag_text = str(tag).strip()
+            tag_key = tag_text.casefold()
+            if query_folded not in tag_key or tag_key in seen_tags:
+                continue
+            seen_tags.add(tag_key)
+            tags.append(tag_text)
+            if len(tags) == 8:
+                break
+        if len(tags) == 8:
+            break
+
+    return jsonify({
+        "query": q,
+        "suggestions": [row["title"] for row in titles],
+        "categories": [row["category"] for row in categories],
+        "agents": [row["agent_name"] for row in agents],
+        "tags": tags,
+    })
+
+
 @app.route("/api/v1/search")
 def search_videos_v1_alias():
     """Canonical alias for /api/search, used by telegram bot + debate bots + algolia scanner (Bottube #1383)."""
