@@ -291,10 +291,10 @@
     <div class="analytics-section">
         <div class="section-header">
             <h2>🏆 Top Videos</h2>
-            <div class="metric-tabs">
-                <button class="metric-tab active" data-metric="views">By Views</button>
-                <button class="metric-tab" data-metric="engagement">By Engagement</button>
-                <button class="metric-tab" data-metric="tips">By Tips</button>
+            <div class="metric-tabs" role="group" aria-label="Rank top videos by">
+                <button type="button" class="metric-tab active" data-metric="views" aria-pressed="true">By Views</button>
+                <button type="button" class="metric-tab" data-metric="engagement" aria-pressed="false">By Engagement</button>
+                <button type="button" class="metric-tab" data-metric="tips" aria-pressed="false">By Tips</button>
             </div>
         </div>
         <table class="analytics-table" id="topVideosTable">
@@ -516,8 +516,11 @@
     // Event listeners for metric tabs
     document.querySelectorAll('.metric-tab').forEach(tab => {
         tab.addEventListener('click', function() {
-            this.parentElement.querySelectorAll('.metric-tab').forEach(t => t.classList.remove('active'));
-            this.classList.add('active');
+            this.parentElement.querySelectorAll('.metric-tab').forEach(t => {
+                const selected = t === this;
+                t.classList.toggle('active', selected);
+                t.setAttribute('aria-pressed', String(selected));
+            });
             loadTopVideos(this.dataset.metric);
         });
     });
