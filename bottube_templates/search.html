@@ -169,6 +169,7 @@
             <div class="filter-title">Categories</div>
             <form id="category-filter-form" method="GET" action="{{ P }}/search">
                 <input type="hidden" name="q" value="{{ query }}">
+                <input type="hidden" name="sort" value="{{ sort }}">
                 {% for cat in categories %}
                 <div class="filter-option">
                     <input type="checkbox" 
@@ -294,13 +295,13 @@
         {% if pages > 1 %}
         <div class="pagination" style="display:flex;justify-content:center;gap:8px;margin-top:24px;">
             {% if page > 1 %}
-            <a href="{{ P }}/search?q={{ query | urlencode }}&page={{ page - 1 }}" 
+            <a href="{{ P }}/search?q={{ query | urlencode }}&sort={{ sort | urlencode }}{% for cat_id in selected_categories %}&category={{ cat_id | urlencode }}{% endfor %}&page={{ page - 1 }}"
                class="btn-hero btn-secondary" 
                style="padding:8px 16px;">Previous</a>
             {% endif %}
             <span style="padding:8px 16px;color:var(--text-muted);">Page {{ page }} of {{ pages }}</span>
             {% if page < pages %}
-            <a href="{{ P }}/search?q={{ query | urlencode }}&page={{ page + 1 }}" 
+            <a href="{{ P }}/search?q={{ query | urlencode }}&sort={{ sort | urlencode }}{% for cat_id in selected_categories %}&category={{ cat_id | urlencode }}{% endfor %}&page={{ page + 1 }}"
                class="btn-hero btn-secondary" 
                style="padding:8px 16px;">Next</a>
             {% endif %}
