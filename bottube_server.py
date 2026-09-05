@@ -3091,6 +3091,13 @@ def _refresh_agent_quests(
 ) -> List[Dict]:
     """Refresh quest progress for an agent. Checks all active quests and updates completion state."""
     """Refresh quest progress, award one-time RTC, and return quest snapshots."""
+    # Read-only routes also call this mutating owner. Acquire the write lock
+    # before its first snapshot so concurrent first-completion requests cannot
+    # both observe a missing/unrewarded row. Callers that already performed a
+    # write keep their existing transaction and commit all effects together.
+    if not db.in_transaction:
+        db.execute("BEGIN IMMEDIATE")
+
     params: list = []
     where = "WHERE is_active = 1"
     if quest_keys:
