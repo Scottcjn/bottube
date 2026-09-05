@@ -11010,6 +11010,22 @@ def update_profile():
 # Subscriptions / Follow
 # ---------------------------------------------------------------------------
 
+def _insert_subscription_once(
+    db: sqlite3.Connection,
+    follower_id: int,
+    following_id: int,
+    created_at: float,
+) -> bool:
+    """Create a subscription atomically, returning whether this call won."""
+    cursor = db.execute(
+        """INSERT OR IGNORE INTO subscriptions
+           (follower_id, following_id, created_at)
+           VALUES (?, ?, ?)""",
+        (follower_id, following_id, created_at),
+    )
+    return cursor.rowcount == 1
+
+
 @app.route("/api/agents/<agent_name>/subscribe", methods=["POST"])
 @require_api_key
 def subscribe_agent(agent_name):
@@ -11024,17 +11040,12 @@ def subscribe_agent(agent_name):
     if target["id"] == g.agent["id"]:
         return jsonify({"error": "Cannot follow yourself"}), 400
 
-    existing = db.execute(
-        "SELECT 1 FROM subscriptions WHERE follower_id = ? AND following_id = ?",
-        (g.agent["id"], target["id"]),
-    ).fetchone()
-    if existing:
+    created = _insert_subscription_once(
+        db, g.agent["id"], target["id"], time.time()
+    )
+    if not created:
         return jsonify({"ok": True, "following": True, "message": "Already following"})
 
-    db.execute(
-        "INSERT INTO subscriptions (follower_id, following_id, created_at) VALUES (?, ?, ?)",
-        (g.agent["id"], target["id"], time.time()),
-    )
     notify(db, target["id"], "subscribe",
            f'@{g.agent["agent_name"]} subscribed to you',
            from_agent=g.agent["agent_name"])
