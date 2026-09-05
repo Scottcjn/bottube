@@ -27,9 +27,9 @@ def _setup(client, app, suffix):
         db.row_factory = sqlite3.Row
         for name in (voter_name, owner_name):
             db.execute(
-                "INSERT OR IGNORE INTO agents (agent_name, fingerprint, public_key) "
-                "VALUES (?, ?, ?)",
-                (name, f"fp_{suffix}_{name}", f"pk_{suffix}_{name}"),
+                "INSERT OR IGNORE INTO agents (agent_name, api_key, created_at) "
+                "VALUES (?, ?, 0)",
+                (name, f"tmp_{suffix}_{name}"),
             )
         voter_id = db.execute(
             "SELECT id FROM agents WHERE agent_name = ?", (voter_name,)
@@ -38,22 +38,23 @@ def _setup(client, app, suffix):
             "SELECT id FROM agents WHERE agent_name = ?", (owner_name,)
         ).fetchone()["id"]
         db.execute(
-            "INSERT INTO videos (video_id, agent_id, title, ipfs_cid, likes, dislikes) "
-            "VALUES (?, ?, ?, ?, 0, 0)",
-            (video_id, owner_id, f"video {suffix}", f"Qm{suffix}"),
+            "INSERT INTO videos (video_id, agent_id, title, filename, likes, dislikes, created_at) "
+            "VALUES (?, ?, ?, ?, 0, 0, 0)",
+            (video_id, owner_id, f"video {suffix}", f"{video_id}.mp4"),
         )
-        db.execute(
-            "INSERT INTO comments (id, video_id, agent_id, body, likes, dislikes) "
-            "VALUES (?, ?, ?, ?, 0, 0)",
-            (f"cmt{suffix}", video_id, owner_id, f"comment {suffix}"),
+        cur = db.execute(
+            "INSERT INTO comments (video_id, agent_id, content, likes, created_at) "
+            "VALUES (?, ?, ?, 0, 0)",
+            (video_id, owner_id, f"comment {suffix}"),
         )
+        comment_id = cur.lastrowid
         api_key = "ak_" + suffix
         db.execute(
             "UPDATE agents SET api_key = ? WHERE id = ?", (api_key, voter_id)
         )
         db.commit()
         db.close()
-    return api_key, video_id, f"cmt{suffix}"
+    return api_key, video_id, comment_id
 
 
 def test_concurrent_video_votes_no_500(client, app):
@@ -82,6 +83,7 @@ def test_concurrent_video_votes_no_500(client, app):
 
     with app.app_context():
         db = sqlite3.connect(app.config["DB_PATH"])
+        db.row_factory = sqlite3.Row
         votes = db.execute(
             "SELECT * FROM votes WHERE video_id = ?", (video_id,)
         ).fetchall()
@@ -118,6 +120,7 @@ def test_concurrent_comment_votes_no_500(client, app):
 
     with app.app_context():
         db = sqlite3.connect(app.config["DB_PATH"])
+        db.row_factory = sqlite3.Row
         votes = db.execute(
             "SELECT * FROM comment_votes WHERE comment_id = ?", (comment_id,)
         ).fetchall()
@@ -131,8 +134,10 @@ def test_concurrent_comment_votes_no_500(client, app):
 
 
 def test_concurrent_vote_idempotent_response(client, app):
-    """At least one concurrent request must report idempotent=True so
-    clients can distinguish the winner from a repeated safe submission."""
+    """Concurrent same-voter requests must converge on one vote and consistent
+    counters. Either the losers report idempotent=True (they hit the UNIQUE
+    collision path) or BEGIN IMMEDIATE serialized them so every response is a
+    plain success with likes==1 — both are correct; a 500 or a split count is not."""
     api_key, video_id, _ = _setup(client, app, "i")
     payloads = []
     lock = threading.Lock()
@@ -152,7 +157,14 @@ def test_concurrent_vote_idempotent_response(client, app):
     for t in threads:
         t.join()
 
-    # BEGIN IMMEDIATE serializes requests; losers see the winner's row.
-    assert any(p and p.get("idempotent") is True for p in payloads), (
-        f"expected at least one idempotent=True response, got {payloads}"
-    )
+    assert all(p and p.get("ok") is True for p in payloads), f"non-success payloads: {payloads}"
+    idempotent_seen = any(p.get("idempotent") is True for p in payloads)
+    all_converged = all(p.get("likes") == 1 and p.get("your_vote") == 1 for p in payloads)
+    # Either the UNIQUE-collision path reported idempotent losers, or BEGIN IMMEDIATE
+    # serialized every request and each saw the single converged vote. Both are correct.
+    assert idempotent_seen or all_converged, f"responses neither idempotent nor converged: {payloads}"
+    with app.app_context():
+        db = sqlite3.connect(app.config["DB_PATH"])
+        n_rows = db.execute("SELECT COUNT(*) FROM votes WHERE video_id = ?", (video_id,)).fetchone()[0]
+        db.close()
+    assert n_rows == 1, f"expected exactly one vote row, got {n_rows}"

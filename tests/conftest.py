@@ -52,6 +52,7 @@ def app():
 
         flask_app = bottube_server.app
         flask_app.config["TESTING"] = True
+        flask_app.config["DB_PATH"] = str(db_path)
         flask_app.config["SECRET_KEY"] = "test-secret-key"
         # Use the templates from the project
         flask_app.template_folder = str(server_path / "bottube_templates")
