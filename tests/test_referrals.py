@@ -19,6 +19,12 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the hardcoded production DB path to the test bootstrap path.
+
+    Import-time code opens `/root/bottube/bottube.db` before the `client`
+    fixture can monkeypatch `DB_PATH`, so without this shim collecting this
+    module would touch production data.
+    """
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +39,12 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Force paypal_packages' schema init onto a clean test bootstrap DB.
+
+    Removes any stale bootstrap file first so a prior interrupted run
+    can't leave referral/milestone rows behind that would inflate this
+    run's invited/activated counts.
+    """
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     Path(bootstrap_path).unlink(missing_ok=True)
@@ -48,6 +60,12 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Yield a Flask test client on an isolated DB with a fixed admin key.
+
+    Pins `ADMIN_KEY` so the admin-review/export tests can authenticate
+    without depending on whatever key the server module loaded from the
+    environment.
+    """
     db_path = tmp_path / "bottube_referrals.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +77,12 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Insert a minimal agent row directly, bypassing signup/registration.
+
+    Used to seed the referrer -- referred accounts are created through the
+    real `/signup`/`/api/register` endpoints below, so the referral code
+    itself gets validated the way a live invite would exercise it.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +98,13 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _insert_video_and_mark(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Seed a video and run it through the referral first-upload hooks.
+
+    A referred account only counts as activated once it uploads, so this
+    calls the same `_referral_mark_first_upload`/`_referral_refresh_invite_state`
+    hooks the real upload path calls, rather than flipping an activation
+    flag directly and risking milestones that pass for the wrong reason.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -90,6 +121,13 @@ def _insert_video_and_mark(agent_id: int, video_id: str, *, created_at: float = 
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Fetch an agent's full row, asserting it exists.
+
+    Called right after signup/registration in every test below; a missing
+    row means account creation silently failed, and asserting here turns
+    that into an immediate, obvious failure instead of a confusing
+    `NoneType` error several lines further down.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -99,6 +137,12 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 @pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "201"])
 def test_referral_leaderboard_rejects_invalid_limit(client, limit):
+    """Non-integer, zero, negative, and out-of-range `limit` values must all 400.
+
+    Covers the boundary just past the valid range (`"201"`) alongside
+    clearly malformed input (`"abc"`, `"1.5"`), so an off-by-one in the
+    upper-bound check can't slip through as a passing edge case.
+    """
     resp = client.get(f"/api/referrals/leaderboard?limit={limit}")
 
     assert resp.status_code == 400
@@ -108,6 +152,12 @@ def test_referral_leaderboard_rejects_invalid_limit(client, limit):
 
 @pytest.mark.parametrize("limit", [None, "1", "200"])
 def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit):
+    """No `limit`, and both ends of the valid range (1 and 200), must succeed.
+
+    Paired with the rejection test above so the boundary is proven from
+    both sides: 200 must pass here while 201 fails there, otherwise the
+    limit check's edge could be off by one in either direction unnoticed.
+    """
     path = "/api/referrals/leaderboard"
     if limit is not None:
         path = f"{path}?limit={limit}"
@@ -121,6 +171,14 @@ def test_referral_leaderboard_accepts_default_and_boundary_limits(client, limit)
 
 
 def test_referral_dashboard_tracks_human_and_agent_funnels(client):
+    """One referrer, one human + one agent invite: milestones must count both tracks.
+
+    Drives a full human signup and a full agent registration through the
+    same referral code, then checks the referrer's summary counts each
+    track separately (`invited`) as well as combined milestone/pair totals
+    -- a bug that only tracked one funnel would halve these numbers
+    silently instead of erroring.
+    """
     referrer_id = _insert_agent("founder1337", "bottube_sk_founder", is_human=True)
 
     with client.session_transaction() as sess:
@@ -210,6 +268,14 @@ def test_referral_dashboard_tracks_human_and_agent_funnels(client):
 
 
 def test_referral_admin_review_and_export(client):
+    """Admin review and CSV-style export must reflect the same referral end to end.
+
+    Checks that the admin listing exposes verifiable evidence refs (the
+    actual video/wallet-settings URLs, not just booleans) and that
+    approving a referral there is what makes it show up as "approved" in
+    the export -- proving review and export share one source of truth
+    instead of drifting independently.
+    """
     referrer_id = _insert_agent("captainref", "bottube_sk_captain", is_human=True)
 
     with client.session_transaction() as sess:
@@ -264,6 +330,13 @@ def test_referral_admin_review_and_export(client):
 
 
 def test_referral_track_setting_blocks_wrong_funnel(client):
+    """A code locked to `allowed_track: "human"` must reject an agent registration.
+
+    Referrers can restrict their invite code to one track; this proves
+    that restriction is enforced server-side at `/api/register`, not just
+    surfaced as a UI hint, so a locked code can't be used to onboard the
+    wrong kind of account.
+    """
     referrer_id = _insert_agent("humancode", "bottube_sk_humancode")
 
     resp = client.post(

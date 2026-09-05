@@ -19,6 +19,12 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the hardcoded production DB path to the test bootstrap path.
+
+    Import-time code opens `/root/bottube/bottube.db` before the `client`
+    fixture can monkeypatch `DB_PATH`, so without this shim collecting this
+    module would touch production badge data.
+    """
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +39,12 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Force paypal_packages' schema init onto a clean test bootstrap DB.
+
+    Removes any stale bootstrap file first so leftover badge/referral rows
+    from a prior interrupted run can't inflate this run's candidate or
+    cohort-number assertions.
+    """
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     Path(bootstrap_path).unlink(missing_ok=True)
@@ -48,6 +60,12 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Yield a Flask test client on an isolated DB with a fixed admin key.
+
+    Pins `ADMIN_KEY` so badge assign/remove/candidates calls can
+    authenticate without depending on whatever key the server module
+    loaded from the environment.
+    """
     db_path = tmp_path / "bottube_badges.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +77,12 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Insert a minimal agent row directly, bypassing signup/registration.
+
+    Used for the creator/referrer seed in each test; referred accounts are
+    still created through the real signup/register endpoints below, where
+    the badge-candidate logic actually needs to observe them.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +98,12 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Fetch an agent's full row, asserting it exists.
+
+    Called right after signup/registration; a missing row means account
+    creation silently failed, so asserting here turns that into an
+    immediate failure instead of a confusing `NoneType` error later.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -82,6 +112,14 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 
 def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Seed a video and drive it through the referral first-upload hooks.
+
+    Badge-candidate eligibility is derived from referral activation state,
+    which only flips on a real first upload -- calling the production
+    `_referral_mark_first_upload`/`_referral_refresh_invite_state` hooks
+    here (instead of writing activation flags directly) keeps the test
+    honest about what actually earns a candidate their badge.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -98,6 +136,12 @@ def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> N
 
 
 def _create_referral_code(client, referrer_id: int) -> str:
+    """Log in as `referrer_id` via the session and fetch their referral code.
+
+    Writes straight into the Flask session rather than going through the
+    login form -- what's under test is badge-candidate logic, not
+    authentication, so this keeps the fixture setup fast and focused.
+    """
     with client.session_transaction() as sess:
         sess["user_id"] = referrer_id
         sess["csrf_token"] = "test-csrf"
@@ -107,6 +151,13 @@ def _create_referral_code(client, referrer_id: int) -> str:
 
 
 def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
+    """Sign up a human agent through `code`, then complete profile/wallet/upload.
+
+    Goes through the real `/signup` form so the referral code is actually
+    consumed and validated, then finishes profile, wallet, and first-upload
+    steps so the account reaches the fully-activated state badge-candidate
+    scanning looks for.
+    """
     with client.session_transaction() as sess:
         sess.pop("user_id", None)
         sess["csrf_token"] = "test-csrf"
@@ -144,6 +195,12 @@ def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
 
 
 def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
+    """Register an AI agent through `code`, then complete wallet/upload.
+
+    Mirrors `_activate_referred_human` for the agent track (`/api/register`
+    instead of `/signup`) so agent-cohort badge candidates are driven
+    through the same code path a real referred agent would use.
+    """
     reg_resp = client.post(
         "/api/register",
         json={
@@ -167,6 +224,15 @@ def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
 
 
 def test_badge_assignment_renders_on_public_surfaces_and_can_be_removed(client):
+    """A badge assigned via the admin API must appear everywhere it's shown, and clear everywhere on removal.
+
+    Walks the full surface area a founding badge touches -- the admin
+    listing, the agent's own API record, their public channel page, a
+    watch page for their video, and their own dashboard -- then removes
+    it and re-checks the agent API. A badge that renders on some surfaces
+    but not others (or that lingers after removal) would only be caught
+    by exercising all of them in one pass like this.
+    """
     creator_id = _insert_agent("founderhuman", "bottube_sk_founderhuman", is_human=True)
     _insert_video(creator_id, "founderwatch1")
 
@@ -231,6 +297,15 @@ def test_badge_assignment_renders_on_public_surfaces_and_can_be_removed(client):
 
 
 def test_badge_candidates_follow_referral_activation_and_scout_thresholds(client):
+    """The candidates scan must surface both per-invitee and scout-bonus badges correctly.
+
+    One referrer activates 3 humans and 1 agent: this checks each
+    activated invitee gets the right badge with the right cohort/campaign
+    metadata, AND that the referrer's own "founding scout" candidate
+    reports the correct pair count and which bonus thresholds it crossed
+    -- a miscount either way would misattribute credit for founding-cohort
+    slots.
+    """
     referrer_id = _insert_agent("captainleet", "bottube_sk_captainleet", is_human=True)
     code = _create_referral_code(client, referrer_id)
 

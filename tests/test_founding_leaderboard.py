@@ -19,6 +19,13 @@ _orig_sqlite_connect = sqlite3.connect
 
 
 def _bootstrap_sqlite_connect(path, *args, **kwargs):
+    """Redirect the hardcoded production DB path to the test bootstrap path.
+
+    Import-time code in `paypal_packages`/`bottube_server` opens the real
+    `/root/bottube/bottube.db` before the `client` fixture can monkeypatch
+    `DB_PATH`, so without this shim just collecting this module would touch
+    production data.
+    """
     if str(path) == "/root/bottube/bottube.db":
         path = os.environ["BOTTUBE_DB_PATH"]
     return _orig_sqlite_connect(path, *args, **kwargs)
@@ -33,6 +40,12 @@ _orig_init_store_db = paypal_packages.init_store_db
 
 
 def _test_init_store_db(db_path=None):
+    """Force paypal_packages' schema init onto a clean test bootstrap DB.
+
+    Deletes any stale bootstrap file first so leftover state from a prior
+    interrupted run can't leak founding-cohort/badge rows into this run's
+    slot-count assertions.
+    """
     bootstrap_path = os.environ["BOTTUBE_DB_PATH"]
     Path(bootstrap_path).parent.mkdir(parents=True, exist_ok=True)
     Path(bootstrap_path).unlink(missing_ok=True)
@@ -48,6 +61,12 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    """Yield a Flask test client on an isolated DB with a fixed admin key.
+
+    Pins `ADMIN_KEY` to a known value so `_assign_badge` can authenticate
+    without depending on whatever admin key the server module happened to
+    load from the environment.
+    """
     db_path = tmp_path / "bottube_founding.db"
     monkeypatch.setattr(bottube_server, "DB_PATH", db_path, raising=False)
     monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test-admin", raising=False)
@@ -59,6 +78,13 @@ def client(monkeypatch, tmp_path):
 
 
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
+    """Insert a minimal agent row directly, bypassing signup/registration.
+
+    Used only for the referrer seed: the leaderboard tests need a referrer
+    that already exists before a referral code can be minted, and going
+    through the real signup/register flow here would be redundant with the
+    referred-activation helpers below.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         cur = db.execute(
@@ -74,6 +100,14 @@ def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> i
 
 
 def _lookup_agent(agent_name: str) -> sqlite3.Row:
+    """Fetch an agent's full row, asserting it exists.
+
+    The assertion here is deliberate: callers use this right after
+    signup/registration, so a missing row means account creation silently
+    failed and every downstream assertion in the test would otherwise
+    fail with a confusing `NoneType` error instead of pointing at the
+    actual cause.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
@@ -82,6 +116,15 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
 
 
 def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> None:
+    """Seed a video and drive it through the referral-activation hooks.
+
+    A referred signup alone does not count as "activated" for the
+    leaderboard -- the real server only flips that state once the referred
+    agent uploads their first video, so this helper calls the same
+    `_referral_mark_first_upload`/`_referral_refresh_invite_state` hooks
+    the production upload path calls, instead of writing activation flags
+    directly and risking a test that passes for reasons the app doesn't.
+    """
     with bottube_server.app.app_context():
         db = bottube_server.get_db()
         db.execute(
@@ -98,6 +141,13 @@ def _insert_video(agent_id: int, video_id: str, *, created_at: float = 5.0) -> N
 
 
 def _create_referral_code(client, referrer_id: int) -> str:
+    """Log in as `referrer_id` via the session and fetch their referral code.
+
+    Bypasses the login form entirely by writing straight into the Flask
+    session -- what's under test here is the leaderboard/referral logic,
+    not authentication, so a direct session write keeps the test focused
+    and fast instead of re-proving login works on every referral test.
+    """
     with client.session_transaction() as sess:
         sess["user_id"] = referrer_id
         sess["csrf_token"] = "test-csrf"
@@ -107,6 +157,13 @@ def _create_referral_code(client, referrer_id: int) -> str:
 
 
 def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
+    """Sign up a human agent through `code`, then complete profile/wallet/upload.
+
+    Goes through the real `/signup` form (not a direct DB insert) so the
+    referral code is actually consumed and validated the way a live invite
+    link would be, then finishes profile, wallet and first-upload steps so
+    the account reaches the same "activated" state the leaderboard counts.
+    """
     with client.session_transaction() as sess:
         sess.pop("user_id", None)
         sess["csrf_token"] = "test-csrf"
@@ -144,6 +201,13 @@ def _activate_referred_human(client, code: str, username: str) -> sqlite3.Row:
 
 
 def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
+    """Register an AI agent through `code`, then complete wallet/upload.
+
+    Mirrors `_activate_referred_human` for the agent track (`/api/register`
+    instead of `/signup`, no bio/avatar PATCH step since registration
+    already takes those fields) so agent-cohort activation is driven
+    through the same code path a real referred agent would use.
+    """
     reg_resp = client.post(
         "/api/register",
         json={
@@ -167,6 +231,12 @@ def _activate_referred_agent(client, code: str, agent_name: str) -> sqlite3.Row:
 
 
 def _assign_badge(client, agent_name: str, badge_key: str, *, cohort_number: int = 0):
+    """Award a founding badge to `agent_name` via the admin endpoint and return it.
+
+    Uses the real admin API (with the fixture's fixed `X-Admin-Key`) rather
+    than inserting a badge row directly, so these tests also cover that the
+    admin-assign endpoint itself works, not just the leaderboard read side.
+    """
     resp = client.post(
         "/api/admin/badges/assign",
         headers={"X-Admin-Key": "test-admin"},
@@ -181,6 +251,13 @@ def _assign_badge(client, agent_name: str, badge_key: str, *, cohort_number: int
 
 
 def test_founding_leaderboard_api_splits_tracks_and_surfaces_badges(client):
+    """The leaderboard API must keep human and agent referral tracks separate.
+
+    One referrer sponsors both a human and an agent, so this also proves
+    the two cohorts don't cross-contaminate each other's slot counts,
+    badge status, or bonus-progress thresholds -- a shared counter bug
+    would silently under- or over-report remaining founding slots.
+    """
     referrer_id = _insert_agent("captainleet", "bottube_sk_captainleet", is_human=True)
     code = _create_referral_code(client, referrer_id)
 
@@ -223,6 +300,13 @@ def test_founding_leaderboard_api_splits_tracks_and_surfaces_badges(client):
 
 
 def test_public_founding_page_renders_required_sections(client):
+    """The public `/founding` HTML page must render both leaderboards and named entries.
+
+    Checks for both the section headings and the actual activated
+    usernames in the rendered HTML, so a regression that keeps the page
+    structure but silently drops the server-rendered data (e.g. an empty
+    template context) would still fail this test.
+    """
     referrer_id = _insert_agent("humanlead", "bottube_sk_humanlead", is_human=True)
     code = _create_referral_code(client, referrer_id)
 
