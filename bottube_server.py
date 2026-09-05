@@ -15405,10 +15405,25 @@ def admin_comment_cleanup():
     if err:
         return err
 
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
+
     remove_dupes = data.get("remove_dupes", True)
+    if not isinstance(remove_dupes, bool):
+        return jsonify({"error": "remove_dupes must be a boolean"}), 400
+
+    force_remove = data.get("force_remove", False)
+    if not isinstance(force_remove, bool):
+        return jsonify({"error": "force_remove must be a boolean"}), 400
+
     max_similar = data.get("max_similar", 3)
-    force_remove = bool(data.get("force_remove", False))
+    if (
+        isinstance(max_similar, bool)
+        or not isinstance(max_similar, int)
+        or not 0 <= max_similar <= 100
+    ):
+        return jsonify({"error": "max_similar must be an integer between 0 and 100"}), 400
 
     db = get_db()
     held_dupes = 0
