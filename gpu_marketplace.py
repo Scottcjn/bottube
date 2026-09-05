@@ -145,6 +145,36 @@ def init_gpu_db(db_path: str = None):
 # HELPERS
 # ---------------------------------------------------------------------------
 
+def _claim_gpu_job_transaction(db, provider_id: str, agent_id: int, job_id: str, now: int) -> str:
+    """Atomically reserve one pending job for one non-busy provider."""
+    claimed = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'claimed', provider_id = ?, claimed_at = ?
+        WHERE id = ? AND status = 'pending'
+        """,
+        (provider_id, now, job_id),
+    )
+    if int(getattr(claimed, "rowcount", 0) or 0) <= 0:
+        db.rollback()
+        return "job_unavailable"
+
+    reserved = db.execute(
+        """
+        UPDATE gpu_providers
+        SET status = 'busy'
+        WHERE id = ? AND agent_id = ? AND COALESCE(status, 'offline') != 'busy'
+        """,
+        (provider_id, agent_id),
+    )
+    if int(getattr(reserved, "rowcount", 0) or 0) <= 0:
+        # Release the job transition as part of the same transaction.
+        db.rollback()
+        return "provider_busy"
+
+    db.commit()
+    return "claimed"
+
 def get_db():
     """Get database connection from Flask g context."""
     if not hasattr(g, 'db') or g.db is None:
@@ -541,15 +571,13 @@ def claim_job():
     if jrow[0] != "pending":
         return jsonify({"error": f"Job not available (status: {jrow[0]})"}), 400
 
-    # Claim the job
+    # Claim the job and provider as one compare-and-set transaction.
     now = int(time.time())
-    db.execute("""
-        UPDATE gpu_jobs SET status = 'claimed', provider_id = ?, claimed_at = ? WHERE id = ?
-    """, (provider_id, now, job_id))
-    db.execute("""
-        UPDATE gpu_providers SET status = 'busy' WHERE id = ?
-    """, (provider_id,))
-    db.commit()
+    outcome = _claim_gpu_job_transaction(db, provider_id, int(agent["id"]), job_id, now)
+    if outcome == "job_unavailable":
+        return jsonify({"error": "Job was claimed by another provider"}), 409
+    if outcome == "provider_busy":
+        return jsonify({"error": "Provider became busy with another job"}), 409
 
     return jsonify({
         "ok": True,
