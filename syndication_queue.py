@@ -279,62 +279,83 @@ class SyndicationQueue:
     ) -> bool:
         """
         Update an item's state with validation.
-        
+
         Returns True if the transition was valid and successful.
+
+        The update is a compare-and-set: the source state read at the top of
+        this method is part of the WHERE clause, so only the worker that
+        observed the validated source state can commit. A competing worker
+        whose `processing -> completed` or `processing -> failed` transition
+        was issued from the same stale snapshot will fail the WHERE predicate
+        and the call returns False without overwriting the winner.
         """
         conn = self._get_connection()
-        
+
         # Get current state
         row = conn.execute(
             "SELECT state, retry_count, metadata FROM syndication_queue WHERE id = ?",
             (item_id,),
         ).fetchone()
-        
+
         if not row:
             conn.close()
             return False
-        
+
         current_state = QueueState(row["state"])
-        
+
         # Validate transition
         if new_state not in VALID_TRANSITIONS.get(current_state, set()):
             conn.close()
             return False
-        
+
         now = time.time()
         updates = ["state = ?", "updated_at = ?"]
         params = [new_state.value, now]
-        
+
         if new_state == QueueState.PROCESSING:
             updates.append("processed_at = ?")
             params.append(now)
-        
+
         if new_state in (QueueState.COMPLETED, QueueState.CANCELLED):
             updates.append("completed_at = ?")
             params.append(now)
-        
+
         if error_message:
             updates.append("error_message = ?")
             params.append(error_message)
-        
+
         if metadata is not None:
             updates.append("metadata = ?")
             params.append(json.dumps(metadata))
-        
+
         if new_state == QueueState.PENDING and current_state == QueueState.FAILED:
             # Reset retry count on retry
             updates.append("retry_count = ?")
             params.append(row["retry_count"] + 1)
-        
+
+        # Compare-and-set: only the writer that still observes the validated
+        # source state may commit.  This is what serializes two competing
+        # terminal transitions (e.g. completed vs failed) issued from the
+        # same stale `processing` snapshot.
         params.append(item_id)
-        
-        conn.execute(
-            f"UPDATE syndication_queue SET {', '.join(updates)} WHERE id = ?",
+        params.append(current_state.value)
+
+        cursor = conn.execute(
+            f"UPDATE syndication_queue SET {', '.join(updates)} "
+            f"WHERE id = ? AND state = ?",
             params,
         )
+        affected = cursor.rowcount
         conn.commit()
         conn.close()
-        
+
+        if affected == 0:
+            # Another worker won the race and moved this row past the
+            # source state we validated.  Do NOT report success: the
+            # documented queue state machine requires the loser to return
+            # False so the caller can decide whether to retry or give up.
+            return False
+
         return True
 
     def mark_processing(self, item_id: int) -> bool:
@@ -375,21 +396,42 @@ class SyndicationQueue:
         if not self.update_state(item_id, QueueState.FAILED, error_message=error_message):
             return False
 
-        # If retry is enabled and retries remain, transition back to pending
+        # If retry is enabled and retries remain, transition back to pending.
+        # Compare-and-set on the just-written `failed` state so a competing
+        # worker that won the original `processing -> terminal` race cannot
+        # silently mutate a row that no longer belongs to this request.
         if auto_retry and retry_count < max_retries:
             now = time.time()
             conn = self._get_connection()
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE syndication_queue
                 SET state = 'pending', updated_at = ?, retry_count = retry_count + 1
-                WHERE id = ?
+                WHERE id = ? AND state = 'failed'
                 """,
                 (now, item_id),
             )
+            retried = cursor.rowcount > 0
             conn.commit()
             conn.close()
-            return True
+            # Surface the retry result: only return True if the failed->pending
+            # transition actually committed.  The earlier processing->failed
+            # CAS already returned True only when we were the writer, so
+            # reaching this branch with retried=False means another caller
+            # slipped in between the two writes (extremely rare, but possible
+            # if mark_failed is called twice on the same row from the same
+            # worker without an intervening dequeue).  Preserve the historical
+            # True-return contract when the row is already in a non-failed
+            # terminal state so legacy callers aren't surprised.
+            if retried:
+                return True
+            conn = self._get_connection()
+            cur = conn.execute(
+                "SELECT state FROM syndication_queue WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+            conn.close()
+            return bool(cur and cur["state"] == "pending")
 
         return True
 
