@@ -133,6 +133,20 @@ def init_base_wrtc_tables(db):
     db.commit()
 
 
+def _claim_base_withdrawal(db, withdrawal_id):
+    """Atomically claim one queued withdrawal before any on-chain side effect."""
+    cursor = db.execute(
+        """
+        UPDATE base_wrtc_withdrawals
+        SET status = 'processing'
+        WHERE id = ? AND status = 'pending'
+        """,
+        (withdrawal_id,),
+    )
+    db.commit()
+    return cursor.rowcount == 1
+
+
 def _json_object_body():
     """Return request JSON when it is an object, or a 400 response tuple."""
     data = request.get_json(silent=True)
@@ -298,7 +312,8 @@ def base_bridge_info():
     wd = db.execute(
         """
         SELECT COUNT(*) AS cnt, COALESCE(SUM(amount_wrtc), 0) AS total
-        FROM base_wrtc_withdrawals WHERE status IN ('pending', 'processing', 'sent', 'completed')
+        FROM base_wrtc_withdrawals
+        WHERE status IN ('pending', 'processing', 'uncertain', 'sent', 'completed')
         """
     ).fetchone()
 
@@ -649,13 +664,10 @@ def base_bridge_process_withdrawals():
     results = []
     for wd in pending:
         wd = dict(wd)
+        if not _claim_base_withdrawal(db, wd["id"]):
+            continue
+        send_attempted = False
         try:
-            db.execute(
-                "UPDATE base_wrtc_withdrawals SET status = 'processing' WHERE id = ?",
-                (wd["id"],),
-            )
-            db.commit()
-
             amount_raw = int(wd["net_wrtc"] * (10 ** WRTC_DECIMALS))
             to_addr = Web3.to_checksum_address(wd["to_address"])
 
@@ -670,6 +682,7 @@ def base_bridge_process_withdrawals():
                 }
             )
             signed = account.sign_transaction(tx)
+            send_attempted = True
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
             receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
 
@@ -678,7 +691,7 @@ def base_bridge_process_withdrawals():
                     """
                     UPDATE base_wrtc_withdrawals
                     SET status = 'completed', tx_hash = ?, completed_at = ?
-                    WHERE id = ?
+                    WHERE id = ? AND status = 'processing'
                     """,
                     (receipt.transactionHash.hex(), time.time(), wd["id"]),
                 )
@@ -691,7 +704,8 @@ def base_bridge_process_withdrawals():
                 )
             else:
                 db.execute(
-                    "UPDATE base_wrtc_withdrawals SET status = 'failed' WHERE id = ?",
+                    "UPDATE base_wrtc_withdrawals SET status = 'failed' "
+                    "WHERE id = ? AND status = 'processing'",
                     (wd["id"],),
                 )
                 results.append(
@@ -699,12 +713,20 @@ def base_bridge_process_withdrawals():
                 )
 
         except Exception as exc:
+            # Once submission was attempted, a transport timeout cannot prove the
+            # transaction was not accepted by the node.  Never requeue that row.
+            terminal_status = "uncertain" if send_attempted else "failed"
             db.execute(
-                "UPDATE base_wrtc_withdrawals SET status = 'failed' WHERE id = ?",
-                (wd["id"],),
+                "UPDATE base_wrtc_withdrawals SET status = ? "
+                "WHERE id = ? AND status = 'processing'",
+                (terminal_status, wd["id"]),
             )
             results.append(
-                {"withdrawal_id": wd["withdrawal_id"], "status": "failed", "reason": str(exc)}
+                {
+                    "withdrawal_id": wd["withdrawal_id"],
+                    "status": terminal_status,
+                    "reason": str(exc),
+                }
             )
 
         db.commit()

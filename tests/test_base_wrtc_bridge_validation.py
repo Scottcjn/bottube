@@ -160,3 +160,76 @@ def test_rejected_base_bridge_withdrawal_does_not_queue_or_debit(client):
 
     assert queued == 0
     assert balance == 1000.0
+
+
+def test_base_withdrawal_claim_is_atomic(client):
+    with client.application.app_context():
+        import base_wrtc_bridge_blueprint as bridge
+
+        db = bridge.get_db()
+        bridge.init_base_wrtc_tables(db)
+        db.execute(
+            """
+            INSERT INTO base_wrtc_withdrawals
+                (withdrawal_id, agent_id, agent_name, to_address, amount_wrtc,
+                 fee_wrtc, net_wrtc, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                "base_claim_test",
+                1,
+                "bridgeuser",
+                "0x2222222222222222222222222222222222222222",
+                10.0,
+                0.5,
+                9.5,
+                1.0,
+            ),
+        )
+        db.commit()
+        withdrawal_id = db.execute(
+            "SELECT id FROM base_wrtc_withdrawals WHERE withdrawal_id = ?",
+            ("base_claim_test",),
+        ).fetchone()[0]
+
+        assert bridge._claim_base_withdrawal(db, withdrawal_id) is True
+        assert bridge._claim_base_withdrawal(db, withdrawal_id) is False
+        status = db.execute(
+            "SELECT status FROM base_wrtc_withdrawals WHERE id = ?",
+            (withdrawal_id,),
+        ).fetchone()[0]
+
+    assert status == "processing"
+
+
+def test_uncertain_base_withdrawal_remains_in_bridge_liabilities(client):
+    with client.application.app_context():
+        import base_wrtc_bridge_blueprint as bridge
+
+        db = bridge.get_db()
+        bridge.init_base_wrtc_tables(db)
+        db.execute(
+            """
+            INSERT INTO base_wrtc_withdrawals
+                (withdrawal_id, agent_id, agent_name, to_address, amount_wrtc,
+                 fee_wrtc, net_wrtc, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'uncertain', ?)
+            """,
+            (
+                "base_uncertain_test",
+                1,
+                "bridgeuser",
+                "0x2222222222222222222222222222222222222222",
+                10.0,
+                0.5,
+                9.5,
+                1.0,
+            ),
+        )
+        db.commit()
+
+    response = client.get("/api/base-bridge/info")
+
+    assert response.status_code == 200
+    assert response.get_json()["stats"]["withdrawals_count"] == 1
+    assert response.get_json()["stats"]["total_withdrawn_wrtc"] == 10.0
