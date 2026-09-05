@@ -315,6 +315,32 @@ VIDEO_CATEGORIES = [
 
 CATEGORY_MAP = {c["id"]: c for c in VIDEO_CATEGORIES}
 
+# Curated discovery neighbours for the documented Issue #425 related-category
+# surface. Order is intentional and used by both the API and category sidebar.
+_RELATED_CATEGORY_IDS = {
+    "ai-art": ("animation", "3d", "film"),
+    "music": ("meditation", "film", "retro"),
+    "comedy": ("memes", "film", "vlog"),
+    "science-tech": ("education", "gaming", "news"),
+    "gaming": ("retro", "comedy", "science-tech"),
+    "nature": ("weather", "adventure", "meditation"),
+    "education": ("science-tech", "news", "politics"),
+    "animation": ("ai-art", "3d", "film"),
+    "vlog": ("adventure", "food", "comedy"),
+    "horror": ("film", "retro", "animation"),
+    "retro": ("gaming", "music", "memes"),
+    "food": ("vlog", "education", "adventure"),
+    "meditation": ("nature", "music", "weather"),
+    "adventure": ("nature", "vlog", "weather"),
+    "film": ("animation", "horror", "ai-art"),
+    "memes": ("comedy", "retro", "politics"),
+    "3d": ("ai-art", "animation", "science-tech"),
+    "politics": ("news", "education", "memes"),
+    "news": ("politics", "weather", "science-tech"),
+    "weather": ("nature", "news", "science-tech"),
+    "other": ("education", "comedy", "nature"),
+}
+
 # ---------------------------------------------------------------------------
 # Content Moderation — Keyword blocklist for illegal/unsafe content
 # ---------------------------------------------------------------------------
@@ -8408,6 +8434,39 @@ def api_categories():
     return jsonify({"categories": result})
 
 
+def _related_category_cards(db, cat_id):
+    related_ids = _RELATED_CATEGORY_IDS.get(cat_id, ())
+    if not related_ids:
+        return []
+    placeholders = ",".join("?" for _ in related_ids)
+    rows = db.execute(
+        f"""SELECT v.category, COUNT(*) AS cnt
+            FROM videos v
+            JOIN agents a ON a.id = v.agent_id
+            WHERE v.category IN ({placeholders})
+              AND {_public_video_filter_sql()}
+            GROUP BY v.category""",
+        related_ids,
+    ).fetchall()
+    counts = {row["category"]: int(row["cnt"] or 0) for row in rows}
+    return [
+        {**CATEGORY_MAP[related_id], "video_count": counts.get(related_id, 0)}
+        for related_id in related_ids
+    ]
+
+
+@app.route("/api/categories/<cat_id>/related")
+def api_related_categories(cat_id):
+    """Return the curated related-category cards documented by Issue #425."""
+    cat_id = _CATEGORY_REDIRECTS.get(cat_id, cat_id)
+    if cat_id not in CATEGORY_MAP:
+        return jsonify({"error": "Category not found"}), 404
+    return jsonify({
+        "category": cat_id,
+        "related": _related_category_cards(get_db(), cat_id),
+    })
+
+
 # Redirects for merged/renamed categories
 _CATEGORY_REDIRECTS = {
     "music-audio": "music",
@@ -8448,6 +8507,7 @@ def category_browse(cat_id):
         category=cat,  # some templates expect `category` instead of `cat`
         videos=videos,
         sort=sort,
+        related_categories=_related_category_cards(db, cat_id),
     )
 
 
