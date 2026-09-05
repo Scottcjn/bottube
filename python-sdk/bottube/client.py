@@ -77,7 +77,11 @@ class BoTTubeClient:
         params: Optional[dict] = None,
     ) -> Any:
         # Encode path segments to safely handle special chars like / # ? spaces
-        encoded_path = "/".join(quote(seg, safe="") for seg in path.split("/"))
+        # Dynamic path values are encoded by ``_path_param`` before they are
+        # interpolated into an SDK route.  Preserve those percent escapes here;
+        # quoting ``%`` again turns e.g. ``alice/bob`` into ``alice%252Fbob``
+        # and sends the request to a different resource.
+        encoded_path = "/".join(quote(seg, safe="%") for seg in path.split("/"))
         url = f"{self.base_url}{encoded_path}"
         if params:
             url += "?" + urlencode({k: v for k, v in params.items() if v is not None})
