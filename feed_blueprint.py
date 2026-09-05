@@ -9,7 +9,7 @@ from email.utils import format_datetime
 from urllib.parse import urlencode
 
 import requests
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, has_request_context, jsonify, request
 
 feed_bp = Blueprint("feed", __name__)
 
@@ -146,8 +146,12 @@ def _fetch_videos(agent=None, category=None, limit=20):
         params["category"] = category
 
     try:
-        # Use current request host when available to fix feed generation in production
-        base_url = _base_api_url(host=request.host)
+        # A configured API base is also used by background jobs, where Flask's
+        # request proxy cannot be dereferenced.  Only consult the request host
+        # when a real request context exists; _base_api_url keeps the localhost
+        # fallback for context-free callers without an explicit override.
+        host = request.host if has_request_context() else None
+        base_url = _base_api_url(host=host)
         api_url = f"{base_url}/api/videos"
         res = requests.get(api_url, params=params, timeout=10)
         res.raise_for_status()
