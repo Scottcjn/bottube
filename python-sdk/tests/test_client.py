@@ -2,6 +2,8 @@
 """Unit tests for the BoTTube Python SDK."""
 
 import json
+import os
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 from io import BytesIO
@@ -60,6 +62,42 @@ class TestBoTTubeClient(unittest.TestCase):
         self.assertEqual(err.status_code, 404)
         self.assertEqual(err.error, "Not found")
         self.assertIn("404", str(err))
+
+    @patch("bottube.client.urlopen")
+    def test_streaming_upload_keeps_request_body_lazy(self, mock_urlopen):
+        response = MagicMock()
+        response.read.return_value = b'{"video_id":"uploaded"}'
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+
+        captured = {}
+
+        def consume(request, timeout):
+            self.assertNotIsInstance(request.data, (bytes, bytearray))
+            parts = list(request.data)
+            captured["parts"] = parts
+            captured["content_length"] = int(request.get_header("Content-length"))
+            return response
+
+        mock_urlopen.side_effect = consume
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as upload:
+            upload.write(b"0123456789")
+            upload_path = upload.name
+
+        try:
+            result = self.client._streaming_upload(
+                "/api/upload", upload_path, {"title": "Chunked"}, chunk_size=3
+            )
+        finally:
+            os.unlink(upload_path)
+
+        body = b"".join(captured["parts"])
+        file_chunks = [part for part in captured["parts"] if part in {b"012", b"345", b"678", b"9"}]
+        self.assertEqual(file_chunks, [b"012", b"345", b"678", b"9"])
+        self.assertIn(b"0123456789", body)
+        self.assertEqual(captured["content_length"], len(body))
+        self.assertEqual(result, {"video_id": "uploaded"})
 
 
 if __name__ == "__main__":
