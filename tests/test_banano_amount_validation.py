@@ -141,10 +141,15 @@ def test_valid_ban_tip_still_records_sender_and_recipient_rows(ban_client):
     ]
 
 
-def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
+def test_ban_video_generation_reward_rejects_non_object_json(ban_client, monkeypatch):
+    monkeypatch.setattr(banano_blueprint, "ADMIN_KEY", "test-admin")
     before = _ban_transaction_count(ban_client.db_path)
 
-    response = ban_client.post("/ban/reward-video-gen", json=["not", "an", "object"])
+    response = ban_client.post(
+        "/ban/reward-video-gen",
+        json=["not", "an", "object"],
+        headers={"X-Admin-Key": "test-admin"},
+    )
 
     assert response.status_code == 400
     assert response.get_json()["error"] == "JSON object required"
@@ -152,7 +157,8 @@ def test_ban_video_generation_reward_rejects_non_object_json(ban_client):
 
 
 @pytest.mark.parametrize("field", ["agent_name", "video_id", "gen_method"])
-def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field):
+def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field, monkeypatch):
+    monkeypatch.setattr(banano_blueprint, "ADMIN_KEY", "test-admin")
     before = _ban_transaction_count(ban_client.db_path)
     payload = {
         "agent_name": "alice",
@@ -161,7 +167,9 @@ def test_ban_video_generation_reward_rejects_non_string_fields(ban_client, field
     }
     payload[field] = ["not", "a", "string"]
 
-    response = ban_client.post("/ban/reward-video-gen", json=payload)
+    response = ban_client.post(
+        "/ban/reward-video-gen", json=payload, headers={"X-Admin-Key": "test-admin"}
+    )
 
     assert response.status_code == 400
     assert response.get_json()["error"] == f"{field} must be a string"
@@ -176,10 +184,25 @@ def test_ban_transactions_rejects_non_positive_pagination(ban_client, query):
     assert response.get_json()["error"] == "Invalid pagination parameters"
 
 
-def test_valid_ban_video_generation_reward_still_records_reward(ban_client):
+def test_session_owner_cannot_self_attest_video_generation(ban_client):
+    before = _ban_transaction_count(ban_client.db_path)
+
+    response = ban_client.post(
+        "/ban/reward-video-gen",
+        json={"agent_name": "alice", "video_id": "video-1", "gen_method": "comfyui"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json() == {"error": "Admin key required"}
+    assert _ban_transaction_count(ban_client.db_path) == before
+
+
+def test_trusted_video_generation_reward_still_records_reward(ban_client, monkeypatch):
+    monkeypatch.setattr(banano_blueprint, "ADMIN_KEY", "test-admin")
     response = ban_client.post(
         "/ban/reward-video-gen",
         json={"agent_name": "alice", "video_id": "video-1", "gen_method": "text"},
+        headers={"X-Admin-Key": "test-admin"},
     )
 
     assert response.status_code == 200

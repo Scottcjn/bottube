@@ -1281,6 +1281,11 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
                 ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
             ),
         )
+        # Generation rewards are minted only from this trusted completion
+        # edge, using the method selected by the worker rather than caller
+        # supplied upload metadata.
+        from banano_blueprint import award_ban_video_gen
+        award_ban_video_gen(db, agent_id, video_id, gen_method)
         db.commit()
         db.close()
 

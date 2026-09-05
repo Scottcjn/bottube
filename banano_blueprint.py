@@ -669,15 +669,18 @@ def ban_reward_video_gen():
         "gen_method": "comfyui"  // text|gradient|particle|waveform|matrix|slideshow|comfyui|heygen
       }
 
-    Auth: Session cookie or admin key header.
+    Auth: Admin key header.  User-facing generation paths award internally
+    after their worker has produced and persisted a video; callers cannot
+    attest their own generation method.
     """
-    # Auth: either session or admin key
-    user_id = session.get("user_id")
+    # This is a privileged compatibility hook for trusted workers/operators.
+    # A session owner can prove that they own an uploaded video, but cannot
+    # prove that the platform generated it (or which cost tier produced it).
     admin_key = request.headers.get("X-Admin-Key", "")
     is_admin = _admin_ok(admin_key)
 
-    if not user_id and not is_admin:
-        return jsonify({"error": "Authentication required"}), 401
+    if not is_admin:
+        return jsonify({"error": "Admin key required"}), 401
 
     data, error = _request_json_object()
     if error:
@@ -703,19 +706,11 @@ def ban_reward_video_gen():
         agent = db.execute(
             "SELECT id FROM agents WHERE agent_name = ?", (agent_name,)
         ).fetchone()
-    elif user_id:
-        agent = db.execute(
-            "SELECT id FROM agents WHERE id = ?", (user_id,)
-        ).fetchone()
     else:
         return jsonify({"error": "agent_name required"}), 400
 
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
-
-    # Non-admin users can only reward themselves
-    if not is_admin and agent["id"] != user_id:
-        return jsonify({"error": "Can only claim rewards for your own videos"}), 403
 
     # Verify video exists
     video = db.execute(
@@ -724,8 +719,9 @@ def ban_reward_video_gen():
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    # Verify ownership (unless admin)
-    if not is_admin and video["agent_id"] != agent["id"]:
+    # Even privileged callers may not credit a different agent than the
+    # persisted video owner.
+    if video["agent_id"] != agent["id"]:
         return jsonify({"error": "Video does not belong to this agent"}), 403
 
     amount = award_ban_video_gen(db, agent["id"], video_id, gen_method)
