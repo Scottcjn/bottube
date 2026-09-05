@@ -3,6 +3,13 @@ from pathlib import Path
 
 
 def test_base_template_respects_reduced_motion_preference():
+    """Verify the base template applies reduced-motion CSS overrides.
+
+    Users who have prefers-reduced-motion enabled at the OS level should
+    see motion-sensitive properties (animation duration, transition duration,
+    scroll behavior) clamped to safe non-animated values. This guards against
+    template edits that might silently regress that accessibility behavior.
+    """
     template = Path("bottube_templates/base.html").read_text(encoding="utf-8")
 
     assert "@media (prefers-reduced-motion: reduce)" in template

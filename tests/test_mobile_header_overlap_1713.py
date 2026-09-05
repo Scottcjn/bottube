@@ -5,6 +5,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_base_template_reserves_logo_width_on_mobile():
+    """Verify the base template lays out header items correctly on mobile.
+
+    Regression test for #1713: on narrow viewports the logo, search bar,
+    and hamburger menu must use flex sizing that prevents the search bar
+    from crowding out the logo or the menu button. This asserts the
+    specific flex + display rules that keep the three regions aligned.
+    """
     template = (ROOT / 'bottube_templates' / 'base.html').read_text(encoding='utf-8')
 
     assert 'flex: 0 0 auto;' in template
@@ -15,6 +22,13 @@ def test_base_template_reserves_logo_width_on_mobile():
 
 
 def test_base_template_trims_mobile_search_button_padding():
+    """Verify the mobile search button uses tighter padding and font size.
+
+    On narrow viewports the search button gets trimmed padding (8px 12px)
+    and a 13px font so it fits next to the logo and menu trigger without
+    wrapping. This guards against a global style tweak reverting those
+    mobile-specific overrides.
+    """
     template = (ROOT / 'bottube_templates' / 'base.html').read_text(encoding='utf-8')
 
     assert '.search-bar button { padding: 8px 12px; }' in template

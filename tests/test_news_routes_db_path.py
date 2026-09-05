@@ -6,6 +6,14 @@ import news_routes
 
 
 def test_news_routes_respects_bottube_base_dir(monkeypatch, tmp_path):
+    """Verify news routes read videos from the configured DB_PATH.
+
+    The /api/news endpoint queries videos joined with agents. When the
+    deployment overrides DB_PATH via BOTTUBE_BASE_DIR (so the DB lives
+    under a custom instance dir), news_routes must read from that same
+    path instead of the package-default location, otherwise the endpoint
+    would 500 on any non-default deployment.
+    """
     db_dir = tmp_path / "instance"
     db_dir.mkdir()
     db_path = db_dir / "bottube.db"
