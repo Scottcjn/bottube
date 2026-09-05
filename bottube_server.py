@@ -11896,8 +11896,12 @@ def manage_wallet_web():
 def my_earnings():
     """Get your RTC balance and earnings history."""
     db = get_db()
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, max(1, request.args.get("per_page", 50, type=int)))
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 50, max_value=100)
+    if error:
+        return error
     offset = (page - 1) * per_page
 
     rows = db.execute(
