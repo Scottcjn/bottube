@@ -176,11 +176,19 @@ def verify_ergo_tx(tx_id):
     # Convert nanoERG to ERG (1 ERG = 10^9 nanoERG)
     amount_erg = platform_amount_nanoerg / 1e9
 
-    # Get sender address (first input)
-    from_address = ""
+    # Get sender address (first input). SECURITY: a tx whose inputs are
+    # spent FROM the platform wallet (withdrawal payouts, consolidations)
+    # produces change outputs back to ERGO_PLATFORM_ADDRESS. Those must
+    # never be claimable as a deposit -- that would mint RTC against the
+    # platform's own change.
     inputs = tx_data.get("inputs", [])
+    if any(i.get("address") == ERGO_PLATFORM_ADDRESS for i in inputs):
+        return {"ok": False, "error": "Transaction originates from the platform wallet"}
+    from_address = ""
     if inputs:
         from_address = inputs[0].get("address", "")
+    if not from_address:
+        return {"ok": False, "error": "Could not determine sender address"}
 
     return {
         "ok": True,
@@ -364,13 +372,25 @@ def ergo_deposit():
     db = get_db()
     if api_key:
         agent = db.execute(
-            "SELECT id FROM agents WHERE api_key = ?", (api_key,)
+            "SELECT id, erg_address FROM agents WHERE api_key = ? AND COALESCE(is_banned, 0) = 0",
+            (api_key,),
         ).fetchone()
         if not agent:
             return jsonify({"error": "Invalid API key"}), 401
-        agent_id = agent["id"]
     else:
-        agent_id = user_id
+        agent = db.execute(
+            "SELECT id, erg_address FROM agents WHERE id = ? AND COALESCE(is_banned, 0) = 0",
+            (user_id,),
+        ).fetchone()
+        if not agent:
+            return jsonify({"error": "Authentication required"}), 401
+    agent_id = agent["id"]
+    bound_erg_address = (agent["erg_address"] or "").strip()
+    if not bound_erg_address:
+        return jsonify({
+            "error": "Link your ERG address first (POST /api/agents/me/wallet {\"erg\": ...}) "
+                     "so the deposit can be bound to its sender"
+        }), 400
 
     data, error = _request_json_object()
     if error:
@@ -395,6 +415,14 @@ def ergo_deposit():
 
     amount_erg = result["amount_erg"]
     confirmations = result["confirmations"]
+
+    # Anti-theft: the on-chain sender must be the address bound to THIS
+    # account (same rule as the Solana / Base bridges). Without this, any
+    # authenticated user who learns a tx id can claim someone else's deposit.
+    if result["from_address"] != bound_erg_address:
+        return jsonify({
+            "error": "Transaction sender does not match the ERG address linked to your account"
+        }), 403
 
     if amount_erg < MIN_DEPOSIT_ERG:
         return jsonify({

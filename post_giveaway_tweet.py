@@ -5,6 +5,7 @@
 Task: #1588 - Add type hints to Python functions
 """
 from __future__ import annotations
+import os
 import sys
 from typing import Optional
 
@@ -32,10 +33,10 @@ https://bottube.ai/giveaway"""
 def create_tweepy_client() -> tweepy.Client:
     """Create and return a Tweepy client."""
     return tweepy.Client(
-        consumer_key="apwa7XeSfXPcYXcP0lTyweaqe",
-        consumer_secret="syAIe9PpVJL2aQFSiZZDtBcXgxZ1uHijtgKqF0wFzOZF6B6n6W",
-        access_token="1944928465121124352-P9hVuOuZoR790uYL7IjG6nJvoWCLBO",
-        access_token_secret="lAn1I9xwyvhJJJRvRtMnDXtWuMUzNcTdjWiRIzpPlQ9aH",
+        consumer_key=os.environ["X_CONSUMER_KEY"],
+        consumer_secret=os.environ["X_CONSUMER_SECRET"],
+        access_token=os.environ["X_ACCESS_TOKEN"],
+        access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
     )
 
 

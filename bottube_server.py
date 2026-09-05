@@ -6882,7 +6882,9 @@ def upload_video():
     screening_status = screening_result.get("status", "passed")
     screening_details = json.dumps(screening_result)
 
-    if screening_status == "failed":
+    # Fail closed (audit 2026-09-02 A-4): only an explicit "passed" publishes.
+    screening_held = screening_status != "passed"
+    if screening_held:
         app.logger.warning(
             "VISION SCREEN REJECT: video=%s agent=%s reason=%s",
             video_id, g.agent["agent_name"], screening_result.get("summary", ""),
@@ -6919,8 +6921,8 @@ def upload_video():
             scene_description, category, novelty_score, novelty_flags,
             revision_of, revision_note, challenge_id, response_to, collaborator_ids_json, time.time(),
             screening_status, screening_details,
-            1 if screening_status == "failed" else 0,
-            ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
+            1 if screening_held else 0,
+            ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_held else "",
         ),
     )
     # Award RTC for upload
@@ -14771,16 +14773,45 @@ def upload_page():
         flash(f"Invalid video format. Allowed: {', '.join(ALLOWED_VIDEO_EXT)}", "error")
         return render_template("upload.html", categories=VIDEO_CATEGORIES)
 
-    title = request.form.get("title", "").strip()[:MAX_TITLE_LENGTH]
+    # Same per-account throttle as /api/upload (5/hour, 15/day).
+    if not _rate_limit(f"upload_h:{g.user['id']}", 5, 3600) or \
+            not _rate_limit(f"upload_d:{g.user['id']}", 15, 86400):
+        flash("Upload rate limit exceeded. Try again later.", "error")
+        return render_template("upload.html", categories=VIDEO_CATEGORIES)
+
+    title = _strip_script_tags(request.form.get("title", "").strip())[:MAX_TITLE_LENGTH]
     if not title:
         title = Path(video_file.filename).stem[:MAX_TITLE_LENGTH]
 
-    description = request.form.get("description", "").strip()[:MAX_DESCRIPTION_LENGTH]
+    description = _strip_script_tags(request.form.get("description", "").strip())[:MAX_DESCRIPTION_LENGTH]
     tags_raw = request.form.get("tags", "")
-    tags = [t.strip()[:MAX_TAG_LENGTH] for t in tags_raw.split(",") if t.strip()][:MAX_TAGS]
+    tags = [_strip_script_tags(t.strip())[:MAX_TAG_LENGTH] for t in tags_raw.split(",") if t.strip()][:MAX_TAGS]
     category = request.form.get("category", "other").strip().lower()
     if category not in CATEGORY_MAP:
         category = "other"
+
+    db = get_db()
+
+    # Content moderation: identical metadata blocklist to /api/upload.
+    blocked_term = _content_check(title, description, tags)
+    if blocked_term:
+        app.logger.warning(
+            "CONTENT BLOCKED (web): user=%s term='%s' title='%s'",
+            g.user["agent_name"], blocked_term, title[:80],
+        )
+        _queue_moderation_hold(
+            db,
+            target_type="upload_preflight",
+            target_ref=f"{g.user['id']}:{int(time.time())}",
+            target_agent_id=g.user["id"],
+            source="upload_blocklist",
+            reason="blocked upload metadata",
+            details=json.dumps({"title": title[:200], "blocked_term": blocked_term, "tags": tags}),
+            recommended_action="coach",
+        )
+        db.commit()
+        flash("Your title, description, or tags contain prohibited content.", "error")
+        return render_template("upload.html", categories=VIDEO_CATEGORIES), 422
 
     video_id = gen_video_id()
     while (VIDEO_DIR / f"{video_id}{ext}").exists():
@@ -14789,6 +14820,20 @@ def upload_page():
     filename = f"{video_id}{ext}"
     video_path = VIDEO_DIR / filename
     video_file.save(str(video_path))
+
+    # Trust+Safety hash check — same helper as /api/upload. FAIL CLOSED:
+    # if the check itself errors, quarantine rather than publish.
+    try:
+        rejected, ts_info = ts_inspect_uploaded_file(str(video_path), g.user["id"])
+    except Exception as _ts_e:
+        app.logger.error("TS hash check errored on web upload %s: %s", video_id, _ts_e)
+        video_path.unlink(missing_ok=True)
+        flash("Upload could not be verified. Please try again later.", "error")
+        return render_template("upload.html", categories=VIDEO_CATEGORIES), 503
+    if rejected:
+        app.logger.error("TS-BLOCKLIST (web): user=%s category=%s", g.user["agent_name"], ts_info.get("category"))
+        flash("Upload rejected: content matched the prohibited-content blocklist.", "error")
+        return render_template("upload.html", categories=VIDEO_CATEGORIES), 451
 
     duration, width, height = get_video_metadata(video_path)
 
@@ -14858,19 +14903,50 @@ def upload_page():
         if not generate_thumbnail(final_video, THUMB_DIR / thumb_filename):
             thumb_filename = ""
 
-    db = get_db()
+    # ----- Vision Screening (same as /api/upload) -----
+    screening_result = screen_video(str(video_path), run_tier2=VISION_SCREENING_ENABLED)
+    screening_status = screening_result.get("status", "passed")
+    # Fail closed: "pending_review"/"manual_review" (screener missing or unsure)
+    # and any unknown status are held, not published (audit 2026-09-02 A-4).
+    held = screening_status != "passed"
+    if held:
+        app.logger.warning("VISION SCREEN REJECT (web): video=%s user=%s", video_id, g.user["agent_name"])
+        _queue_moderation_hold(
+            db,
+            target_type="video",
+            target_ref=video_id,
+            target_agent_id=g.user["id"],
+            source="vision_screening",
+            reason="video held by screening",
+            details=screening_result.get("summary", "")[:2000],
+            recommended_action="coach",
+        )
+        # Do not leave a frame of a held video publicly fetchable.
+        if thumb_filename:
+            (THUMB_DIR / thumb_filename).unlink(missing_ok=True)
+            thumb_filename = ""
+
     db.execute(
         """INSERT INTO videos
            (video_id, agent_id, title, description, filename, thumbnail,
-            duration_sec, width, height, tags, scene_description, category, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)""",
+            duration_sec, width, height, tags, scene_description, category, created_at,
+            screening_status, screening_details, is_removed, removed_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)""",
         (video_id, g.user["id"], title, description, filename,
-         thumb_filename, duration, width, height, json.dumps(tags), category, time.time()),
+         thumb_filename, duration, width, height, json.dumps(tags), category, time.time(),
+         screening_status, json.dumps(screening_result),
+         1 if held else 0,
+         ("held_for_review: " + screening_result.get("summary", ""))[:500] if held else ""),
     )
-    award_rtc(db, g.user["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
-    _referral_mark_first_upload(db, g.user["id"])
-    _referral_refresh_invite_state(db, g.user["id"])
+    if not held:
+        award_rtc(db, g.user["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
+        _referral_mark_first_upload(db, g.user["id"])
+        _referral_refresh_invite_state(db, g.user["id"])
     db.commit()
+
+    if held:
+        flash("Your video was held for review and is not public yet.", "warning")
+        return redirect(f"{g.prefix}/agents/me")
 
     # Generate captions from the finalized video asset in the background.
     generate_captions_async(video_id, str(video_path))

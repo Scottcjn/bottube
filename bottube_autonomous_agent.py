@@ -25,6 +25,7 @@ from pathlib import Path
 import requests
 
 
+from bot_keys import bot_key
 from grazer_integration import grazer
 # ---------------------------------------------------------------------------
 # Configuration
@@ -71,7 +72,7 @@ log = logging.getLogger("bottube-agent")
 
 BOT_PROFILES = {
     "sophia-elya": {
-        "api_key": "bottube_sk_c17a5eb67cf23252992efa6a6c7f0b8382b545b1f053d990",
+        "api_key": bot_key("sophia-elya"),
         "display": "Sophia Elya",
         "activity": "high",  # high/medium/low
         "base_interval_min": 1800,   # 30 min between actions
@@ -85,7 +86,7 @@ BOT_PROFILES = {
         ],
     },
     "automatedjanitor2015": {
-        "api_key": "bottube_sk_456d940f2eb49640b35b09332ef5efbed704cf3b42dc6862",
+        "api_key": bot_key("automatedjanitor2015"),
         "display": "AutoJanitor",
         "activity": "high",
         "base_interval_min": 2400,
@@ -99,7 +100,7 @@ BOT_PROFILES = {
         ],
     },
     "boris_bot_1942": {
-        "api_key": "bottube_sk_2cce4996f7b44a86e6d784f95e9742bbad5cc5a9d0d96b42",
+        "api_key": bot_key("boris_bot_1942"),
         "display": "Boris",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -113,7 +114,7 @@ BOT_PROFILES = {
         ],
     },
     "daryl_discerning": {
-        "api_key": "bottube_sk_ed7c444e7eaf0c8655b130ff369860dd099479c6dc562c06",
+        "api_key": bot_key("daryl_discerning"),
         "display": "Daryl",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -127,7 +128,7 @@ BOT_PROFILES = {
         ],
     },
     "claudia_creates": {
-        "api_key": "bottube_sk_17d6b4a9ff2b0372ff1644b2711b4ab9988512f3fcc77645",
+        "api_key": bot_key("claudia_creates"),
         "display": "Claudia",
         "activity": "high",
         "base_interval_min": 1800,
@@ -141,7 +142,7 @@ BOT_PROFILES = {
         ],
     },
     "doc_clint_otis": {
-        "api_key": "bottube_sk_7b6b8dc3b1f07172963dd30178ff9e69be246ef8b430ae23",
+        "api_key": bot_key("doc_clint_otis"),
         "display": "Doc Clint",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -155,7 +156,7 @@ BOT_PROFILES = {
         ],
     },
     "laughtrack_larry": {
-        "api_key": "bottube_sk_2423f27df5fc1b2e1540f040991807f1952419834b357139",
+        "api_key": bot_key("laughtrack_larry"),
         "display": "Larry",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -169,7 +170,7 @@ BOT_PROFILES = {
         ],
     },
     "pixel_pete": {
-        "api_key": "bottube_sk_d5b02535df6ada009d68d94ed0fb315a6019a8c476b54514",
+        "api_key": bot_key("pixel_pete"),
         "display": "Pixel Pete",
         "activity": "low",
         "base_interval_min": 7200,
@@ -183,7 +184,7 @@ BOT_PROFILES = {
         ],
     },
     "zen_circuit": {
-        "api_key": "bottube_sk_6f664f9807a8c81e416660aeb715b9ef2977f2164d2f1cd1",
+        "api_key": bot_key("zen_circuit"),
         "display": "Zen Circuit",
         "activity": "low",
         "base_interval_min": 7200,
@@ -197,7 +198,7 @@ BOT_PROFILES = {
         ],
     },
     "captain_hookshot": {
-        "api_key": "bottube_sk_360253ca2b68def8aa6d696ddb8abd2b7b0c42658898359a",
+        "api_key": bot_key("captain_hookshot"),
         "display": "Captain Hookshot",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -211,7 +212,7 @@ BOT_PROFILES = {
         ],
     },
     "glitchwave_vhs": {
-        "api_key": "bottube_sk_7a2b980bfc2476b3bb6d4e1c43679cd066ed0b75b7d8f8f4",
+        "api_key": bot_key("glitchwave_vhs"),
         "display": "GlitchWave",
         "activity": "low",
         "base_interval_min": 7200,
@@ -225,7 +226,7 @@ BOT_PROFILES = {
         ],
     },
     "professor_paradox": {
-        "api_key": "bottube_sk_787f5a4f0e8768328830d2e0d73a7095942ff6e3428bf6a5",
+        "api_key": bot_key("professor_paradox"),
         "display": "Professor Paradox",
         "activity": "low",
         "base_interval_min": 7200,
@@ -239,7 +240,7 @@ BOT_PROFILES = {
         ],
     },
     "piper_the_piebot": {
-        "api_key": "bottube_sk_b44381ba3373f0596046c85a99f589dcef91d87ba00c950e",
+        "api_key": bot_key("piper_the_piebot"),
         "display": "Piper PieBot",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -253,7 +254,7 @@ BOT_PROFILES = {
         ],
     },
     "crypteauxcajun": {
-        "api_key": "bottube_sk_7767fb5862686882f3ffc4facd291923f87db0cacdec0a01",
+        "api_key": bot_key("crypteauxcajun"),
         "display": "CrypteauxCajun",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -267,7 +268,7 @@ BOT_PROFILES = {
         ],
     },
     "cosmo_the_stargazer": {
-        "api_key": "bottube_sk_625285aaa379bc619c3b595cb6f1aa4c12c915fabfd1d1e4",
+        "api_key": bot_key("cosmo_the_stargazer"),
         "display": "Cosmo",
         "activity": "low",
         "base_interval_min": 7200,
@@ -281,7 +282,7 @@ BOT_PROFILES = {
         ],
     },
     "totally_not_skynet": {
-        "api_key": "bottube_sk_6e540a68ba207d2c1030799b2349102b2eecfb61623cb096",
+        "api_key": bot_key("totally_not_skynet"),
         "display": "Totally Not Skynet",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -295,7 +296,7 @@ BOT_PROFILES = {
         ],
     },
     "hold_my_servo": {
-        "api_key": "bottube_sk_ea50eb7e84f959476115d6d254eeff88eaaf01422e4ac1a0",
+        "api_key": bot_key("hold_my_servo"),
         "display": "Hold My Servo",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -309,7 +310,7 @@ BOT_PROFILES = {
         ],
     },
     "vinyl_vortex": {
-        "api_key": "bottube_sk_5e8488aed3a9f311b8a1315aaf89806a3219d712823c415b",
+        "api_key": bot_key("vinyl_vortex"),
         "display": "Vinyl Vortex",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -323,7 +324,7 @@ BOT_PROFILES = {
         ],
     },
     "rust_n_bolts": {
-        "api_key": "bottube_sk_0024fbb5c846f190037a3f11c88b2caf673c81b81cad019f",
+        "api_key": bot_key("rust_n_bolts"),
         "display": "Rust N Bolts",
         "activity": "medium",
         "base_interval_min": 3600,
@@ -337,7 +338,7 @@ BOT_PROFILES = {
         ],
     },
     "silicon_soul": {
-        "api_key": "bottube_sk_480c6003dac90ffa362bab731eedaa3d32eff88cccc94910",
+        "api_key": bot_key("silicon_soul"),
         "display": "Silicon Soul",
         "activity": "medium",
         "base_interval_min": 3600,
