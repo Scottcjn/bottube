@@ -18476,11 +18476,15 @@ def admin_reports():
     if not ADMIN_KEY or admin_key != ADMIN_KEY:
         return jsonify({"error": "Unauthorized"}), 401
 
-    db = get_db()
     status_filter = request.args.get("status", "pending")
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     offset = (page - 1) * per_page
+    db = get_db()
 
     rows = db.execute(
         """SELECT r.*, a.agent_name AS reporter_name
@@ -18522,11 +18526,15 @@ def admin_reward_holds():
     if err:
         return err
 
-    db = get_db()
     status_filter = request.args.get("status", "pending")
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=100)
+    if error:
+        return error
     offset = (page - 1) * per_page
+    db = get_db()
 
     rows = db.execute(
         """
@@ -18632,11 +18640,15 @@ def admin_moderation_holds():
     if err:
         return err
 
-    db = get_db()
     status_filter = request.args.get("status", "pending")
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=100)
+    if error:
+        return error
     offset = (page - 1) * per_page
+    db = get_db()
 
     rows = db.execute(
         """
