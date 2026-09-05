@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+import builtins
+
 from video_providers import ProviderRegistry
 
 
@@ -71,3 +73,17 @@ def test_report_success_resets_failures_and_updates_latency_average():
     assert status["fail_count"] == 0
     assert status["success_count"] == 2
     assert status["avg_latency_ms"] == 130
+
+
+def test_provider_rotation_does_not_depend_on_process_hash_seed(monkeypatch):
+    registry = ProviderRegistry()
+    for name in ("alpha", "beta", "gamma"):
+        registry.register(name, noop_provider)
+
+    monkeypatch.setattr(builtins, "hash", lambda _value: 0)
+    first_order = [name for name, _fn in registry.get_ordered("job-42")]
+
+    monkeypatch.setattr(builtins, "hash", lambda _value: 1)
+    second_order = [name for name, _fn in registry.get_ordered("job-42")]
+
+    assert second_order == first_order

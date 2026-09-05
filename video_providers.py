@@ -7,6 +7,7 @@ backends. Self-healing: providers recover after a cooldown period.
 """
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 import os
@@ -69,7 +70,8 @@ class ProviderRegistry:
 
             # Rotate healthy providers by job_id for load distribution
             if healthy:
-                start = hash(job_id) % len(healthy)
+                digest = hashlib.sha256(job_id.encode("utf-8")).digest()
+                start = int.from_bytes(digest[:8], "big") % len(healthy)
                 healthy = healthy[start:] + healthy[:start]
 
             ordered = healthy + cooldown_ready
