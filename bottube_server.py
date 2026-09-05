@@ -12342,8 +12342,12 @@ def get_video_tips(video_id):
     if not v:
         return jsonify({"error": "Video not found"}), 404
     _sync_pending_tips(db)
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 10, type=int)))
+    page, error = _parse_positive_int_query("page", 1)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 10, max_value=50)
+    if error:
+        return error
     offset = (page - 1) * per_page
     # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
     # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
