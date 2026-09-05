@@ -152,3 +152,49 @@ schedule:
     assert poller.reload_runtime_config() is True
     assert poller.config.poll_interval == 120
     assert poller.adapters["moltbook"].api_key == "beta"
+
+
+def test_poll_watermark_does_not_skip_videos_created_during_fetch(tmp_path):
+    """The next `since` watermark must be captured before the feed request."""
+    config_path = tmp_path / "syndication.yaml"
+    _write_config(
+        config_path,
+        """
+poll_interval: 1
+platforms: {}
+schedule:
+  enabled: false
+""",
+    )
+    poller = SyndicationPoller(
+        api_key="test-key",
+        db_path=str(tmp_path / "bottube.db"),
+        config_file=str(config_path),
+    )
+
+    class Clock:
+        value = 100.0
+
+        @classmethod
+        def time(cls):
+            return cls.value
+
+    def fetch_during_upload_window(*, since):
+        assert since is None
+        Clock.value = 200.0
+        return []
+
+    def stop_after_first_cycle(_seconds):
+        poller.running = False
+
+    with (
+        patch("syndication_poller.time.time", side_effect=Clock.time),
+        patch("syndication_poller.time.sleep", side_effect=stop_after_first_cycle),
+        patch("syndication_poller.random.random", return_value=1.0),
+        patch.object(poller, "_load_known_videos"),
+        patch.object(poller, "fetch_new_videos", side_effect=fetch_during_upload_window),
+        patch.object(poller, "process_pending_items", return_value=0),
+    ):
+        poller.run()
+
+    assert poller.last_poll_time == 100.0
