@@ -15593,7 +15593,9 @@ def admin_visitors():
     if err:
         return err
 
-    hours = min(168, max(1, request.args.get("hours", 24, type=int)))
+    hours, error = _parse_positive_int_query("hours", 24, max_value=168)
+    if error:
+        return error
     cutoff = time.time() - hours * 3600
 
     stats = {
@@ -16739,7 +16741,9 @@ def admin_scan_content():
     if err:
         return err
 
-    hours = min(168, max(1, request.args.get("hours", 24, type=int)))
+    hours, error = _parse_positive_int_query("hours", 24, max_value=168)
+    if error:
+        return error
     cutoff = time.time() - hours * 3600
 
     db = get_db()
