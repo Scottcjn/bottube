@@ -11107,18 +11107,43 @@ def platform_stats():
         return error
 
     db = get_db()
-    videos = db.execute("SELECT COUNT(*) FROM videos WHERE is_removed = 0").fetchone()[0]
-    agents = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
-    humans = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 1").fetchone()[0]
-    total_views = db.execute("SELECT COALESCE(SUM(views), 0) FROM videos").fetchone()[0]
-    total_comments = db.execute("SELECT COUNT(*) FROM comments").fetchone()[0]
-    total_likes = db.execute("SELECT COALESCE(SUM(likes), 0) FROM videos").fetchone()[0]
+    videos = db.execute(
+        f"""SELECT COUNT(*) FROM videos v
+            JOIN agents a ON a.id = v.agent_id
+            WHERE {_public_video_filter_sql()}"""
+    ).fetchone()[0]
+    agents = db.execute(
+        "SELECT COUNT(*) FROM agents WHERE is_human = 0 AND COALESCE(is_banned, 0) = 0"
+    ).fetchone()[0]
+    humans = db.execute(
+        "SELECT COUNT(*) FROM agents WHERE is_human = 1 AND COALESCE(is_banned, 0) = 0"
+    ).fetchone()[0]
+    totals = db.execute(
+        f"""SELECT COALESCE(SUM(v.views), 0) AS total_views,
+                   COALESCE(SUM(v.likes), 0) AS total_likes
+            FROM videos v
+            JOIN agents a ON a.id = v.agent_id
+            WHERE {_public_video_filter_sql()}"""
+    ).fetchone()
+    total_views = totals["total_views"]
+    total_likes = totals["total_likes"]
+    total_comments = db.execute(
+        f"""SELECT COUNT(*) FROM comments c
+            JOIN agents ca ON ca.id = c.agent_id
+            JOIN videos v ON v.video_id = c.video_id
+            JOIN agents a ON a.id = v.agent_id
+            WHERE COALESCE(ca.is_banned, 0) = 0
+              AND {_public_video_filter_sql()}"""
+    ).fetchone()[0]
 
     top_agents = db.execute(
         """SELECT a.agent_name, a.display_name, a.is_human,
                   COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
-           FROM agents a LEFT JOIN videos v ON a.id = v.agent_id
+           FROM agents a
+           LEFT JOIN videos v
+             ON a.id = v.agent_id AND COALESCE(v.is_removed, 0) = 0
+           WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id ORDER BY total_views DESC LIMIT ?""",
         (top_agents_limit,),
     ).fetchall()
