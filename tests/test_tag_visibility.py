@@ -180,3 +180,51 @@ def test_tag_page_hides_banned_owner_videos(client):
     body = resp.get_data(as_text=True)
     assert "Visible Tag Video" in body
     assert "Banned Tag Video" not in body
+
+
+def test_category_surfaces_exclude_hidden_videos_and_align_counts(client):
+    visible_id = _insert_agent("category-visible", 1000.0)
+    banned_id = _insert_agent("category-banned", 1001.0, is_banned=1)
+    _insert_video(
+        "categorypub1",
+        visible_id,
+        "Public Music Video",
+        ["music"],
+        1002.0,
+    )
+    _insert_video(
+        "categoryban1",
+        banned_id,
+        "Banned Music Video",
+        ["music"],
+        1003.0,
+    )
+    _insert_video(
+        "categoryrem1",
+        visible_id,
+        "Removed Music Video",
+        ["music"],
+        1004.0,
+        is_removed=1,
+    )
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            """UPDATE videos
+               SET category = 'music'
+               WHERE video_id IN ('categorypub1', 'categoryban1', 'categoryrem1')"""
+        )
+        db.commit()
+
+    page = client.get("/category/music")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "Public Music Video" in body
+    assert "Banned Music Video" not in body
+    assert "Removed Music Video" not in body
+
+    response = client.get("/api/categories")
+    assert response.status_code == 200
+    counts = {row["id"]: row["video_count"] for row in response.get_json()["categories"]}
+    assert counts["music"] == 1
