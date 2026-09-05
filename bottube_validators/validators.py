@@ -15,6 +15,7 @@ request that did not supply the parameter at all.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional, Tuple
 
@@ -274,18 +275,29 @@ def _parse_ts_param(
     try:
         value = int(raw_value)
     except (TypeError, ValueError):
-        if not accept_iso:
-            return None, _query_error(name, "must be a Unix timestamp")
         try:
-            parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            value = parsed.timestamp()
-        except (OverflowError, OSError, TypeError, ValueError):
-            return None, _query_error(
-                name,
-                "must be a Unix timestamp or ISO-8601 datetime",
-            )
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            if not accept_iso:
+                return None, _query_error(name, "must be a Unix timestamp")
+            try:
+                parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                value = parsed.timestamp()
+            except (OverflowError, OSError, TypeError, ValueError):
+                return None, _query_error(
+                    name,
+                    "must be a Unix timestamp or ISO-8601 datetime",
+                )
+
+    if not math.isfinite(value):
+        detail = (
+            "must be a finite Unix timestamp or ISO-8601 datetime"
+            if accept_iso
+            else "must be a finite Unix timestamp"
+        )
+        return None, _query_error(name, detail)
 
     if min_value is not None and value < min_value:
         return None, _query_error(name, f"must be >= {min_value:g}")
