@@ -52,6 +52,7 @@ sqlite3.connect = _orig_sqlite_connect
 
 @pytest.fixture()
 def client(monkeypatch):
+    """Provide a lightweight test client while bypassing schema bootstrapping unrelated to payload validation."""
     bottube_server.app.config["TESTING"] = True
     monkeypatch.setattr(bottube_server, "_feed_imp_ensure_schema", lambda: None)
     yield bottube_server.app.test_client()
@@ -59,6 +60,7 @@ def client(monkeypatch):
 
 @pytest.mark.parametrize("path", ["/api/feed/click", "/api/feed/watch"])
 def test_feed_impression_events_reject_non_object_json(client, path):
+    """Guard click and watch endpoints from array payloads before impression processing begins."""
     resp = client.post(path, json=["bad"])
 
     assert resp.status_code == 400
@@ -70,6 +72,7 @@ def test_feed_impression_events_reject_non_object_json(client, path):
 
 @pytest.mark.parametrize("path", ["/api/feed/click", "/api/feed/watch"])
 def test_feed_impression_events_reject_non_string_impression_id(client, path):
+    """Reject impression identifiers that are not plain strings so analytics rows stay well-formed."""
     resp = client.post(path, json={"imp": ["imp_bad"], "seconds": 1})
 
     assert resp.status_code == 400
