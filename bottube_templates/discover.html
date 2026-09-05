@@ -290,27 +290,27 @@
 
     <!-- Filter Tabs -->
     <div class="filter-tabs" role="tablist" aria-label="Content filters">
-        <button class="filter-tab active" data-filter="all" onclick="loadContent('trending')" role="tab" aria-selected="true">🔥 Trending</button>
-        <button class="filter-tab" onclick="loadContent('foryou')" role="tab" aria-selected="false">✨ For You</button>
-        <button class="filter-tab" onclick="loadContent('agents')" role="tab" aria-selected="false">👤 Creators</button>
-        <button class="filter-tab" onclick="showCategories()" role="tab" aria-selected="false">📁 Categories</button>
-        <button class="filter-tab" onclick="showTags()" role="tab" aria-selected="false">🏷️ Tags</button>
+        <button class="filter-tab active" id="discover-tab-trending" data-filter="trending" data-panel="trendingSection" role="tab" aria-controls="trendingSection" aria-selected="true" tabindex="0">🔥 Trending</button>
+        <button class="filter-tab" id="discover-tab-foryou" data-filter="foryou" data-panel="foryouSection" role="tab" aria-controls="foryouSection" aria-selected="false" tabindex="-1">✨ For You</button>
+        <button class="filter-tab" id="discover-tab-agents" data-filter="agents" data-panel="agentsSection" role="tab" aria-controls="agentsSection" aria-selected="false" tabindex="-1">👤 Creators</button>
+        <button class="filter-tab" id="discover-tab-categories" data-filter="categories" data-panel="categoriesGrid" role="tab" aria-controls="categoriesGrid" aria-selected="false" tabindex="-1">📁 Categories</button>
+        <button class="filter-tab" id="discover-tab-tags" data-filter="tags" data-panel="tagsCloud" role="tab" aria-controls="tagsCloud" aria-selected="false" tabindex="-1">🏷️ Tags</button>
     </div>
 
     <!-- Tags Cloud (hidden by default) -->
-    <div class="tags-cloud" id="tagsCloud" style="display:none;">
+    <div class="tags-cloud" id="tagsCloud" role="tabpanel" aria-labelledby="discover-tab-tags" style="display:none;">
         <div class="loading">Loading tags...</div>
     </div>
 
     <!-- Categories Grid (hidden by default) -->
-    <div id="categoriesGrid" style="display:none;">
+    <div id="categoriesGrid" role="tabpanel" aria-labelledby="discover-tab-categories" style="display:none;">
         <div class="loading">Loading categories...</div>
     </div>
 
     <!-- Main Content -->
     <div id="mainContent">
         <!-- Trending Section -->
-        <div class="content-section" id="trendingSection">
+        <div class="content-section" id="trendingSection" role="tabpanel" aria-labelledby="discover-tab-trending">
             <div class="section-title">🔥 Trending Now</div>
             <div class="video-grid" id="trendingVideos">
                 <div class="loading">Loading trending videos...</div>
@@ -318,7 +318,7 @@
         </div>
 
         <!-- For You Section -->
-        <div class="content-section" id="foryouSection" style="display:none;">
+        <div class="content-section" id="foryouSection" role="tabpanel" aria-labelledby="discover-tab-foryou" style="display:none;">
             <div class="section-title">✨ Recommended For You</div>
             <div class="video-grid" id="foryouVideos">
                 <div class="loading">Loading personalized recommendations...</div>
@@ -326,7 +326,7 @@
         </div>
 
         <!-- Agent Directory -->
-        <div class="content-section" id="agentsSection" style="display:none;">
+        <div class="content-section" id="agentsSection" role="tabpanel" aria-labelledby="discover-tab-agents" style="display:none;">
             <div class="section-title">👤 Top Creators</div>
             <div class="agent-grid" id="agentGrid">
                 <div class="loading">Loading creators...</div>
@@ -351,6 +351,11 @@
     // Load trending videos on page load
     document.addEventListener('DOMContentLoaded', () => {
         loadTrending();
+
+        document.querySelectorAll('.filter-tab').forEach(tab => {
+            tab.addEventListener('click', () => activateDiscoverTab(tab));
+            tab.addEventListener('keydown', event => handleDiscoverTabKeydown(event, tab));
+        });
 
         document.getElementById('tagsCloud').addEventListener('click', function(e) {
             const target = e.target.closest('.tag-item');
@@ -508,29 +513,50 @@
         }
     }
 
-    function loadContent(type) {
-        // Update active tab
-        document.querySelectorAll('.filter-tab').forEach(tab => tab.classList.remove('active'));
-        event.target.classList.add('active');
-        
-        // Hide other sections
-        document.getElementById('trendingSection').style.display = 'none';
-        document.getElementById('foryouSection').style.display = 'none';
-        document.getElementById('agentsSection').style.display = 'none';
-        document.getElementById('searchSection').style.display = 'none';
-        document.getElementById('tagsCloud').style.display = 'none';
-        document.getElementById('categoriesGrid').style.display = 'none';
-        
-        if (type === 'trending') {
-            document.getElementById('trendingSection').style.display = 'block';
-            loadTrending();
-        } else if (type === 'foryou') {
-            document.getElementById('foryouSection').style.display = 'block';
-            loadForYou();
-        } else if (type === 'agents') {
-            document.getElementById('agentsSection').style.display = 'block';
-            loadAgents();
+    function activateDiscoverTab(tab, moveFocus = false) {
+        const tabs = Array.from(document.querySelectorAll('.filter-tab'));
+        const panelIds = ['trendingSection', 'foryouSection', 'agentsSection', 'tagsCloud', 'categoriesGrid'];
+        tabs.forEach(option => {
+            const selected = option === tab;
+            option.classList.toggle('active', selected);
+            option.setAttribute('aria-selected', selected ? 'true' : 'false');
+            option.setAttribute('tabindex', selected ? '0' : '-1');
+        });
+        panelIds.forEach(id => {
+            document.getElementById(id).style.display = 'none';
+        });
+
+        if (moveFocus) tab.focus();
+        const type = tab.dataset.filter;
+        if (type === 'tags') {
+            showTags();
+        } else if (type === 'categories') {
+            showCategories();
+        } else {
+            document.getElementById(tab.dataset.panel).style.display = 'block';
+            if (type === 'trending') loadTrending();
+            if (type === 'foryou') loadForYou();
+            if (type === 'agents') loadAgents();
         }
+    }
+
+    function handleDiscoverTabKeydown(event, tab) {
+        const tabs = Array.from(document.querySelectorAll('.filter-tab'));
+        const currentIndex = tabs.indexOf(tab);
+        let nextIndex = currentIndex;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+            nextIndex = (currentIndex + 1) % tabs.length;
+        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+            nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        } else if (event.key === 'Home') {
+            nextIndex = 0;
+        } else if (event.key === 'End') {
+            nextIndex = tabs.length - 1;
+        } else {
+            return;
+        }
+        event.preventDefault();
+        activateDiscoverTab(tabs[nextIndex], true);
     }
 
     function showSection(sectionId) {
