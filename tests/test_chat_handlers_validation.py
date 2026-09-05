@@ -41,8 +41,32 @@ def chat_client(tmp_path):
 
 
 def _chat_message_count(db_path):
+    return _table_count(db_path, "chat_messages")
+
+
+def _chat_ban_count(db_path):
+    return _table_count(db_path, "chat_bans")
+
+
+def _table_count(db_path, table_name):
     with sqlite3.connect(db_path) as db:
-        return db.execute("SELECT COUNT(*) FROM chat_messages").fetchone()[0]
+        return db.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+
+
+def _chat_settings_row(db_path, video_id):
+    with sqlite3.connect(db_path) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            "SELECT slow_mode, sub_only, premiere FROM chat_settings WHERE video_id = ?",
+            (video_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def _make_moderator(client):
+    with client.session_transaction() as sess:
+        sess["is_mod"] = True
+        sess["username"] = "mod"
 
 
 def test_send_message_rejects_non_object_json_without_insert(chat_client):
@@ -50,6 +74,38 @@ def test_send_message_rejects_non_object_json_without_insert(chat_client):
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "JSON object required"}
+    assert _chat_message_count(chat_client.db_path) == 0
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ({"username": "Ada", "message": 42}, "message must be a string"),
+        (
+            {"username": "Ada", "message": "Hello chat", "is_super": "boost"},
+            "is_super must be 0/1 or boolean",
+        ),
+        (
+            {"username": "Ada", "message": "Hello chat", "tip_amount": "oops"},
+            "tip_amount must be a finite non-negative number",
+        ),
+        (
+            {"username": "Ada", "message": "Hello chat", "tip_amount": "nan"},
+            "tip_amount must be a finite non-negative number",
+        ),
+        (
+            {"username": "Ada", "message": "Hello chat", "tip_amount": -1},
+            "tip_amount must be a finite non-negative number",
+        ),
+    ],
+)
+def test_send_message_rejects_malformed_fields_without_insert(
+    chat_client, payload, expected_error
+):
+    resp = chat_client.post("/api/chat/video-1/send", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": expected_error}
     assert _chat_message_count(chat_client.db_path) == 0
 
 
@@ -64,37 +120,97 @@ def test_send_message_still_records_valid_json_object(chat_client):
     assert _chat_message_count(chat_client.db_path) == 1
 
 
-def test_send_message_rejects_non_finite_tip_without_insert(chat_client):
-    resp = chat_client.post(
-        "/api/chat/video-1/send",
-        json={"username": "Ada", "message": "Hello chat", "tip_amount": float("inf")},
-    )
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        (["not", "an", "object"], "JSON object required"),
+        ({"user_id": 123}, "user_id must be a string"),
+        ({"user_id": ""}, "user_id is required"),
+        (
+            {"user_id": "victim", "duration": "later"},
+            "duration must be a finite non-negative number",
+        ),
+        (
+            {"user_id": "victim", "duration": -1},
+            "duration must be a finite non-negative number",
+        ),
+    ],
+)
+def test_ban_user_rejects_malformed_json_without_insert(
+    chat_client, payload, expected_error
+):
+    _make_moderator(chat_client)
+
+    resp = chat_client.post("/api/chat/video-1/ban", json=payload)
 
     assert resp.status_code == 400
-    assert resp.get_json() == {"error": "tip_amount must be a finite non-negative number"}
-    assert _chat_message_count(chat_client.db_path) == 0
+    assert resp.get_json() == {"error": expected_error}
+    assert _chat_ban_count(chat_client.db_path) == 0
 
 
-def test_ban_rejects_non_numeric_duration(chat_client):
-    with chat_client.session_transaction() as sess:
-        sess["is_mod"] = True
-        sess["username"] = "mod"
+def test_ban_user_still_accepts_valid_duration(chat_client):
+    _make_moderator(chat_client)
+
     resp = chat_client.post(
         "/api/chat/video-1/ban",
-        json={"user_id": "user-1", "duration": "forever"},
+        json={"user_id": " victim ", "duration": 60, "reason": "spam"},
     )
 
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "banned"}
+    assert _chat_ban_count(chat_client.db_path) == 1
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        (["not", "an", "object"], "JSON object required"),
+        (
+            {"slow_mode": "fast"},
+            "slow_mode, sub_only, and premiere must be 0/1 or boolean",
+        ),
+        (
+            {"slow_mode": 2, "sub_only": 0, "premiere": 1},
+            "slow_mode, sub_only, and premiere must be 0/1 or boolean",
+        ),
+        (
+            {"sub_only": "maybe"},
+            "slow_mode, sub_only, and premiere must be 0/1 or boolean",
+        ),
+        (
+            {"premiere": "soon"},
+            "slow_mode, sub_only, and premiere must be 0/1 or boolean",
+        ),
+        (
+            {"premiere_at": "soon"},
+            "premiere_at must be a finite non-negative number",
+        ),
+    ],
+)
+def test_chat_settings_rejects_malformed_json_without_update(
+    chat_client, payload, expected_error
+):
+    _make_moderator(chat_client)
+
+    resp = chat_client.post("/api/chat/video-1/settings", json=payload)
+
     assert resp.status_code == 400
-    assert resp.get_json() == {"error": "duration must be a finite non-negative number"}
+    assert resp.get_json() == {"error": expected_error}
+    assert _chat_settings_row(chat_client.db_path, "video-1") is None
 
 
-def test_settings_reject_non_boolean_like_flags(chat_client):
-    with chat_client.session_transaction() as sess:
-        sess["is_mod"] = True
+def test_chat_settings_still_accepts_valid_numeric_strings_and_booleans(chat_client):
+    _make_moderator(chat_client)
+
     resp = chat_client.post(
         "/api/chat/video-1/settings",
-        json={"slow_mode": 2, "sub_only": 0, "premiere": 1},
+        json={"slow_mode": True, "sub_only": 0, "premiere": 1},
     )
 
-    assert resp.status_code == 400
-    assert resp.get_json() == {"error": "slow_mode, sub_only, and premiere must be 0/1 or boolean"}
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "updated"}
+    assert _chat_settings_row(chat_client.db_path, "video-1") == {
+        "slow_mode": 1,
+        "sub_only": 0,
+        "premiere": 1,
+    }
