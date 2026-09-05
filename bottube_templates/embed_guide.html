@@ -364,14 +364,23 @@ function setVideo(videoId, btn) {
 
 function copyCode(btn) {
     var block = btn.parentElement;
-    var text = block.textContent.replace("Copy", "").replace("Copied!", "").trim();
+    var copy = block.cloneNode(true);
+    copy.querySelectorAll(".copy-btn").forEach(function(control) { control.remove(); });
+    var text = copy.textContent.trim();
     // Decode HTML entities for clipboard
     var tmp = document.createElement("textarea");
     tmp.innerHTML = text;
     text = tmp.value;
+    if (btn._copyResetTimer !== undefined) {
+        clearTimeout(btn._copyResetTimer);
+        btn._copyResetTimer = undefined;
+    }
     navigator.clipboard.writeText(text).then(function() {
         btn.textContent = "Copied!";
-        setTimeout(function() { btn.textContent = "Copy"; }, 1500);
+        btn._copyResetTimer = setTimeout(function() {
+            btn.textContent = "Copy";
+            btn._copyResetTimer = undefined;
+        }, 1500);
     });
 }
 
