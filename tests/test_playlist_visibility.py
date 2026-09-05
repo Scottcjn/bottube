@@ -3,7 +3,9 @@ import os
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -278,3 +280,63 @@ def test_add_playlist_item_rejects_hidden_videos(client):
     assert removed_resp.status_code == 400
     assert banned_resp.status_code == 400
     assert visible_resp.status_code == 201
+
+
+def test_playlist_append_allocates_unique_positions_concurrently(client):
+    owner_id = _insert_agent("concurrent-owner", 2000.0)
+    creator_id = _insert_agent("concurrent-creator", 2001.0)
+    playlist_db_id = _insert_playlist("concurrent-list", owner_id, "Concurrent Mix")
+    video_ids = [f"concurrent{i:02d}" for i in range(8)]
+    for index, video_id in enumerate(video_ids):
+        _insert_video(video_id, creator_id, f"Concurrent {index}", 2010.0 + index)
+
+    start = Barrier(len(video_ids))
+
+    def append(video_id):
+        with bottube_server.app.app_context():
+            db = bottube_server.get_db()
+            start.wait(timeout=5)
+            return bottube_server._append_playlist_item(
+                db,
+                playlist_db_id,
+                video_id,
+            )
+
+    with ThreadPoolExecutor(max_workers=len(video_ids)) as pool:
+        positions = list(pool.map(append, video_ids))
+
+    assert sorted(positions) == list(range(1, len(video_ids) + 1))
+    with bottube_server.app.app_context():
+        rows = bottube_server.get_db().execute(
+            "SELECT position FROM playlist_items WHERE playlist_id = ? ORDER BY position",
+            (playlist_db_id,),
+        ).fetchall()
+    assert [row["position"] for row in rows] == list(range(1, len(video_ids) + 1))
+
+
+def test_playlist_append_duplicate_race_returns_conflict_sentinel(client):
+    owner_id = _insert_agent("duplicate-owner", 3000.0)
+    creator_id = _insert_agent("duplicate-creator", 3001.0)
+    playlist_db_id = _insert_playlist("duplicate-list", owner_id, "Duplicate Mix")
+    _insert_video("duplicate-video", creator_id, "Duplicate", 3002.0)
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        first = bottube_server._append_playlist_item(
+            db,
+            playlist_db_id,
+            "duplicate-video",
+        )
+        duplicate = bottube_server._append_playlist_item(
+            db,
+            playlist_db_id,
+            "duplicate-video",
+        )
+        count = db.execute(
+            "SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ?",
+            (playlist_db_id,),
+        ).fetchone()[0]
+
+    assert first == 1
+    assert duplicate is None
+    assert count == 1
