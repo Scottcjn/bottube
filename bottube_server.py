@@ -11970,6 +11970,8 @@ def my_earnings():
     if error:
         return error
     offset = (page - 1) * per_page
+    if offset > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
 
     rows = db.execute(
         """SELECT amount, reason, video_id, created_at
