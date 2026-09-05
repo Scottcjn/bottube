@@ -86,6 +86,11 @@
         background: var(--bg-hover);
     }
 
+    .endpoint-header:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: -3px;
+    }
+
     .method {
         font-size: 12px;
         font-weight: 700;
@@ -1005,8 +1010,17 @@ print(results["total"], "results")</code></pre>
 {% block extra_js %}
 <script>
 function toggleEndpoint(header) {
-    header.parentElement.classList.toggle("open");
+    const expanded = header.parentElement.classList.toggle("open");
+    header.setAttribute("aria-expanded", String(expanded));
 }
+
+document.querySelectorAll(".endpoint-header").forEach(header => {
+    header.addEventListener("keydown", event => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleEndpoint(header);
+    });
+});
 </script>
 
 <!-- Umami Docs Tracking -->
