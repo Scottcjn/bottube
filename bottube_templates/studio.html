@@ -52,12 +52,12 @@
     <p>Type a prompt, pick a mode, pay in RTC — video, image, or voice, rendered on our own pipeline. No gatekeepers.</p>
   </div>
 
-  <div class="st-modes">
-    <button class="st-mode active" data-mode="video" onclick="stMode('video')">🎬 Video</button>
-    <button class="st-mode" data-mode="image" onclick="stMode('image')">🖼️ Image</button>
-    <button class="st-mode" data-mode="voice" onclick="stMode('voice')">🔊 Voice</button>
-    <button class="st-mode" data-mode="model" onclick="stMode('model')">🧊 3D</button>
-    <button class="st-mode" data-mode="i2v" onclick="stMode('i2v')">🎞️ Image→Video</button>
+  <div class="st-modes" role="tablist" aria-label="Generation mode">
+    <button type="button" id="tab-video" class="st-mode active" data-mode="video" role="tab" aria-controls="mode-video" aria-selected="true" tabindex="0" onclick="stMode('video')">🎬 Video</button>
+    <button type="button" id="tab-image" class="st-mode" data-mode="image" role="tab" aria-controls="mode-image" aria-selected="false" tabindex="-1" onclick="stMode('image')">🖼️ Image</button>
+    <button type="button" id="tab-voice" class="st-mode" data-mode="voice" role="tab" aria-controls="mode-voice" aria-selected="false" tabindex="-1" onclick="stMode('voice')">🔊 Voice</button>
+    <button type="button" id="tab-model" class="st-mode" data-mode="model" role="tab" aria-controls="mode-model" aria-selected="false" tabindex="-1" onclick="stMode('model')">🧊 3D</button>
+    <button type="button" id="tab-i2v" class="st-mode" data-mode="i2v" role="tab" aria-controls="mode-i2v" aria-selected="false" tabindex="-1" onclick="stMode('i2v')">🎞️ Image→Video</button>
   </div>
 
   <div class="st-bal" id="st-bal">Checking your RTC balance…</div>
@@ -66,7 +66,7 @@
   <textarea class="st-prompt" id="st-prompt" maxlength="1000" placeholder="Describe what you want…"></textarea>
 
   <!-- VIDEO: seconds selector + 3 tiers -->
-  <div id="mode-video">
+  <div id="mode-video" role="tabpanel" aria-labelledby="tab-video">
     <div class="st-seconds">
       <label for="sec-slider">Length: <strong id="sec-val">5</strong> s</label>
       <input type="range" id="sec-slider" min="3" max="8" value="5" step="1" oninput="stSeconds()">
@@ -90,26 +90,26 @@
   </div>
 
   <!-- IMAGE -->
-  <div class="st-single" id="mode-image" style="display:none">
+  <div class="st-single" id="mode-image" role="tabpanel" aria-labelledby="tab-image" style="display:none" hidden>
     <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">A single high-quality AI image (Gemini 2.5 Flash Image). Posted nowhere — yours to download.</p>
     <button class="gen" onclick="stGenerate('image')">Generate Image · <span class="price">{{ image_rtc }} RTC</span></button>
   </div>
 
   <!-- VOICE -->
-  <div class="st-single" id="mode-voice" style="display:none">
+  <div class="st-single" id="mode-voice" role="tabpanel" aria-labelledby="tab-voice" style="display:none" hidden>
     <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">Type up to ~600 characters; we voice it in the Sophia Elya XTTS voice.</p>
     <button class="gen" id="voice-btn" onclick="stGenerate('voice')">Generate Voice · <span class="price">{{ voice_rtc }} RTC</span></button>
   </div>
 
   <!-- 3D MODEL -->
-  <div class="st-single" id="mode-model" style="display:none">
+  <div class="st-single" id="mode-model" role="tabpanel" aria-labelledby="tab-model" style="display:none" hidden>
     <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">Describe an object; we generate a downloadable 3D model (GLB) on our own TRELLIS pipeline. ~2 min.</p>
     <button class="gen" onclick="stGenerate('model')">Generate 3D Model · <span class="price">{{ model_rtc }} RTC</span></button>
     <div style="margin-top:12px;"><a href="/studio/models" style="color:var(--accent);font-weight:700;font-size:14px;">🧊 Browse the 3D model gallery →</a></div>
   </div>
 
   <!-- IMAGE -> VIDEO -->
-  <div class="st-single" id="mode-i2v" style="display:none">
+  <div class="st-single" id="mode-i2v" role="tabpanel" aria-labelledby="tab-i2v" style="display:none" hidden>
     <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px;">Upload an image; Wan 2.2 animates it into video. Describe the motion in the prompt. Priced per second.</p>
     <label for="i2v-file" class="sr-only">Upload image for video animation</label>
     <input type="file" id="i2v-file" accept="image/*" style="margin-bottom:10px;color:var(--text-secondary);">
@@ -150,10 +150,16 @@
   window.stMode = function (mode) {
     curMode = mode;
     document.querySelectorAll(".st-mode").forEach(function(b){
-      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
+      var selected = b.getAttribute("data-mode") === mode;
+      b.classList.toggle("active", selected);
+      b.setAttribute("aria-selected", String(selected));
+      b.tabIndex = selected ? 0 : -1;
     });
     ["video","image","voice","model","i2v"].forEach(function(m){
-      document.getElementById("mode-" + m).style.display = (mode === m) ? "" : "none";
+      var panel = document.getElementById("mode-" + m);
+      var selected = mode === m;
+      panel.style.display = selected ? "" : "none";
+      panel.hidden = !selected;
     });
     say(""); clearResult();
     var ph = {
