@@ -25020,6 +25020,15 @@ def api_agent_receipts_zip(agent_name):
     if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", agent_name or ""):
         return jsonify({"ok": False, "error": "invalid agent name"}), 400
 
+    limit, error = _parse_positive_int_query(
+        "limit",
+        200,
+        min_value=1,
+        max_value=_RECEIPTS_BATCH_MAX,
+    )
+    if error:
+        return error
+
     ip = _get_client_ip()
     if not _rate_limit(f"receipts_zip:{ip}", 6, 600):
         return jsonify({"ok": False, "error": "rate limited"}), 429
@@ -25033,14 +25042,9 @@ def api_agent_receipts_zip(agent_name):
     if not agent:
         return jsonify({"ok": False, "error": "agent not found"}), 404
 
-    # Cap at a reasonable batch — agents with thousands of videos can
-    # paginate via ?since_video_id=, but the common case is "small enough
-    # to fit in one zip".
-    try:
-        limit = max(1, min(_RECEIPTS_BATCH_MAX,
-                           int(request.args.get("limit", 200))))
-    except Exception:
-        limit = 200
+    # Keep each batch bounded. Agents with thousands of videos can paginate
+    # via ?since_video_id=, but malformed bounds are rejected above rather
+    # than silently changing the archive a caller requested.
     since = (request.args.get("since_video_id") or "").strip()
 
     if since:
