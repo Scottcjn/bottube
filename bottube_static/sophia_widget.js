@@ -56,12 +56,21 @@
 
   // --- elements ---
   var btn = document.createElement("button");
-  btn.className = "selya-btn"; btn.setAttribute("aria-label", TITLE); btn.textContent = "🔥";
+  btn.className = "selya-btn";
+  btn.id = "selya-launcher";
+  btn.setAttribute("aria-label", TITLE);
+  btn.setAttribute("aria-controls", "selya-panel");
+  btn.setAttribute("aria-expanded", "false");
+  btn.textContent = "🔥";
   var panel = document.createElement("div");
   panel.className = "selya-panel";
+  panel.id = "selya-panel";
+  panel.hidden = true;
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-labelledby", "selya-dialog-title");
   panel.innerHTML =
-    '<div class="selya-head"><span>' + esc(TITLE) + '</span><button aria-label="Close">×</button></div>' +
-    '<div class="selya-msgs"></div>' +
+    '<div class="selya-head"><span id="selya-dialog-title">' + esc(TITLE) + '</span><button aria-label="Close">×</button></div>' +
+    '<div class="selya-msgs" role="log" aria-live="polite" aria-relevant="additions"></div>' +
     '<div class="selya-foot"><input type="text" placeholder="Type a message…" aria-label="Message"/>' +
     '<button>Send</button></div>';
   document.body.appendChild(btn);
@@ -82,13 +91,26 @@
   }
   function open() {
     panel.classList.add("open");
+    panel.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
     if (!greeted) { add("bot", GREETING); greeted = true; }
     input.focus();
   }
-  function close() { panel.classList.remove("open"); }
+  function close() {
+    panel.classList.remove("open");
+    panel.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    btn.focus();
+  }
 
   btn.addEventListener("click", function () { panel.classList.contains("open") ? close() : open(); });
   closeBtn.addEventListener("click", close);
+  panel.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  });
 
   function send() {
     var text = (input.value || "").trim();
