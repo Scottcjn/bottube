@@ -667,3 +667,65 @@ def test_backfill_allows_batch_size_at_the_cap(admin_client, monkeypatch):
     assert resp.status_code == 200
     assert seen["batch_size"] == wtb._BACKFILL_BATCH_MAX
     assert resp.get_json()["enqueued"] == 3
+
+
+# ---------------------------------------------------------------------------
+# _parse_positive_int / _parse_positive_int_arg: default-vs-cap invariant
+# ---------------------------------------------------------------------------
+
+def test_parse_positive_int_rejects_default_above_cap():
+    """A default above its own cap is a wiring mistake, not a user error."""
+    import whisper_transcription_blueprint as wtb
+
+    with pytest.raises(ValueError) as excinfo:
+        wtb._parse_positive_int({}, "batch_size", 500, max_value=50)
+
+    assert "batch_size" in str(excinfo.value)
+
+
+def test_parse_positive_int_arg_rejects_default_above_cap(flask_client):
+    import whisper_transcription_blueprint as wtb
+
+    with flask_client.application.test_request_context("/api/transcript/search?q=x"):
+        with pytest.raises(ValueError):
+            wtb._parse_positive_int_arg("limit", 500, max_value=50)
+
+
+def test_parse_positive_int_accepts_default_equal_to_cap():
+    import whisper_transcription_blueprint as wtb
+
+    value, error = wtb._parse_positive_int({}, "batch_size", 50, max_value=50)
+
+    assert error is None
+    assert value == 50
+
+
+def test_default_vs_cap_invariant_survives_python_O():
+    """The check must not be a bare assert: -O strips those.
+
+    Runs the invariant in a subprocess under python -O; a bare `assert`
+    would silently vanish there and the call would return normally.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    code = (
+        "import whisper_transcription_blueprint as wtb\n"
+        "try:\n"
+        "    wtb._parse_positive_int({}, 'batch_size', 500, max_value=50)\n"
+        "except ValueError:\n"
+        "    print('RAISED')\n"
+        "else:\n"
+        "    print('SILENT')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-O", "-c", code],
+        cwd=str(root), capture_output=True, text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "RAISED" in result.stdout, (
+        "invariant was optimised away under -O: " + result.stdout
+    )
