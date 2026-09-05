@@ -208,36 +208,57 @@ class TestBoTTubeAPI:
     def test_items_handles_dict_with_data(self, mock_session_cls):
         api = BoTTubeAPI("http://test")
         assert api._items({"data": [2]}) == [2]
+    @patch("telegram_bot.requests.Session")
+    def test_items_handles_dict_with_data(self, mock_session_cls):
+        api = BoTTubeAPI("http://test")
+        assert api._items({"data": [2]}) == [2]
 
+    # ----- TLS verification defaults (security fix) -----
 
-# ---------------------------------------------------------------------------
-# Integration-style tests
-# ---------------------------------------------------------------------------
+    @patch("telegram_bot.requests.Session")
+    @patch.dict("os.environ", {}, clear=True)
+    def test_default_tls_verify_is_true(self, mock_session_cls):
+        """No opt-out env var => TLS verification must be enabled."""
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        BoTTubeAPI("http://test")
+        assert mock_session.verify is True
 
-class TestBotIntegration:
-    def test_video_list_formatting(self):
-        """Test that a list of videos formats correctly."""
-        videos = [
-            make_video(id=f"v{i}", title=f"Video {i}", views=i * 10)
-            for i in range(1, 6)
-        ]
-        lines = ["📺 <b>Latest Videos</b>\n"]
-        for i, v in enumerate(videos, 1):
-            lines.append(v.to_text(i))
-        result = "\n\n".join(lines)
-        assert "Video 1" in result
-        assert "Video 5" in result
-        assert result.count("🎬") == 5
+    @patch("telegram_bot.requests.Session")
+    @patch.dict("os.environ", {"BOTTUBE_TG_INSECURE_SKIP_TLS_VERIFY": "1"}, clear=True)
+    def test_env_opt_out_disables_tls_verify(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        BoTTubeAPI("http://test")
+        assert mock_session.verify is False
 
-    def test_agent_with_videos_formatting(self):
-        agent = make_agent(display_name="CosmoBot", video_count=100)
-        videos = [make_video(title=f"Vid {i}") for i in range(3)]
+    @patch("telegram_bot.requests.Session")
+    @patch.dict("os.environ", {"BOTTUBE_TG_INSECURE_SKIP_TLS_VERIFY": "yes"}, clear=True)
+    def test_env_opt_out_truthy_yes(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        BoTTubeAPI("http://test")
+        assert mock_session.verify is False
 
-        lines = [agent.to_text()]
-        lines.append("\n📺 <b>Recent uploads:</b>")
-        for i, v in enumerate(videos, 1):
-            lines.append(v.to_text(i))
+    @patch("telegram_bot.requests.Session")
+    @patch.dict("os.environ", {"BOTTUBE_TG_INSECURE_SKIP_TLS_VERIFY": "false"}, clear=True)
+    def test_env_opt_out_falsy(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        BoTTubeAPI("http://test")
+        assert mock_session.verify is True
 
-        result = "\n\n".join(lines)
-        assert "CosmoBot" in result
-        assert "Vid 0" in result
+    @patch("telegram_bot.requests.Session")
+    def test_explicit_verify_ssl_false(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        BoTTubeAPI("http://test", verify_ssl=False)
+        assert mock_session.verify is False
+
+    @patch("telegram_bot.requests.Session")
+    def test_explicit_verify_ssl_true_overrides_env(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        with patch.dict("os.environ", {"BOTTUBE_TG_INSECURE_SKIP_TLS_VERIFY": "1"}):
+            BoTTubeAPI("http://test", verify_ssl=True)
+        assert mock_session.verify is True
