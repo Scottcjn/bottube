@@ -15,6 +15,15 @@ class Row(dict):
 
 
 def test_news_rss_escapes_category_xml(monkeypatch):
+    """Verify the /news/rss endpoint XML-escapes category values.
+
+    RSS feeds are XML, so user-controlled category strings (e.g. "weather
+    & climate <alerts>") must be escaped to "weather &amp; climate
+    &lt;alerts&gt;" before being written into the <category> element.
+    Without escaping, the feed would produce malformed XML (breaking any
+    strict RSS parser) and create a potential XXE / injection vector for
+    downstream consumers.
+    """
     row = Row(
         video_id="news-1",
         title="Storm update",
