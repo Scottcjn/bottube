@@ -146,6 +146,19 @@ def test_owner_can_still_record_own_signal(client, victim):
     assert resp.status_code == 200, resp.get_json()
 
 
+@pytest.mark.parametrize("endpoint", ["update", "signal"])
+def test_mood_writes_reject_non_object_json(client, victim, endpoint):
+    """Arrays must produce a client error instead of crashing on ``.get``."""
+    resp = client.post(
+        f"/api/v1/agents/{victim['agent_name']}/mood/{endpoint}",
+        json=["not", "an", "object"],
+        headers={"X-API-Key": victim["api_key"]},
+    )
+
+    assert resp.status_code == 400, resp.get_json()
+    assert resp.get_json() == {"error": "JSON body must be an object"}
+
+
 # --- regressions on PR #1639's own fix ----------------------------------
 
 
