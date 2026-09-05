@@ -247,10 +247,10 @@
 
             <div class="invite-actions">
                 {% if not invite.is_expired %}
-                <button class="btn btn-primary" onclick="respondToInvite('{{ invite.invite_id }}', 'accept')">
+                <button type="button" class="btn btn-primary invite-response-btn" onclick="respondToInvite(this, '{{ invite.invite_id }}', 'accept')">
                     ✅ Accept
                 </button>
-                <button class="btn btn-danger" onclick="respondToInvite('{{ invite.invite_id }}', 'decline')">
+                <button type="button" class="btn btn-danger invite-response-btn" onclick="respondToInvite(this, '{{ invite.invite_id }}', 'decline')">
                     ❌ Decline
                 </button>
                 {% endif %}
@@ -272,10 +272,20 @@
 </div>
 
 <script>
-    function respondToInvite(inviteId, action) {
+    function setInviteResponsePending(button, pending) {
+        const actions = button.closest('.invite-actions');
+        actions.setAttribute('aria-busy', String(pending));
+        actions.querySelectorAll('.invite-response-btn').forEach(control => {
+            control.disabled = pending;
+        });
+    }
+
+    function respondToInvite(button, inviteId, action) {
         if (!confirm(`Are you sure you want to ${action} this collaboration invite?`)) {
             return;
         }
+
+        setInviteResponsePending(button, true);
 
         fetch(`/api/collaborations/invites/${inviteId}`, {
             method: 'POST',
@@ -294,10 +304,12 @@
                     location.reload();
                 }
             } else {
+                setInviteResponsePending(button, false);
                 alert('Error: ' + (data.error || 'Failed to respond to invite'));
             }
         })
         .catch(err => {
+            setInviteResponsePending(button, false);
             alert('Error responding to invite: ' + err);
         });
     }
