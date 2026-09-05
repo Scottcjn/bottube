@@ -2535,10 +2535,13 @@
                 </div>
                 <div class="channel-row-right">
                     {% if current_user and current_user.agent_name != video.agent_name %}
-                    <button id="watch-sub-btn" aria-label="Subscribe to {{ channel_display_name }}" class="watch-sub-btn {{ 'following' if is_following else 'not-following' }}"
-                            onclick="toggleWatchSubscribe()">
+                    <button id="watch-sub-btn" aria-label="{{ 'Unfollow ' + channel_display_name if is_following else 'Subscribe to ' + channel_display_name }}"
+                            aria-describedby="watch-sub-status" aria-pressed="{{ 'true' if is_following else 'false' }}"
+                            class="watch-sub-btn {{ 'following' if is_following else 'not-following' }}" onclick="toggleWatchSubscribe()">
                         {{ 'Following' if is_following else 'Subscribe' }}
                     </button>
+                    <span id="watch-sub-status" role="status" aria-live="polite" aria-atomic="true"
+                          style="display:block;max-width:220px;margin-top:6px;font-size:12px;color:var(--text-muted);"></span>
                     {% elif not current_user %}
                     <a href="{{ P }}/login" aria-label="Subscribe to {{ channel_display_name }}" class="watch-sub-btn not-following">Subscribe</a>
                     {% endif %}
@@ -3447,24 +3450,43 @@ function buildCommentElement(opts) {
 
 function toggleWatchSubscribe() {
     var btn = document.getElementById("watch-sub-btn");
+    var status = document.getElementById("watch-sub-status");
+    if (!btn || btn.disabled) return Promise.resolve();
     btn.disabled = true;
-    fetch(prefix + "/api/agents/" + uploaderAgent + "/web-subscribe", {
+    status.textContent = "Updating subscription…";
+    status.style.color = "var(--text-muted)";
+    return fetch(prefix + "/api/agents/" + uploaderAgent + "/web-subscribe", {
         method: "POST",
         headers: _csrfHeaders()
     })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-        if (d.ok) {
+    .then(function(r) {
+        return r.json().catch(function() { return null; }).then(function(d) {
+            return { httpOK: r.ok, httpStatus: r.status, body: d };
+        });
+    })
+    .then(function(result) {
+        var d = result.body;
+        if (result.httpOK && d && d.ok && typeof d.following === "boolean") {
             btn.textContent = d.following ? "Following" : "Subscribe";
             btn.className = "watch-sub-btn " + (d.following ? "following" : "not-following");
+            btn.setAttribute("aria-pressed", d.following ? "true" : "false");
+            btn.setAttribute("aria-label", d.following ? "Unfollow this channel" : "Subscribe to this channel");
             var sc = document.getElementById("watch-sub-count");
-            if (sc) sc.textContent = d.subscriber_count;
-        } else if (d.login_required) {
+            if (sc && Number.isFinite(Number(d.subscriber_count))) sc.textContent = d.subscriber_count;
+            status.textContent = d.following ? "Subscription confirmed." : "Subscription removed.";
+            status.style.color = "var(--text-muted)";
+        } else if (d && d.login_required) {
             window.location.href = prefix + "/login";
+        } else {
+            status.textContent = (d && d.error) || ("Subscription failed (" + result.httpStatus + ").");
+            status.style.color = "var(--danger, #e26060)";
         }
-        btn.disabled = false;
     })
-    .catch(function() { btn.disabled = false; });
+    .catch(function() {
+        status.textContent = "Subscription failed. Check your connection and try again.";
+        status.style.color = "var(--danger, #e26060)";
+    })
+    .finally(function() { btn.disabled = false; });
 }
 
 function postComment() {
