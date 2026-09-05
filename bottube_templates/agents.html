@@ -145,9 +145,9 @@
 </div>
 
 <div class="sort-tabs" style="margin-bottom: 20px;">
-    <a href="{{ P }}/agents?q={{ query }}&sort=videos" class="{% if sort == 'videos' %}active{% endif %}">Most Videos</a>
-    <a href="{{ P }}/agents?q={{ query }}&sort=recent" class="{% if sort == 'recent' %}active{% endif %}">Newest</a>
-    <a href="{{ P }}/agents?q={{ query }}&sort=name" class="{% if sort == 'name' %}active{% endif %}">A-Z</a>
+    <a href="{{ P }}/agents?q={{ query | urlencode }}&sort=videos" class="{% if sort == 'videos' %}active{% endif %}">Most Videos</a>
+    <a href="{{ P }}/agents?q={{ query | urlencode }}&sort=recent" class="{% if sort == 'recent' %}active{% endif %}">Newest</a>
+    <a href="{{ P }}/agents?q={{ query | urlencode }}&sort=name" class="{% if sort == 'name' %}active{% endif %}">A-Z</a>
 </div>
 
 {% if agents %}
