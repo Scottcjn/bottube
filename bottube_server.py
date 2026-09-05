@@ -16084,6 +16084,13 @@ def _admin_text_field(data, field, default="", max_length=None):
     return value, None
 
 
+def _admin_bool_field(data, field, default=False):
+    value = data.get(field, default)
+    if not isinstance(value, bool):
+        return None, f"{field} must be a boolean"
+    return value, None
+
+
 def _admin_json_body():
     data = request.get_json(silent=True)
     if data is None:
@@ -16112,7 +16119,9 @@ def admin_ban_agent():
     reason, error = _admin_text_field(data, "reason", default="Needs moderation review")
     if error:
         return jsonify({"error": error}), 400
-    force = bool(data.get("force", False))
+    force, error = _admin_bool_field(data, "force")
+    if error:
+        return jsonify({"error": error}), 400
 
     if not agent_name:
         return jsonify({"error": "agent_name required"}), 400
@@ -16213,7 +16222,9 @@ def admin_nuke_agent():
     reason, error = _admin_text_field(data, "reason", default="Escalated moderation review")
     if error:
         return jsonify({"error": error}), 400
-    force = bool(data.get("force", False))
+    force, error = _admin_bool_field(data, "force")
+    if error:
+        return jsonify({"error": error}), 400
 
     if not agent_name:
         return jsonify({"error": "agent_name required"}), 400
@@ -16329,7 +16340,9 @@ def admin_remove_video():
     reason, error = _admin_text_field(data, "reason", default="Held for moderation review")
     if error:
         return jsonify({"error": error}), 400
-    force = bool(data.get("force", False))
+    force, error = _admin_bool_field(data, "force")
+    if error:
+        return jsonify({"error": error}), 400
 
     if not video_id:
         return jsonify({"error": "video_id required"}), 400
@@ -17173,7 +17186,9 @@ def admin_bulk_remove():
     reason, error = _admin_text_field(data, "reason", default="Bulk moderation review")
     if error:
         return jsonify({"error": error}), 400
-    force = bool(data.get("force", False))
+    force, error = _admin_bool_field(data, "force")
+    if error:
+        return jsonify({"error": error}), 400
 
     db = get_db()
     touched = 0
@@ -18124,13 +18139,21 @@ def admin_resolve_report(report_id):
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    action = data.get("action", "coach")  # dismiss, coach, hold_content, remove_content, ban_user
-    force = bool(data.get("force", False))
+    data, error = _admin_json_body()
+    if error:
+        return jsonify({"error": error}), 400
+    action, error = _admin_text_field(data, "action", default="coach")
+    if error:
+        return jsonify({"error": error}), 400
+    force, error = _admin_bool_field(data, "force")
+    if error:
+        return jsonify({"error": error}), 400
     target_agent_id = None
     target_type = "report"
     target_ref = str(report_id)
-    coach_note = data.get("coach_note", "").strip()
+    coach_note, error = _admin_text_field(data, "coach_note")
+    if error:
+        return jsonify({"error": error}), 400
 
     if report["video_id"]:
         video = db.execute(
