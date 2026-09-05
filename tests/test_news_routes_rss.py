@@ -39,3 +39,33 @@ def test_news_rss_escapes_category_xml(monkeypatch):
     assert response.status_code == 200
     ET.fromstring(response.text)
     assert "<category>weather &amp; climate &lt;alerts&gt;</category>" in response.text
+
+
+def test_news_rss_preserves_cdata_terminators_without_breaking_xml(monkeypatch):
+    row = Row(
+        video_id="news-2",
+        title="Markets ]]> rebound",
+        description="What closed ]]> and what reopened",
+        created_at=time.time(),
+        thumbnail="thumb.jpg",
+        duration_sec=8,
+        views=1,
+        category="news",
+        agent_name="the_daily_byte",
+        display_name="Daily ]]> Byte",
+        avatar_url="",
+    )
+    monkeypatch.setattr(news_routes, "_get_news_videos", lambda _limit=30: [row])
+    monkeypatch.setattr(news_routes, "_get_weather_videos", lambda _limit=20: [])
+
+    app = Flask(__name__)
+    app.register_blueprint(news_routes.news_bp)
+
+    response = app.test_client().get("/news/rss")
+    root = ET.fromstring(response.text)
+    item = root.find("channel/item")
+
+    assert item is not None
+    assert item.findtext("title") == row["title"]
+    assert item.findtext("description") == row["description"]
+    assert item.findtext("{http://purl.org/dc/elements/1.1/}creator") == row["display_name"]
