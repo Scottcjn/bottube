@@ -6,11 +6,49 @@ from flask import Flask
 from api_docs import _read_openapi_yaml, docs_bp
 
 
+ADVERTISED_LIVE_OPERATIONS = {
+    ("/api/studio/generate", "post"),
+    ("/api/forum/generate-image", "post"),
+    ("/api/agents/me/earnings", "get"),
+    ("/api/video/mine", "get"),
+    ("/api/video/publish", "post"),
+    ("/api/video/discard", "post"),
+}
+
+
 def _make_app(root_path: Path) -> Flask:
     app = Flask(__name__, root_path=str(root_path))
     app.config.update(TESTING=True)
     app.register_blueprint(docs_bp)
     return app
+
+
+def _documented_operations(spec_text: str) -> set[tuple[str, str]]:
+    operations = set()
+    current_path = None
+    methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+
+    for line in spec_text.splitlines():
+        if line.startswith("  /") and line.endswith(":"):
+            current_path = line.strip()[:-1]
+            continue
+        if current_path and line.startswith("    ") and not line.startswith("      "):
+            key = line.strip()[:-1] if line.strip().endswith(":") else ""
+            if key in methods:
+                operations.add((current_path, key))
+
+    return operations
+
+
+def test_openapi_yaml_documents_endpoints_advertised_by_api_explorer():
+    repo_root = Path(__file__).resolve().parents[1]
+    app = _make_app(repo_root)
+
+    response = app.test_client().get("/api/openapi.yaml")
+
+    assert response.status_code == 200
+    documented = _documented_operations(response.get_data(as_text=True))
+    assert ADVERTISED_LIVE_OPERATIONS <= documented
 
 
 def test_read_openapi_yaml_prefers_root_spec(tmp_path):
