@@ -11136,6 +11136,8 @@ def web_notification_list():
 
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    if (page - 1) * per_page > _SQLITE_MAX_SIGNED_INT:
+        return jsonify({"error": "page out of range"}), 400
     unread_only = request.args.get("unread_only", request.args.get("unread", "0")).lower() in (
         "1",
         "true",
