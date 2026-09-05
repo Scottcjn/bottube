@@ -21322,9 +21322,15 @@ def agent_accept_terms():
     Required before any write action by agents created after the TOS rollout.
     Existing agents are grandfathered with a 30-day grace period.
     """
-    _ensure_ts_schema()
-    data = request.get_json(silent=True) or {}
-    version = str(data.get("version", "")).strip() or TOS_VERSION
+    data = request.get_json(silent=True) if request.is_json else {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    raw_version = data.get("version")
+    if raw_version is not None and not isinstance(raw_version, str):
+        return jsonify({"error": "version must be a string"}), 400
+
+    version = (raw_version or "").strip() or TOS_VERSION
     if version != TOS_VERSION:
         return jsonify({
             "ok": False,
@@ -21334,6 +21340,7 @@ def agent_accept_terms():
             "terms_url": "https://bottube.ai/terms",
         }), 400
 
+    _ensure_ts_schema()
     agent = g.agent
     ip = _get_client_ip()
     db = get_db()
