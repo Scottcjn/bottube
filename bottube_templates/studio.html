@@ -124,7 +124,7 @@
     <button class="gen" id="i2v-btn" onclick="stGenerate('i2v')">Animate Image · <span class="btnc-i2v">5</span> RTC</button>
   </div>
 
-  <div class="st-status" id="st-status"></div>
+  <div class="st-status" id="st-status" role="status" aria-live="polite" aria-atomic="true"></div>
   <div class="st-result" id="st-result"></div>
 
   <div class="st-foot">
@@ -262,12 +262,54 @@
 
   function poll(url) {
     var tries = 0;
+    var consecutiveFailures = 0;
+    var pollInFlight = false;
+    var finished = false;
+    var maxFailures = 3;
+
+    function finish(message) {
+      if (finished) return;
+      finished = true;
+      clearInterval(iv);
+      setBusy(false);
+      if (message) say(message);
+    }
+
+    function recordFailure(detail) {
+      if (finished) return;
+      consecutiveFailures++;
+      if (consecutiveFailures >= maxFailures) {
+        finish("Job status is unavailable after " + maxFailures + " attempts. Your generation may still be running; check your channel before starting another charge.");
+        return;
+      }
+      say("Job status temporarily unavailable (" + detail + "; retry " + consecutiveFailures + "/" + maxFailures + ").");
+    }
+
     var iv = setInterval(function(){
+      if (finished || pollInFlight) return Promise.resolve();
+      if (tries >= 120) {
+        finish("Still working — check your channel shortly.");
+        return Promise.resolve();
+      }
       tries++;
-      fetch(url, { credentials: "same-origin" }).then(function(r){ return r.json(); }).then(function(d){
+      pollInFlight = true;
+      return fetch(url, { credentials: "same-origin" }).then(function(r){
+        return r.json().catch(function(){ return null; }).then(function(d){
+          return { httpOK: r.ok, status: r.status, body: d };
+        });
+      }).then(function(result){
+        if (!result.httpOK) {
+          recordFailure("HTTP " + result.status);
+          return;
+        }
+        var d = result.body;
+        if (!d || typeof d !== "object" || Array.isArray(d)) {
+          recordFailure("invalid response");
+          return;
+        }
+        consecutiveFailures = 0;
         if (d.model_url) {
-          clearInterval(iv); setBusy(false);
-          say("🧊 Done! Charged successfully.");
+          finish("🧊 Done! Charged successfully.");
           resultEl.innerHTML =
             '<model-viewer src="' + d.model_url + '" camera-controls auto-rotate ' +
             'style="width:100%;height:360px;background:#111;border-radius:8px;" ' +
@@ -275,17 +317,18 @@
             '<div style="margin-top:8px"><a href="' + d.model_url + '" download>Download GLB →</a>' +
             ((d.formats && d.formats.length) ? ' · formats: ' + d.formats.join(", ") : "") + '</div>';
         } else if (d.status === "completed" || d.video_id) {
-          clearInterval(iv); setBusy(false);
           var watch = d.watch_url || (d.video_id ? ("/watch/" + d.video_id) : null);
-          say(watch ? ("🎬 Done! <a href='" + watch + "'>Watch your video →</a>") : "🎬 Done — check your channel.");
+          finish(watch ? ("🎬 Done! <a href='" + watch + "'>Watch your video →</a>") : "🎬 Done — check your channel.");
         } else if (d.status === "failed" || d.error) {
-          clearInterval(iv); setBusy(false);
-          say("Generation failed: " + (d.error || "unknown") + ". (RTC for failed jobs is refunded.)");
+          finish("Generation failed: " + (d.error || "unknown") + ". (RTC for failed jobs is refunded.)");
         } else {
           say("Generating… (" + (d.status || "working") + ")");
         }
-      }).catch(function(){ /* keep polling */ });
-      if (tries > 120) { clearInterval(iv); setBusy(false); say("Still working — check your channel shortly."); }
+      }).catch(function(){
+        recordFailure("network error");
+      }).finally(function(){
+        pollInFlight = false;
+      });
     }, 3000);
   }
 })();
