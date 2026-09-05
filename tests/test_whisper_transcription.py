@@ -594,6 +594,49 @@ def test_trigger_transcription_video_not_found(flask_client):
     assert resp.status_code == 404
 
 
+def test_trigger_transcription_rejects_non_object_json(flask_client, monkeypatch):
+    import whisper_transcription_blueprint as wtb
+
+    monkeypatch.setattr(wtb, "_get_video_filename", lambda _video_id: "clip.mp4")
+    monkeypatch.setattr(
+        wtb.wt,
+        "enqueue_transcription",
+        lambda *_args, **_kwargs: pytest.fail("malformed body enqueued work"),
+    )
+
+    resp = flask_client.post(
+        "/api/videos/clip/transcript/trigger",
+        json=["not", "an", "object"],
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "JSON object required"
+
+
+@pytest.mark.parametrize("force", ["false", 0, 1, [], {}])
+def test_trigger_transcription_requires_boolean_force(
+    flask_client,
+    monkeypatch,
+    force,
+):
+    import whisper_transcription_blueprint as wtb
+
+    monkeypatch.setattr(wtb, "_get_video_filename", lambda _video_id: "clip.mp4")
+    monkeypatch.setattr(
+        wtb.wt,
+        "enqueue_transcription",
+        lambda *_args, **_kwargs: pytest.fail("invalid force enqueued work"),
+    )
+
+    resp = flask_client.post(
+        "/api/videos/clip/transcript/trigger",
+        json={"force": force},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "force must be a boolean"
+
+
 # ---------------------------------------------------------------------------
 # /api/transcript/backfill is admin-only
 # ---------------------------------------------------------------------------
