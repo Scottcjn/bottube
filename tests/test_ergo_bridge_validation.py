@@ -31,7 +31,9 @@ def client(tmp_path, monkeypatch):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             agent_name TEXT NOT NULL,
             api_key TEXT NOT NULL,
-            rtc_balance REAL DEFAULT 0
+            rtc_balance REAL DEFAULT 0,
+            erg_address TEXT,
+            is_banned INTEGER DEFAULT 0
         );
         CREATE TABLE earnings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,8 +42,8 @@ def client(tmp_path, monkeypatch):
             reason TEXT,
             created_at REAL
         );
-        INSERT INTO agents (agent_name, api_key, rtc_balance)
-        VALUES ('ergo_agent', 'bottube_sk_ergo_agent', 100.0);
+        INSERT INTO agents (agent_name, api_key, rtc_balance, erg_address)
+        VALUES ('ergo_agent', 'bottube_sk_ergo_agent', 100.0, '9fErgoTestAddressBoundForDepositValidation000000000');
         """
     )
     ergo_bridge_blueprint.init_ergo_tables(conn)
