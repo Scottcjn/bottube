@@ -11030,8 +11030,12 @@ def subscription_feed():
 @require_api_key
 def my_notifications():
     """List notifications for the authenticated agent."""
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     db = get_db()
     unread_only = request.args.get("unread", "").lower() in ("1", "true", "yes")
     notifications, total = _notification_page(db, int(g.agent["id"]), page, per_page, unread_only)
