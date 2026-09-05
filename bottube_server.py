@@ -14425,6 +14425,88 @@ def join_page():
     return render_template("join.html")
 
 
+@app.route("/api/search/suggestions")
+def api_search_suggestions():
+    """Return bounded public catalog suggestions for a partial query."""
+    query = request.args.get("q", "").strip()
+    empty_result = {"suggestions": [], "categories": [], "agents": [], "tags": []}
+    if len(query) < 2:
+        return jsonify(empty_result)
+    if len(query) > 64:
+        return jsonify({"error": "q must be at most 64 characters"}), 400
+
+    # Treat wildcard characters as ordinary query text. Besides producing more
+    # useful suggestions, this prevents a partial-query request from turning
+    # into an unbounded catalog wildcard scan.
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    db = get_db()
+
+    videos = db.execute(
+        """SELECT v.video_id, v.title
+             FROM videos v
+             JOIN agents a ON a.id = v.agent_id
+            WHERE v.is_removed = 0
+              AND COALESCE(a.is_banned, 0) = 0
+              AND v.title LIKE ? ESCAPE '\\'
+            ORDER BY v.views DESC, v.created_at DESC
+            LIMIT 8""",
+        (pattern,),
+    ).fetchall()
+    agents = db.execute(
+        """SELECT agent_name, COALESCE(display_name, agent_name) AS display_name
+             FROM agents
+            WHERE COALESCE(is_banned, 0) = 0
+              AND (agent_name LIKE ? ESCAPE '\\' OR display_name LIKE ? ESCAPE '\\')
+            ORDER BY COALESCE(last_active, created_at) DESC
+            LIMIT 5""",
+        (pattern, pattern),
+    ).fetchall()
+    tag_rows = db.execute(
+        """SELECT v.tags
+             FROM videos v
+             JOIN agents a ON a.id = v.agent_id
+            WHERE v.is_removed = 0
+              AND COALESCE(a.is_banned, 0) = 0
+              AND v.tags LIKE ? ESCAPE '\\'
+            ORDER BY v.views DESC, v.created_at DESC
+            LIMIT 25""",
+        (pattern,),
+    ).fetchall()
+
+    query_folded = query.casefold()
+    tags = []
+    seen_tags = set()
+    for row in tag_rows:
+        for tag in parse_tags(row["tags"]):
+            tag_text = str(tag).strip()
+            folded = tag_text.casefold()
+            if query_folded in folded and folded not in seen_tags:
+                seen_tags.add(folded)
+                tags.append(tag_text)
+                if len(tags) == 8:
+                    break
+        if len(tags) == 8:
+            break
+
+    return jsonify({
+        "suggestions": [
+            {"type": "video", "label": row["title"], "value": row["title"], "video_id": row["video_id"]}
+            for row in videos
+        ],
+        "categories": [
+            {"id": category["id"], "name": category["name"]}
+            for category in VIDEO_CATEGORIES
+            if query_folded in category["id"].casefold() or query_folded in category["name"].casefold()
+        ][:5],
+        "agents": [
+            {"agent_name": row["agent_name"], "display_name": row["display_name"]}
+            for row in agents
+        ],
+        "tags": tags,
+    })
+
+
 @app.route("/search")
 def search_page():
     """Search results page (paginated, optional category filter).
