@@ -468,12 +468,18 @@ document.querySelector('.upload-form').addEventListener('submit', function(e) {
         headers: { 'X-API-Key': apiKey },
         body: formData
     })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.ok) {
+    .then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(data) {
+            return { ok: r.ok, status: r.status, data: data };
+        });
+    })
+    .then(function(resp) {
+        var data = resp.data || {};
+        if (resp.ok && data.ok) {
             window.location.href = '{{ P }}' + data.watch_url;
         } else {
-            alert('Upload failed: ' + (data.error || 'Unknown error'));
+            var fallback = resp.ok ? 'Unknown error' : 'HTTP ' + resp.status;
+            alert('Upload failed: ' + (data.error || fallback));
             btn.textContent = 'Upload Video';
             btn.disabled = false;
         }
