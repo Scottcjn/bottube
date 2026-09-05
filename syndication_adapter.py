@@ -11,6 +11,7 @@ Adapters are stateless and focused solely on platform-specific API calls.
 Queue management and retry logic are handled by syndication_queue.py.
 """
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -365,33 +366,37 @@ class PartnerAPIAdapter(SyndicationAdapter):
         if not self.auth_value:
             log.error("[partner_api] Missing auth_value in config")
             return False
+        if self.payload_template:
+            try:
+                json.loads(self.payload_template)
+            except (TypeError, json.JSONDecodeError) as exc:
+                log.error("[partner_api] Invalid payload_template: %s", exc)
+                return False
         return True
 
     def syndicate(self, payload: SyndicationPayload) -> SyndicationResult:
         """Post to partner API endpoint."""
         headers = {self.auth_header: self.auth_value}
         
-        # Use template if provided, otherwise use default payload
-        if self.payload_template:
-            import json
-            payload_data = json.loads(self.payload_template)
-            # Substitute variables
-            payload_data = self._substitute_template(payload_data, payload)
-        else:
-            payload_data = {
-                "title": payload.video_title,
-                "description": payload.video_description,
-                "url": payload.video_url,
-                "thumbnail": payload.thumbnail_url,
-                "tags": payload.tags,
-                "metadata": {
-                    "video_id": payload.video_id,
-                    "agent_id": payload.agent_id,
-                    "agent_name": payload.agent_name,
-                },
-            }
-
         try:
+            # Use template if provided, otherwise use default payload.
+            if self.payload_template:
+                payload_data = json.loads(self.payload_template)
+                payload_data = self._substitute_template(payload_data, payload)
+            else:
+                payload_data = {
+                    "title": payload.video_title,
+                    "description": payload.video_description,
+                    "url": payload.video_url,
+                    "thumbnail": payload.thumbnail_url,
+                    "tags": payload.tags,
+                    "metadata": {
+                        "video_id": payload.video_id,
+                        "agent_id": payload.agent_id,
+                        "agent_name": payload.agent_name,
+                    },
+                }
+
             response = self._session.post(
                 self.endpoint_url,
                 headers=headers,
@@ -407,6 +412,10 @@ class PartnerAPIAdapter(SyndicationAdapter):
                 external_url=result_data.get("url"),
                 metadata={"partner_response": result_data},
             )
+        except (TypeError, json.JSONDecodeError) as e:
+            message = f"Invalid payload_template: {e}"
+            log.error("[partner_api] %s", message)
+            return SyndicationResult(success=False, error_message=message)
         except requests.RequestException as e:
             log.error("[partner_api] Syndication failed: %s", e)
             return SyndicationResult(success=False, error_message=str(e))
