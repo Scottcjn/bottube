@@ -326,3 +326,28 @@ def test_agent_interactions_rejects_invalid_limit(client, query, expected_error)
 
     assert resp.status_code == 400
     assert resp.get_json() == {"error": expected_error}
+
+
+def test_agent_profile_does_not_run_discarded_interaction_aggregates(client, monkeypatch):
+    """The profile response must not execute social aggregates it never returns."""
+    _seed_interaction_data()
+    statements = []
+    original_get_db = bottube_server.get_db
+
+    def traced_get_db():
+        db = original_get_db()
+        db.set_trace_callback(statements.append)
+        return db
+
+    monkeypatch.setattr(bottube_server, "get_db", traced_get_db)
+
+    response = client.get("/api/agents/alice")
+
+    assert response.status_code == 200
+    assert response.get_json()["agent"]["agent_name"] == "alice"
+    normalized = [" ".join(statement.lower().split()) for statement in statements]
+    assert not any(
+        "group by a2.id order by cnt desc limit 8" in statement
+        or "order by comments_given + likes_given desc limit 8" in statement
+        for statement in normalized
+    )
