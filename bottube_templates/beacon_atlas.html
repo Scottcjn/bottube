@@ -33,6 +33,7 @@
   /* --- Glow defs applied via CSS filter on nodes --- */
   .node-circle{cursor:pointer;transition:filter .2s}
   .node-circle:hover{filter:brightness(1.4) drop-shadow(0 0 8px currentColor)}
+  .node-circle:focus{outline:none;stroke:#fff!important;stroke-width:4px!important}
   .link{stroke-opacity:.18;stroke-linecap:round}
 
   /* --- Top bar --- */
@@ -527,12 +528,20 @@ async function _atlasLoadDirectoryData() {
   // Main circle
   nodeEls.append('circle')
     .attr('class', 'node-circle')
+    .attr('tabindex', 0)
+    .attr('role', 'button')
+    .attr('aria-label', d => `Open ${d.displayName} agent details`)
     .attr('r', d => nodeRadius(d))
     .attr('fill', d => nodeColor(d))
     .attr('stroke', d => d.registered ? '#00ff88' : 'rgba(255,255,255,0.08)')
     .attr('stroke-width', d => d.registered ? 2 : 0.5)
     .attr('filter', d => d.registered ? 'url(#glow-green)' : d.isHuman ? 'url(#glow-blue)' : null)
     .on('click', (e, d) => showCard(d))
+    .on('keydown', (e, d) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      showCard(d);
+    })
     .on('mouseenter', (e, d) => showTooltip(e, d))
     .on('mouseleave', hideTooltip);
 
