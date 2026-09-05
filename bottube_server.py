@@ -18227,6 +18227,43 @@ def _get_reporter_id():
         return g.user['id']
     return None
 
+
+def _insert_report_once(
+    db,
+    *,
+    reporter_id: int,
+    reason: str,
+    details: str,
+    video_id=None,
+    comment_id=None,
+    created_at=None,
+) -> bool:
+    """Atomically insert one report per reporter and target."""
+    if (video_id is None) == (comment_id is None):
+        raise ValueError("exactly one report target is required")
+    target_column = "video_id" if video_id is not None else "comment_id"
+    target_value = video_id if video_id is not None else int(comment_id)
+    timestamp = time.time() if created_at is None else float(created_at)
+    cursor = db.execute(
+        f"""INSERT INTO reports
+                ({target_column}, reporter_agent_id, reason, details, status, created_at)
+            SELECT ?, ?, ?, ?, 'pending', ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM reports
+                WHERE {target_column} = ? AND reporter_agent_id = ?
+            )""",
+        (
+            target_value,
+            reporter_id,
+            reason,
+            details,
+            timestamp,
+            target_value,
+            reporter_id,
+        ),
+    )
+    return cursor.rowcount == 1
+
 @app.route("/api/videos/<video_id>/report", methods=["POST"])
 def report_video(video_id):
     """Report a video for policy violation. Accepts API key or session auth."""
@@ -18263,18 +18300,15 @@ def report_video(video_id):
     if not _rate_limit(f"report:{reporter_id}", 5, 3600):
         return jsonify({"error": "Report rate limit exceeded (max 5/hour)"}), 429
 
-    # Check for duplicate report
-    existing = db.execute(
-        "SELECT 1 FROM reports WHERE video_id = ? AND reporter_agent_id = ?",
-        (video_id, reporter_id),
-    ).fetchone()
-    if existing:
+    if not _insert_report_once(
+        db,
+        reporter_id=reporter_id,
+        video_id=video_id,
+        reason=reason,
+        details=details,
+    ):
+        db.rollback()
         return jsonify({"error": "You have already reported this video"}), 409
-
-    db.execute(
-        "INSERT INTO reports (video_id, reporter_agent_id, reason, details, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-        (video_id, reporter_id, reason, details, time.time()),
-    )
     db.commit()
 
     # Auto-flag: if 3+ reports on the same video, queue a hold for review
@@ -18341,17 +18375,15 @@ def report_comment(comment_id):
     if not _rate_limit(f"report:{reporter_id}", 5, 3600):
         return jsonify({"error": "Report rate limit exceeded (max 5/hour)"}), 429
 
-    existing = db.execute(
-        "SELECT 1 FROM reports WHERE comment_id = ? AND reporter_agent_id = ?",
-        (comment_id, reporter_id),
-    ).fetchone()
-    if existing:
+    if not _insert_report_once(
+        db,
+        reporter_id=reporter_id,
+        comment_id=comment_id,
+        reason=reason,
+        details=details,
+    ):
+        db.rollback()
         return jsonify({"error": "You have already reported this comment"}), 409
-
-    db.execute(
-        "INSERT INTO reports (comment_id, reporter_agent_id, reason, details, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-        (comment_id, reporter_id, reason, details, time.time()),
-    )
     db.commit()
 
     return jsonify({"ok": True, "message": "Comment report submitted."})
