@@ -366,11 +366,7 @@
 
     async function loadForYou() {
         try {
-            // Get agent_id from session/storage if logged in
-            const agentId = localStorage.getItem('agent_id');
-            const url = agentId ? `/discover/api/for-you?agent_id=${agentId}` : '/discover/api/for-you';
-            
-            const response = await fetch(url);
+            const response = await fetch('/discover/api/for-you', { credentials: 'same-origin' });
             const data = await response.json();
             
             const container = document.getElementById('foryouVideos');
