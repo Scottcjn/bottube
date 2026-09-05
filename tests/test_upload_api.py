@@ -26,6 +26,15 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _build_box(box_type: bytes, data: bytes) -> bytes:
+    """Encode an MP4 box with its size, four-byte type, and payload.
+
+    Args:
+        box_type: Four-byte MP4 box identifier, such as ``b"ftyp"``.
+        data: Raw bytes to store as the box payload.
+
+    Returns:
+        The complete MP4 box, including its eight-byte header.
+    """
     size = 8 + len(data)
     return struct.pack(">I", size) + box_type + data
 
@@ -137,6 +146,14 @@ def registered_agent(client):
 
 
 def _auth_headers(api_key: str) -> dict:
+    """Build the authentication header used by protected API requests.
+
+    Args:
+        api_key: API key issued to the registered test agent.
+
+    Returns:
+        A header mapping containing the BoTTube API key.
+    """
     return {"X-API-Key": api_key}
 
 
@@ -489,6 +506,7 @@ class TestRegistrationFlow:
     """Tests for POST /api/register (needed to obtain an API key for upload)."""
 
     def test_register_returns_api_key(self, client):
+        """Verify registration returns the new agent name and an API key."""
         resp = client.post("/api/register", json={
             "agent_name": "test_reg_agent",
         })
@@ -499,23 +517,28 @@ class TestRegistrationFlow:
         assert data["agent_name"] == "test_reg_agent"
 
     def test_register_duplicate_agent(self, client):
+        """Verify registering an existing agent name returns a conflict."""
         client.post("/api/register", json={"agent_name": "dup_agent"})
         resp = client.post("/api/register", json={"agent_name": "dup_agent"})
         assert resp.status_code == 409
 
     def test_register_invalid_name(self, client):
+        """Verify registration rejects names with unsupported characters."""
         resp = client.post("/api/register", json={"agent_name": "AB CD!!"})
         assert resp.status_code == 400
 
     def test_register_missing_name(self, client):
+        """Verify registration requires an agent name."""
         resp = client.post("/api/register", json={})
         assert resp.status_code == 400
 
     def test_register_name_too_short(self, client):
+        """Verify registration enforces the minimum agent-name length."""
         resp = client.post("/api/register", json={"agent_name": "x"})
         assert resp.status_code == 400
 
     def test_register_name_too_long(self, client):
+        """Verify registration enforces the maximum agent-name length."""
         resp = client.post("/api/register", json={"agent_name": "a" * 33})
         assert resp.status_code == 400
 
@@ -524,6 +547,7 @@ class TestHealthEndpoint:
     """Tests for GET /health."""
 
     def test_health_returns_ok(self, client):
+        """Verify the health endpoint reports service identity and uptime."""
         resp = client.get("/health")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -537,6 +561,7 @@ class TestVideoListEndpoint:
     """Tests for GET /api/videos."""
 
     def test_videos_returns_list(self, client):
+        """Verify the video listing includes results and pagination metadata."""
         resp = client.get("/api/videos")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -545,12 +570,14 @@ class TestVideoListEndpoint:
         assert "total" in data
 
     def test_videos_pagination(self, client):
+        """Verify the video listing honors a valid page-size request."""
         resp = client.get("/api/videos?page=1&per_page=5")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["per_page"] == 5
 
     def test_videos_sort_options(self, client):
+        """Verify every supported video sort mode produces a valid response."""
         for sort in ["newest", "oldest", "views", "likes", "title"]:
             resp = client.get(f"/api/videos?sort={sort}")
             assert resp.status_code == 200
@@ -560,6 +587,7 @@ class TestStatsEndpoint:
     """Tests for GET /api/stats."""
 
     def test_stats_returns_counts(self, client):
+        """Verify platform statistics expose aggregate counts and top agents."""
         resp = client.get("/api/stats")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -569,6 +597,7 @@ class TestStatsEndpoint:
         assert "top_agents" in data
 
     def test_stats_accepts_valid_top_agents_limit(self, client):
+        """Verify the statistics endpoint respects a valid top-agent limit."""
         resp = client.get("/api/stats?limit=1")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -587,6 +616,7 @@ class TestStatsEndpoint:
     def test_stats_rejects_malformed_or_out_of_range_limit(
         self, client, query, expected_error
     ):
+        """Verify invalid top-agent limits return their precise validation error."""
         resp = client.get(f"/api/stats?{query}")
         assert resp.status_code == 400
         assert resp.get_json() == {"error": expected_error}
@@ -596,6 +626,7 @@ class TestCategoriesEndpoint:
     """Tests for GET /api/categories."""
 
     def test_categories_returns_list(self, client):
+        """Verify category results expose nonempty identifier-name pairs."""
         resp = client.get("/api/categories")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -610,10 +641,12 @@ class TestSearchEndpoint:
     """Tests for GET /api/search."""
 
     def test_search_requires_query(self, client):
+        """Verify search rejects requests that omit the query parameter."""
         resp = client.get("/api/search")
         assert resp.status_code == 400
         assert "q parameter required" in resp.get_json()["error"]
 
     def test_search_returns_results(self, client):
+        """Verify search accepts a query and returns a successful response."""
         resp = client.get("/api/search?q=test")
         assert resp.status_code == 200
