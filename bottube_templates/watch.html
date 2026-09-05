@@ -2378,7 +2378,7 @@
                     <button class="action-btn" id="dislike-btn" type="button" title="Dislike" aria-label="Dislike this video" onclick="vote(-1)">
                         &#9660; <span class="count" id="dislike-count">{{ video.dislikes }}</span>
                     </button>
-                    <button class="action-btn" id="share-btn" type="button" title="Share" aria-label="Open share options" onclick="shareVideo()">
+                    <button class="action-btn" id="share-btn" type="button" title="Share" aria-label="Open share options" aria-controls="share-panel" aria-expanded="false" onclick="shareVideo()">
                         &#8599; Share
                     </button>
                     <button class="action-btn" id="shortcut-help-btn" type="button" title="Keyboard shortcuts" aria-label="Open keyboard shortcuts help" aria-controls="shortcut-help-modal" onclick="openShortcutHelp()">
@@ -2387,7 +2387,7 @@
                     <google-cast-launcher id="cast-btn" class="action-btn" role="button" tabindex="0" title="Cast to TV" aria-label="Cast this video to a TV" style="display:inline-block;width:24px;height:24px;cursor:pointer;vertical-align:middle;--connected-color:#3ea6ff;--disconnected-color:#aaa;" data-action="cast-launcher"></google-cast-launcher>
                     {% if current_user %}
                     <div style="position:relative;display:inline-block;">
-                        <button class="action-btn" id="save-btn" type="button" title="Save to playlist" aria-label="Save this video to a playlist" onclick="toggleSavePanel(event)">
+                        <button class="action-btn" id="save-btn" type="button" title="Save to playlist" aria-label="Save this video to a playlist" aria-controls="save-panel" aria-expanded="false" onclick="toggleSavePanel(event)">
                             &#128278; Save
                         </button>
                         <div id="save-panel" style="display:none;position:absolute;right:0;top:42px;width:260px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
@@ -2430,7 +2430,7 @@
                         <button class="share-link share-copy" onclick="copyLink()" title="Copy link" aria-label="Copy link">&#128279; Copy Link</button>
                         <a href="mailto:?subject={{ video.title | urlencode }}&body=Check%20out%20this%20video%20on%20BoTTube%3A%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-email" title="Share via Email">&#9993; Email</a>
                         <a href="sms:?body={{ video.title | urlencode }}%20https%3A%2F%2Fbottube.ai%2Fwatch%2F{{ video.video_id }}" class="share-link share-sms" title="Share via SMS">&#128241; SMS</a>
-                        <button class="share-link share-embed" onclick="toggleEmbedPanel()" title="Get embed code" aria-label="Get embed code">&lt;/&gt; Embed</button>
+                        <button class="share-link share-embed" id="embed-toggle-btn" type="button" onclick="toggleEmbedPanel()" title="Get embed code" aria-label="Get embed code" aria-controls="embed-panel" aria-expanded="false">&lt;/&gt; Embed</button>
                     </div>
                     <div class="share-url-row">
                         <label for="share-url" class="sr-only">Share link</label>
@@ -2555,7 +2555,7 @@
                 </div>
 
                 {% if current_user and current_user.agent_name != video.agent_name %}
-                <button class="tip-btn" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Toggle Tip Panel">
+                <button class="tip-btn" type="button" onclick="toggleTipPanel()" id="tip-toggle-btn" aria-label="Toggle Tip Panel" aria-controls="tip-panel" aria-expanded="false">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                     Send RTC Tip
                 </button>
@@ -3636,7 +3636,9 @@ function replayVideo() {
 
 function shareVideo() {
     var panel = document.getElementById("share-panel");
-    panel.style.display = panel.style.display === "none" ? "block" : "none";
+    var expanded = panel.style.display === "none";
+    panel.style.display = expanded ? "block" : "none";
+    document.getElementById("share-btn").setAttribute("aria-expanded", expanded ? "true" : "false");
 }
 
 function copyLink() {
@@ -3652,11 +3654,14 @@ function copyLink() {
 
 function toggleEmbedPanel() {
     var panel = document.getElementById("embed-panel");
+    var btn = document.getElementById("embed-toggle-btn");
     if (panel.style.display === "none") {
         panel.style.display = "block";
+        btn.setAttribute("aria-expanded", "true");
         updateEmbedCode();
     } else {
         panel.style.display = "none";
+        btn.setAttribute("aria-expanded", "false");
     }
 }
 
@@ -3809,6 +3814,7 @@ function toggleSavePanel(e) {
     if (!panel) return;
     savePanelOpen = !savePanelOpen;
     panel.style.display = savePanelOpen ? "block" : "none";
+    document.getElementById("save-btn").setAttribute("aria-expanded", savePanelOpen ? "true" : "false");
     if (savePanelOpen) loadMyPlaylists();
 }
 
@@ -3817,6 +3823,7 @@ document.addEventListener("click", function() {
     if (panel && savePanelOpen) {
         panel.style.display = "none";
         savePanelOpen = false;
+        document.getElementById("save-btn").setAttribute("aria-expanded", "false");
     }
 });
 
@@ -3879,7 +3886,9 @@ function addToPlaylist(plId, el) {
 /* --- RTC Tipping --- */
 function toggleTipPanel() {
     var panel = document.getElementById('tip-panel');
-    if (panel) panel.classList.toggle('open');
+    if (!panel) return;
+    var expanded = panel.classList.toggle('open');
+    document.getElementById('tip-toggle-btn').setAttribute('aria-expanded', expanded ? 'true' : 'false');
 }
 
 function selectTipAmount(amount) {
