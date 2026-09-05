@@ -47,6 +47,16 @@ def test_timestamp_helpers_normalize_epoch_and_iso_values():
     )
 
 
+@pytest.mark.parametrize("value", ["9" * 400, float("inf"), float("-inf")])
+def test_timestamp_helpers_fall_back_for_out_of_range_epochs(value):
+    """Persisted bad timestamps must not take the entire feed offline."""
+    rfc_value = feed_blueprint._to_rfc2822(value)
+    iso_value = feed_blueprint._to_iso8601(value)
+
+    assert parsedate_to_datetime(rfc_value).tzinfo is not None
+    assert dt.datetime.fromisoformat(iso_value).tzinfo is not None
+
+
 def test_normalize_videos_filters_non_dict_entries_from_supported_shapes():
     """Discard malformed video entries while supporting the response envelope shapes the API emits."""
     video_a = {"id": "a"}
@@ -207,6 +217,32 @@ def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
         response = client.get(path)
         assert response.status_code == 200
         ET.fromstring(response.get_data(as_text=True))
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/feed/rss", "/feed/atom", "/feed/rss/test-agent", "/feed/atom/test-agent"],
+)
+def test_feed_routes_survive_out_of_range_video_timestamps(monkeypatch, path):
+    app = Flask(__name__)
+    app.register_blueprint(feed_blueprint.feed_bp)
+
+    monkeypatch.setattr(
+        feed_blueprint,
+        "_fetch_videos",
+        lambda **_kwargs: [
+            {
+                "video_id": "badtime01",
+                "title": "Still available",
+                "created_at": "9" * 400,
+            }
+        ],
+    )
+
+    response = app.test_client().get(path)
+
+    assert response.status_code == 200
+    ET.fromstring(response.get_data(as_text=True))
 
 
 def test_base_api_url_uses_request_host_when_env_unset():
