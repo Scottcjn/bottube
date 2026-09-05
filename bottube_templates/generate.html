@@ -130,6 +130,17 @@
         padding: 10px 14px; background: var(--bg-secondary);
         border-radius: 6px; margin-bottom: 6px;
         border: 1px solid var(--border);
+        color: inherit; text-decoration: none;
+    }
+    a.gen-history-item {
+        cursor: pointer;
+    }
+    a.gen-history-item:hover {
+        border-color: var(--accent);
+    }
+    a.gen-history-item:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
     }
     .gen-history-item .prompt-text {
         flex: 1; color: var(--text-primary); font-size: 0.9rem;
@@ -491,12 +502,23 @@ async function loadHistory() {
             container.innerHTML = '<p style="color:var(--text-muted);">No generations yet. Create your first one!</p>';
             return;
         }
-        container.innerHTML = data.jobs.map(j => `
-            <div class="gen-history-item" onclick="if('${j.status}'==='completed') window.open(P+'/api/gemini/job/${j.job_id}','_blank')">
+        container.innerHTML = data.jobs.map(j => {
+            const status = escHtml(String(j.status || 'unknown'));
+            const content = `
                 <div class="prompt-text">${escHtml(j.prompt)}</div>
-                <span class="status-badge ${j.status}">${j.status}</span>
-            </div>
-        `).join('');
+                <span class="status-badge ${status}">${status}</span>
+            `;
+
+            if (j.status === 'completed') {
+                return `
+                    <a class="gen-history-item" href="${P}/api/gemini/job/${encodeURIComponent(j.job_id)}" target="_blank" rel="noopener noreferrer" aria-label="Open completed generation: ${escHtml(j.prompt)}">
+                        ${content}
+                    </a>
+                `;
+            }
+
+            return `<div class="gen-history-item">${content}</div>`;
+        }).join('');
     } catch (e) {
         document.getElementById('history-list').innerHTML =
             '<p style="color:var(--text-muted);">Could not load history.</p>';
