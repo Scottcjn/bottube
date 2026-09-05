@@ -6,25 +6,94 @@ import datetime
 import math
 import os
 from email.utils import format_datetime
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import requests
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, has_request_context, jsonify, request
 
 feed_bp = Blueprint("feed", __name__)
+
+_LOOPBACK_FEED_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _normalize_host(host: str = None) -> str:
+    """Return a lowercase hostname without a port, or an empty string if invalid."""
+    raw = str(host or "").strip()
+    if not raw or any(ch.isspace() for ch in raw) or any(ch in raw for ch in "/\\@"):
+        return ""
+
+    if raw.startswith("["):
+        end = raw.find("]")
+        if end == -1:
+            return ""
+        name = raw[1:end]
+        suffix = raw[end + 1 :]
+        if suffix and (not suffix.startswith(":") or not suffix[1:].isdigit()):
+            return ""
+        return name.lower().rstrip(".")
+
+    # Accept host:port for ordinary names and IPv4. Leave unbracketed IPv6 alone.
+    if raw.count(":") == 1:
+        name, port = raw.rsplit(":", 1)
+        if not port.isdigit():
+            return ""
+        raw = name
+    elif raw.count(":") > 1:
+        return raw.lower().rstrip(".")
+
+    return raw.lower().rstrip(".")
+
+
+def _feed_allowed_hosts() -> set[str]:
+    """Allowed request hosts that may be used as the feed API origin."""
+    canonical = _normalize_host(os.getenv("BOTTUBE_CANONICAL_HOST", "bottube.ai"))
+    allowed = set(_LOOPBACK_FEED_HOSTS)
+    if canonical:
+        allowed.add(canonical)
+        if canonical.startswith("www."):
+            allowed.add(canonical[4:])
+        else:
+            allowed.add(f"www.{canonical}")
+
+    for item in os.getenv("BOTTUBE_FEED_ALLOWED_HOSTS", "").split(","):
+        normalized = _normalize_host(item)
+        if normalized:
+            allowed.add(normalized)
+    return allowed
+
+
+def _safe_request_host(host: str = None) -> str:
+    """Return the original host only when its normalized hostname is allowlisted."""
+    raw = str(host or "").strip()
+    normalized = _normalize_host(raw)
+    if normalized and normalized in _feed_allowed_hosts():
+        return raw
+    return ""
 
 
 def _base_api_url(host: str = None) -> str:
     """
     Prefer local API by default; allow explicit override for external deployments.
 
-    If BOTTUBE_API_BASE is unset, fallback to request host (if provided) to fix
-    feed generation in production when localhost is not accessible.
+    If BOTTUBE_API_BASE is unset, only use an allowlisted request host. Host
+    headers are attacker-controlled at the HTTP edge, so unlisted hosts fall
+    back to the canonical BoTTube origin instead of becoming an SSRF target.
     """
     if "BOTTUBE_API_BASE" in os.environ:
         return os.getenv("BOTTUBE_API_BASE").rstrip("/")
-    # Use request host if available; fallback to localhost for backward compatibility
-    default_url = f"https://{host}" if host else "http://127.0.0.1:5000"
+
+    safe_host = _safe_request_host(host)
+    if safe_host:
+        scheme = "http" if _normalize_host(safe_host) in _LOOPBACK_FEED_HOSTS else "https"
+        return f"{scheme}://{safe_host}".rstrip("/")
+
+    # Preserve local fallback when there is no request host, but do not trust a
+    # present unlisted Host header.
+    if not host:
+        return "http://127.0.0.1:5000"
+
+    canonical = _normalize_host(os.getenv("BOTTUBE_CANONICAL_HOST", "bottube.ai"))
+    default_url = f"https://{canonical or 'bottube.ai'}"
     return default_url.rstrip("/")
 
 
@@ -47,6 +116,17 @@ def _cdata_safe(text):
     return str(text or "").replace("]]>", "]]]]><![CDATA[>")
 
 
+def _is_safe_feed_url(value) -> bool:
+    """Allow http(s) and same-origin absolute-path URLs in feed HTML/media attrs."""
+    raw = str(value or "").strip()
+    if not raw or any(ch.isspace() for ch in raw):
+        return False
+    if raw.startswith("/"):
+        return not raw.startswith("//")
+    parsed = urlsplit(raw)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
 def _video_description_html(fields):
     """Video description html.
     
@@ -56,9 +136,17 @@ def _video_description_html(fields):
     Returns:
         The result value.
     """
-    thumb = escape_xml(fields["thumb"])
+    thumb = escape_xml(fields["thumb"]) if _is_safe_feed_url(fields.get("thumb")) else ""
+    title = fields.get("title") or "BoTTube video"
+    alt = escape_xml(f"Video thumbnail: {title}")
     desc = _cdata_safe(escape_xml(fields["desc"]))
-    return f'<img src="{thumb}" /><p>{desc}</p>'
+    image = (
+        f'<img src="{thumb}" alt="{alt}" loading="lazy" decoding="async" '
+        'width="720" height="720" />'
+        if thumb
+        else ""
+    )
+    return f"{image}<p>{desc}</p>"
 
 
 def _epoch_datetime_or_now(value):
@@ -146,8 +234,9 @@ def _fetch_videos(agent=None, category=None, limit=20):
         params["category"] = category
 
     try:
-        # Use current request host when available to fix feed generation in production
-        base_url = _base_api_url(host=request.host)
+        # Use current request host only when a Flask request context exists.
+        request_host = request.host if has_request_context() else None
+        base_url = _base_api_url(host=request_host)
         api_url = f"{base_url}/api/videos"
         res = requests.get(api_url, params=params, timeout=10)
         res.raise_for_status()
@@ -190,17 +279,20 @@ def _limit_error_response(exc):
 def _vid_fields(vid):
     """Extract common fields from a video dict."""
     vid_id = vid.get("video_id") or vid.get("id") or ""
+    safe_vid_id = quote(str(vid_id), safe="")
+    default_thumb = f"https://bottube.ai/api/videos/{safe_vid_id}/thumbnail"
+    thumb = vid.get("thumbnail_url", default_thumb)
+    if not _is_safe_feed_url(thumb):
+        thumb = default_thumb
     return {
         "id": vid_id,
         "title": vid.get("title", "Untitled Video"),
         "desc": vid.get("description", ""),
         "author": vid.get("agent_name", "AI Agent"),
         "category": vid.get("category", "General"),
-        "thumb": vid.get(
-            "thumbnail_url", f"https://bottube.ai/api/videos/{vid_id}/thumbnail"
-        ),
-        "stream": f"https://bottube.ai/api/videos/{vid_id}/stream",
-        "watch": f"https://bottube.ai/watch/{vid_id}",
+        "thumb": thumb,
+        "stream": f"https://bottube.ai/api/videos/{safe_vid_id}/stream",
+        "watch": f"https://bottube.ai/watch/{safe_vid_id}",
         "created_at": vid.get("created_at"),
     }
 
