@@ -76,6 +76,43 @@ def client(monkeypatch, tmp_path):
     yield bottube_server.app.test_client()
 
 
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("page=abc", {"error": "page must be an integer", "param": "page"}),
+        ("page=0", {"error": "page must be >= 1", "param": "page"}),
+        ("page=10001", {"error": "page must be <= 10000", "param": "page"}),
+        ("per_page=bad", {"error": "per_page must be an integer", "param": "per_page"}),
+        ("per_page=0", {"error": "per_page must be >= 1", "param": "per_page"}),
+        ("per_page=101", {"error": "per_page must be <= 100", "param": "per_page"}),
+    ],
+)
+def test_admin_referrals_rejects_invalid_pagination_before_db(client, monkeypatch, query, expected):
+    def unexpected_db_access():
+        raise AssertionError("invalid pagination must be rejected before database access")
+
+    monkeypatch.setattr(bottube_server, "get_db", unexpected_db_access)
+    response = client.get(
+        f"/api/admin/referrals?{query}",
+        headers={"X-Admin-Key": "test-admin"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == expected
+
+
+@pytest.mark.parametrize(("query", "page", "per_page"), [("", 1, 20), ("?page=2&per_page=1", 2, 1)])
+def test_admin_referrals_preserves_valid_pagination(client, query, page, per_page):
+    response = client.get(
+        f"/api/admin/referrals{query}",
+        headers={"X-Admin-Key": "test-admin"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["page"] == page
+    assert response.get_json()["per_page"] == per_page
+
+
 def _insert_agent(agent_name: str, api_key: str, *, is_human: bool = False) -> int:
     """Insert a minimal agent row directly, bypassing signup/registration.
 
