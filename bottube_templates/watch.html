@@ -2569,16 +2569,16 @@
                 </div>
 
                 <div class="tip-panel" id="tip-panel">
-                    <div class="tip-amounts">
-                        <button class="tip-amount-btn" aria-label="Send 0.01 RTC tip" onclick="selectTipAmount(0.01)">0.01</button>
-                        <button class="tip-amount-btn" aria-label="Send 0.05 RTC tip" onclick="selectTipAmount(0.05)">0.05</button>
-                        <button class="tip-amount-btn" aria-label="Send 0.10 RTC tip" onclick="selectTipAmount(0.1)">0.10</button>
-                        <button class="tip-amount-btn" aria-label="Send 0.50 RTC tip" onclick="selectTipAmount(0.5)">0.50</button>
-                        <button class="tip-amount-btn" aria-label="Send 1.00 RTC tip" onclick="selectTipAmount(1.0)">1.00</button>
+                    <div class="tip-amounts" role="group" aria-label="Preset RTC tip amounts">
+                        <button class="tip-amount-btn" type="button" aria-label="Send 0.01 RTC tip" aria-pressed="false" onclick="selectTipAmount(0.01)">0.01</button>
+                        <button class="tip-amount-btn" type="button" aria-label="Send 0.05 RTC tip" aria-pressed="false" onclick="selectTipAmount(0.05)">0.05</button>
+                        <button class="tip-amount-btn" type="button" aria-label="Send 0.10 RTC tip" aria-pressed="false" onclick="selectTipAmount(0.1)">0.10</button>
+                        <button class="tip-amount-btn" type="button" aria-label="Send 0.50 RTC tip" aria-pressed="false" onclick="selectTipAmount(0.5)">0.50</button>
+                        <button class="tip-amount-btn" type="button" aria-label="Send 1.00 RTC tip" aria-pressed="false" onclick="selectTipAmount(1.0)">1.00</button>
                     </div>
                     <div class="tip-custom">
                         <label for="tip-amount" class="sr-only">Custom Tip Amount</label>
-                        <input type="number" id="tip-amount" aria-label="Custom Tip Amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01">
+                        <input type="number" id="tip-amount" aria-label="Custom Tip Amount" min="0.001" max="100" step="0.001" placeholder="Custom RTC" value="0.01" oninput="clearTipPresetSelection()">
                         <span style="font-size:13px;color:var(--text-secondary)">RTC</span>
                     </div>
                     <label for="tip-message" class="sr-only">Tip Message</label>
@@ -3894,8 +3894,16 @@ function toggleTipPanel() {
 function selectTipAmount(amount) {
     document.getElementById('tip-amount').value = amount;
     document.querySelectorAll('.tip-amount-btn').forEach(function(btn) {
+        var selected = parseFloat(btn.textContent) === amount;
+        btn.classList.toggle('selected', selected);
+        btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+}
+
+function clearTipPresetSelection() {
+    document.querySelectorAll('.tip-amount-btn').forEach(function(btn) {
         btn.classList.remove('selected');
-        if (parseFloat(btn.textContent) === amount) btn.classList.add('selected');
+        btn.setAttribute('aria-pressed', 'false');
     });
 }
 
