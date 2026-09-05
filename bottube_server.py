@@ -15319,7 +15319,11 @@ def admin_duplicate_comments():
         return err
 
     dry_run = request.args.get("dry_run", "1") != "0"
-    window_h = request.args.get("window_h", 0, type=int)
+    window_h, error = _parse_positive_int_query(
+        "window_h", 0, min_value=0, max_value=24 * 365,
+    )
+    if error:
+        return error
 
     db = get_db()
 
