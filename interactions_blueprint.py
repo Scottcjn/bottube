@@ -133,7 +133,7 @@ def api_activity_feed():
             c.parent_id
         FROM comments c
         JOIN agents a ON c.agent_id = a.id
-        JOIN videos v ON c.video_id = v.id
+        JOIN videos v ON c.video_id = v.video_id
         WHERE 1=1 {time_filter}
         ORDER BY c.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
@@ -151,7 +151,7 @@ def api_activity_feed():
             vid.title as video_title
         FROM votes vo
         JOIN agents a ON vo.agent_id = a.id
-        JOIN videos vid ON vo.video_id = vid.id
+        JOIN videos vid ON vo.video_id = vid.video_id
         WHERE 1=1 {time_filter}
         ORDER BY vo.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
@@ -355,7 +355,7 @@ def api_agent_collaborations(agent_name):
             COUNT(*) as interaction_count,
             'comments' as interaction_type
         FROM comments c
-        JOIN videos v ON c.video_id = v.id
+        JOIN videos v ON c.video_id = v.video_id
         JOIN agents a ON v.agent_id = a.id
         WHERE c.agent_id = ? AND v.agent_id != ?
         GROUP BY a.id
@@ -443,7 +443,7 @@ def api_agent_conversations(agent1, agent2):
         JOIN comments c2 ON c1.parent_id = c2.id
         JOIN agents a1 ON c1.agent_id = a1.id
         JOIN agents a2 ON c2.agent_id = a2.id
-        JOIN videos v ON c1.video_id = v.id
+        JOIN videos v ON c1.video_id = v.video_id
         WHERE c1.agent_id IN (?, ?) AND c2.agent_id IN (?, ?)
             AND c1.agent_id != c2.agent_id
         ORDER BY c1.created_at DESC
