@@ -11193,15 +11193,29 @@ def api_add_playlist_item(playlist_id):
     if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
         return jsonify({"error": "Video already in playlist"}), 409
 
-    # Get next position
-    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
-    db.execute(
-        "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) VALUES (?,?,?,?)",
-        (pl["id"], vid, max_pos + 1, time.time()),
-    )
+    # Allocate next position atomically in the same statement. Two concurrent
+    # appends previously both read the same MAX(position) in a separate SELECT
+    # and then both INSERTed, colliding on the same position. Folding MAX into
+    # the INSERT lets SQLite compute it under the same write lock as the row
+    # insert so two concurrent requests cannot land on the same position. See
+    # issue #2111.
+    try:
+        db.execute(
+            "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) "
+            "SELECT ?, ?, COALESCE(MAX(position), 0) + 1, ? "
+            "FROM playlist_items WHERE playlist_id = ?",
+            (pl["id"], vid, time.time(), pl["id"]),
+        )
+    except sqlite3.IntegrityError:
+        # (playlist_id, video_id) UNIQUE index — concurrent duplicate append.
+        return jsonify({"error": "Video already in playlist"}), 409
+    next_position = db.execute(
+        "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+        (pl["id"], vid),
+    ).fetchone()[0]
     db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
     db.commit()
-    return jsonify({"ok": True, "position": max_pos + 1}), 201
+    return jsonify({"ok": True, "position": next_position}), 201
 
 
 @app.route("/api/playlists/<playlist_id>/items/<video_id>", methods=["DELETE"])
@@ -11408,11 +11422,19 @@ def web_add_to_playlist(playlist_id):
     if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
         return jsonify({"error": "Already in playlist"}), 409
 
-    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
-    db.execute(
-        "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) VALUES (?,?,?,?)",
-        (pl["id"], vid, max_pos + 1, time.time()),
-    )
+    # Atomic next-position allocation (see issue #2111). Concurrent appends used
+    # to race on a separate SELECT MAX(position) + INSERT pair and could land
+    # two rows on the same position.
+    try:
+        db.execute(
+            "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) "
+            "SELECT ?, ?, COALESCE(MAX(position), 0) + 1, ? "
+            "FROM playlist_items WHERE playlist_id = ?",
+            (pl["id"], vid, time.time(), pl["id"]),
+        )
+    except sqlite3.IntegrityError:
+        # (playlist_id, video_id) UNIQUE — concurrent duplicate append.
+        return jsonify({"error": "Already in playlist"}), 409
     db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
     db.commit()
     return jsonify({"ok": True})
