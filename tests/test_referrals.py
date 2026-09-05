@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -170,6 +171,73 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
         assert row is not None
         return row
+
+
+class _ConcurrentHitCursor:
+    def __init__(self, *, row=None, rowcount=0):
+        self._row = row
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._row
+
+
+class _ConcurrentHitDb:
+    """Coordinate stale fingerprint reads while writes remain atomic."""
+
+    def __init__(self, *, expired):
+        self._reads = threading.Barrier(2)
+        self._lock = threading.Lock()
+        self.last_hit_at = 1.0 if expired else None
+        self.hits = 0
+
+    def execute(self, sql, params=()):
+        normalized = " ".join(sql.split()).lower()
+        if normalized.startswith("select last_hit_at from referral_hit_uniques"):
+            stale = None if self.last_hit_at is None else {"last_hit_at": self.last_hit_at}
+            self._reads.wait(timeout=2)
+            return _ConcurrentHitCursor(row=stale)
+        if normalized.startswith("insert or ignore into referral_hit_uniques"):
+            with self._lock:
+                if self.last_hit_at is not None:
+                    return _ConcurrentHitCursor(rowcount=0)
+                self.last_hit_at = params[2]
+                return _ConcurrentHitCursor(rowcount=1)
+        if normalized.startswith("update referral_hit_uniques set last_hit_at"):
+            with self._lock:
+                cutoff = params[3] if len(params) == 4 else None
+                if cutoff is not None and self.last_hit_at is not None and self.last_hit_at > cutoff:
+                    return _ConcurrentHitCursor(rowcount=0)
+                self.last_hit_at = params[0]
+                return _ConcurrentHitCursor(rowcount=1)
+        if normalized.startswith("update referral_codes set hits = hits + 1"):
+            with self._lock:
+                self.hits += 1
+            return _ConcurrentHitCursor(rowcount=1)
+        raise AssertionError(f"unexpected SQL in concurrent-hit harness: {normalized}")
+
+    def commit(self):
+        return None
+
+
+@pytest.mark.parametrize("expired", [False, True], ids=["new-fingerprint", "expired-window"])
+def test_referral_hit_window_is_admitted_once_under_concurrent_stale_reads(monkeypatch, expired):
+    db = _ConcurrentHitDb(expired=expired)
+    monkeypatch.setattr(bottube_server, "_get_client_ip", lambda: "203.0.113.10")
+    monkeypatch.setattr(bottube_server, "_fingerprint_ua", lambda *_args, **_kwargs: "same-fingerprint")
+
+    def touch():
+        with bottube_server.app.test_request_context(headers={"User-Agent": "test"}):
+            bottube_server._referral_touch_hit_unique(db, "REF-CODE")
+
+    workers = [threading.Thread(target=touch) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=3)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert db.hits == 1
 
 
 @pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "201"])
