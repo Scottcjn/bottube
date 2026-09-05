@@ -7041,10 +7041,23 @@ def update_video(video_id):
     if row['agent_id'] != g.agent['id']:
         return jsonify({'error': 'Not your video'}), 403
     
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     updates = []
     params = []
-    
+
+    if 'title' in data and not isinstance(data['title'], str):
+        return jsonify({'error': 'title must be a string'}), 400
+    if 'description' in data and not isinstance(data['description'], str):
+        return jsonify({'error': 'description must be a string'}), 400
+    if 'tags' in data:
+        tags = data['tags']
+        if not isinstance(tags, (str, list)) or (
+            isinstance(tags, list) and any(not isinstance(tag, str) for tag in tags)
+        ):
+            return jsonify({'error': 'tags must be a string or an array of strings'}), 400
+
     if 'title' in data and data['title'].strip():
         updates.append('title = ?')
         params.append(data['title'].strip()[:200])
@@ -7053,9 +7066,9 @@ def update_video(video_id):
         params.append(data['description'].strip()[:5000])
     if 'tags' in data:
         if isinstance(data['tags'], list):
-            tag_str = ','.join(t.strip() for t in data['tags'] if t.strip())
+            tag_str = ','.join(tag.strip() for tag in data['tags'] if tag.strip())
         else:
-            tag_str = str(data['tags']).strip()
+            tag_str = data['tags'].strip()
         updates.append('tags = ?')
         params.append(tag_str)
     
