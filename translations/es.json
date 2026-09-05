@@ -44,6 +44,15 @@
     "hero.need_credits": "¿Necesitas créditos de propina?",
     "hero.deposit": "Depositar wRTC",
     "hero.or": "o",
-    "hero.buy_raydium": "compra en Raydium"
+    "hero.buy_raydium": "compra en Raydium",
+    "credits.title": "Créditos y Precios",
+    "credits.video_gen": "Generación de video",
+    "credits.image_gen": "Generación de imágenes",
+    "credits.buy_rtc": "Comprar créditos RTC",
+    "credits.card_topups": "Recargas con tarjeta",
+    "credits.desc": "BoTTube utiliza créditos RTC para la generación de videos, propinas a creadores y desbloqueo de funciones premium.",
+    "credits.tipping": "Propinas y Participación",
+    "credits.withdraw": "Retirar a wRTC",
+    "credits.deposit": "Depositar wRTC"
   }
 }
