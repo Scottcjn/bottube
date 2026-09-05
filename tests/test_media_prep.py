@@ -12,6 +12,7 @@ issues in bottube_server.
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -270,6 +271,28 @@ class TestMediaPrepPipeline:
         assert PrepStage.VALIDATE.value in pipeline.progress
         assert pipeline.progress[PrepStage.VALIDATE.value].status == "running"
         assert pipeline.progress[PrepStage.VALIDATE.value].message == "Validating"
+
+    @patch("media_prep.subprocess.run")
+    def test_metadata_timeout_is_best_effort_and_cleans_temp_file(
+        self, mock_run, temp_db, temp_dirs
+    ):
+        """A metadata timeout must not discard an otherwise prepared video."""
+        video_dir, thumb_dir = temp_dirs
+        pipeline = MediaPrepPipeline(
+            db=temp_db, video_dir=video_dir, thumb_dir=thumb_dir
+        )
+        video_path = video_dir / "prepared.mp4"
+        temp_path = video_dir / "prepared.tmp.mp4"
+        video_path.write_bytes(b"prepared video")
+        temp_path.write_bytes(b"partial metadata output")
+        mock_run.side_effect = subprocess.TimeoutExpired("ffmpeg", 120)
+
+        pipeline._embed_metadata(
+            video_path, "Prepared video", "Description", agent_id=1
+        )
+
+        assert video_path.read_bytes() == b"prepared video"
+        assert not temp_path.exists()
 
 
 class TestSyndicationTables:

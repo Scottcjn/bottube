@@ -503,7 +503,7 @@ class MediaPrepPipeline:
         try:
             subprocess.run(cmd, capture_output=True, timeout=120, check=True)
             temp_path.replace(video_path)
-        except subprocess.CalledProcessError as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             log.warning(f"Metadata embedding failed: {e}")
             if temp_path.exists():
                 temp_path.unlink()
