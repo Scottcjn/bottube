@@ -6,6 +6,16 @@ from pathlib import Path
 
 
 def test_gemini_uses_bottube_db_path_for_app_and_worker(tmp_path, monkeypatch):
+    """Verify gemini_blueprint uses BOTTUBE_DB_PATH for both app and worker.
+
+    The gemini jobs table is read by the Flask app and written by a
+    background worker. Both code paths must resolve to the same DB
+    file when BOTTUBE_DB_PATH is set in the environment, otherwise a
+    job created by the worker would be invisible to the app (and vice
+    versa). This test pins init_gemini_tables, get_db, and _update_job
+    to the same custom path and asserts the row written by _update_job
+    is visible to a direct sqlite3 connection.
+    """
     db_dir = tmp_path / "custom-db-dir"
     db_dir.mkdir()
     db_path = db_dir / "bottube.db"

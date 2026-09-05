@@ -40,6 +40,15 @@ def client(monkeypatch, tmp_path):
 
 
 def test_iframe_embed_examples_use_iframe_safe_embed_route(client):
+    """Verify the embed guide uses the iframe-safe /embed/ route in examples.
+
+    The embed guide page shows users how to embed a Bottube video on a
+    third-party site. The example snippets must use /embed/VIDEO_ID (the
+    sandboxed iframe-friendly route) rather than /watch/VIDEO_ID (the
+    full app page that would break out of the parent's frame). Otherwise
+    copying the example would silently fail or trigger X-Frame-Options
+    refusals on the embedder.
+    """
     response = client.get("/embed-guide")
 
     assert response.status_code == 200

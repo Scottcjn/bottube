@@ -26,6 +26,14 @@ def discover_client():
     ],
 )
 def test_discoverability_endpoints_reject_malformed_integer_params(discover_client, path):
+    """Verify discoverability endpoints reject non-integer limit/offset.
+
+    The /discover/api/* endpoints (tags, tag/{slug}, trending, for-you)
+    accept limit and offset as integer query params. Non-integer values
+    (e.g. `limit=not-an-int`, `offset=not-an-int`) must be rejected with
+    a 400 and an error message containing 'expected an integer' so the
+    SDK can show a precise validation hint instead of a 500 from int().
+    """
     resp = discover_client.get(path)
 
     assert resp.status_code == 400
@@ -43,6 +51,13 @@ def test_discoverability_endpoints_reject_malformed_integer_params(discover_clie
     ],
 )
 def test_discoverability_endpoints_reject_out_of_range_integer_params(discover_client, path):
+    """Verify discoverability endpoints reject out-of-range limit/offset.
+
+    Mirrors the malformed-integer test above but for integer values that
+    are out of the allowed range (limit=0, offset=-1). These must 400
+    with an error message containing 'Invalid' so clients can tell the
+    difference between a parse failure and a range failure.
+    """
     resp = discover_client.get(path)
 
     assert resp.status_code == 400
