@@ -252,3 +252,35 @@ def test_notification_read_routes_update_unread_count_and_dashboard_bell(client)
     html = dashboard.get_data(as_text=True)
     assert 'id="bell-btn"' in html
     assert 'id="notif-badge"' in html
+
+
+def test_notification_read_routes_reject_string_false_without_marking_all(client):
+    alice_id = _insert_agent("strictread", "bottube_sk_strictread")
+    _insert_notification(alice_id, "comment", "first unread")
+    _insert_notification(alice_id, "comment", "second unread")
+
+    agent_response = client.post(
+        "/api/agents/me/notifications/read",
+        headers={"X-API-Key": "bottube_sk_strictread"},
+        json={"all": "false"},
+    )
+    assert agent_response.status_code == 400
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        assert bottube_server._notification_unread_count(db, alice_id) == 2
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = alice_id
+        sess["csrf_token"] = "strict-read-csrf"
+
+    web_response = client.post(
+        "/api/notifications/read",
+        headers={"X-CSRF-Token": "strict-read-csrf"},
+        json={"all": "false"},
+    )
+    assert web_response.status_code == 400
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        assert bottube_server._notification_unread_count(db, alice_id) == 2
