@@ -11696,13 +11696,20 @@ def create_webhook():
     data, error = _json_object_body()
     if error:
         return error
-    url = str(data.get("url", "")).strip()
+    url = data.get("url", "")
+    if not isinstance(url, str):
+        return jsonify({"error": "url must be a string"}), 400
+    url = url.strip()
     if not url or not url.startswith("https://"):
         return jsonify({"error": "url must be a valid HTTPS URL"}), 400
 
     events = data.get("events", "*")
     if isinstance(events, list):
+        if not all(isinstance(event, str) for event in events):
+            return jsonify({"error": "events must contain only strings"}), 400
         events = ",".join(events)
+    elif not isinstance(events, str):
+        return jsonify({"error": "events must be a string or array of strings"}), 400
     # Validate event names
     for ev in events.split(","):
         ev = ev.strip()
