@@ -76,6 +76,17 @@ class TestAccessibilityAttributes(unittest.TestCase):
                           "Notification bell missing aria-label")
             self.assertIn('role="button"', context,
                           "Notification bell should have role='button'")
+
+    def test_watch_new_tab_links_isolate_the_opener(self):
+        """Every watch-page new tab must hide opener and referrer state."""
+        content = self.read_file(self.TEMPLATE_DIR / 'watch.html')
+        new_tab_links = re.findall(
+            r'<a\b[^>]*target="_blank"[^>]*>', content, flags=re.IGNORECASE,
+        )
+        self.assertGreater(len(new_tab_links), 0)
+        for link in new_tab_links:
+            self.assertRegex(link, r'rel="[^"]*noopener[^"]*"')
+            self.assertRegex(link, r'rel="[^"]*noreferrer[^"]*"')
     
     def test_subscribe_button_has_aria_label(self):
         """Test that subscribe button has aria-label attribute."""
