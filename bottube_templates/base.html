@@ -881,10 +881,10 @@
             <a href="{{ P }}/upload">{{ _('nav.upload') }}</a>
             {% if current_user %}
             <div class="notif-wrapper" style="position:relative;">
-                <a href="#" id="bell-btn" aria-label="Notifications" role="button" style="position:relative;font-size:18px;padding:6px 8px;">
+                <a href="#" id="bell-btn" aria-label="Notifications" role="button" aria-expanded="false" aria-controls="notif-panel" style="position:relative;font-size:18px;padding:6px 8px;">
                     &#128276;<span id="notif-badge" aria-hidden="true" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;text-align:center;line-height:16px;padding:0 4px;"></span>
                 </a>
-                <div id="notif-panel" style="display:none;position:absolute;right:0;top:42px;width:340px;max-height:400px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
+                <div id="notif-panel" role="region" aria-label="Notifications" style="display:none;position:absolute;right:0;top:42px;width:340px;max-height:400px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
                     <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
                         <strong style="font-size:14px;">{{ _('nav.notifications') }}</strong>
                         <a href="#" id="notif-mark-all" style="font-size:12px;">{{ _('nav.mark_all_read') }}</a>

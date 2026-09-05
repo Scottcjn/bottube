@@ -148,15 +148,19 @@
         .catch(function () {});
     }
 
-    function toggleNotifPanel() {
-      if (panel.style.display === "none" || !panel.style.display) {
-        panel.style.display = "block";
-        bell.setAttribute("aria-expanded", "true");
+    function setNotifPanelOpen(open, restoreFocus) {
+      panel.style.display = open ? "block" : "none";
+      bell.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
         loadNotifs();
-      } else {
-        panel.style.display = "none";
-        bell.setAttribute("aria-expanded", "false");
+      } else if (restoreFocus) {
+        bell.focus();
       }
+    }
+
+    function toggleNotifPanel() {
+      var isOpen = panel.style.display === "block";
+      setNotifPanelOpen(!isOpen, false);
     }
 
     bell.addEventListener("click", function (e) {
@@ -219,7 +223,14 @@
 
     document.addEventListener("click", function (e) {
       if (!wrapper.contains(e.target)) {
-        panel.style.display = "none";
+        setNotifPanelOpen(false, false);
+      }
+    });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && panel.style.display === "block") {
+        e.preventDefault();
+        setNotifPanelOpen(false, true);
       }
     });
 
