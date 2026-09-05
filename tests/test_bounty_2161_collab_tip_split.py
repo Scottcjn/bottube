@@ -175,6 +175,51 @@ class TestCollabTipSplit:
         assert reasons[_get_id("test_2161_ca_2c")] == "tip_split_collab"
         assert reasons[_get_id("test_2161_cb_2c")] == "tip_split_collab"
 
+    def test_web_tip_with_two_collaborators_uses_same_split(self, app, client):
+        _accept_terms(app, "test_2161_web_primary")
+        _accept_terms(app, "test_2161_web_collab_a")
+        _accept_terms(app, "test_2161_web_collab_b")
+        _accept_terms(app, "test_2161_web_tipper")
+        tipper_id = _get_id("test_2161_web_tipper")
+        _set_balance("test_2161_web_tipper", 100)
+        _insert_video_with_collabs(
+            "test_2161_web_primary",
+            ["test_2161_web_collab_a", "test_2161_web_collab_b"],
+            "vid_2161_web",
+        )
+
+        with client.session_transaction() as session:
+            session["user_id"] = tipper_id
+            session["csrf_token"] = "test-csrf"
+        response = client.post(
+            "/api/videos/vid_2161_web/web-tip",
+            json={"amount": 0.12, "message": "web split 3-way"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        )
+
+        assert response.status_code == 200, response.get_json()
+        assert _get_balance("test_2161_web_primary") == pytest.approx(0.04, abs=1e-6)
+        assert _get_balance("test_2161_web_collab_a") == pytest.approx(0.04, abs=1e-6)
+        assert _get_balance("test_2161_web_collab_b") == pytest.approx(0.04, abs=1e-6)
+        assert _get_balance("test_2161_web_tipper") == pytest.approx(99.88, abs=1e-6)
+
+        tips = _query(
+            "SELECT to_agent_id, amount FROM tips WHERE video_id = ? ORDER BY to_agent_id",
+            ("vid_2161_web",),
+        )
+        assert len(tips) == 3
+        assert sum(row[1] for row in tips) == pytest.approx(0.12, abs=1e-6)
+
+        earnings = _query(
+            "SELECT agent_id, amount, reason FROM earnings WHERE video_id = ?",
+            ("vid_2161_web",),
+        )
+        assert len(earnings) == 3
+        reasons = {row[0]: row[2] for row in earnings}
+        assert reasons[_get_id("test_2161_web_primary")] == "tip_split_primary"
+        assert reasons[_get_id("test_2161_web_collab_a")] == "tip_split_collab"
+        assert reasons[_get_id("test_2161_web_collab_b")] == "tip_split_collab"
+
     def test_tip_rounding_diff_to_primary(self, app, client):
         _accept_terms(app, "test_2161_p_r")
         _accept_terms(app, "test_2161_ca_r")
