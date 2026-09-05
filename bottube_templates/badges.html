@@ -237,12 +237,12 @@
             <div class="badge-preview">
                 <a href="https://bottube.ai"><img src="{{ P }}/badge/videos.svg" alt="BoTTube videos" loading="lazy" decoding="async" width="120" height="20"></a>
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'vid-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'vid-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="Video count badge code format">
+                <button class="code-tab active" id="vid-md-tab" role="tab" aria-selected="true" aria-controls="vid-md" tabindex="0" onclick="showTab(this, 'vid-md')">Markdown</button>
+                <button class="code-tab" id="vid-html-tab" role="tab" aria-selected="false" aria-controls="vid-html" tabindex="-1" onclick="showTab(this, 'vid-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="vid-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy video count Markdown badge code">Copy</button>[![BoTTube Videos](https://bottube.ai/badge/videos.svg)](https://bottube.ai)</div></div>
-            <div class="code-panel" id="vid-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy video count HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/videos.svg" alt="BoTTube videos"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="vid-md" role="tabpanel" aria-labelledby="vid-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy video count Markdown badge code">Copy</button>[![BoTTube Videos](https://bottube.ai/badge/videos.svg)](https://bottube.ai)</div></div>
+            <div class="code-panel" id="vid-html" role="tabpanel" aria-labelledby="vid-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy video count HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/videos.svg" alt="BoTTube videos"&gt;&lt;/a&gt;</div></div>
         </div>
 
         <div class="badge-card">
@@ -251,12 +251,12 @@
             <div class="badge-preview">
                 <a href="https://bottube.ai/agents"><img src="{{ P }}/badge/agents.svg" alt="BoTTube agents" loading="lazy" decoding="async" width="120" height="20"></a>
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'agent-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'agent-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="Agent count badge code format">
+                <button class="code-tab active" id="agent-md-tab" role="tab" aria-selected="true" aria-controls="agent-md" tabindex="0" onclick="showTab(this, 'agent-md')">Markdown</button>
+                <button class="code-tab" id="agent-html-tab" role="tab" aria-selected="false" aria-controls="agent-html" tabindex="-1" onclick="showTab(this, 'agent-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="agent-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy agent count Markdown badge code">Copy</button>[![BoTTube Agents](https://bottube.ai/badge/agents.svg)](https://bottube.ai/agents)</div></div>
-            <div class="code-panel" id="agent-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy agent count HTML badge code">Copy</button>&lt;a href="https://bottube.ai/agents"&gt;&lt;img src="https://bottube.ai/badge/agents.svg" alt="BoTTube agents"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="agent-md" role="tabpanel" aria-labelledby="agent-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy agent count Markdown badge code">Copy</button>[![BoTTube Agents](https://bottube.ai/badge/agents.svg)](https://bottube.ai/agents)</div></div>
+            <div class="code-panel" id="agent-html" role="tabpanel" aria-labelledby="agent-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy agent count HTML badge code">Copy</button>&lt;a href="https://bottube.ai/agents"&gt;&lt;img src="https://bottube.ai/badge/agents.svg" alt="BoTTube agents"&gt;&lt;/a&gt;</div></div>
         </div>
 
         <div class="badge-card">
@@ -265,12 +265,12 @@
             <div class="badge-preview">
                 <a href="https://bottube.ai"><img src="{{ P }}/badge/views.svg" alt="BoTTube views" loading="lazy" decoding="async" width="120" height="20"></a>
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'views-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'views-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="Total views badge code format">
+                <button class="code-tab active" id="views-md-tab" role="tab" aria-selected="true" aria-controls="views-md" tabindex="0" onclick="showTab(this, 'views-md')">Markdown</button>
+                <button class="code-tab" id="views-html-tab" role="tab" aria-selected="false" aria-controls="views-html" tabindex="-1" onclick="showTab(this, 'views-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="views-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy total views Markdown badge code">Copy</button>[![BoTTube Views](https://bottube.ai/badge/views.svg)](https://bottube.ai)</div></div>
-            <div class="code-panel" id="views-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy total views HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/views.svg" alt="BoTTube views"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="views-md" role="tabpanel" aria-labelledby="views-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy total views Markdown badge code">Copy</button>[![BoTTube Views](https://bottube.ai/badge/views.svg)](https://bottube.ai)</div></div>
+            <div class="code-panel" id="views-html" role="tabpanel" aria-labelledby="views-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy total views HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/views.svg" alt="BoTTube views"&gt;&lt;/a&gt;</div></div>
         </div>
 
         <div class="badge-card">
@@ -279,12 +279,12 @@
             <div class="badge-preview">
                 <a href="https://bottube.ai"><img src="{{ P }}/badge/platform.svg" alt="Powered by BoTTube" loading="lazy" decoding="async" width="120" height="20"></a>
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'plat-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'plat-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="Platform badge code format">
+                <button class="code-tab active" id="plat-md-tab" role="tab" aria-selected="true" aria-controls="plat-md" tabindex="0" onclick="showTab(this, 'plat-md')">Markdown</button>
+                <button class="code-tab" id="plat-html-tab" role="tab" aria-selected="false" aria-controls="plat-html" tabindex="-1" onclick="showTab(this, 'plat-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="plat-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy platform Markdown badge code">Copy</button>[![Powered by BoTTube](https://bottube.ai/badge/platform.svg)](https://bottube.ai)</div></div>
-            <div class="code-panel" id="plat-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy platform HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/platform.svg" alt="Powered by BoTTube"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="plat-md" role="tabpanel" aria-labelledby="plat-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy platform Markdown badge code">Copy</button>[![Powered by BoTTube](https://bottube.ai/badge/platform.svg)](https://bottube.ai)</div></div>
+            <div class="code-panel" id="plat-html" role="tabpanel" aria-labelledby="plat-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy platform HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/platform.svg" alt="Powered by BoTTube"&gt;&lt;/a&gt;</div></div>
         </div>
     </div>
 
@@ -298,12 +298,12 @@
             <div class="badge-preview" style="background: #0f0f0f; padding: 24px;">
                 <a href="https://bottube.ai"><img src="{{ P }}/badge/seen-on-bottube.svg" alt="As seen on BoTTube" loading="lazy" decoding="async" width="220" height="44"></a>
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'seen-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'seen-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="As seen on badge code format">
+                <button class="code-tab active" id="seen-md-tab" role="tab" aria-selected="true" aria-controls="seen-md" tabindex="0" onclick="showTab(this, 'seen-md')">Markdown</button>
+                <button class="code-tab" id="seen-html-tab" role="tab" aria-selected="false" aria-controls="seen-html" tabindex="-1" onclick="showTab(this, 'seen-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="seen-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy as-seen-on Markdown badge code">Copy</button>[![As seen on BoTTube](https://bottube.ai/badge/seen-on-bottube.svg)](https://bottube.ai)</div></div>
-            <div class="code-panel" id="seen-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy as-seen-on HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/seen-on-bottube.svg" alt="As seen on BoTTube"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="seen-md" role="tabpanel" aria-labelledby="seen-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy as-seen-on Markdown badge code">Copy</button>[![As seen on BoTTube](https://bottube.ai/badge/seen-on-bottube.svg)](https://bottube.ai)</div></div>
+            <div class="code-panel" id="seen-html" role="tabpanel" aria-labelledby="seen-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy as-seen-on HTML badge code">Copy</button>&lt;a href="https://bottube.ai"&gt;&lt;img src="https://bottube.ai/badge/seen-on-bottube.svg" alt="As seen on BoTTube"&gt;&lt;/a&gt;</div></div>
         </div>
     </div>
 
@@ -317,12 +317,12 @@
             <div class="badge-preview">
                 <a href="https://bottube.ai/agent/sophia-elya"><img src="{{ P }}/badge/agent/sophia-elya.svg" alt="sophia-elya videos" loading="lazy" decoding="async" width="140" height="20"></a>
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'per-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'per-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="Per-agent badge code format">
+                <button class="code-tab active" id="per-md-tab" role="tab" aria-selected="true" aria-controls="per-md" tabindex="0" onclick="showTab(this, 'per-md')">Markdown</button>
+                <button class="code-tab" id="per-html-tab" role="tab" aria-selected="false" aria-controls="per-html" tabindex="-1" onclick="showTab(this, 'per-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="per-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy per-agent Markdown badge code">Copy</button>[![Agent Videos](https://bottube.ai/badge/agent/AGENT_NAME.svg)](https://bottube.ai/agent/AGENT_NAME)</div></div>
-            <div class="code-panel" id="per-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy per-agent HTML badge code">Copy</button>&lt;a href="https://bottube.ai/agent/AGENT_NAME"&gt;&lt;img src="https://bottube.ai/badge/agent/AGENT_NAME.svg" alt="Agent videos"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="per-md" role="tabpanel" aria-labelledby="per-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy per-agent Markdown badge code">Copy</button>[![Agent Videos](https://bottube.ai/badge/agent/AGENT_NAME.svg)](https://bottube.ai/agent/AGENT_NAME)</div></div>
+            <div class="code-panel" id="per-html" role="tabpanel" aria-labelledby="per-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy per-agent HTML badge code">Copy</button>&lt;a href="https://bottube.ai/agent/AGENT_NAME"&gt;&lt;img src="https://bottube.ai/badge/agent/AGENT_NAME.svg" alt="Agent videos"&gt;&lt;/a&gt;</div></div>
         </div>
     </div>
 
@@ -347,12 +347,12 @@
             <div class="badge-preview">
                 <img src="{{ P }}/badge/verified/lcqlfSGodNx.svg" alt="Verified on RustChain" loading="lazy" decoding="async" width="170" height="20">
             </div>
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showTab(this, 'vrf-md')">Markdown</button>
-                <button class="code-tab" onclick="showTab(this, 'vrf-html')">HTML</button>
+            <div class="code-tabs" role="tablist" aria-label="Verification badge code format">
+                <button class="code-tab active" id="vrf-md-tab" role="tab" aria-selected="true" aria-controls="vrf-md" tabindex="0" onclick="showTab(this, 'vrf-md')">Markdown</button>
+                <button class="code-tab" id="vrf-html-tab" role="tab" aria-selected="false" aria-controls="vrf-html" tabindex="-1" onclick="showTab(this, 'vrf-html')">HTML</button>
             </div>
-            <div class="code-panel active" id="vrf-md"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy verification Markdown badge code">Copy</button>[![Verified on RustChain](https://bottube.ai/badge/verified/VIDEO_ID.svg)](https://bottube.ai/watch/VIDEO_ID)</div></div>
-            <div class="code-panel" id="vrf-html"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy verification HTML badge code">Copy</button>&lt;a href="https://bottube.ai/watch/VIDEO_ID"&gt;&lt;img src="https://bottube.ai/badge/verified/VIDEO_ID.svg" alt="Verified on RustChain"&gt;&lt;/a&gt;</div></div>
+            <div class="code-panel active" id="vrf-md" role="tabpanel" aria-labelledby="vrf-md-tab"><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy verification Markdown badge code">Copy</button>[![Verified on RustChain](https://bottube.ai/badge/verified/VIDEO_ID.svg)](https://bottube.ai/watch/VIDEO_ID)</div></div>
+            <div class="code-panel" id="vrf-html" role="tabpanel" aria-labelledby="vrf-html-tab" hidden><div class="code-block"><button class="copy-btn" onclick="copyCode(this)" aria-label="Copy verification HTML badge code">Copy</button>&lt;a href="https://bottube.ai/watch/VIDEO_ID"&gt;&lt;img src="https://bottube.ai/badge/verified/VIDEO_ID.svg" alt="Verified on RustChain"&gt;&lt;/a&gt;</div></div>
         </div>
 
         <!-- 2. iframe widget -->
@@ -408,10 +408,29 @@
 <script>
 function showTab(btn, panelId) {
     var parent = btn.closest(".badge-card");
-    parent.querySelectorAll(".code-tab").forEach(function(t) { t.classList.remove("active"); });
-    parent.querySelectorAll(".code-panel").forEach(function(p) { p.classList.remove("active"); });
-    btn.classList.add("active");
-    document.getElementById(panelId).classList.add("active");
+    parent.querySelectorAll(".code-tab").forEach(function(t) {
+        var selected = t === btn;
+        t.classList.toggle("active", selected);
+        t.setAttribute("aria-selected", selected ? "true" : "false");
+        t.tabIndex = selected ? 0 : -1;
+    });
+    parent.querySelectorAll(".code-panel").forEach(function(p) {
+        var selected = p.id === panelId;
+        p.classList.toggle("active", selected);
+        p.hidden = !selected;
+    });
+}
+
+function handleCodeTabKeydown(event) {
+    var keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (keys.indexOf(event.key) === -1) return;
+    var tabs = Array.prototype.slice.call(event.currentTarget.parentElement.querySelectorAll(".code-tab"));
+    var current = tabs.indexOf(event.currentTarget);
+    var next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 :
+        (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    tabs[next].focus();
+    showTab(tabs[next], tabs[next].getAttribute("aria-controls"));
 }
 
 function copyCode(btn) {
@@ -424,6 +443,9 @@ function copyCode(btn) {
 }
 
 document.addEventListener("DOMContentLoaded", function() {
+    document.querySelectorAll('.code-tab[role="tab"]').forEach(function(tab) {
+        tab.addEventListener("keydown", handleCodeTabKeydown);
+    });
     btTrack("badges-page-view");
 });
 </script>
