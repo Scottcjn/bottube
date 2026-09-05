@@ -53,6 +53,13 @@ def populated_mem(tmp_path):
 
 class TestTfIdfStore:
     def test_add_and_search(self):
+        """Verify TfIdfStore returns documents matching query terms.
+
+        Seeds three documents, searches for 'brown dog' with top_k=2,
+        and asserts at least one matching doc is returned. The d1 and
+        d3 seeds both contain overlapping query terms so the assertion
+        uses an OR-style check rather than ranking-specific order.
+        """
         store = TfIdfStore()
         store.add("d1", "the quick brown fox jumps over the lazy dog")
         store.add("d2", "a fast red car drives down the highway")
@@ -65,10 +72,21 @@ class TestTfIdfStore:
         assert "d1" in ids or "d3" in ids
 
     def test_empty_store(self):
+        """Verify search on an empty TfIdfStore returns an empty list.
+
+        Sanity check that the store doesn't return None or raise on
+        empty input. Callers rely on iterating over the result list.
+        """
         store = TfIdfStore()
         assert store.search("anything") == []
 
     def test_remove(self):
+        """Verify remove() makes the document invisible to search.
+
+        After remove(d1), searching for 'hello world' (only in d1)
+        returns an empty list. Guards against stale-document leaks
+        where removed entries linger in the inverted index.
+        """
         store = TfIdfStore()
         store.add("d1", "hello world")
         store.remove("d1")
@@ -77,24 +95,51 @@ class TestTfIdfStore:
 
 class TestIngestAndSearch:
     def test_ingest_single(self, mem):
+        """Verify ingesting one video makes it searchable.
+
+        Happy path: a single ingest_video call should produce one
+        search hit with the matching video_id. The first tuple
+        element of the search result is the Video dataclass.
+        """
         mem.ingest_video("v1", "Test Video", "A description", tags=["test"])
         results = mem.search("test video")
         assert len(results) == 1
         assert results[0][0].video_id == "v1"
 
     def test_search_by_topic(self, populated_mem):
+        """Verify search finds videos on a topic the agent has covered.
+
+        The fixture seeds 5 videos; querying for 'PowerPC hardware'
+        (a covered topic) must return at least one result with
+        'PowerPC' in the title.
+        """
         results = populated_mem.search("PowerPC hardware")
         assert len(results) >= 1
         titles = [r[0].title for r in results]
         assert any("PowerPC" in t for t in titles)
 
     def test_search_unrelated(self, populated_mem):
+        """Verify search returns low-score results for unrelated queries.
+
+        Queries completely outside the seeded corpus (e.g. 'quantum
+        physics dark matter') must either return nothing or the top
+        score must be below 0.5. This prevents the memory layer from
+        confidently matching noise as related content.
+        """
         results = populated_mem.search("quantum physics dark matter")
         # Should return few or no results with low scores
         if results:
             assert results[0][1] < 0.5
 
     def test_has_covered_topic(self, populated_mem):
+        """Verify has_covered_topic returns True for seeded topics and False for new ones.
+
+        Pins the boolean check the agent uses to decide whether to
+        reference prior coverage. 'PowerPC hardware' and 'mining
+        rustchain' are in the seeded corpus; 'underwater basket
+        weaving xyz123' is a unique-novel-topic sentinel that must
+        return False.
+        """
         assert populated_mem.has_covered_topic("PowerPC hardware")
         assert populated_mem.has_covered_topic("mining rustchain")
         # Unlikely to have covered
@@ -103,6 +148,14 @@ class TestIngestAndSearch:
 
 class TestSuggestReference:
     def test_followup_for_recent_related(self, tmp_path):
+        """Verify a close-topic video from ~7 days ago is suggested as a followup or callback.
+
+        When the agent posts about a topic closely related to a prior
+        post within the recent past, suggest_reference should produce
+        a FOLLOWUP, CALLBACK, or CHANGED_MIND suggestion that
+        references the prior video. Asserts the related_video_id is
+        the seeded v1.
+        """
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -117,6 +170,13 @@ class TestSuggestReference:
         assert ref.related_video_id == "v1"
 
     def test_first_time_for_new_topic(self, populated_mem):
+        """Verify a novel topic with no prior coverage gets a FIRST_TIME suggestion.
+
+        The seeded corpus covers PowerPC and mining; 'Underwater
+        Basket Weaving XYZ' shares no semantic overlap. The agent
+        should be told this is genuinely new content rather than
+        forced to manufacture a relation.
+        """
         ref = populated_mem.suggest_reference(
             "Underwater Basket Weaving XYZ",
             "Something completely different",
@@ -125,6 +185,13 @@ class TestSuggestReference:
         assert ref.type == ReferenceType.FIRST_TIME
 
     def test_changed_mind_when_opinions_exist(self, tmp_path):
+        """Verify a contradicting revisit produces a CHANGED_MIND reference.
+
+        When the agent has a strong prior opinion ('JavaScript is the
+        worst language') and posts a follow-up 30 days later that
+        revisits the topic, the suggester should produce a
+        CHANGED_MIND reference rather than a generic followup.
+        """
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -140,6 +207,12 @@ class TestSuggestReference:
         assert "JavaScript" in ref.text
 
     def test_series_detection(self, populated_mem):
+        """Verify a Part-3 follow-up to a Part-1/Part-2 series is detected as SERIES.
+
+        The fixture seeds 'PowerPC vs ARM — Part 1' and 'Part 2';
+        querying with 'PowerPC vs ARM — Part 3' must return a
+        SERIES-type reference whose text mentions 'Part 3'.
+        """
         ref = populated_mem.suggest_reference(
             "PowerPC vs ARM — Part 3",
             "Continuing the comparison",
@@ -149,6 +222,13 @@ class TestSuggestReference:
         assert "Part 3" in ref.text
 
     def test_milestone(self, tmp_path):
+        """Verify reaching 10 ingested videos triggers a MILESTONE suggestion.
+
+        The MILESTONE reference is meant to nudge the agent to
+        acknowledge the cumulative body of work. The test seeds 10
+        videos and asserts the suggester emits MILESTONE with '10'
+        in the text.
+        """
         t = [1000.0]
         m = AgentMemory(agent="bot", db_path=tmp_path / "m.db",
                         now_fn=lambda: t[0])
@@ -164,22 +244,47 @@ class TestSuggestReference:
 
 class TestStats:
     def test_basic_stats(self, populated_mem):
+        """Verify the populated fixture produces sensible aggregate stats.
+
+        Seeds 5 videos spanning 2 weeks, then asserts total_videos=5
+        and days_active >= 1 (the time delta between first and last
+        ingest). first_upload must also be a real timestamp.
+        """
         stats = populated_mem.get_stats()
         assert stats.total_videos == 5
         assert stats.first_upload is not None
         assert stats.days_active >= 1
 
     def test_top_topics(self, populated_mem):
+        """Verify 'hardware' appears in top_topics for the seeded corpus.
+
+        Four of the five seeded videos carry the 'hardware' tag, so
+        it must surface in the aggregated top-topics list. This is
+        what the agent uses to decide what themes it has covered.
+        """
         stats = populated_mem.get_stats()
         topic_names = [t[0] for t in stats.top_topics]
         assert "hardware" in topic_names  # appears in 4 videos
 
     def test_series_detection(self, populated_mem):
+        """Verify the PowerPC vs ARM series is detected by the stats surface.
+
+        The seeded fixture includes two 'PowerPC vs ARM' parts; the
+        stats layer must surface that series in current_series so
+        the agent can decide whether to continue it.
+        """
         stats = populated_mem.get_stats()
         assert len(stats.current_series) >= 1
         assert any("PowerPC vs ARM" in s for s in stats.current_series)
 
     def test_empty_stats(self, mem):
+        """Verify an empty AgentMemory returns empty stats gracefully.
+
+        The empty fixture (no ingest_video calls) must report
+        total_videos=0 and an empty top_topics list. Without this
+        the agent UI could crash on division-by-zero or NoneType
+        errors when computing averages over empty data.
+        """
         stats = mem.get_stats()
         assert stats.total_videos == 0
         assert stats.top_topics == []
@@ -187,6 +292,13 @@ class TestStats:
 
 class TestPersistence:
     def test_data_survives_reload(self, tmp_path):
+        """Verify ingested videos survive a reload from the same db_path.
+
+        Writes a video into one AgentMemory instance, opens a second
+        instance on the same db_path, and asserts the video is
+        searchable. Guards against the SQLite store failing to
+        commit before close.
+        """
         db = tmp_path / "persist.db"
         m1 = AgentMemory(agent="bot", db_path=db)
         m1.ingest_video("v1", "Test", "Desc", tags=["tag1"])
@@ -196,6 +308,13 @@ class TestPersistence:
         assert len(results) == 1
 
     def test_agents_isolated(self, tmp_path):
+        """Verify two agents sharing the same db_path cannot see each other's videos.
+
+        Cross-tenant isolation: agent_a ingests a quantum physics
+        video, agent_b ingests a renaissance painting video. Each
+        agent's search must only see its own content. Without this
+        guard, a single db_path would leak data across agents.
+        """
         db = tmp_path / "shared.db"
         m1 = AgentMemory(agent="bot_a", db_path=db)
         m2 = AgentMemory(agent="bot_b", db_path=db)
@@ -211,7 +330,14 @@ class TestPersistence:
 
 class TestExampleScenario:
     def test_agent_references_old_video(self, tmp_path):
-        """Agent posted about X two weeks ago, now posts follow-up."""
+        """Verify end-to-end flow: agent posts about X, waits two weeks, posts follow-up.
+
+        Integration-style test using the docstring as the scenario
+        description: ingest a vintage-computing post 14 days ago,
+        then ask suggest_reference for a follow-up on the same topic.
+        The result must be a FOLLOWUP or CALLBACK referencing v_old
+        and mentioning 'vintage' in the text.
+        """
         t = [1700000000.0]
         m = AgentMemory(agent="cosmo", db_path=tmp_path / "ex.db",
                         now_fn=lambda: t[0])

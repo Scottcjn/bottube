@@ -11,6 +11,14 @@ class FakeCTRTracker:
 
 
 def test_ctr_top_rejects_invalid_query_values(client, monkeypatch):
+    """Verify /api/ctr/top rejects invalid limit and min_impressions.
+
+    Five invalid query combinations must each 400 with a specific error
+    message: non-integer values, limit=0, limit>50, and min_impressions<0.
+    The test also asserts the underlying CTR tracker was never called
+    (tracker.calls == []), proving validation happens before any DB
+    query and that an invalid request cannot leak partial results.
+    """
     import bottube_server
 
     tracker = FakeCTRTracker()
@@ -34,6 +42,15 @@ def test_ctr_top_rejects_invalid_query_values(client, monkeypatch):
 
 
 def test_ctr_top_accepts_default_and_boundary_values(client, monkeypatch):
+    """Verify /api/ctr/top accepts the default and the limit boundaries.
+
+    Three happy-path cases: no query params (server defaults limit=20,
+    min_impressions=10), the inclusive lower bounds (limit=1,
+    min_impressions=0), and the inclusive upper bound (limit=50,
+    min_impressions=25). The tracker.calls assertion at the end confirms
+    the validated values reach the tracker in the expected order with
+    the defaults applied first.
+    """
     import bottube_server
 
     tracker = FakeCTRTracker()

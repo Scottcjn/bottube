@@ -73,6 +73,13 @@ def _seed_agent_and_videos():
 
 
 def test_list_videos_limit_alias_honoured(client):
+    """Verify /api/videos honours ?limit=N as an alias for ?per_page=N.
+
+    Regression for Bottube #1414: third-party bot clients send ?limit=N
+    but list_videos only parsed per_page, silently coercing to the
+    default of 20. This test asserts the alias is now recognised and
+    the returned page has exactly limit items (capped by total seeded).
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=3")
@@ -83,6 +90,13 @@ def test_list_videos_limit_alias_honoured(client):
 
 
 def test_list_videos_limit_alias_accepts_max_boundary(client):
+    """Verify ?limit=50 is accepted and the page size is 50.
+
+    Boundary check for the validator: the inclusive upper bound (50)
+    must be accepted. The test seeds 8 videos so the returned list is
+    shorter than 50 (sanity check that limit doesn't overflow into
+    fabricated rows).
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=50")
@@ -93,6 +107,13 @@ def test_list_videos_limit_alias_accepts_max_boundary(client):
 
 
 def test_list_videos_limit_alias_rejects_above_max(client):
+    """Verify ?limit=51 is rejected with 400 and a clear error.
+
+    Off-by-one guard for the upper bound: limit=51 (one past the cap)
+    must 400 with an error message that mentions 'limit' and '<= 50'
+    so clients can show a precise validation hint instead of silently
+    coercing to the cap.
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=51")
@@ -103,6 +124,12 @@ def test_list_videos_limit_alias_rejects_above_max(client):
 
 
 def test_list_videos_limit_alias_rejects_malformed(client):
+    """Verify ?limit=abc is rejected with 400.
+
+    Non-integer values must fail validation with an error mentioning
+    'limit' so the SDK can distinguish from a per_page failure (which
+    would have a different message key).
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=abc")
@@ -112,6 +139,11 @@ def test_list_videos_limit_alias_rejects_malformed(client):
 
 
 def test_list_videos_limit_alias_rejects_zero(client):
+    """Verify ?limit=0 is rejected with 400.
+
+    Lower bound guard: limit must be >= 1 (zero would return an empty
+    page which is confusing UX and likely a client bug).
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/videos?limit=0")
@@ -154,6 +186,11 @@ def test_list_videos_default_page_size_unchanged_when_no_param(client):
 
 
 def test_list_videos_v1_alias_honours_limit(client):
+    """Verify /api/v1/videos inherits the ?limit alias support.
+
+    The /v1 alias must mirror /api/videos behaviour so old SDKs
+    hitting the alias get the same page-size semantics.
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/v1/videos?limit=2")
@@ -164,6 +201,12 @@ def test_list_videos_v1_alias_honours_limit(client):
 
 
 def test_list_videos_v1_alias_rejects_both_params(client):
+    """Verify /api/v1/videos also rejects per_page+limit supplied together.
+
+    Same mutual-exclusivity contract as the canonical route. Without
+    this the alias would silently accept both and pick one, leading
+    to confusion when a client expects deterministic precedence.
+    """
     _seed_agent_and_videos()
 
     response = client.get("/api/v1/videos?per_page=3&limit=3")
@@ -176,6 +219,13 @@ def test_list_videos_v1_alias_rejects_both_params(client):
 
 
 def test_make_param_conflict_error_shape(app):
+    """Verify _make_param_conflict_error returns 400 with a clear error body.
+
+    Unit-style test for the helper that powers the mutual-exclusivity
+    responses. It must return the canonical (response, 400) tuple and
+    the JSON body must include both parameter names so clients can
+    pinpoint the conflict without parsing the message string.
+    """
     with app.test_request_context("/api/videos?per_page=4&limit=4"):
         from bottube_server import _make_param_conflict_error
 
@@ -201,7 +251,14 @@ def test_make_param_conflict_error_shape(app):
 
 
 def test_list_videos_page_rejects_over_max(client):
-    """`page=99999` is rejected with HTTP 400 (defense in depth)."""
+    """Verify ?page=99999 is rejected with 400 to prevent unbounded OFFSET scans.
+
+    Regression for Bottube #1414 follow-up: pre-fix, ?page=99999 silently
+    triggered a SQLite OFFSET scan that returned empty pages and wasted
+    CPU. The fix caps `page` at 10000 (well above the catalogue size)
+    and 400s anything above that. This test pins the message to mention
+    'page' and '<= 10000' so clients can show the precise reason.
+    """
     response = client.get("/api/videos?page=99999")
     assert response.status_code == 400
     data = response.get_json()
@@ -210,7 +267,13 @@ def test_list_videos_page_rejects_over_max(client):
 
 
 def test_list_videos_page_accepts_max_boundary(client):
-    """`page=10000` (the cap) is accepted and clamped server-side."""
+    """Verify ?page=10000 (the cap) is accepted and clamped server-side.
+
+    Boundary test: the inclusive upper bound must 200 (not 400) and the
+    returned page field must be in [1, 10000]. The actual value may be
+    lower when the catalogue is shorter than 10000 pages, but it must
+    never be 99999 (which is what an uncapped response would echo back).
+    """
     response = client.get("/api/videos?page=10000")
     assert response.status_code == 200
     data = response.get_json()
@@ -222,7 +285,11 @@ def test_list_videos_page_accepts_max_boundary(client):
 
 
 def test_list_videos_page_rejects_just_above_max(client):
-    """`page=10001` is rejected (off-by-one around the cap)."""
+    """Verify ?page=10001 is rejected (off-by-one around the cap).
+
+    Off-by-one guard mirroring the limit-alias test above: page=10001
+    must 400 so a client using <= comparison instead of < is caught.
+    """
     response = client.get("/api/videos?page=10001")
     assert response.status_code == 400
     data = response.get_json()
@@ -230,7 +297,12 @@ def test_list_videos_page_rejects_just_above_max(client):
 
 
 def test_list_videos_v1_alias_page_rejects_over_max(client):
-    """The /api/v1/videos alias inherits the new page cap."""
+    """Verify /api/v1/videos inherits the new page cap.
+
+    The /v1 alias must apply the same upper bound as the canonical
+    route, otherwise a client could bypass the cap by switching to
+    /v1 paths.
+    """
     response = client.get("/api/v1/videos?page=99999")
     assert response.status_code == 400
     data = response.get_json()
