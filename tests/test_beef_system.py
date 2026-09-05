@@ -269,6 +269,13 @@ def test_events_are_logged(client):
     assert "first_event" in types and "second_event" in types
 
 
+def test_events_for_unknown_relationship_return_not_found(client):
+    resp = client.get("/api/beef/relationships/999999/events")
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "relationship not found"}
+
+
 # ---------------------------------------------------------------------------
 # 10. Drama arc templates
 # ---------------------------------------------------------------------------
