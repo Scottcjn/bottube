@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -170,6 +171,63 @@ def _lookup_agent(agent_name: str) -> sqlite3.Row:
         row = db.execute("SELECT * FROM agents WHERE agent_name = ?", (agent_name,)).fetchone()
         assert row is not None
         return row
+
+
+class _ConcurrentReferralCursor:
+    def __init__(self, *, row=None, rowcount=0):
+        self._row = row
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._row
+
+
+class _ConcurrentReferralDb:
+    """Deterministic stale-read harness for the first-upload admission edge."""
+
+    def __init__(self):
+        self._reads = threading.Barrier(2)
+        self._lock = threading.Lock()
+        self.counted = False
+        self.first_uploads = 0
+
+    def execute(self, sql, params=()):
+        normalized = " ".join(sql.split()).lower()
+        if normalized.startswith("select referred_by_code from agents"):
+            self._reads.wait(timeout=2)
+            return _ConcurrentReferralCursor(row={"referred_by_code": "REF-CODE"})
+        if normalized.startswith("update agents set referral_first_upload_counted = 1"):
+            with self._lock:
+                if "coalesce(referral_first_upload_counted, 0) = 0" in normalized and self.counted:
+                    return _ConcurrentReferralCursor(rowcount=0)
+                self.counted = True
+                return _ConcurrentReferralCursor(rowcount=1)
+        if normalized.startswith("update referral_codes set first_uploads = first_uploads + 1"):
+            with self._lock:
+                self.first_uploads += 1
+            return _ConcurrentReferralCursor(rowcount=1)
+        raise AssertionError(f"unexpected SQL in concurrency harness: {normalized}")
+
+    def commit(self):
+        return None
+
+
+def test_referral_first_upload_is_counted_once_under_concurrent_stale_reads(monkeypatch):
+    db = _ConcurrentReferralDb()
+    monkeypatch.setattr(bottube_server, "_referral_refresh_invite_state", lambda *_args: None)
+
+    workers = [
+        threading.Thread(target=bottube_server._referral_mark_first_upload, args=(db, 7))
+        for _ in range(2)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=3)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert db.counted is True
+    assert db.first_uploads == 1
 
 
 @pytest.mark.parametrize("limit", ["abc", "1.5", "0", "-1", "201"])
