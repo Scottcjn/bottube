@@ -16030,6 +16030,15 @@ app.register_blueprint(store_bp)
 
 # USDC Payment Integration (Base Chain)
 from bottube_db import resolve_db_path
+
+# Translation API and UI. Keep its table initializer beside registration so a
+# route cannot be advertised without the storage contract it needs.
+from translation_routes import init_translation_tables, translation_bp
+_translation_db = sqlite3.connect(resolve_db_path())
+init_translation_tables(_translation_db)
+_translation_db.close()
+app.register_blueprint(translation_bp)
+
 from usdc_blueprint import usdc_bp, init_usdc_tables
 import sqlite3 as _usdc_sqlite3
 _usdc_db = _usdc_sqlite3.connect(resolve_db_path())
