@@ -355,6 +355,9 @@
     integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
     crossorigin="anonymous"></script>
 <script>
+    let viewsRequestGeneration = 0;
+    let engagementRequestGeneration = 0;
+
     // Fetch summary stats
     async function loadSummary() {
         try {
@@ -372,9 +375,14 @@
 
     // Fetch and render views chart
     async function loadViewsChart(period = '30d') {
+        const requestGeneration = ++viewsRequestGeneration;
         try {
             const response = await fetch(`/analytics/api/views?period=${period}`);
             const data = await response.json();
+
+            if (requestGeneration !== viewsRequestGeneration) {
+                return;
+            }
             
             const ctx = document.getElementById('viewsChart');
             
@@ -423,9 +431,14 @@
 
     // Fetch engagement data
     async function loadEngagement(period = '30d') {
+        const requestGeneration = ++engagementRequestGeneration;
         try {
             const response = await fetch(`/analytics/api/engagement?period=${period}`);
             const data = await response.json();
+
+            if (requestGeneration !== engagementRequestGeneration) {
+                return;
+            }
             
             const tbody = document.getElementById('engagementTable').querySelector('tbody');
             
@@ -528,8 +541,8 @@
     // Load all data on page load
     document.addEventListener('DOMContentLoaded', () => {
         loadSummary();
-        loadViewsChart('30d');
-        loadEngagement('30d');
+        loadViewsChart('7d');
+        loadEngagement('7d');
         loadTopVideos('views');
         loadAudience();
     });
