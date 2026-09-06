@@ -1009,6 +1009,18 @@ print(results["total"], "results")</code></pre>
 
 {% block extra_js %}
 <script>
+function wireEndpointControls() {
+    document.querySelectorAll(".endpoint").forEach((endpoint, index) => {
+        const header = endpoint.querySelector(":scope > .endpoint-header");
+        const body = endpoint.querySelector(":scope > .endpoint-body");
+        if (!header || !body) return;
+
+        const panelId = `endpoint-panel-${index + 1}`;
+        body.id = panelId;
+        header.setAttribute("aria-controls", panelId);
+    });
+}
+
 function toggleEndpoint(header) {
     const expanded = header.parentElement.classList.toggle("open");
     header.setAttribute("aria-expanded", String(expanded));
@@ -1021,6 +1033,8 @@ document.querySelectorAll(".endpoint-header").forEach(header => {
         toggleEndpoint(header);
     });
 });
+
+wireEndpointControls();
 </script>
 
 <!-- Umami Docs Tracking -->
