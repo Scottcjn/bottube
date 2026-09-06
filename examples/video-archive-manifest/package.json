@@ -1,0 +1,17 @@
+{
+  "name": "bottube-video-archive-manifest-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only BoTTube SDK example that exports a portable video archive manifest.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check index.js && node --check lib.js"
+  },
+  "dependencies": {
+    "bottube-sdk": "file:../../js-sdk"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
