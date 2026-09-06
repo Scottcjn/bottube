@@ -10937,6 +10937,65 @@ def api_delete_playlist(playlist_id):
     return jsonify({"ok": True})
 
 
+def _append_playlist_item(db, playlist_row_id, video_id, now=None):
+    """Append ``video_id`` to a playlist as one atomic operation.
+
+    Returns the allocated ``position`` when a row was inserted, or ``None`` --
+    the conflict sentinel -- when ``(playlist_id, video_id)`` is already a
+    member of the playlist.
+
+    Both playlist append routes previously inlined their own copy of the
+    duplicate check, the position allocation and the ``IntegrityError``
+    handling, so the API and web surfaces were free to drift apart: a fix
+    applied to one route silently left the other behind. Routing both through
+    this helper keeps a single definition of the operation.
+
+    The write is wrapped in ``BEGIN IMMEDIATE`` so the membership check and the
+    insert happen under one write lock -- concurrent appends are serialized
+    instead of interleaving between the check and the act. Within that lock
+    ``COALESCE(MAX(position), 0) + 1`` is computed inside the ``INSERT``
+    statement itself, so two appends can never allocate the same slot. The
+    ``UNIQUE(playlist_id, video_id)`` index remains the authority on
+    membership: a duplicate that still loses the race raises
+    ``IntegrityError``, which is translated into the same ``None`` sentinel as
+    the pre-check rather than escaping as an HTTP 500.
+
+    See issue #2141.
+    """
+    if now is None:
+        now = time.time()
+
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        if db.execute(
+            "SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+            (playlist_row_id, video_id),
+        ).fetchone():
+            db.rollback()
+            return None
+
+        db.execute(
+            "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) "
+            "SELECT ?, ?, COALESCE(MAX(position), 0) + 1, ? "
+            "FROM playlist_items WHERE playlist_id = ?",
+            (playlist_row_id, video_id, now, playlist_row_id),
+        )
+        position = db.execute(
+            "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+            (playlist_row_id, video_id),
+        ).fetchone()[0]
+    except sqlite3.IntegrityError:
+        # (playlist_id, video_id) UNIQUE index -- concurrent duplicate append.
+        db.rollback()
+        return None
+    except Exception:
+        db.rollback()
+        raise
+
+    db.commit()
+    return position
+
+
 @app.route("/api/playlists/<playlist_id>/items", methods=["POST"])
 @require_api_key
 def api_add_playlist_item(playlist_id):
@@ -10964,19 +11023,12 @@ def api_add_playlist_item(playlist_id):
     if not vid or not visible_video:
         return jsonify({"error": "Invalid video_id"}), 400
 
-    # Check duplicate
-    if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
+    next_position = _append_playlist_item(db, pl["id"], vid)
+    if next_position is None:
         return jsonify({"error": "Video already in playlist"}), 409
-
-    # Get next position
-    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
-    db.execute(
-        "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) VALUES (?,?,?,?)",
-        (pl["id"], vid, max_pos + 1, time.time()),
-    )
     db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
     db.commit()
-    return jsonify({"ok": True, "position": max_pos + 1}), 201
+    return jsonify({"ok": True, "position": next_position}), 201
 
 
 @app.route("/api/playlists/<playlist_id>/items/<video_id>", methods=["DELETE"])
@@ -11180,14 +11232,8 @@ def web_add_to_playlist(playlist_id):
     if not vid or not visible_video:
         return jsonify({"error": "Invalid video"}), 400
 
-    if db.execute("SELECT 1 FROM playlist_items WHERE playlist_id = ? AND video_id = ?", (pl["id"], vid)).fetchone():
+    if _append_playlist_item(db, pl["id"], vid) is None:
         return jsonify({"error": "Already in playlist"}), 409
-
-    max_pos = db.execute("SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?", (pl["id"],)).fetchone()[0]
-    db.execute(
-        "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) VALUES (?,?,?,?)",
-        (pl["id"], vid, max_pos + 1, time.time()),
-    )
     db.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (time.time(), pl["id"]))
     db.commit()
     return jsonify({"ok": True})
