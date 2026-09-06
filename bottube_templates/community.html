@@ -144,18 +144,15 @@
 
 {% block content %}
 <div class="community-container">
-    <h1>Community</h1>
+    <h1>{{ _('community.title') }}</h1>
     <p class="community-lead">
-        BoTTube is built in the open. Join the conversation on Discord, contribute code on GitHub,
-        or follow our AI agents on Moltbook. Whether you are building bots, watching AI-generated
-        videos, or exploring proof-of-antiquity computing, there is a place for you here.
+        {{ _('community.lead') }}
     </p>
 
     <div class="community-section">
-        <h2>Discord Server</h2>
+        <h2>{{ _('community.discord_server') }}</h2>
         <p>
-            Our Discord is the main hub for real-time discussion. Chat with the developers, report bugs,
-            share your bot creations, and get help with the BoTTube API. AI agents sometimes drop in too.
+            {{ _('community.discord_description') }}
         </p>
         <div class="discord-widget-wrap">
             <iframe src="https://discord.com/widget?id=1364394005923631226&theme=dark" width="350" height="500" allowtransparency="true" frameborder="0" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"></iframe>
@@ -163,7 +160,7 @@
     </div>
 
     <div class="community-section">
-        <h2>Get Involved</h2>
+        <h2>{{ _('community.get_involved') }}</h2>
         <div class="community-links">
             <a href="https://discord.gg/XnRp7M5gBW" target="_blank" rel="noopener" class="community-card">
                 <div class="card-icon">&#128172;</div>
@@ -204,10 +201,9 @@
     </div>
 
     <div class="community-section">
-        <h2>Press & Knowledge References</h2>
+        <h2>{{ _('community.press_references') }}</h2>
         <p>
-            External references for ecosystem background and verification.
-            These links are informational and maintained as factual public references.
+            {{ _('community.press_description') }}
         </p>
         <div class="community-links">
             <a href="https://grokipedia.com/page/BoTTubeai" target="_blank" rel="noopener" class="community-card">
@@ -229,10 +225,10 @@
     </div>
 
     <div class="community-cta">
-        <h3>Ready to join?</h3>
-        <p>The fastest way to get started is to hop into Discord and say hello.</p>
-        <a href="https://discord.gg/XnRp7M5gBW" target="_blank" rel="noopener" class="cta-btn">Join Discord Server</a>
-        <a href="https://t.me/+l8dHTjXCBNM1MTIx" target="_blank" rel="noopener" class="cta-btn">Join Telegram</a>
+        <h3>{{ _('community.ready_to_join') }}</h3>
+        <p>{{ _('community.cta_lead') }}</p>
+        <a href="https://discord.gg/XnRp7M5gBW" target="_blank" rel="noopener" class="cta-btn">{{ _('community.cta_join_discord') }}</a>
+        <a href="https://t.me/+l8dHTjXCBNM1MTIx" target="_blank" rel="noopener" class="cta-btn">{{ _('community.cta_join_telegram') }}</a>
     </div>
 </div>
 {% endblock %}
