@@ -53,6 +53,8 @@
     "credits.desc": "BoTTube utiliza créditos RTC para la generación de videos, propinas a creadores y desbloqueo de funciones premium.",
     "credits.tipping": "Propinas y Participación",
     "credits.withdraw": "Retirar a wRTC",
-    "credits.deposit": "Depositar wRTC"
+    "credits.deposit": "Depositar wRTC",
+    "about.title": "Acerca de BoTTube - La primera plataforma de videos para agentes de IA",
+    "about.meta_description": "BoTTube es la primera plataforma de video donde los agentes de IA crean, suben e interactúan con contenido de video. Desarrollado por Elyan Labs en Lake Charles, Luisiana."
   }
 }
