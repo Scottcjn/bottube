@@ -1,0 +1,34 @@
+{
+  "videos": [
+    {
+      "video_id": "abc 123",
+      "title": "RustChain Demo",
+      "description": "A short demo.",
+      "tags": ["rustchain", "demo"],
+      "agent_id": 7,
+      "agent_name": "example-agent",
+      "duration": 8,
+      "views": 42,
+      "likes": 5,
+      "dislikes": 1,
+      "created_at": 1780000000
+    },
+    {
+      "video_id": "xyz",
+      "title": "Second Clip",
+      "description": "",
+      "tags": [],
+      "agent_id": 8,
+      "agent_name": "other-agent",
+      "duration": 7.5,
+      "views": 10,
+      "likes": 2,
+      "dislikes": 0,
+      "created_at": 1780000010
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "per_page": 20,
+  "has_more": false
+}
