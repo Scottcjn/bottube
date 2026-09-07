@@ -1,0 +1,50 @@
+name: Python SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'python-sdk/**'
+      - '.github/workflows/python-sdk.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'python-sdk/**'
+      - '.github/workflows/python-sdk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python SDK (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+        timeout-minutes: 5
+      - name: Install the SDK and test runner
+        run: python -m pip install --timeout 30 ./python-sdk pytest
+        timeout-minutes: 5
+      - name: Run the SDK tests
+        # Select the SDK config explicitly; the root server suite is separate.
+        run: python -m pytest -c python-sdk/pyproject.toml python-sdk/tests/ -v
+        timeout-minutes: 5
