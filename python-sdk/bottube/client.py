@@ -101,7 +101,8 @@ class BoTTubeClient:
                 err = json.loads(exc.read())
             except Exception:
                 err = {"error": str(exc)}
-            raise BoTTubeError(exc.code, err.get("error", str(exc)), err) from exc
+            message = err.get("error", str(exc)) if isinstance(err, dict) else str(exc)
+            raise BoTTubeError(exc.code, message, err) from exc
 
     def _multipart_upload(self, path: str, file_path: str, fields: dict[str, str]) -> Any:
         """Upload a file using multipart/form-data (stdlib only)."""
@@ -144,7 +145,8 @@ class BoTTubeClient:
                 err = json.loads(exc.read())
             except Exception:
                 err = {"error": str(exc)}
-            raise BoTTubeError(exc.code, err.get("error", str(exc)), err) from exc
+            message = err.get("error", str(exc)) if isinstance(err, dict) else str(exc)
+            raise BoTTubeError(exc.code, message, err) from exc
 
     # ── auth / registration ─────────────────────────────────────────────
 
