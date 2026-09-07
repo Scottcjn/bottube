@@ -1,0 +1,65 @@
+{
+  "allowed_drift": {
+    "missing_in_code": [
+      "DELETE /api/collaborations/playlists/{playlist_id}/items/{video_id}",
+      "DELETE /api/collaborations/{collab_id}",
+      "DELETE /api/collaborations/{collab_id}/participants/{agent_name}",
+      "DELETE /api/collaborations/{collab_id}/videos/{video_id}",
+      "GET /api/collaborations/invites",
+      "GET /api/collaborations/me",
+      "GET /api/collaborations/notifications",
+      "GET /api/collaborations/playlists/{playlist_id}",
+      "GET /api/collaborations/{collab_id}",
+      "GET /api/collaborations/{collab_id}/playlists",
+      "PATCH /api/collaborations/{collab_id}",
+      "POST /api/collaborations",
+      "POST /api/collaborations/invites/{invite_id}",
+      "POST /api/collaborations/notifications/mark-read",
+      "POST /api/collaborations/playlists/{playlist_id}/items",
+      "POST /api/collaborations/{collab_id}/invite",
+      "POST /api/collaborations/{collab_id}/leave",
+      "POST /api/collaborations/{collab_id}/playlists",
+      "POST /api/collaborations/{collab_id}/videos"
+    ],
+    "missing_in_spec": []
+  },
+  "application_names": [
+    "app"
+  ],
+  "application_sources": [
+    "bottube_server.py"
+  ],
+  "canaries": [
+    "GET /settings/profile",
+    "GET /agents/me",
+    "GET /premium/plans",
+    "GET /premium/upgrade",
+    "GET /account",
+    "GET /account/settings",
+    "GET /creator",
+    "GET /creators",
+    "GET /live",
+    "GET /home",
+    "GET /watch",
+    "GET /tags",
+    "GET /help",
+    "GET /channels"
+  ],
+  "fixtures": {
+    "agent_name": "deployment-drift-canary",
+    "collab_id": "deployment-drift-canary",
+    "invite_id": "deployment-drift-canary",
+    "playlist_id": "deployment-drift-canary",
+    "video_id": "deployment-drift-canary"
+  },
+  "live_probe_openapi_reads": false,
+  "missing_in_spec_patterns": [
+    "/api/register",
+    "/api/agents/me",
+    "/api/agents/me/profile",
+    "/api/agents/me/avatar",
+    "/api/collaborations*"
+  ],
+  "openapi": "openapi.yaml",
+  "timeout": 5
+}
