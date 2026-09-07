@@ -33,6 +33,44 @@ except ImportError:
     log.info("x402.flask not available - premium routes will be open")
 
 
+# Stale facilitator hostname reported in rustchain-bounties#16871 / bottube#2210:
+# x402-facilitator.cdp.coinbase.com no longer resolves (NXDOMAIN), which made
+# every paid request fail with a 500 after the X-PAYMENT header was submitted.
+# The current CDP facilitator lives on x402.org infrastructure; operators can
+# still override via the X402_FACILITATOR_URL environment variable.
+DEFAULT_FACILITATOR_URL = "https://www.x402.org/facilitator"
+DEFAULT_X402_NETWORK = "base"  # eip155:8453
+
+
+def _facilitator_url():
+    """Resolve the x402 facilitator URL from env or the current default."""
+    if X402_AVAILABLE and FACILITATOR_URL:
+        return FACILITATOR_URL
+    return os.environ.get("X402_FACILITATOR_URL", DEFAULT_FACILITATOR_URL)
+
+
+def _x402_network():
+    """Resolve the x402 network identifier shared by paywall and reporting paths."""
+    if X402_AVAILABLE and X402_NETWORK:
+        return X402_NETWORK
+    return os.environ.get("X402_NETWORK", DEFAULT_X402_NETWORK)
+
+
+def _usdc_amount_to_atomic(amount) -> int:
+    """Convert a decimal USDC amount (e.g. 0.01) to atomic units (6 decimals).
+
+    Regression guard for bottube#2210: the paywall previously applied the 1e6
+    atomic conversion to a value that was already in atomic units, quoting
+    10,000 USDC for a 0.01 USDC price. Prices are always decimal USDC here;
+    atomic conversion happens exactly once, at the boundary.
+    """
+    from decimal import Decimal, ROUND_DOWN
+
+    value = Decimal(str(amount))
+    raw = (value * (Decimal(10) ** 6)).quantize(Decimal("1"), rounding=ROUND_DOWN)
+    return int(raw)
+
+
 def init_app(app, db_path):
     """Register x402 premium routes and wallet endpoints on the Flask app."""
 
@@ -166,10 +204,24 @@ def init_app(app, db_path):
     # Wallet Endpoints
     # ------------------------------------------------------------------
 
+    def _resolve_api_key():
+        """Resolve the caller's API key.
+
+        The rest of the BoTTube API authenticates with the X-API-Key header,
+        but these wallet/payment endpoints only read `Authorization: Bearer`,
+        so agents sending X-API-Key got a 401 (bottube#2210, item 3).
+        Accept either: X-API-Key first (platform convention), then
+        Authorization: Bearer for callers that already use it.
+        """
+        api_key = request.headers.get("X-API-Key", "").strip()
+        if not api_key:
+            api_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        return api_key or None
+
     @app.route("/api/agents/me/coinbase-wallet", methods=["GET"])
     def x402_get_agent_wallet():
         """Get agent's Coinbase wallet info."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _resolve_api_key()
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
         db = _get_db()
@@ -195,7 +247,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["POST"])
     def x402_create_agent_wallet():
         """Create or link Coinbase wallet for agent."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _resolve_api_key()
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
 
@@ -266,7 +318,7 @@ def init_app(app, db_path):
     @app.route("/api/x402/payments", methods=["GET"])
     def x402_payment_history():
         """View x402 payment history."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _resolve_api_key()
         db = _get_db()
         try:
             if api_key:
@@ -292,8 +344,8 @@ def init_app(app, db_path):
         """Public x402 integration info."""
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
-            "network": X402_NETWORK if X402_AVAILABLE else None,
-            "facilitator": FACILITATOR_URL if X402_AVAILABLE else None,
+            "network": _x402_network(),
+            "facilitator": _facilitator_url(),
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
             "treasury": BOTTUBE_TREASURY if X402_AVAILABLE else None,
@@ -313,7 +365,11 @@ def init_app(app, db_path):
     # ------------------------------------------------------------------
     if X402_MIDDLEWARE and X402_AVAILABLE and not _all_free:
         _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
-        _net = "base" if "8453" in X402_NETWORK else "base-sepolia"
+        # bottube#2210 item 4: /api/x402/info reported eip155:8453 while the
+        # paywall compared against "base". Resolve both from the same value so
+        # the CAIP-2 identifier and the network name can never drift apart.
+        _network_id = _x402_network()
+        _net = "base" if ("8453" in _network_id or _network_id == "base") else "base-sepolia"
         mw = PaymentMiddleware(app)
         if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
             mw.add(price=PRICE_VIDEO_STREAM_PREMIUM, pay_to_address=_addr,
