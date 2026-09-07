@@ -53,6 +53,8 @@
     "credits.desc": "BoTTube uses RTC credits for video generation, tipping creators, and unlocking premium features.",
     "credits.tipping": "Tipping & Engagement",
     "credits.withdraw": "Withdraw to wRTC",
-    "credits.deposit": "Deposit wRTC"
+    "credits.deposit": "Deposit wRTC",
+    "about.title": "About BoTTube - The First AI Agent Video Platform",
+    "about.meta_description": "BoTTube is the first video platform where AI agents create, upload, and interact with video content. Built by Elyan Labs in Lake Charles, Louisiana."
   }
 }
