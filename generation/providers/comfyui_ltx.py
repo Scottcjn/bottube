@@ -86,10 +86,19 @@ _LTX_WORKFLOW = {
 class ComfyUILTXProvider(GenerationProvider):
     """Local LTX-2 via ComfyUI."""
 
+    # Consecutive poll failures per prompt_id before the job is declared failed.
+    # Transport errors (DNS, timeout, HTTP 5xx, malformed JSON) are usually
+    # transient — a ComfyUI restart or network blip — so a single failure must
+    # not kill a queued job, but a persistent outage must not poll forever
+    # either (issue #2209: every error surfaced as "pending").
+    MAX_CONSECUTIVE_POLL_ERRORS = int(os.environ.get("COMFYUI_MAX_POLL_ERRORS", "5"))
+
     def __init__(self):
         """Set up the in-memory prompt_id -> outputs cache for completed jobs."""
         # Completed jobs: prompt_id -> local path
         self._completed: dict = {}
+        # Consecutive poll errors per prompt_id (reset on any successful poll).
+        self._poll_errors: dict = {}
 
     def get_name(self) -> str:
         """Return the provider's registry key."""
@@ -146,7 +155,15 @@ class ComfyUILTXProvider(GenerationProvider):
             return False, str(exc)
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
-        """Poll ComfyUI history for this prompt_id."""
+        """Poll ComfyUI history for this prompt_id.
+
+        Returns ("error", 0.0) as a transient-error signal when the history
+        poll itself fails (transport error, timeout, HTTP error, malformed
+        JSON). Only a valid history response without this prompt_id — a job
+        genuinely not dequeued/finished yet — maps to "pending". After
+        MAX_CONSECUTIVE_POLL_ERRORS consecutive errors the job is declared
+        "failed" instead of erroring forever (issue #2209).
+        """
         if external_id in self._completed:
             return "completed", 1.0
         try:
@@ -154,16 +171,26 @@ class ComfyUILTXProvider(GenerationProvider):
                 f"{COMFYUI_URL}/history/{external_id}", timeout=10
             ) as resp:
                 history = json.loads(resp.read())
-            if external_id in history:
-                entry = history[external_id]
-                if entry.get("status", {}).get("status_str") == "error":
-                    return "failed", 0.0
-                if entry.get("outputs"):
-                    self._completed[external_id] = entry["outputs"]
-                    return "completed", 1.0
-                return "running", 0.5
-        except Exception:
-            pass
+        except Exception as exc:
+            errors = self._poll_errors.get(external_id, 0) + 1
+            self._poll_errors[external_id] = errors
+            log.warning(
+                "ComfyUI history poll failed for %s (%d/%d): %s",
+                external_id, errors, self.MAX_CONSECUTIVE_POLL_ERRORS, exc,
+            )
+            if errors >= self.MAX_CONSECUTIVE_POLL_ERRORS:
+                return "failed", 0.0
+            return "error", 0.0
+        # Successful poll: reset the consecutive-error budget.
+        self._poll_errors.pop(external_id, None)
+        if external_id in history:
+            entry = history[external_id]
+            if entry.get("status", {}).get("status_str") == "error":
+                return "failed", 0.0
+            if entry.get("outputs"):
+                self._completed[external_id] = entry["outputs"]
+                return "completed", 1.0
+            return "running", 0.5
         return "pending", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:

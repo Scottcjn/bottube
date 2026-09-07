@@ -25,10 +25,10 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from generation.models import GenerationRequest, JobStatus
-from generation.quality_gate import check_quality, QualityGateResult
+from generation.quality_gate import check_quality
 from generation.router import GenerationRouter
 from generation.provider import ProviderRegistry
 from generation.reliability import classify_error, provider_metrics_snapshot, run_with_retries
@@ -464,6 +464,14 @@ def _poll_provider(job_id, provider, external_id, work_dir) -> Optional[Path]:
             return None
         elif status_str == "failed":
             return None
+        elif status_str == "error":
+            # Transient provider-level poll error (issue #2209): surface it on
+            # the job but keep polling — the provider fails the job itself
+            # after its bounded consecutive-error budget.
+            update_job(
+                job_id,
+                error=f"provider poll error (transient): {provider.get_name()}",
+            )
 
         time.sleep(_POLL_INTERVAL)
 
