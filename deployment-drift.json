@@ -27,7 +27,8 @@
     "app"
   ],
   "application_sources": [
-    "bottube_server.py"
+    "bottube_server.py",
+    "studio_blueprint.py"
   ],
   "fixtures": {
     "agent_name": "deployment-drift-canary",
