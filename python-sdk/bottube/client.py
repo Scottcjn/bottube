@@ -69,6 +69,14 @@ class BoTTubeClient:
         """Encode one URL path segment before interpolation."""
         return quote(str(value), safe="")
 
+    @staticmethod
+    def _multipart_filename(file_path: str) -> str:
+        """Escape filename header delimiters using HTML multipart encoding."""
+        return (
+            Path(file_path).name.replace("\r", "%0D")
+            .replace("\n", "%0A").replace('"', "%22")
+        )
+
     def _request(
         self,
         method: str,
@@ -115,9 +123,10 @@ class BoTTubeClient:
 
         filename = Path(file_path).name
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        encoded_filename = self._multipart_filename(file_path)
         body_parts.append(f"--{boundary}\r\n".encode())
         body_parts.append(
-            f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'.encode()
+            f'Content-Disposition: form-data; name="video"; filename="{encoded_filename}"\r\n'.encode()
         )
         body_parts.append(f"Content-Type: {mime}\r\n\r\n".encode())
         with open(file_path, "rb") as f:
@@ -197,9 +206,10 @@ class BoTTubeClient:
         # Build file part header
         filename = Path(file_path).name
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        encoded_filename = self._multipart_filename(file_path)
         file_header = (
             f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'
+            f'Content-Disposition: form-data; name="video"; filename="{encoded_filename}"\r\n'
             f"Content-Type: {mime}\r\n\r\n"
         ).encode()
         
