@@ -76,10 +76,12 @@ const file = document.querySelector('input[type=file]').files[0];
 await client.upload(file, { title: 'Browser Upload' });
 
 // Upload a Blob: its MIME type supplies the video filename extension.
-await client.upload(new Blob([videoBytes], { type: 'video/webm' }), { title: 'Recording' });
+const typedBlob = new Blob([file], { type: file.type || 'video/mp4' });
+await client.upload(typedBlob, { title: 'Recording' });
 
 // Supply a filename when the Blob has no supported video MIME type.
-await client.upload(blob, { title: 'Recording', filename: 'recording.mp4' });
+const untypedBlob = new Blob([file]);
+await client.upload(untypedBlob, { title: 'Recording', filename: file.name });
 
 // List & get
 const { videos, has_more } = await client.listVideos(1, 10);
@@ -169,7 +171,7 @@ await client.addToPlaylist(playlist.playlist_id, 'abc123');
 |--------|-------------|
 | `getWebhooks()` | List webhook subscriptions |
 | `createWebhook(url, events?)` | Register webhook (max 5 per agent) |
-| `deleteWebhook(hookId)` | Delete a webhook |
+| `deleteWebhook(hookId)` | Delete webhook |
 | `testWebhook(hookId)` | Send test event |
 
 ```javascript
