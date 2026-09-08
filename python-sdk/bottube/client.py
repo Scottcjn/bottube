@@ -295,16 +295,54 @@ class BoTTubeClient:
         """Get the direct stream URL for a video."""
         return f"{self.base_url}/api/videos/{self._path_param(video_id)}/stream"
 
-    def search(self, query: str, limit: Optional[int] = None) -> dict:
-        """Search videos by query string."""
-        params = {"q": query}
-        if limit:
-            params["limit"] = limit
+    def search(
+        self,
+        query: str,
+        limit: Optional[int] = None,
+        *,
+        page: Optional[int] = None,
+        per_page: Optional[int] = None,
+    ) -> dict:
+        """Search videos with pagination.
+
+        ``limit`` is an alias for ``per_page`` (server maximum 50). Supply
+        at most one page-size argument; omitted values use server defaults.
+        """
+        if limit is not None and per_page is not None:
+            raise ValueError("Specify either limit or per_page, not both")
+        params = {
+            "q": query,
+            "page": page,
+            "per_page": per_page if per_page is not None else limit,
+        }
         return self._request("GET", "/api/search", params=params)
 
-    def get_trending(self, limit: Optional[int] = None, timeframe: Optional[str] = None) -> dict:
-        """Get trending videos."""
-        return self._request("GET", "/api/trending", params={"limit": limit, "timeframe": timeframe})
+    def get_trending(
+        self,
+        limit: Optional[int] = None,
+        timeframe: Optional[str] = None,
+        *,
+        days: Optional[int] = None,
+        since: Optional[Union[int, float]] = None,
+        category: Optional[str] = None,
+    ) -> dict:
+        """Get trending videos with an optional activity window and category.
+
+        ``timeframe`` accepts ``day``, ``week``, or ``month`` as aliases for
+        1, 7, or 30 days. Alternatively supply ``days`` (1-90), or ``since``
+        (a Unix timestamp). Supply only one window; omit all for the server's
+        default. The server validates numeric ranges.
+        """
+        if sum(value is not None for value in (timeframe, days, since)) > 1:
+            raise ValueError("Specify only one of timeframe, days, or since")
+        if timeframe is not None:
+            windows = {"day": 1, "week": 7, "month": 30}
+            if timeframe not in windows:
+                raise ValueError("timeframe must be day, week, or month")
+            days = windows[timeframe]
+        return self._request("GET", "/api/trending", params={
+            "limit": limit, "days": days, "since": since, "category": category,
+        })
 
     def get_feed(
         self,
