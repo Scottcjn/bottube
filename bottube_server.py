@@ -3425,18 +3425,41 @@ def _queue_reward_hold(
     risk_score: int,
     reasons: list[str],
 ) -> None:
-    """Queue a reward hold for later review. Stores the hold with metadata for manual or automated review."""
-    """Persist a suspicious reward instead of paying it immediately."""
+    """Record a reward that was not paid, with an honest status.
+
+    Two different things used to land here as 'pending', which implied a review
+    queue that nobody ever worked: 35,657 rows sat unreviewed until 2026-07-25.
+
+    A reward blocked purely by a daily or per-creator cap is not suspicious and
+    there is nothing for a human to decide, so it is recorded as resolved with
+    its reason. Only rewards carrying an actual anti-farm signal stay 'pending',
+    which is what makes that queue meaningful.
+    """
+    _cap_only = bool(reasons) and all(
+        "cap reached" in r or "new voter account" in r for r in reasons
+    )
+    if _cap_only:
+        _status = "dismissed"
+        _reviewed_at = time.time()
+        _note = ("above the daily or per-creator reward cap in force at the time. "
+                 "Not payable under the cap policy. The activity itself is not disputed.")
+    else:
+        _status = "pending"
+        _reviewed_at = 0
+        _note = ""
+
     db.execute(
         """
         INSERT INTO reward_holds
-            (agent_id, event_type, event_ref, amount, status, risk_score, reasons, created_at)
-        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+            (agent_id, event_type, event_ref, amount, status, risk_score, reasons,
+             created_at, reviewed_at, reviewer_note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(agent_id, event_type, event_ref) DO UPDATE SET
             risk_score = excluded.risk_score,
             reasons = excluded.reasons
         """,
-        (agent_id, event_type, event_ref, amount, int(risk_score), json.dumps(reasons), time.time()),
+        (agent_id, event_type, event_ref, amount, _status, int(risk_score),
+         json.dumps(reasons), time.time(), _reviewed_at, _note),
     )
 
 
@@ -4466,6 +4489,12 @@ def video_to_dict(row):
     d["url"] = f"/api/videos/{d['video_id']}/stream"
     d["watch_url"] = f"/watch/{d['video_id']}"
     d["thumbnail_url"] = f"/thumbnails/{d['thumbnail']}" if d.get("thumbnail") else ""
+    # Internal moderation/pipeline fields must not reach public API consumers.
+    # Verified: no frontend, template or server-side consumer reads these off
+    # this dict; every caller passes the result straight to jsonify.
+    for _internal in ("screening_details", "removed_reason", "screening_status",
+                      "novelty_score", "novelty_flags", "gen_job_id", "filename"):
+        d.pop(_internal, None)
     cat_id = d.get("category", "other")
     cat_info = CATEGORY_MAP.get(cat_id, CATEGORY_MAP["other"])
     d["category"] = cat_id
@@ -7597,6 +7626,8 @@ def update_agent_mood(agent_name):
         - force_state: Force a specific mood state (optional)
         - trigger_reason: Reason for the mood change (optional)
     """
+    if g.agent["agent_name"] != agent_name:
+        return jsonify({"error": "Forbidden - agents may only update their own mood"}), 403
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
 
@@ -7628,6 +7659,8 @@ def record_mood_signal(agent_name):
         - signal_value: Numeric value of the signal
         - signal_data: Optional additional data
     """
+    if g.agent["agent_name"] != agent_name:
+        return jsonify({"error": "Forbidden - agents may only update their own mood"}), 403
     if not MOOD_ENGINE_AVAILABLE:
         return jsonify({"error": "Mood engine not available"}), 503
 
