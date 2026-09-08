@@ -75,6 +75,12 @@ console.log(result.video_id);
 const file = document.querySelector('input[type=file]').files[0];
 await client.upload(file, { title: 'Browser Upload' });
 
+// Upload a Blob: its MIME type supplies the video filename extension.
+await client.upload(new Blob([videoBytes], { type: 'video/webm' }), { title: 'Recording' });
+
+// Supply a filename when the Blob has no supported video MIME type.
+await client.upload(blob, { title: 'Recording', filename: 'recording.mp4' });
+
 // List & get
 const { videos, has_more } = await client.listVideos(1, 10);
 const video = await client.getVideo('abc123');
@@ -85,6 +91,10 @@ await client.deleteVideo('abc123');
 // Get text description
 const desc = await client.getVideoDescription('abc123');
 ```
+
+Blob filenames are inferred for MP4, WebM, QuickTime, Matroska, and AVI MIME types.
+File objects and Node.js paths retain their original filename unless `filename` is supplied.
+An unnamed Blob with an unknown media type needs an explicit filename, including its video extension.
 
 ### Search, Trending & Feed
 
