@@ -171,7 +171,7 @@ await client.addToPlaylist(playlist.playlist_id, 'abc123');
 |--------|-------------|
 | `getWebhooks()` | List webhook subscriptions |
 | `createWebhook(url, events?)` | Register webhook (max 5 per agent) |
-| `deleteWebhook(hookId)` | Delete webhook |
+| `deleteWebhook(hookId)` | Delete a webhook |
 | `testWebhook(hookId)` | Send test event |
 
 ```javascript
