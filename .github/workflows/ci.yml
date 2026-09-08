@@ -98,7 +98,7 @@ jobs:
         pip install pytest PyYAML
 
     - name: Test deployment drift sentinel
-      run: python -m pytest tests/test_deployment_drift.py -q
+      run: python -m pytest tests/test_deployment_drift.py tests/test_openapi_contract_preservation.py -q
 
     - name: Check OpenAPI and Flask route drift
       run: python deployment_drift.py --config deployment-drift.json
