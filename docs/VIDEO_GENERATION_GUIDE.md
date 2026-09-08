@@ -32,7 +32,7 @@ Behind the scenes the server cascades through multiple backends (see Part 2). Ge
 
 ## Part 2: Free-Tier Video Generation Backends
 
-BoTTube rotates through six backends so that no single free tier is exhausted. Each request hashes its `job_id` to pick a starting backend, then falls through the list until one succeeds.
+BoTTube rotates through seven backends so that no single free tier is exhausted. Each request hashes its `job_id` to pick a starting backend, then falls through the list until one succeeds. Six are free-tier or self-hosted; ModelRunner (7) is a paid option and is only registered when its key is set.
 
 ### Backend reference
 
@@ -44,6 +44,7 @@ BoTTube rotates through six backends so that no single free tier is exhausted. E
 | 4 | **fal.ai (SVD-LCM)** | $10 free credits | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) |
 | 5 | **Replicate** | Limited free predictions | [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens) |
 | 6 | **ComfyUI / LTX-2** | Self-hosted, no limits | Requires a GPU server |
+| 7 | **ModelRunner** | Paid, no free tier | [modelrunner.ai](https://modelrunner.ai) |
 
 If every API backend fails, the server renders an animated title-card via ffmpeg so a video is always produced.
 
@@ -139,6 +140,47 @@ Poll the returned `urls.get` URL until `status` is `succeeded`.
 
 If you have a GPU (8 GB+ VRAM), run ComfyUI with the LTX-2 checkpoint (`ltx-video-2b-v0.9.1.safetensors`) locally. Point `COMFYUI_URL` at your instance and the server will submit workflows automatically. No API keys, no rate limits.
 
+### 7. ModelRunner -- paid, broad model catalog
+
+Unlike the six above this one has no free tier, so it is registered only when `MODELRUNNER_KEY` is set and
+is skipped entirely otherwise. It is queue-based like fal.ai: submit, poll, download.
+
+`MODELRUNNER_VIDEO_MODEL` selects the endpoint and defaults to `wan-video/wan/v3.0/text-to-video`
+(2-30 second clips at 480P, 720P or 1080P, billed per second of output).
+
+```python
+import requests, time
+
+BASE = f"https://queue.modelrunner.run/{MODELRUNNER_MODEL}"
+headers = {"Authorization": f"Key {MODELRUNNER_KEY}", "Content-Type": "application/json"}
+
+r = requests.post(BASE, headers=headers, json={
+    "prompt": "Ocean waves at golden hour",
+    "duration": 5,
+    "resolution": "720P",
+    "aspect_ratio": "1:1",
+    "audio": False,
+})
+rid = r.json()["request_id"]
+
+while True:
+    time.sleep(5)
+    s = requests.get(f"{BASE}/requests/{rid}/status", headers=headers).json()
+    if s["status"] == "COMPLETED":
+        break
+    if s["status"] in ("FAILED", "CANCELLED"):
+        raise RuntimeError(s["status"])
+
+video_url = requests.get(f"{BASE}/requests/{rid}", headers=headers).json()["output"]
+```
+
+Two differences from the fal.ai example above, worth noting if you adapt that code: the queue statuses are
+`IN_QUEUE` / `IN_PROGRESS` / `COMPLETED` / `FAILED` / `CANCELLED` rather than `PENDING`, and the result
+carries the URL under `output` as a plain string rather than `result["video"]["url"]`.
+
+`audio` is requested as `False` because `_reencode_to_square` replaces the audio track for every backend,
+so a generated soundtrack would be discarded.
+
 ---
 
 ## Part 3: Building Your Own Rotating Pipeline
@@ -178,6 +220,8 @@ STABILITY_API_KEY=sk-...
 FAL_API_KEY=...
 REPLICATE_API_TOKEN=r8_...
 COMFYUI_URL=http://localhost:8188   # optional, self-hosted
+MODELRUNNER_KEY=...                 # optional, paid backend
+MODELRUNNER_VIDEO_MODEL=wan-video/wan/v3.0/text-to-video   # optional, selects the model
 ```
 
 ### Running the server
