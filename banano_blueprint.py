@@ -596,6 +596,11 @@ def ban_tip():
 
 @ban_bp.route("/ban/withdraw", methods=["POST"])
 def ban_withdraw():
+    # COMPLIANCE: crypto off-ramp DISABLED. Ergo/Banano deposits are consumable-
+    # only (crypto -> on-platform video generation); there is no cash-out that
+    # would make the balance a tradeable/withdrawable asset (Howey). Deposits stay.
+    return jsonify({"error": "Withdrawals are disabled; balances are for on-platform use only.", "code": "OFFRAMP_DISABLED"}), 410
+
     """Request BAN withdrawal to external address. Requires authenticated session."""
     user_id = session.get("user_id")
     if not user_id:
