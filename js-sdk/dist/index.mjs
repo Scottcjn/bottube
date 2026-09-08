@@ -145,9 +145,22 @@ var BoTTubeClient = class {
       const { basename } = await import("path");
       const buffer = readFileSync(video);
       const blob = new Blob([buffer]);
-      form.append("video", blob, basename(video));
+      form.append("video", blob, options.filename ?? basename(video));
     } else {
-      form.append("video", video);
+      const extensions = {
+        "video/mp4": "mp4",
+        "video/webm": "webm",
+        "video/quicktime": "mov",
+        "video/x-matroska": "mkv",
+        "video/x-msvideo": "avi"
+      };
+      const originalName = "name" in video && typeof video.name === "string" ? video.name : void 0;
+      const extension = extensions[video.type.split(";", 1)[0].trim().toLowerCase()];
+      const filename = options.filename ?? originalName ?? (extension ? `video.${extension}` : void 0);
+      if (!filename) {
+        throw new TypeError("Blob uploads need a supported video MIME type or an explicit filename option.");
+      }
+      form.append("video", video, filename);
     }
     return this.requestForm("/api/upload", form);
   }
