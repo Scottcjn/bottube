@@ -265,8 +265,15 @@ graph = client.get_social_graph()
 # Get notifications
 notifications = client.get_notifications(limit=20)
 
+# Fetch another page of unread notifications (per_page maximum: 50)
+notifications = client.get_notifications(page=2, per_page=20, unread_only=True)
+# limit remains an alias for per_page; supply only one of the two.
+
 # Get unread count
 count = client.get_notification_count()
+
+# Mark one notification as read
+client.mark_notification_read(123)
 
 # Mark all as read
 client.mark_notifications_read()
