@@ -187,6 +187,9 @@ FAL_API_KEY = os.environ.get("FAL_API_KEY", "")
 FAL_VIDEO_URL = "https://queue.fal.run/fal-ai/fast-svd-lcm"
 
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
+MODELRUNNER_KEY = os.environ.get("MODELRUNNER_KEY", "")
+MODELRUNNER_MODEL = os.environ.get("MODELRUNNER_VIDEO_MODEL", "wan-video/wan/v3.0/text-to-video")
+MODELRUNNER_QUEUE_URL = "https://queue.modelrunner.run"
 REPLICATE_VIDEO_URL = "https://api.replicate.com/v1/predictions"
 
 PROMPT_MAX_LEN = 500
@@ -218,6 +221,7 @@ def _init_provider_registry():
     _provider_registry.register("stability", _try_stability, requires_key_env="STABILITY_API_KEY")
     _provider_registry.register("fal", _try_fal, requires_key_env="FAL_API_KEY")
     _provider_registry.register("replicate", _try_replicate, requires_key_env="REPLICATE_API_TOKEN")
+    _provider_registry.register("modelrunner", _try_modelrunner, requires_key_env="MODELRUNNER_KEY")
 
 
 # ---------------------------------------------------------------------------
@@ -949,6 +953,73 @@ def _try_fal(prompt: str, duration: int, output_path: Path) -> bool:
 
         # Download and re-encode
         raw_path = output_path.with_suffix(".fal.mp4")
+        urllib.request.urlretrieve(video_url, str(raw_path))
+        return _reencode_to_square(raw_path, output_path, duration)
+    except Exception:
+        return False
+
+
+def _try_modelrunner(prompt: str, duration: int, output_path: Path) -> bool:
+    """Try ModelRunner for text-to-video generation (paid; MODELRUNNER_VIDEO_MODEL selects the model)."""
+    if not MODELRUNNER_KEY:
+        return False
+    try:
+        headers = {
+            "Authorization": f"Key {MODELRUNNER_KEY}",
+            "Content-Type": "application/json",
+        }
+        # Audio is off because _reencode_to_square replaces the track anyway.
+        payload = json.dumps({
+            "prompt": prompt,
+            "duration": max(2, min(duration, 30)),
+            "resolution": "720P",
+            "aspect_ratio": "1:1",
+            "audio": False,
+        }).encode()
+
+        submit_url = f"{MODELRUNNER_QUEUE_URL}/{MODELRUNNER_MODEL}"
+        req = urllib.request.Request(submit_url, data=payload, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+
+        request_id = result.get("request_id", "")
+        if not request_id:
+            return False
+
+        status_url = f"{submit_url}/requests/{request_id}/status"
+        result_url = f"{submit_url}/requests/{request_id}"
+
+        for _ in range(40):  # Poll up to 200 seconds
+            time.sleep(5)
+            req2 = urllib.request.Request(status_url, headers=headers)
+            with urllib.request.urlopen(req2, timeout=10) as resp2:
+                status = json.loads(resp2.read())
+            state = status.get("status")
+            if state == "COMPLETED":
+                break
+            if state in ("FAILED", "CANCELLED"):
+                return False
+
+        # Get result
+        req3 = urllib.request.Request(result_url, headers=headers)
+        with urllib.request.urlopen(req3, timeout=30) as resp3:
+            final = json.loads(resp3.read())
+
+        # Most video models return the URL as a bare string; some wrap it.
+        output = final.get("output")
+        video_url = ""
+        if isinstance(output, str):
+            video_url = output
+        elif isinstance(output, dict):
+            candidate = output.get("video_url") or output.get("url") or output.get("video") or ""
+            if isinstance(candidate, dict):
+                candidate = candidate.get("url", "")
+            video_url = candidate if isinstance(candidate, str) else ""
+        if not video_url:
+            return False
+
+        # Download and re-encode
+        raw_path = output_path.with_suffix(".modelrunner.mp4")
         urllib.request.urlretrieve(video_url, str(raw_path))
         return _reencode_to_square(raw_path, output_path, duration)
     except Exception:
