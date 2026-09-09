@@ -189,6 +189,8 @@ def init_ban_tables(db=None):
         CREATE INDEX IF NOT EXISTS idx_ban_tx_agent ON ban_transactions(agent_id);
         CREATE INDEX IF NOT EXISTS idx_ban_tx_status ON ban_transactions(status);
         CREATE INDEX IF NOT EXISTS idx_ban_milestones_video ON ban_milestones(agent_id, video_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ban_wallets_index ON ban_wallets(account_index);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ban_wallets_addr ON ban_wallets(ban_address);
     """)
     db.commit()
     if should_close:
@@ -253,13 +255,12 @@ def _derive_address(seed: str, index: int) -> str:
         wallet = BananoWallet(rpc, seed=seed, index=index)
         return wallet.get_address()
 
-    # Fallback: derive private key with Blake2b, use RPC key_expand
-    import hashlib
-    seed_bytes = bytes.fromhex(seed)
-    index_bytes = index.to_bytes(4, "big")
-    private_key = hashlib.blake2b(seed_bytes + index_bytes, digest_size=32).hexdigest()
-    resp = _ban_rpc({"action": "key_expand", "key": private_key})
-    return resp.get("account", "")
+    # SECURITY: bananopie unavailable. Do NOT derive the private key and send it to
+    # the RPC via key_expand — that hands the custodial hot-wallet private key to the
+    # RPC operator. Fail closed instead of leaking the key.
+    log.error("bananopie unavailable — refusing RPC key_expand derivation (would leak "
+              "the private key). Install bananopie to derive addresses safely.")
+    return None
 
 
 def _get_or_create_wallet(db, agent_id: int) -> dict:
@@ -271,20 +272,30 @@ def _get_or_create_wallet(db, agent_id: int) -> dict:
     if wallet:
         return dict(wallet)
 
-    # Find next available index (index 0 = platform hot wallet)
-    max_idx = db.execute("SELECT MAX(account_index) FROM ban_wallets").fetchone()[0]
-    next_index = (max_idx or 0) + 1
-
-    address = _derive_address(BANANO_SEED, next_index)
-    if not address:
-        return None
-
-    db.execute(
-        "INSERT INTO ban_wallets (agent_id, ban_address, account_index, created_at) VALUES (?, ?, ?, ?)",
-        (agent_id, address, next_index, time.time()),
-    )
-    db.commit()
-    return {"agent_id": agent_id, "ban_address": address, "account_index": next_index}
+    # Allocate the next index atomically. Concurrent creators can read the same
+    # MAX(account_index); the UNIQUE index on account_index/ban_address makes the
+    # loser fail on INSERT, so retry with a fresh index (or return this agent's
+    # existing wallet if it was created concurrently).
+    import sqlite3 as _sq
+    for _attempt in range(6):
+        max_idx = db.execute("SELECT MAX(account_index) FROM ban_wallets").fetchone()[0]
+        next_index = (max_idx or 0) + 1
+        address = _derive_address(BANANO_SEED, next_index)
+        if not address:
+            return None
+        try:
+            db.execute(
+                "INSERT INTO ban_wallets (agent_id, ban_address, account_index, created_at) VALUES (?, ?, ?, ?)",
+                (agent_id, address, next_index, time.time()),
+            )
+            db.commit()
+            return {"agent_id": agent_id, "ban_address": address, "account_index": next_index}
+        except _sq.IntegrityError:
+            db.rollback()
+            row = db.execute("SELECT * FROM ban_wallets WHERE agent_id = ?", (agent_id,)).fetchone()
+            if row:
+                return dict(row)
+    return None
 
 
 def ban_to_raw(amount: float) -> str:
@@ -357,20 +368,19 @@ def award_ban_video_gen(db, agent_id: int, video_id: str, gen_method: str = "tex
         amount = REWARDS["video_gen"]
         reason = f"video_gen_{gen_method}"
 
-    # Prevent double-award: check if already rewarded for this video's generation
-    existing = db.execute(
-        "SELECT 1 FROM ban_transactions WHERE agent_id = ? AND video_id = ? AND reason LIKE 'video_gen_%'",
-        (agent_id, video_id),
-    ).fetchone()
-    if existing:
-        return 0.0
-
-    db.execute(
+    # Atomic double-award guard: insert only if no video_gen reward exists for this
+    # (agent, video). Single-statement INSERT..WHERE NOT EXISTS + SQLite write
+    # serialization closes the check-then-insert race (mirrors the upload-reward path).
+    cur = db.execute(
         "INSERT INTO ban_transactions (agent_id, tx_type, amount_ban, reason, video_id, status, created_at) "
-        "VALUES (?, 'reward', ?, ?, ?, 'credited', ?)",
-        (agent_id, amount, reason, video_id, time.time()),
+        "SELECT ?, 'reward', ?, ?, ?, 'credited', ? "
+        "WHERE NOT EXISTS (SELECT 1 FROM ban_transactions "
+        "                  WHERE agent_id = ? AND video_id = ? AND reason LIKE 'video_gen_%')",
+        (agent_id, amount, reason, video_id, time.time(), agent_id, video_id),
     )
     db.commit()
+    if cur.rowcount == 0:
+        return 0.0
     log.info(f"Awarded {amount} BAN to agent#{agent_id} for {reason} (video={video_id})")
     return amount
 
