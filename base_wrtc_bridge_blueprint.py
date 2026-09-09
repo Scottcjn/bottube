@@ -29,6 +29,21 @@ from bottube_db import resolve_db_path
 
 base_wrtc_bp = Blueprint("base_wrtc_bridge", __name__)
 
+# ── COMPLIANCE: Base wRTC on-ramp/off-ramp DISABLED ──────────────────
+# A wrapped, transferable RTC bridge is securities-law exposure (Howey test).
+# Every route on this blueprint is REFUSED (410) — the code and the deposit/
+# withdrawal tables are left intact on purpose (records preserved, no spoliation).
+# Re-enable ONLY on counsel approval by flipping WRTC_BRIDGE_ENABLED.
+WRTC_BRIDGE_ENABLED = False
+
+@base_wrtc_bp.before_request
+def _wrtc_bridge_disabled_guard():
+    if not WRTC_BRIDGE_ENABLED:
+        return jsonify({
+            "error": "The wRTC bridge is disabled.",
+            "code": "WRTC_BRIDGE_DISABLED",
+        }), 410
+
 # ─── Base Chain Configuration ─────────────────────────────────
 BASE_RPC = os.environ.get("BASE_RPC", "https://mainnet.base.org")
 BASE_CHAIN_ID = 8453

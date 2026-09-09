@@ -470,6 +470,11 @@ def ergo_deposit():
 
 @ergo_bp.route("/api/ergo/withdraw", methods=["POST"])
 def ergo_withdraw():
+    # COMPLIANCE: crypto off-ramp DISABLED. Ergo/Banano deposits are consumable-
+    # only (crypto -> on-platform video generation); there is no cash-out that
+    # would make the balance a tradeable/withdrawable asset (Howey). Deposits stay.
+    return jsonify({"error": "Withdrawals are disabled; balances are for on-platform use only.", "code": "OFFRAMP_DISABLED"}), 410
+
     """Request RTC → ERG withdrawal.
 
     Request JSON:
@@ -626,6 +631,11 @@ def ergo_rate():
 
 @ergo_bp.route("/api/ergo/process-withdrawals", methods=["POST"])
 def process_withdrawals():
+    # COMPLIANCE: crypto off-ramp DISABLED. Ergo/Banano deposits are consumable-
+    # only (crypto -> on-platform video generation); there is no cash-out that
+    # would make the balance a tradeable/withdrawable asset (Howey). Deposits stay.
+    return jsonify({"error": "Withdrawals are disabled; balances are for on-platform use only.", "code": "OFFRAMP_DISABLED"}), 410
+
     """Admin endpoint: mark withdrawals as completed with TX ID.
 
     Request JSON:
