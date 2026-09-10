@@ -182,7 +182,7 @@ def add_translation():
         # Update existing translation
         db.execute('''
             UPDATE video_translations 
-            SET title = ?, description = ?, created_at = CURRENT_TIMESTAMP
+            SET title = ?, description = ?, created_at = unixepoch()
             WHERE id = ?
         ''', (title, description, existing['id']))
     else:
