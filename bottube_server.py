@@ -9005,6 +9005,11 @@ def web_subscribe(agent_name):
 # Search
 # ---------------------------------------------------------------------------
 
+def _escape_search_like(value: str) -> str:
+    """Escape SQLite LIKE metacharacters so search input stays literal."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @app.route("/api/search/suggestions")
 def search_suggestions():
     """Return bounded public-catalog suggestions for a partial query."""
@@ -9014,13 +9019,13 @@ def search_suggestions():
         return jsonify(empty)
 
     db = get_db()
-    like_q = f"%{q}%"
+    like_q = f"%{_escape_search_like(q)}%"
     visible = "COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0"
 
     titles = db.execute(
         f"""SELECT DISTINCT v.title
               FROM videos v JOIN agents a ON a.id = v.agent_id
-             WHERE {visible} AND v.title LIKE ? COLLATE NOCASE
+             WHERE {visible} AND v.title LIKE ? ESCAPE '\\' COLLATE NOCASE
              ORDER BY v.views DESC, v.title COLLATE NOCASE
              LIMIT 8""",
         (like_q,),
@@ -9028,7 +9033,7 @@ def search_suggestions():
     categories = db.execute(
         f"""SELECT DISTINCT v.category
               FROM videos v JOIN agents a ON a.id = v.agent_id
-             WHERE {visible} AND v.category LIKE ? COLLATE NOCASE
+             WHERE {visible} AND v.category LIKE ? ESCAPE '\\' COLLATE NOCASE
              ORDER BY v.category COLLATE NOCASE
              LIMIT 8""",
         (like_q,),
@@ -9036,7 +9041,7 @@ def search_suggestions():
     agents = db.execute(
         f"""SELECT DISTINCT a.agent_name
               FROM videos v JOIN agents a ON a.id = v.agent_id
-             WHERE {visible} AND a.agent_name LIKE ? COLLATE NOCASE
+             WHERE {visible} AND a.agent_name LIKE ? ESCAPE '\\' COLLATE NOCASE
              ORDER BY a.agent_name COLLATE NOCASE
              LIMIT 8""",
         (like_q,),
@@ -9045,7 +9050,7 @@ def search_suggestions():
     tag_rows = db.execute(
         f"""SELECT v.tags
               FROM videos v JOIN agents a ON a.id = v.agent_id
-             WHERE {visible} AND v.tags LIKE ? COLLATE NOCASE
+             WHERE {visible} AND v.tags LIKE ? ESCAPE '\\' COLLATE NOCASE
              ORDER BY v.views DESC
              LIMIT 100""",
         (like_q,),
@@ -9115,14 +9120,14 @@ def search_videos():
         return jsonify({"error": "page out of range"}), 400
 
     db = get_db()
-    like_q = f"%{q}%"
+    like_q = f"%{_escape_search_like(q)}%"
 
     # Build dynamic WHERE clauses
     search_conditions = [
-        "v.title LIKE ?",
-        "v.description LIKE ?",
-        "v.tags LIKE ?",
-        "a.agent_name LIKE ?",
+        "v.title LIKE ? ESCAPE '\\'",
+        "v.description LIKE ? ESCAPE '\\'",
+        "v.tags LIKE ? ESCAPE '\\'",
+        "a.agent_name LIKE ? ESCAPE '\\'",
     ]
     params = [like_q, like_q, like_q, like_q]
     caption_video_ids = find_caption_video_ids(q, limit=500)
@@ -14890,11 +14895,11 @@ def search_page():
     total = 0
     if q:
         db = get_db()
-        like_q = f"%{q}%"
+        like_q = f"%{_escape_search_like(q)}%"
         params = [like_q, like_q, like_q, like_q]
         where = (
             "v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0 "
-            "AND (v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR a.agent_name LIKE ?)"
+            "AND (v.title LIKE ? ESCAPE '\\' OR v.description LIKE ? ESCAPE '\\' OR v.tags LIKE ? ESCAPE '\\' OR a.agent_name LIKE ? ESCAPE '\\')"
         )
         if selected_categories:
             where += " AND v.category IN (%s)" % ",".join("?" * len(selected_categories))
