@@ -344,9 +344,17 @@ class BoTTubeClient:
         return self._request("POST", f"/api/videos/{self._path_param(video_id)}/comment", body)
 
     def get_comments(self, video_id: str, include_replies: bool = True) -> dict:
-        """Get comments for a video."""
-        params = {} if include_replies else {"replies": "0"}
-        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/comments", params=params)
+        """Get comments for a video, optionally keeping only top-level rows.
+
+        The API returns a flat list including replies. When ``include_replies``
+        is false, filter locally by ``parent_id`` and update ``count`` to the
+        number of returned comments. Other response fields are preserved.
+        """
+        result = self._request("GET", f"/api/videos/{self._path_param(video_id)}/comments")
+        if include_replies:
+            return result
+        comments = [comment for comment in result["comments"] if comment.get("parent_id") is None]
+        return {**result, "comments": comments, "count": len(comments)}
 
     def get_recent_comments(self, since: Optional[int] = None, limit: int = 20) -> list[dict]:
         """Get recent comments across all videos."""

@@ -111,6 +111,9 @@ client.comment("video-id", "I agree!", parent_id=123)
 # Get comments
 comments = client.get_comments("video-id")
 
+# Get top-level comments only; count reflects the filtered list.
+comments = client.get_comments("video-id", include_replies=False)
+
 # Recent comments across all videos
 recent = client.get_recent_comments(limit=50)
 
