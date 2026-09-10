@@ -67,6 +67,20 @@ def _network_name(network_id):
     return CAIP2_TO_NETWORK.get(network_id, network_id)
 
 
+def _network_caip2(network_id):
+    """Return the canonical CAIP-2 identifier for a network short name.
+
+    Used by /api/x402/info to report the raw chain id while the paywall
+    compares against the short name, so both ends agree on which chain.
+    """
+    for short, caip2 in CAIP2_TO_NETWORK.items():
+        if network_id == short and caip2.startswith("eip155:"):
+            return caip2
+        if network_id == caip2:
+            return caip2
+    return network_id
+
+
 def _facilitator_url():
     """Resolve the x402 facilitator URL: explicit env override always wins."""
     return os.environ.get("X402_FACILITATOR_URL") or DEFAULT_FACILITATOR_URL
@@ -367,7 +381,8 @@ def init_app(app, db_path):
         """Public x402 integration info."""
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
-            "network": _x402_network(),
+            "network": _network_caip2(_x402_network()),
+            "facilitator": _facilitator_url(),
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
             "treasury": BOTTUBE_TREASURY if X402_AVAILABLE else None,
@@ -387,23 +402,25 @@ def init_app(app, db_path):
     # ------------------------------------------------------------------
     if X402_MIDDLEWARE and X402_AVAILABLE and not _all_free:
         _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
-        # bottube#2210 item 2 + 4: resolve network and price from the
+        # bottube#2210 items 1 + 2 + 4: resolve network and price from the
         # single-source-of-truth mapping table and atomic-price dict so the
-        # /info endpoint and the middleware 402 body can never disagree.
+        # /info endpoint and the middleware 402 body can never disagree, and
+        # wire _usdc_amount_to_atomic() so the decimal USDC prices in
+        # PREMIUM_PRICE_USDC are never passed raw to the middleware.
         _net = _x402_network()
         mw = PaymentMiddleware(app)
         if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
-            _price = PREMIUM_PRICE_USDC.get("/api/premium/videos", 0.01)
+            _price = _usdc_amount_to_atomic(PREMIUM_PRICE_USDC.get("/api/premium/videos", 0.01))
             mw.add(price=_price, pay_to_address=_addr,
                    path="/api/premium/videos", network=_net,
                    description="Bulk video data export")
         if not is_free(PRICE_PREMIUM_ANALYTICS):
-            _price = PREMIUM_PRICE_USDC.get("/api/premium/analytics/*", 0.005)
+            _price = _usdc_amount_to_atomic(PREMIUM_PRICE_USDC.get("/api/premium/analytics/*", 0.005))
             mw.add(price=_price, pay_to_address=_addr,
                    path="/api/premium/analytics/*", network=_net,
                    description="Deep agent analytics")
         if not is_free(PRICE_PREMIUM_EXPORT):
-            _price = PREMIUM_PRICE_USDC.get("/api/premium/trending/export", 0.01)
+            _price = _usdc_amount_to_atomic(PREMIUM_PRICE_USDC.get("/api/premium/trending/export", 0.01))
             mw.add(price=_price, pay_to_address=_addr,
                    path="/api/premium/trending/export", network=_net,
                    description="Trending data export")
