@@ -68,15 +68,19 @@ def _network_name(network_id):
 
 
 def _network_caip2(network_id):
-    """Return the canonical CAIP-2 identifier for a network short name.
+    """Return the canonical CAIP-2 identifier for a network id or short name.
 
     Used by /api/x402/info to report the raw chain id while the paywall
     compares against the short name, so both ends agree on which chain.
+
+    CAIP2_TO_NETWORK maps caip2 -> short name, so the lookup must invert it:
+    a previous version iterated expecting name -> caip2 and therefore never
+    matched, silently returning the short name from /api/x402/info.
     """
-    for short, caip2 in CAIP2_TO_NETWORK.items():
-        if network_id == short and caip2.startswith("eip155:"):
-            return caip2
-        if network_id == caip2:
+    if network_id in CAIP2_TO_NETWORK and str(network_id).startswith("eip155:"):
+        return network_id
+    for caip2, short in CAIP2_TO_NETWORK.items():
+        if short == network_id and caip2.startswith("eip155:"):
             return caip2
     return network_id
 
@@ -103,6 +107,8 @@ def _usdc_amount_to_atomic(amount) -> int:
     """
     from decimal import Decimal, ROUND_DOWN
 
+    if Decimal(str(amount)) < 0:
+        raise ValueError("amount must be non-negative")
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** 6)).quantize(Decimal("1"), rounding=ROUND_DOWN)
     return int(raw)
@@ -382,6 +388,7 @@ def init_app(app, db_path):
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
             "network": _network_caip2(_x402_network()),
+            "network_name": _x402_network(),
             "facilitator": _facilitator_url(),
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,

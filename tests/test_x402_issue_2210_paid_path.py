@@ -5,24 +5,22 @@ import pytest
 
 
 def _fresh_app(tmp_path):
-    """Build a minimal bottube app with the x402 blueprint registered.
+    """Build a minimal bottube app with the x402 routes registered.
 
     Uses tmp_path for the database so each test gets an isolated DB.
     """
     import flask
-    from x402_config import x402_config
     app = flask.Flask(__name__)
-    # Simulate a real config
-    app.config.update(x402_config)
-    # Tell the x402 module we're in test mode
     app.config["TESTING"] = True
-    app.config["DB_PATH"] = str(tmp_path / "bottube.db")
-    # Register the x402 blueprint
-    from bottube_x402 import x402_bp
+    db_path = str(tmp_path / "bottube.db")
+    app.config["DB_PATH"] = db_path
+    # Register the payment blueprint, mirroring bottube_server.py.
+    from x402_payment import x402_bp
     app.register_blueprint(x402_bp)
-    # Include the init_app hook that registers routes and middleware
+    # init_app registers /api/premium/*, /api/agents/me/coinbase-wallet,
+    # /api/x402/payments and /api/x402/info.
     from bottube_x402 import init_app
-    init_app(app)
+    init_app(app, db_path)
     return app
 
 
@@ -64,17 +62,32 @@ class TestInfoEndpoint:
         resp = client.get("/api/x402/info")
         assert resp.status_code == 200
         body = resp.get_json()
-        # /info reports the canonical CAIP-2 identifier
-        assert body["network"] in ("eip155:8453", "eip155:84532", "eip155:1")
+        # /info reports the canonical CAIP-2 identifier. Assert the exact
+        # spec form (bottube#2210 item 4) so a regression to the bare short
+        # name cannot hide behind a permissive membership check.
+        assert body["network"] == "eip155:8453"
+        assert body["network_name"] == "base"
         assert body["facilitator"].startswith("https://")
         assert "x402-facilitator.cdp.coinbase.com" not in body["facilitator"]
 
     def test_info_network_and_paywall_name_agree(self, tmp_path):
         # Item 4: the CAIP-2 id in /api/x402/info and the paywall's network
-        # name must resolve to the same chain.  Both use the mapping table.
-        # /info sends CAIP-2; the paywall uses the short name internally.
-        # Verify the mapping is consistent.
-        APP = _fresh_app(tmp_path)
+        # name must resolve to the same chain. Both derive from
+        # CAIP2_TO_NETWORK, so mapping the reported id back must yield
+        # exactly the name the paywall compares against.
+        app = _fresh_app(tmp_path)
+        body = app.test_client().get("/api/x402/info").get_json()
+        mapped = bottube_x402._network_name(body["network"])
+        assert mapped == body["network_name"]
+        assert mapped == bottube_x402._x402_network()
+        assert mapped in ("base", "base-sepolia")
+
+    def test_network_caip2_roundtrip(self):
+        # The CAIP-2 helper must invert CAIP2_TO_NETWORK in both directions.
+        assert bottube_x402._network_caip2("base") == "eip155:8453"
+        assert bottube_x402._network_caip2("eip155:8453") == "eip155:8453"
+        assert bottube_x402._network_caip2("base-sepolia") == "eip155:84532"
+        assert bottube_x402._network_name("eip155:8453") == "base"
 
     def test_x402_network_returns_short_name(self):
         # _x402_network() must return a short name, never a raw CAIP-2 string.
