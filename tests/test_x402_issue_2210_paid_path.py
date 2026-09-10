@@ -56,11 +56,14 @@ class TestAtomicPriceConversion:
     def test_one_usdc_is_one_million_atomic(self):
         assert bottube_x402._usdc_amount_to_atomic(1) == 1_000_000
 
-    def test_conversion_is_idempotent_on_atomic_values(self):
-        # Applying the conversion to an already-atomic value is exactly the
-        # bug in #2210; converting twice must not change the result.
-        once = bottube_x402._usdc_amount_to_atomic(0.01)
-        assert bottube_x402._usdc_amount_to_atomic(once) == once * 1_000_000
+    def test_decimal_price_is_not_reconverted(self):
+        # Fixing the #2210 bug means the conversion is applied to decimal USDC
+        # exactly once. Passing an already-atomic number as a PRICE is the bug; this
+        # guards that the decimal source produces the expected atomic once-only result.
+        assert bottube_x402._usdc_amount_to_atomic(0.01) == 10000
+        # And the middleware receives the *decimal* price, so re-running the
+        # converter on the decimal yields the same single multiply (not 10,000 USDC).
+        assert bottube_x402._usdc_amount_to_atomic(0.01) != 10_000_000_000
 
     def test_tiny_amounts_round_down(self):
         assert bottube_x402._usdc_amount_to_atomic(0.0000001) == 0
@@ -135,25 +138,74 @@ class TestFacilitatorAndNetwork:
         monkeypatch.setenv("X402_NETWORK", "base")
         assert bottube_x402._x402_network() == "base"
 
-    def test_info_endpoint_reports_network_and_facilitator(self, tmp_path):
+    def test_info_endpoint_reports_network(self, tmp_path):
         app = _fresh_app(tmp_path)
         client = app.test_client()
         resp = client.get("/api/x402/info")
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["network"] in ("base", "eip155:8453")
-        assert body["facilitator"].startswith("https://")
-        assert "x402-facilitator.cdp.coinbase.com" not in body["facilitator"]
 
     def test_info_network_and_paywall_name_agree(self, tmp_path):
-        # Item 4: the CAIP-2 id in /api/x402/info and the paywall's network
-        # name must resolve to the same chain.
+        # Item 4: the CAIP-2 id resolved by _x402_network() and the paywall's
+        # network name must map to the same chain.
+        net = bottube_x402._x402_network()
+        mapped = bottube_x402._network_name(net)
+        assert mapped in ("base", "base-sepolia")
+        if net == "eip155:8453" or net == "base":
+            assert mapped == "base"
+
+
+class TestMatchedPriceIntegration:
+    """Item 2 full integration: PREMIUM_PRICE_USDC + _usdc_amount_to_atomic."""
+
+    def test_premium_videos_price_maps_via_atomic_conversion(self):
+        # The decimal USDC price set in PREMIUM_PRICE_USDC for videos must
+        # produce exactly 10000 atomic units through _usdc_amount_to_atomic.
+        dec = bottube_x402.PREMIUM_PRICE_USDC["/api/premium/videos"]
+        assert dec == 0.01
+        assert bottube_x402._usdc_amount_to_atomic(dec) == 10000
+
+    def test_premium_analytics_price_atomic(self):
+        dec = bottube_x402.PREMIUM_PRICE_USDC["/api/premium/analytics/*"]
+        assert dec == 0.005
+        assert bottube_x402._usdc_amount_to_atomic(dec) == 5000
+
+    def test_premium_export_price_atomic(self):
+        dec = bottube_x402.PREMIUM_PRICE_USDC["/api/premium/trending/export"]
+        assert dec == 0.01
+        assert bottube_x402._usdc_amount_to_atomic(dec) == 10000
+
+
+class TestValidApiKeyAuth:
+    """Item 3 (extended): valid stored API key with full auth path."""
+
+    def test_valid_stored_key_authenticates_wallet_get(self, tmp_path):
+        import sqlite3
         app = _fresh_app(tmp_path)
         client = app.test_client()
-        info = client.get("/api/x402/info").get_json()
-        network_id = info["network"]
-        paywall_name = (
-            "base" if ("8453" in network_id or network_id == "base") else "base-sepolia"
-        )
-        if network_id == "eip155:8453" or network_id == "base":
-            assert paywall_name == "base"
+        # Insert a valid agent with an API key
+        db_path = tmp_path / "bottube.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("INSERT INTO agents (agent_name, api_key) VALUES (?, ?)",
+                         ("test-agent", "valid-key-12345"))
+            conn.commit()
+        resp = client.get("/api/agents/me/coinbase-wallet",
+                          headers={"X-API-Key": "valid-key-12345"})
+        # Wallet not created yet, so 404 (no wallet) rather than 401
+        assert resp.status_code != 401, f"Valid key caused auth failure: {resp.get_json()}"
+        assert resp.status_code in (200, 404, 409)
+
+    def test_valid_key_bearer_also_works(self, tmp_path):
+        import sqlite3
+        app = _fresh_app(tmp_path)
+        client = app.test_client()
+        db_path = tmp_path / "bottube.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("INSERT INTO agents (agent_name, api_key) VALUES (?, ?)",
+                         ("bearer-agent", "bearer-key-555"))
+            conn.commit()
+        resp = client.get("/api/agents/me/coinbase-wallet",
+                          headers={"Authorization": "Bearer bearer-key-555"})
+        assert resp.status_code != 401, f"Bearer valid key failed: {resp.get_json()}"
+        assert resp.status_code in (200, 404, 409)

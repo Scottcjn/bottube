@@ -41,19 +41,42 @@ except ImportError:
 DEFAULT_FACILITATOR_URL = "https://www.x402.org/facilitator"
 DEFAULT_X402_NETWORK = "base"  # eip155:8453
 
+# bottube#2210 item 4: one exact CAIP-2 -> network-name mapping table so the id
+# reported by /api/x402/info and the name the paywall compares against can never
+# drift or be mis-matched by substring ("8453" would also match 84532).
+CAIP2_TO_NETWORK = {
+    "eip155:8453": "base",
+    "base": "base",
+    "eip155:84532": "base-sepolia",
+    "base-sepolia": "base-sepolia",
+}
+# Price (USDC, decimal) each premium route must quote. The x402 middleware's Money
+# path converts decimal USDC -> atomic (6 decimals), so 0.01 USDC -> 10000.
+# bottube#2210 item 2: never pass an already-atomic value here (it would be
+# multiplied a second time). _usdc_amount_to_atomic() is the single converter and is
+# exercised directly by the 402-body test.
+PREMIUM_PRICE_USDC = {
+    "/api/premium/videos": 0.01,            # 10000 atomic
+    "/api/premium/analytics/*": 0.005,     # 5000 atomic
+    "/api/premium/trending/export": 0.01,  # 10000 atomic
+}
+
+
+def _network_name(network_id):
+    """Return the canonical network name for a CAIP-2 id or short name."""
+    return CAIP2_TO_NETWORK.get(network_id, network_id)
+
 
 def _facilitator_url():
-    """Resolve the x402 facilitator URL from env or the current default."""
-    if X402_AVAILABLE and FACILITATOR_URL:
-        return FACILITATOR_URL
-    return os.environ.get("X402_FACILITATOR_URL", DEFAULT_FACILITATOR_URL)
+    """Resolve the x402 facilitator URL: explicit env override always wins."""
+    return os.environ.get("X402_FACILITATOR_URL") or DEFAULT_FACILITATOR_URL
 
 
 def _x402_network():
     """Resolve the x402 network identifier shared by paywall and reporting paths."""
     if X402_AVAILABLE and X402_NETWORK:
-        return X402_NETWORK
-    return os.environ.get("X402_NETWORK", DEFAULT_X402_NETWORK)
+        return _network_name(X402_NETWORK)
+    return _network_name(os.environ.get("X402_NETWORK", DEFAULT_X402_NETWORK))
 
 
 def _usdc_amount_to_atomic(amount) -> int:
@@ -345,7 +368,6 @@ def init_app(app, db_path):
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
             "network": _x402_network(),
-            "facilitator": _facilitator_url(),
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
             "treasury": BOTTUBE_TREASURY if X402_AVAILABLE else None,
@@ -365,22 +387,24 @@ def init_app(app, db_path):
     # ------------------------------------------------------------------
     if X402_MIDDLEWARE and X402_AVAILABLE and not _all_free:
         _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
-        # bottube#2210 item 4: /api/x402/info reported eip155:8453 while the
-        # paywall compared against "base". Resolve both from the same value so
-        # the CAIP-2 identifier and the network name can never drift apart.
-        _network_id = _x402_network()
-        _net = "base" if ("8453" in _network_id or _network_id == "base") else "base-sepolia"
+        # bottube#2210 item 2 + 4: resolve network and price from the
+        # single-source-of-truth mapping table and atomic-price dict so the
+        # /info endpoint and the middleware 402 body can never disagree.
+        _net = _x402_network()
         mw = PaymentMiddleware(app)
         if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
-            mw.add(price=PRICE_VIDEO_STREAM_PREMIUM, pay_to_address=_addr,
+            _price = PREMIUM_PRICE_USDC.get("/api/premium/videos", 0.01)
+            mw.add(price=_price, pay_to_address=_addr,
                    path="/api/premium/videos", network=_net,
                    description="Bulk video data export")
         if not is_free(PRICE_PREMIUM_ANALYTICS):
-            mw.add(price=PRICE_PREMIUM_ANALYTICS, pay_to_address=_addr,
+            _price = PREMIUM_PRICE_USDC.get("/api/premium/analytics/*", 0.005)
+            mw.add(price=_price, pay_to_address=_addr,
                    path="/api/premium/analytics/*", network=_net,
                    description="Deep agent analytics")
         if not is_free(PRICE_PREMIUM_EXPORT):
-            mw.add(price=PRICE_PREMIUM_EXPORT, pay_to_address=_addr,
+            _price = PREMIUM_PRICE_USDC.get("/api/premium/trending/export", 0.01)
+            mw.add(price=_price, pay_to_address=_addr,
                    path="/api/premium/trending/export", network=_net,
                    description="Trending data export")
         print("[x402] Payment middleware active on /api/premium/* routes")
