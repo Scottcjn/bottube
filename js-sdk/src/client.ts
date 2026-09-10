@@ -92,6 +92,9 @@ export class BoTTubeClient {
     try {
       data = await res.json();
     } catch (err) {
+      // Let the request helper classify a timed-out body read consistently,
+      // including responses whose error status arrived before the deadline.
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       // Successful DELETE-style operations may legitimately return no body.
       if (res.ok && res.status === 204) return undefined as T;
 
@@ -125,15 +128,15 @@ export class BoTTubeClient {
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-      clearTimeout(timer);
       return await this.responseData<T>(res);
     } catch (err) {
-      clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
       if (err instanceof Error && err.name === 'AbortError') {
         throw new BoTTubeError(408, { error: 'Request timeout' }, 'Request timed out');
       }
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -149,15 +152,15 @@ export class BoTTubeClient {
         body: form,
         signal: controller.signal,
       });
-      clearTimeout(timer);
       return await this.responseData<T>(res);
     } catch (err) {
-      clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
       if (err instanceof Error && err.name === 'AbortError') {
         throw new BoTTubeError(408, { error: 'Request timeout' }, 'Request timed out');
       }
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
