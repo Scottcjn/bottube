@@ -83,6 +83,22 @@
         color: var(--text-muted);
     }
 
+    .auth-switch a {
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 0.18em;
+    }
+
+    .auth-switch a:hover {
+        text-decoration-thickness: 2px;
+    }
+
+    .auth-switch a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+        border-radius: 2px;
+    }
+
     .flash-msg {
         padding: 10px 16px;
         border-radius: var(--radius);
