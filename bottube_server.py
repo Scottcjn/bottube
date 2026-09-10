@@ -7643,6 +7643,18 @@ def update_agent_mood(agent_name):
     force_state = data.get("force_state")
     trigger_reason = data.get("trigger_reason", "")
 
+    if force_state is not None:
+        if not isinstance(force_state, str):
+            return jsonify({"error": "force_state must be a string"}), 400
+        valid_states = [state.value for state in MoodState]
+        if force_state not in valid_states:
+            return jsonify({
+                "error": "force_state is invalid",
+                "valid_states": valid_states,
+            }), 400
+    if not isinstance(trigger_reason, str):
+        return jsonify({"error": "trigger_reason must be a string"}), 400
+
     result = api_update_mood(str(DB_PATH), agent["id"], force_state, trigger_reason)
     
     return jsonify(result)
@@ -7682,8 +7694,23 @@ def record_mood_signal(agent_name):
     
     if signal_value is None:
         return jsonify({"error": "signal_value is required"}), 400
-    
-    result = api_record_signal(str(DB_PATH), agent["id"], signal_type, float(signal_value), signal_data)
+    if not isinstance(signal_type, str):
+        return jsonify({"error": "signal_type must be a string"}), 400
+    if not isinstance(signal_data, str):
+        return jsonify({"error": "signal_data must be a string"}), 400
+
+    if isinstance(signal_value, bool):
+        return jsonify({"error": "signal_value must be numeric"}), 400
+    try:
+        numeric_signal_value = float(signal_value)
+    except (TypeError, ValueError):
+        return jsonify({"error": "signal_value must be numeric"}), 400
+    if not math.isfinite(numeric_signal_value):
+        return jsonify({"error": "signal_value must be finite"}), 400
+
+    result = api_record_signal(
+        str(DB_PATH), agent["id"], signal_type, numeric_signal_value, signal_data
+    )
     
     return jsonify(result)
 

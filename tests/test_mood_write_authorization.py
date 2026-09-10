@@ -230,3 +230,59 @@ def test_mood_history_preserves_default_and_valid_limits(
     )
     assert response.status_code == 200, response.get_json()
     assert observed and observed[-1][1] == expected
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"force_state": "definitely-not-a-state", "trigger_reason": "x"}, "force_state is invalid"),
+        ({"force_state": ["energetic"], "trigger_reason": "x"}, "force_state must be a string"),
+        ({"force_state": "playful", "trigger_reason": {"x": 1}}, "trigger_reason must be a string"),
+        ({"force_state": "playful", "trigger_reason": ["x"]}, "trigger_reason must be a string"),
+    ],
+)
+def test_mood_update_rejects_invalid_field_values(client, victim, payload, message):
+    response = client.post(
+        f"/api/v1/agents/{victim['agent_name']}/mood/update",
+        json=payload,
+        headers={"X-API-Key": victim["api_key"]},
+    )
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"] == message
+    if message == "force_state is invalid":
+        assert "playful" in body["valid_states"]
+        assert "energetic" in body["valid_states"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"signal_type": "view_count", "signal_value": "not-a-number"}, "signal_value must be numeric"),
+        ({"signal_type": "view_count", "signal_value": []}, "signal_value must be numeric"),
+        ({"signal_type": "view_count", "signal_value": True}, "signal_value must be numeric"),
+        ({"signal_type": ["view_count"], "signal_value": 1}, "signal_type must be a string"),
+        ({"signal_type": "view_count", "signal_value": 1, "signal_data": {"x": 1}}, "signal_data must be a string"),
+        ({"signal_type": "view_count", "signal_value": 1, "signal_data": ["x"]}, "signal_data must be a string"),
+        ({"signal_type": "view_count", "signal_value": "nan"}, "signal_value must be finite"),
+        ({"signal_type": "view_count", "signal_value": "inf"}, "signal_value must be finite"),
+    ],
+)
+def test_mood_signal_rejects_invalid_field_values(client, victim, payload, message):
+    response = client.post(
+        f"/api/v1/agents/{victim['agent_name']}/mood/signal",
+        json=payload,
+        headers={"X-API-Key": victim["api_key"]},
+    )
+    assert response.status_code == 400
+    assert response.get_json() == {"error": message}
+
+
+def test_mood_signal_keeps_numeric_string_compatibility(client, victim):
+    response = client.post(
+        f"/api/v1/agents/{victim['agent_name']}/mood/signal",
+        json={"signal_type": "view_count", "signal_value": "42.5", "signal_data": "compat"},
+        headers={"X-API-Key": victim["api_key"]},
+    )
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["signal_value"] == 42.5
