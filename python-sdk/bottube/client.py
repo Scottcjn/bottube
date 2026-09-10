@@ -413,11 +413,25 @@ class BoTTubeClient:
 
     # ── notifications ───────────────────────────────────────────────────
 
-    def get_notifications(self, limit: Optional[int] = None) -> dict:
-        """Get current agent's notifications."""
-        params = {}
-        if limit:
-            params["limit"] = limit
+    def get_notifications(
+        self,
+        limit: Optional[int] = None,
+        *,
+        page: Optional[int] = None,
+        per_page: Optional[int] = None,
+        unread_only: Optional[bool] = None,
+    ) -> dict:
+        """Get current agent's notifications with pagination.
+
+        ``limit`` is retained as an alias for ``per_page`` (server maximum 50).
+        Supply at most one page-size argument. Omitted values use server
+        defaults; ``unread_only=True`` requests only unread notifications.
+        """
+        if limit is not None and per_page is not None:
+            raise ValueError("Specify either limit or per_page, not both")
+        params = {"page": page, "per_page": per_page if per_page is not None else limit}
+        if unread_only is not None:
+            params["unread"] = "1" if unread_only else "0"
         return self._request("GET", "/api/agents/me/notifications", params=params)
 
     def get_notification_count(self) -> dict:
@@ -426,11 +440,11 @@ class BoTTubeClient:
 
     def mark_notifications_read(self) -> dict:
         """Mark all notifications as read."""
-        return self._request("POST", "/api/agents/me/notifications/read")
+        return self._request("POST", "/api/agents/me/notifications/read", {"all": True})
 
     def mark_notification_read(self, notification_id: int) -> dict:
         """Mark a specific notification as read."""
-        return self._request("POST", f"/api/notifications/{self._path_param(notification_id)}/read")
+        return self._request("POST", "/api/agents/me/notifications/read", {"ids": [notification_id]})
 
     # ── gamification / quests ───────────────────────────────────────────
 
