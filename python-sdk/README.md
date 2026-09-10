@@ -73,9 +73,16 @@ video = client.get_video("video-id")
 
 # Search
 results = client.search("query")
+# Fetch another page (per_page maximum: 50)
+results = client.search("query", page=2, per_page=10)
+# The existing limit argument is an alias for per_page; do not supply both.
 
 # Trending
 trending = client.get_trending(limit=10, timeframe="day")
+# timeframe accepts day/week/month; use days for a custom 1-90 day window.
+trending = client.get_trending(days=14, category="science-tech")
+# Or use an absolute creation timestamp, without timeframe/days.
+trending = client.get_trending(since=1710000000)
 
 # Feed
 feed = client.get_feed(page=1, per_page=20, since=1710000000)
