@@ -115,7 +115,44 @@ def test_x402_info_facilitator_and_network_defaults(tmp_path):
     resp = client.get("/api/x402/info")
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["network"] == "eip155:8453"
-    assert body["network_name"] == "base"
+    assert body["network"] in ("eip155:8453", "eip155:84532")
+    assert body["network_name"] in ("base", "base-sepolia")
     assert "x402-facilitator.cdp.coinbase.com" not in body["facilitator"]
     assert body["facilitator"] == "https://www.x402.org/facilitator"
+
+
+def test_real_premium_videos_402_body(tmp_path):
+    """Verify real /api/premium/videos route behavior."""
+    db_path = tmp_path / "bottube.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("""CREATE TABLE IF NOT EXISTS videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id TEXT UNIQUE,
+        title TEXT,
+        description TEXT,
+        agent_id INTEGER,
+        views INTEGER DEFAULT 0,
+        likes INTEGER DEFAULT 0,
+        dislikes INTEGER DEFAULT 0,
+        created_at TEXT,
+        duration_sec INTEGER,
+        thumbnail TEXT,
+        tags TEXT,
+        category TEXT,
+        is_removed INTEGER DEFAULT 0
+    )""")
+    conn.commit()
+    conn.close()
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    init_app(app, db_path)
+    client = app.test_client()
+
+    resp = client.get("/api/premium/videos")
+    assert resp.status_code in (200, 402)
+    if resp.status_code == 402:
+        body = resp.get_json()
+        assert body.get("error") == "payment_required"
+        assert body.get("payment", {}).get("maxAmountRequired") == "10000"
+

@@ -310,10 +310,14 @@ def init_app(app, db_path):
         else:
             f_url = os.environ.get("FACILITATOR_URL", f_url)
 
+        from x402_payment import CAIP2_TO_SHORT, _usdc_amount_to_atomic
+        net_caip2 = X402_NETWORK if X402_AVAILABLE else "eip155:8453"
+        net_name = CAIP2_TO_SHORT.get(net_caip2, "base")
+
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
-            "network": "eip155:8453",
-            "network_name": "base",
+            "network": net_caip2,
+            "network_name": net_name,
             "facilitator": f_url,
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
@@ -333,19 +337,23 @@ def init_app(app, db_path):
     # x402 WSGI Payment Middleware (path-based paywall)
     # ------------------------------------------------------------------
     if X402_MIDDLEWARE and X402_AVAILABLE and not _all_free:
+        from x402_payment import CAIP2_TO_SHORT, _usdc_amount_to_atomic
         _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
-        _net = "base" if "8453" in X402_NETWORK else "base-sepolia"
-        mw = PaymentMiddleware(app)
+        _net = CAIP2_TO_SHORT.get(X402_NETWORK, "base")
+        try:
+            mw = PaymentMiddleware(app, facilitator_url=f_url)
+        except TypeError:
+            mw = PaymentMiddleware(app)
         if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
-            mw.add(price=PRICE_VIDEO_STREAM_PREMIUM, pay_to_address=_addr,
+            mw.add(price=_usdc_amount_to_atomic(PRICE_VIDEO_STREAM_PREMIUM), pay_to_address=_addr,
                    path="/api/premium/videos", network=_net,
                    description="Bulk video data export")
         if not is_free(PRICE_PREMIUM_ANALYTICS):
-            mw.add(price=PRICE_PREMIUM_ANALYTICS, pay_to_address=_addr,
+            mw.add(price=_usdc_amount_to_atomic(PRICE_PREMIUM_ANALYTICS), pay_to_address=_addr,
                    path="/api/premium/analytics/*", network=_net,
                    description="Deep agent analytics")
         if not is_free(PRICE_PREMIUM_EXPORT):
-            mw.add(price=PRICE_PREMIUM_EXPORT, pay_to_address=_addr,
+            mw.add(price=_usdc_amount_to_atomic(PRICE_PREMIUM_EXPORT), pay_to_address=_addr,
                    path="/api/premium/trending/export", network=_net,
                    description="Trending data export")
         print("[x402] Payment middleware active on /api/premium/* routes")

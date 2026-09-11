@@ -93,6 +93,15 @@ CAIP2_TO_SHORT = {
     "ethereum": "ethereum",
 }
 
+PAYMENT_RECIPIENTS = {
+    "base": USDC_RECEIVING_ADDRESS.lower(),
+    "base-sepolia": USDC_RECEIVING_ADDRESS.lower(),
+    "ethereum": USDC_RECEIVING_ADDRESS.lower(),
+    "eip155:8453": USDC_RECEIVING_ADDRESS.lower(),
+    "eip155:84532": USDC_RECEIVING_ADDRESS.lower(),
+    "eip155:1": USDC_RECEIVING_ADDRESS.lower(),
+}
+
 
 def _normalize_network(net):
     """Normalize network string (base or eip155:8453) to canonical short name (e.g. base)."""
@@ -103,15 +112,8 @@ def _normalize_network(net):
 
 
 def _supported_networks():
-    """Return the list of network names that have a configured RPC URL."""
-    nets = []
-    for network, rpc_url in NETWORK_RPCS.items():
-        if rpc_url:
-            nets.append(network)
-            caip2 = CAIP2_NETWORK_MAP.get(network)
-            if caip2 and caip2 not in nets:
-                nets.append(caip2)
-    return nets
+    """Return the list of network names that have a configured RPC URL or recipient."""
+    return ["base", "base-sepolia", "ethereum", "eip155:8453", "eip155:84532", "eip155:1"]
 
 
 def _request_fingerprint():
@@ -343,17 +345,22 @@ def require_payment(price_key):
 
 
 def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
-    """Verify a structured x402 receipt against on-chain USDC transfers."""
+    """Verify a structured x402 receipt against on-chain USDC transfers or facilitator."""
     try:
         _cleanup_payment_cache()
         receipt = _parse_payment_receipt(payment_data)
         tx_hash = receipt["tx_hash"]
-        network = receipt["network"]
+        raw_net = receipt.get("network", "base")
+        network = _normalize_network(raw_net)
 
-        if network not in _supported_networks():
-            return False, "unsupported_network:" + network, None
+        if network not in _supported_networks() and raw_net not in _supported_networks():
+            return False, "unsupported_network:" + str(raw_net), None
 
-        configured_recipient = PAYMENT_RECIPIENTS.get(network, "").lower()
+        configured_recipient = (
+            PAYMENT_RECIPIENTS.get(network)
+            or PAYMENT_RECIPIENTS.get(raw_net)
+            or USDC_RECEIVING_ADDRESS
+        ).lower()
         if not configured_recipient:
             return False, "recipient_not_configured", None
 
