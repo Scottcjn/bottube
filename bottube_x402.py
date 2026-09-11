@@ -299,9 +299,7 @@ def init_app(app, db_path):
         finally:
             db.close()
 
-    @app.route("/api/x402/info", methods=["GET"])
-    def x402_info():
-        """Public x402 integration info."""
+    def _get_facilitator_url():
         f_url = "https://www.x402.org/facilitator"
         if X402_AVAILABLE:
             configured_f = os.environ.get("FACILITATOR_URL", FACILITATOR_URL)
@@ -309,6 +307,12 @@ def init_app(app, db_path):
                 f_url = configured_f
         else:
             f_url = os.environ.get("FACILITATOR_URL", f_url)
+        return f_url
+
+    @app.route("/api/x402/info", methods=["GET"])
+    def x402_info():
+        """Public x402 integration info."""
+        f_url = _get_facilitator_url()
 
         from x402_payment import CAIP2_TO_SHORT, _usdc_amount_to_atomic
         net_caip2 = X402_NETWORK if X402_AVAILABLE else "eip155:8453"
@@ -340,8 +344,9 @@ def init_app(app, db_path):
         from x402_payment import CAIP2_TO_SHORT, _usdc_amount_to_atomic
         _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
         _net = CAIP2_TO_SHORT.get(X402_NETWORK, "base")
+        _f_url = _get_facilitator_url()
         try:
-            mw = PaymentMiddleware(app, facilitator_url=f_url)
+            mw = PaymentMiddleware(app, facilitator_url=_f_url)
         except TypeError:
             mw = PaymentMiddleware(app)
         if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
