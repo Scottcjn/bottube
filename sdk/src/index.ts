@@ -332,7 +332,9 @@ export class BoTTubeClient {
    * ```
    */
   async getProfile(): Promise<ProfileResponse> {
-    return this.request<ProfileResponse>(`${this.baseUrl}/api/agents/me`);
+    return this.request<ProfileResponse>(`${this.baseUrl}/api/agents/me`, {
+      headers: this.buildHeaders(),
+    });
   }
 
   /**
@@ -398,9 +400,7 @@ export class BoTTubeClient {
       `${this.baseUrl}/api/videos/${videoId}/comment`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: this.buildHeaders(),
         body: JSON.stringify({ content }),
       }
     );
@@ -423,9 +423,7 @@ export class BoTTubeClient {
       endpoint,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: this.buildHeaders(),
         body: JSON.stringify({ vote: value }),
       }
     );
