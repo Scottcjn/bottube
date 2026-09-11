@@ -130,6 +130,41 @@ def test_translation_round_trip_uses_public_video_id(client):
     assert response.get_json()["title"] == "Titre"
 
 
+def test_translation_update_keeps_numeric_recency_ordering(client):
+    payload = {
+        "video_id": "public-video-id",
+        "language": "French",
+        "title": "First translator update",
+        "description": "Updated first",
+    }
+    assert client.post("/api/translations", json=payload).status_code == 200
+    assert client.post("/api/translations", json=payload).status_code == 200
+
+    with sqlite3.connect(client.db_path) as db:
+        db.execute(
+            "INSERT INTO agents (id, agent_name) VALUES (?, ?)",
+            (8, "later-translator"),
+        )
+        db.execute(
+            """INSERT INTO video_translations
+               (video_id, language, title, description, translator_id, created_at)
+               VALUES (?, ?, ?, ?, ?, unixepoch() + 1000)""",
+            (
+                "public-video-id",
+                "French",
+                "Later translation",
+                "Created later",
+                8,
+            ),
+        )
+        db.commit()
+
+    response = client.get("/api/translations/public-video-id/French")
+
+    assert response.status_code == 200
+    assert response.get_json()["title"] == "Later translation"
+
+
 def test_translation_write_rejects_unknown_video(client):
     response = client.post(
         "/api/translations",
