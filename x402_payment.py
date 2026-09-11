@@ -75,9 +75,43 @@ _payment_cache = {}
 CACHE_TTL = 3600
 
 
+CAIP2_NETWORK_MAP = {
+    "eip155:8453": "base",
+    "eip155:84532": "base-sepolia",
+    "eip155:1": "ethereum",
+    "base": "eip155:8453",
+    "base-sepolia": "eip155:84532",
+    "ethereum": "eip155:1",
+}
+
+CAIP2_TO_SHORT = {
+    "eip155:8453": "base",
+    "eip155:84532": "base-sepolia",
+    "eip155:1": "ethereum",
+    "base": "base",
+    "base-sepolia": "base-sepolia",
+    "ethereum": "ethereum",
+}
+
+
+def _normalize_network(net):
+    """Normalize network string (base or eip155:8453) to canonical short name (e.g. base)."""
+    if not net:
+        return "base"
+    n = str(net).strip().lower()
+    return CAIP2_TO_SHORT.get(n, n)
+
+
 def _supported_networks():
     """Return the list of network names that have a configured RPC URL."""
-    return [network for network, rpc_url in NETWORK_RPCS.items() if rpc_url]
+    nets = []
+    for network, rpc_url in NETWORK_RPCS.items():
+        if rpc_url:
+            nets.append(network)
+            caip2 = CAIP2_NETWORK_MAP.get(network)
+            if caip2 and caip2 not in nets:
+                nets.append(caip2)
+    return nets
 
 
 def _request_fingerprint():
@@ -113,14 +147,23 @@ def _parse_positive_int_query(name, default, max_value=None):
     return value, None
 
 
-def _amount_to_raw(amount) -> int:
-    """Convert a decimal USDC amount to its raw integer representation (USDC_DECIMALS)."""
+def _usdc_amount_to_atomic(amount) -> str:
+    """Convert decimal USDC amount to its raw atomic integer representation string (USDC_DECIMALS).
+    Handles already atomic digit strings (e.g. '10000' -> '10000').
+    """
+    if isinstance(amount, str) and amount.isdigit() and int(amount) >= 10000:
+        return amount
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** USDC_DECIMALS)).quantize(
         Decimal("1"),
         rounding=ROUND_DOWN,
     )
-    return int(raw)
+    return str(int(raw))
+
+
+def _amount_to_raw(amount) -> int:
+    """Convert a decimal USDC amount to its raw integer representation (USDC_DECIMALS)."""
+    return int(_usdc_amount_to_atomic(amount))
 
 
 def _parse_payment_receipt(payment_data):
@@ -248,12 +291,14 @@ def require_payment(price_key):
             )
 
             if not payment_header:
+                max_amount = _usdc_amount_to_atomic(price)
                 return jsonify({
                     "error": "payment_required",
                     "protocol": "x402",
                     "version": "1.0",
                     "payment": {
                         "amount": str(price),
+                        "maxAmountRequired": max_amount,
                         "currency": PAYMENT_ASSET,
                         "recipient": USDC_RECEIVING_ADDRESS,
                         "networks": _supported_networks(),

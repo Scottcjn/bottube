@@ -33,6 +33,18 @@ except ImportError:
     log.info("x402.flask not available - premium routes will be open")
 
 
+def _extract_api_key(req):
+    """Extract API key from X-API-Key or Authorization Bearer header."""
+    key = req.headers.get("X-API-Key")
+    if not key:
+        auth = req.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            key = auth[7:]
+        else:
+            key = auth
+    return key.strip() if key else ""
+
+
 def init_app(app, db_path):
     """Register x402 premium routes and wallet endpoints on the Flask app."""
 
@@ -169,7 +181,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["GET"])
     def x402_get_agent_wallet():
         """Get agent's Coinbase wallet info."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
         db = _get_db()
@@ -195,7 +207,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["POST"])
     def x402_create_agent_wallet():
         """Create or link Coinbase wallet for agent."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
 
@@ -266,7 +278,7 @@ def init_app(app, db_path):
     @app.route("/api/x402/payments", methods=["GET"])
     def x402_payment_history():
         """View x402 payment history."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         db = _get_db()
         try:
             if api_key:
@@ -290,10 +302,19 @@ def init_app(app, db_path):
     @app.route("/api/x402/info", methods=["GET"])
     def x402_info():
         """Public x402 integration info."""
+        f_url = "https://www.x402.org/facilitator"
+        if X402_AVAILABLE:
+            configured_f = os.environ.get("FACILITATOR_URL", FACILITATOR_URL)
+            if configured_f and "x402-facilitator.cdp.coinbase.com" not in str(configured_f):
+                f_url = configured_f
+        else:
+            f_url = os.environ.get("FACILITATOR_URL", f_url)
+
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
-            "network": X402_NETWORK if X402_AVAILABLE else None,
-            "facilitator": FACILITATOR_URL if X402_AVAILABLE else None,
+            "network": "eip155:8453",
+            "network_name": "base",
+            "facilitator": f_url,
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
             "treasury": BOTTUBE_TREASURY if X402_AVAILABLE else None,
