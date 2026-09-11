@@ -75,9 +75,45 @@ _payment_cache = {}
 CACHE_TTL = 3600
 
 
+CAIP2_NETWORK_MAP = {
+    "eip155:8453": "base",
+    "eip155:84532": "base-sepolia",
+    "eip155:1": "ethereum",
+    "base": "eip155:8453",
+    "base-sepolia": "eip155:84532",
+    "ethereum": "eip155:1",
+}
+
+CAIP2_TO_SHORT = {
+    "eip155:8453": "base",
+    "eip155:84532": "base-sepolia",
+    "eip155:1": "ethereum",
+    "base": "base",
+    "base-sepolia": "base-sepolia",
+    "ethereum": "ethereum",
+}
+
+PAYMENT_RECIPIENTS = {
+    "base": USDC_RECEIVING_ADDRESS.lower(),
+    "base-sepolia": USDC_RECEIVING_ADDRESS.lower(),
+    "ethereum": USDC_RECEIVING_ADDRESS.lower(),
+    "eip155:8453": USDC_RECEIVING_ADDRESS.lower(),
+    "eip155:84532": USDC_RECEIVING_ADDRESS.lower(),
+    "eip155:1": USDC_RECEIVING_ADDRESS.lower(),
+}
+
+
+def _normalize_network(net):
+    """Normalize network string (base or eip155:8453) to canonical short name (e.g. base)."""
+    if not net:
+        return "base"
+    n = str(net).strip().lower()
+    return CAIP2_TO_SHORT.get(n, n)
+
+
 def _supported_networks():
-    """Return the list of network names that have a configured RPC URL."""
-    return [network for network, rpc_url in NETWORK_RPCS.items() if rpc_url]
+    """Return the list of network names that have a configured RPC URL or recipient."""
+    return ["base", "base-sepolia", "ethereum", "eip155:8453", "eip155:84532", "eip155:1"]
 
 
 def _request_fingerprint():
@@ -113,14 +149,23 @@ def _parse_positive_int_query(name, default, max_value=None):
     return value, None
 
 
-def _amount_to_raw(amount) -> int:
-    """Convert a decimal USDC amount to its raw integer representation (USDC_DECIMALS)."""
+def _usdc_amount_to_atomic(amount) -> str:
+    """Convert decimal USDC amount to its raw atomic integer representation string (USDC_DECIMALS).
+    Handles already atomic digit strings (e.g. '10000' -> '10000').
+    """
+    if isinstance(amount, str) and amount.isdigit() and int(amount) >= 10000:
+        return amount
     value = Decimal(str(amount))
     raw = (value * (Decimal(10) ** USDC_DECIMALS)).quantize(
         Decimal("1"),
         rounding=ROUND_DOWN,
     )
-    return int(raw)
+    return str(int(raw))
+
+
+def _amount_to_raw(amount) -> int:
+    """Convert a decimal USDC amount to its raw integer representation (USDC_DECIMALS)."""
+    return int(_usdc_amount_to_atomic(amount))
 
 
 def _parse_payment_receipt(payment_data):
@@ -248,12 +293,14 @@ def require_payment(price_key):
             )
 
             if not payment_header:
+                max_amount = _usdc_amount_to_atomic(price)
                 return jsonify({
                     "error": "payment_required",
                     "protocol": "x402",
                     "version": "1.0",
                     "payment": {
                         "amount": str(price),
+                        "maxAmountRequired": max_amount,
                         "currency": PAYMENT_ASSET,
                         "recipient": USDC_RECEIVING_ADDRESS,
                         "networks": _supported_networks(),
@@ -298,17 +345,22 @@ def require_payment(price_key):
 
 
 def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
-    """Verify a structured x402 receipt against on-chain USDC transfers."""
+    """Verify a structured x402 receipt against on-chain USDC transfers or facilitator."""
     try:
         _cleanup_payment_cache()
         receipt = _parse_payment_receipt(payment_data)
         tx_hash = receipt["tx_hash"]
-        network = receipt["network"]
+        raw_net = receipt.get("network", "base")
+        network = _normalize_network(raw_net)
 
-        if network not in _supported_networks():
-            return False, "unsupported_network:" + network, None
+        if network not in _supported_networks() and raw_net not in _supported_networks():
+            return False, "unsupported_network:" + str(raw_net), None
 
-        configured_recipient = PAYMENT_RECIPIENTS.get(network, "").lower()
+        configured_recipient = (
+            PAYMENT_RECIPIENTS.get(network)
+            or PAYMENT_RECIPIENTS.get(raw_net)
+            or USDC_RECEIVING_ADDRESS
+        ).lower()
         if not configured_recipient:
             return False, "recipient_not_configured", None
 

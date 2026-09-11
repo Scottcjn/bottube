@@ -33,6 +33,18 @@ except ImportError:
     log.info("x402.flask not available - premium routes will be open")
 
 
+def _extract_api_key(req):
+    """Extract API key from X-API-Key or Authorization Bearer header."""
+    key = req.headers.get("X-API-Key")
+    if not key:
+        auth = req.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            key = auth[7:]
+        else:
+            key = auth
+    return key.strip() if key else ""
+
+
 def init_app(app, db_path):
     """Register x402 premium routes and wallet endpoints on the Flask app."""
 
@@ -169,7 +181,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["GET"])
     def x402_get_agent_wallet():
         """Get agent's Coinbase wallet info."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
         db = _get_db()
@@ -195,7 +207,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["POST"])
     def x402_create_agent_wallet():
         """Create or link Coinbase wallet for agent."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
 
@@ -266,7 +278,7 @@ def init_app(app, db_path):
     @app.route("/api/x402/payments", methods=["GET"])
     def x402_payment_history():
         """View x402 payment history."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         db = _get_db()
         try:
             if api_key:
@@ -287,13 +299,30 @@ def init_app(app, db_path):
         finally:
             db.close()
 
+    def _get_facilitator_url():
+        f_url = "https://www.x402.org/facilitator"
+        if X402_AVAILABLE:
+            configured_f = os.environ.get("FACILITATOR_URL", FACILITATOR_URL)
+            if configured_f and "x402-facilitator.cdp.coinbase.com" not in str(configured_f):
+                f_url = configured_f
+        else:
+            f_url = os.environ.get("FACILITATOR_URL", f_url)
+        return f_url
+
     @app.route("/api/x402/info", methods=["GET"])
     def x402_info():
         """Public x402 integration info."""
+        f_url = _get_facilitator_url()
+
+        from x402_payment import CAIP2_TO_SHORT, _usdc_amount_to_atomic
+        net_caip2 = X402_NETWORK if X402_AVAILABLE else "eip155:8453"
+        net_name = CAIP2_TO_SHORT.get(net_caip2, "base")
+
         return _jsonify({
             "x402_enabled": X402_AVAILABLE,
-            "network": X402_NETWORK if X402_AVAILABLE else None,
-            "facilitator": FACILITATOR_URL if X402_AVAILABLE else None,
+            "network": net_caip2,
+            "network_name": net_name,
+            "facilitator": f_url,
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
             "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
             "treasury": BOTTUBE_TREASURY if X402_AVAILABLE else None,
@@ -312,19 +341,24 @@ def init_app(app, db_path):
     # x402 WSGI Payment Middleware (path-based paywall)
     # ------------------------------------------------------------------
     if X402_MIDDLEWARE and X402_AVAILABLE and not _all_free:
+        from x402_payment import CAIP2_TO_SHORT, _usdc_amount_to_atomic
         _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
-        _net = "base" if "8453" in X402_NETWORK else "base-sepolia"
-        mw = PaymentMiddleware(app)
+        _net = CAIP2_TO_SHORT.get(X402_NETWORK, "base")
+        _f_url = _get_facilitator_url()
+        try:
+            mw = PaymentMiddleware(app, facilitator_url=_f_url)
+        except TypeError:
+            mw = PaymentMiddleware(app)
         if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
-            mw.add(price=PRICE_VIDEO_STREAM_PREMIUM, pay_to_address=_addr,
+            mw.add(price=_usdc_amount_to_atomic(PRICE_VIDEO_STREAM_PREMIUM), pay_to_address=_addr,
                    path="/api/premium/videos", network=_net,
                    description="Bulk video data export")
         if not is_free(PRICE_PREMIUM_ANALYTICS):
-            mw.add(price=PRICE_PREMIUM_ANALYTICS, pay_to_address=_addr,
+            mw.add(price=_usdc_amount_to_atomic(PRICE_PREMIUM_ANALYTICS), pay_to_address=_addr,
                    path="/api/premium/analytics/*", network=_net,
                    description="Deep agent analytics")
         if not is_free(PRICE_PREMIUM_EXPORT):
-            mw.add(price=PRICE_PREMIUM_EXPORT, pay_to_address=_addr,
+            mw.add(price=_usdc_amount_to_atomic(PRICE_PREMIUM_EXPORT), pay_to_address=_addr,
                    path="/api/premium/trending/export", network=_net,
                    description="Trending data export")
         print("[x402] Payment middleware active on /api/premium/* routes")

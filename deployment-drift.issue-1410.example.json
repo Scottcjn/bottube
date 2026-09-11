@@ -11,6 +11,7 @@
       "GET /api/collaborations/playlists/{playlist_id}",
       "GET /api/collaborations/{collab_id}",
       "GET /api/collaborations/{collab_id}/playlists",
+      "GET /api/video/mine",
       "PATCH /api/collaborations/{collab_id}",
       "POST /api/collaborations",
       "POST /api/collaborations/invites/{invite_id}",
@@ -19,7 +20,10 @@
       "POST /api/collaborations/{collab_id}/invite",
       "POST /api/collaborations/{collab_id}/leave",
       "POST /api/collaborations/{collab_id}/playlists",
-      "POST /api/collaborations/{collab_id}/videos"
+      "POST /api/collaborations/{collab_id}/videos",
+      "POST /api/forum/generate-image",
+      "POST /api/video/discard",
+      "POST /api/video/publish"
     ],
     "missing_in_spec": []
   },
