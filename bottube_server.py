@@ -11522,8 +11522,12 @@ def web_notification_list():
     if not g.user:
         return jsonify({"error": "Login required", "login_required": True}), 401
 
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(50, max(1, request.args.get("per_page", 20, type=int)))
+    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    if error:
+        return error
+    per_page, error = _parse_positive_int_query("per_page", 20, max_value=50)
+    if error:
+        return error
     if (page - 1) * per_page > _SQLITE_MAX_SIGNED_INT:
         return jsonify({"error": "page out of range"}), 400
     unread_only = request.args.get("unread_only", request.args.get("unread", "0")).lower() in (
