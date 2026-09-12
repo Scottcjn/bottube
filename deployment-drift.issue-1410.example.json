@@ -19,7 +19,11 @@
       "POST /api/collaborations/{collab_id}/invite",
       "POST /api/collaborations/{collab_id}/leave",
       "POST /api/collaborations/{collab_id}/playlists",
-      "POST /api/collaborations/{collab_id}/videos"
+      "POST /api/collaborations/{collab_id}/videos",
+      "GET /api/video/mine",
+      "POST /api/video/publish",
+      "POST /api/video/discard",
+      "POST /api/forum/generate-image"
     ],
     "missing_in_spec": []
   },
@@ -62,5 +66,6 @@
     "/api/collaborations*"
   ],
   "openapi": "openapi.yaml",
-  "timeout": 5
+  "timeout": 5,
+  "_allowed_drift_note": "2026-09-11: the four /api/video/{mine,publish,discard} + /api/forum/generate-image operations were restored to openapi.yaml by #2214 (originally documented by #1608 from live production, which serves them from code not in this repository). Allowed until the routes are added to a tracked source or pruned from the spec."
 }

@@ -235,6 +235,8 @@ def verify_solana_deposit(tx_signature: str):
                 # Verify destination is our reserve wallet's ATA
                 if not _is_reserve_ata(dest_ata):
                     continue
+                if _is_reserve_ata(source_ata):
+                    continue  # D4: ignore reserve-originating/self transfers
 
                 return {
                     "tx_signature": tx_signature,
@@ -255,6 +257,8 @@ def verify_solana_deposit(tx_signature: str):
 
                 if not _is_reserve_ata(dest_ata):
                     continue
+                if _is_reserve_ata(source_ata):
+                    continue  # D4: ignore reserve-originating/self transfers
 
                 # For plain transfer, we need to verify the token account holds wRTC
                 if _verify_token_account_mint(dest_ata):
@@ -307,12 +311,14 @@ def _get_reserve_ata():
 
 
 def _is_reserve_ata(account_address: str) -> bool:
-    """Check if a token account belongs to our reserve wallet."""
+    """Check if a token account is our reserve wallet's derived ATA.
+
+    SECURITY (D2): trust ONLY the deterministic reserve ATA. The old
+    current-owner fallback let an attacker reassign a token account's owner to
+    the reserve AFTER a historical transfer into it, then claim that transfer.
+    """
     ata = _get_reserve_ata()
-    if ata and account_address == ata:
-        return True
-    # Fallback: query the account owner
-    return _check_account_owner(account_address, RESERVE_WALLET)
+    return bool(ata and account_address == ata)
 
 
 def _check_account_owner(token_account: str, expected_owner: str) -> bool:
@@ -443,6 +449,16 @@ def bridge_deposit():
         return jsonify({
             "error": f"Minimum deposit is {MIN_DEPOSIT} wRTC (got {amount})"
         }), 400
+
+    # Anti-theft (D3): the on-chain sender must match the Solana address linked
+    # to THIS account (mirrors the Ergo bridge). Without it, any authenticated
+    # user who observes a public tx signature can claim someone else's deposit.
+    _sol_row = db.execute("SELECT sol_address FROM agents WHERE id = ?", (agent["id"],)).fetchone()
+    bound_sol = ((_sol_row[0] if _sol_row else "") or "").strip()
+    if not bound_sol:
+        return jsonify({"error": "Link your Solana address to your account before depositing"}), 400
+    if info["from_address"] != bound_sol:
+        return jsonify({"error": "Transaction sender does not match the Solana address linked to your account"}), 403
 
     # Credit balance
     _award_rtc(db, agent["id"], amount, "bridge_deposit")

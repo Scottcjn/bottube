@@ -24,7 +24,7 @@ function setupMock() {
         const urlString = url.toString();
         requestLog.push({ url: urlString, options: options || {} });
         
-        const mock = mockResponses.find(m => urlString.includes(m.url));
+        const mock = mockResponses.find(m => new URL(urlString).pathname === m.url);
         if (mock) {
             // Clone the response body so it can be read multiple times
             return new Response(JSON.stringify(mock.body), {

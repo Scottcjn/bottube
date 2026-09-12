@@ -69,6 +69,14 @@ class BoTTubeClient:
         """Encode one URL path segment before interpolation."""
         return quote(str(value), safe="")
 
+    @staticmethod
+    def _multipart_filename(file_path: str) -> str:
+        """Escape filename header delimiters using HTML multipart encoding."""
+        return (
+            Path(file_path).name.replace("\r", "%0D")
+            .replace("\n", "%0A").replace('"', "%22")
+        )
+
     def _request(
         self,
         method: str,
@@ -101,7 +109,8 @@ class BoTTubeClient:
                 err = json.loads(exc.read())
             except Exception:
                 err = {"error": str(exc)}
-            raise BoTTubeError(exc.code, err.get("error", str(exc)), err) from exc
+            message = err.get("error", str(exc)) if isinstance(err, dict) else str(exc)
+            raise BoTTubeError(exc.code, message, err) from exc
 
     def _multipart_upload(self, path: str, file_path: str, fields: dict[str, str]) -> Any:
         """Upload a file using multipart/form-data (stdlib only)."""
@@ -115,9 +124,10 @@ class BoTTubeClient:
 
         filename = Path(file_path).name
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        encoded_filename = self._multipart_filename(file_path)
         body_parts.append(f"--{boundary}\r\n".encode())
         body_parts.append(
-            f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'.encode()
+            f'Content-Disposition: form-data; name="video"; filename="{encoded_filename}"\r\n'.encode()
         )
         body_parts.append(f"Content-Type: {mime}\r\n\r\n".encode())
         with open(file_path, "rb") as f:
@@ -144,7 +154,8 @@ class BoTTubeClient:
                 err = json.loads(exc.read())
             except Exception:
                 err = {"error": str(exc)}
-            raise BoTTubeError(exc.code, err.get("error", str(exc)), err) from exc
+            message = err.get("error", str(exc)) if isinstance(err, dict) else str(exc)
+            raise BoTTubeError(exc.code, message, err) from exc
 
     # ── auth / registration ─────────────────────────────────────────────
 
@@ -197,9 +208,10 @@ class BoTTubeClient:
         # Build file part header
         filename = Path(file_path).name
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        encoded_filename = self._multipart_filename(file_path)
         file_header = (
             f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'
+            f'Content-Disposition: form-data; name="video"; filename="{encoded_filename}"\r\n'
             f"Content-Type: {mime}\r\n\r\n"
         ).encode()
         
@@ -295,16 +307,54 @@ class BoTTubeClient:
         """Get the direct stream URL for a video."""
         return f"{self.base_url}/api/videos/{self._path_param(video_id)}/stream"
 
-    def search(self, query: str, limit: Optional[int] = None) -> dict:
-        """Search videos by query string."""
-        params = {"q": query}
-        if limit:
-            params["limit"] = limit
+    def search(
+        self,
+        query: str,
+        limit: Optional[int] = None,
+        *,
+        page: Optional[int] = None,
+        per_page: Optional[int] = None,
+    ) -> dict:
+        """Search videos with pagination.
+
+        ``limit`` is an alias for ``per_page`` (server maximum 50). Supply
+        at most one page-size argument; omitted values use server defaults.
+        """
+        if limit is not None and per_page is not None:
+            raise ValueError("Specify either limit or per_page, not both")
+        params = {
+            "q": query,
+            "page": page,
+            "per_page": per_page if per_page is not None else limit,
+        }
         return self._request("GET", "/api/search", params=params)
 
-    def get_trending(self, limit: Optional[int] = None, timeframe: Optional[str] = None) -> dict:
-        """Get trending videos."""
-        return self._request("GET", "/api/trending", params={"limit": limit, "timeframe": timeframe})
+    def get_trending(
+        self,
+        limit: Optional[int] = None,
+        timeframe: Optional[str] = None,
+        *,
+        days: Optional[int] = None,
+        since: Optional[Union[int, float]] = None,
+        category: Optional[str] = None,
+    ) -> dict:
+        """Get trending videos with an optional activity window and category.
+
+        ``timeframe`` accepts ``day``, ``week``, or ``month`` as aliases for
+        1, 7, or 30 days. Alternatively supply ``days`` (1-90), or ``since``
+        (a Unix timestamp). Supply only one window; omit all for the server's
+        default. The server validates numeric ranges.
+        """
+        if sum(value is not None for value in (timeframe, days, since)) > 1:
+            raise ValueError("Specify only one of timeframe, days, or since")
+        if timeframe is not None:
+            windows = {"day": 1, "week": 7, "month": 30}
+            if timeframe not in windows:
+                raise ValueError("timeframe must be day, week, or month")
+            days = windows[timeframe]
+        return self._request("GET", "/api/trending", params={
+            "limit": limit, "days": days, "since": since, "category": category,
+        })
 
     def get_feed(
         self,
@@ -342,9 +392,17 @@ class BoTTubeClient:
         return self._request("POST", f"/api/videos/{self._path_param(video_id)}/comment", body)
 
     def get_comments(self, video_id: str, include_replies: bool = True) -> dict:
-        """Get comments for a video."""
-        params = {} if include_replies else {"replies": "0"}
-        return self._request("GET", f"/api/videos/{self._path_param(video_id)}/comments", params=params)
+        """Get comments for a video, optionally keeping only top-level rows.
+
+        The API returns a flat list including replies. When ``include_replies``
+        is false, filter locally by ``parent_id`` and update ``count`` to the
+        number of returned comments. Other response fields are preserved.
+        """
+        result = self._request("GET", f"/api/videos/{self._path_param(video_id)}/comments")
+        if include_replies:
+            return result
+        comments = [comment for comment in result["comments"] if comment.get("parent_id") is None]
+        return {**result, "comments": comments, "count": len(comments)}
 
     def get_recent_comments(self, since: Optional[int] = None, limit: int = 20) -> list[dict]:
         """Get recent comments across all videos."""
@@ -411,11 +469,25 @@ class BoTTubeClient:
 
     # ── notifications ───────────────────────────────────────────────────
 
-    def get_notifications(self, limit: Optional[int] = None) -> dict:
-        """Get current agent's notifications."""
-        params = {}
-        if limit:
-            params["limit"] = limit
+    def get_notifications(
+        self,
+        limit: Optional[int] = None,
+        *,
+        page: Optional[int] = None,
+        per_page: Optional[int] = None,
+        unread_only: Optional[bool] = None,
+    ) -> dict:
+        """Get current agent's notifications with pagination.
+
+        ``limit`` is retained as an alias for ``per_page`` (server maximum 50).
+        Supply at most one page-size argument. Omitted values use server
+        defaults; ``unread_only=True`` requests only unread notifications.
+        """
+        if limit is not None and per_page is not None:
+            raise ValueError("Specify either limit or per_page, not both")
+        params = {"page": page, "per_page": per_page if per_page is not None else limit}
+        if unread_only is not None:
+            params["unread"] = "1" if unread_only else "0"
         return self._request("GET", "/api/agents/me/notifications", params=params)
 
     def get_notification_count(self) -> dict:
@@ -424,11 +496,11 @@ class BoTTubeClient:
 
     def mark_notifications_read(self) -> dict:
         """Mark all notifications as read."""
-        return self._request("POST", "/api/agents/me/notifications/read")
+        return self._request("POST", "/api/agents/me/notifications/read", {"all": True})
 
     def mark_notification_read(self, notification_id: int) -> dict:
         """Mark a specific notification as read."""
-        return self._request("POST", f"/api/notifications/{self._path_param(notification_id)}/read")
+        return self._request("POST", "/api/agents/me/notifications/read", {"ids": [notification_id]})
 
     # ── gamification / quests ───────────────────────────────────────────
 

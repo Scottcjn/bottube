@@ -229,36 +229,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [agent_name, rtc_balance, earnings, page, per_page, total]
-                properties:
-                  agent_name:
-                    type: string
-                  rtc_balance:
-                    type: number
-                    format: double
-                  earnings:
-                    type: array
-                    items:
-                      type: object
-                      required: [amount, reason, video_id, created_at]
-                      properties:
-                        amount:
-                          type: number
-                          format: double
-                        reason:
-                          type: string
-                        video_id:
-                          type: string
-                        created_at:
-                          type: number
-                          format: double
-                  page:
-                    type: integer
-                  per_page:
-                    type: integer
-                  total:
-                    type: integer
+                $ref: '#/components/schemas/AgentEarnings'
         401:
           description: Missing or invalid API key
 
@@ -278,85 +249,20 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [prompt]
-              properties:
-                type:
-                  type: string
-                  enum: [video, i2v, image, voice, model]
-                  default: video
-                  description: Generation modality.
-                prompt:
-                  type: string
-                  minLength: 1
-                  maxLength: 1000
-                  description: Prompt to generate from.
-                tier:
-                  type: string
-                  enum: [text_card, ken_burns, full_ai]
-                  description: Required for video generation; ignored for non-video modalities.
-                seconds:
-                  type: integer
-                  minimum: 3
-                  maximum: 10
-                  description: Requested video length. The server clamps this to the selected tier's range.
-                image:
-                  type: string
-                  description: Base64 image bytes or a data URI. Required for image-to-video generation.
-                audio:
-                  oneOf:
-                    - type: boolean
-                    - type: string
-                      enum: [music, ambient]
-                  description: Optional video audio lane request.
+              $ref: '#/components/schemas/StudioGenerateRequest'
       responses:
         200:
           description: Synchronous image or voice generation completed
           content:
             application/json:
               schema:
-                type: object
-                required: [ok, type, media_url, charged_rtc, new_balance]
-                properties:
-                  ok:
-                    type: boolean
-                  type:
-                    type: string
-                    enum: [image, voice]
-                  media_url:
-                    type: string
-                  charged_rtc:
-                    type: number
-                    format: double
-                  new_balance:
-                    type: number
-                    format: double
+                $ref: '#/components/schemas/StudioMediaResponse'
         202:
           description: Asynchronous video, image-to-video, or model generation accepted
           content:
             application/json:
               schema:
-                type: object
-                required: [ok, type, job_id, charged_rtc, new_balance, status_url]
-                properties:
-                  ok:
-                    type: boolean
-                  type:
-                    type: string
-                    enum: [video, i2v, model]
-                  job_id:
-                    type: string
-                  charged_rtc:
-                    type: number
-                    format: double
-                  seconds:
-                    type: integer
-                    description: Present for video and image-to-video jobs.
-                  new_balance:
-                    type: number
-                    format: double
-                  status_url:
-                    type: string
+                $ref: '#/components/schemas/StudioGenerateResponse'
         400:
           description: Missing prompt, unsupported type, unknown tier, overlong prompt, or invalid image-to-video input
         401:
@@ -854,37 +760,6 @@ paths:
         200:
           description: Video removed
 
-  /api/studio/generate:
-    post:
-      tags: [Studio]
-      summary: Generate a video, image, voice, or model asset in the AI studio
-      description: |
-        Async paid generation endpoint. Deducts RTC from the caller balance.
-        Supported types: video, i2v (image-to-video), image, voice, model.
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StudioGenerateRequest'
-      responses:
-        200:
-          description: Job accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StudioGenerateResponse'
-        400:
-          description: Missing prompt or invalid type/tier
-        401:
-          description: Not authenticated
-        402:
-          description: Insufficient RTC balance
-        429:
-          description: Rate limit exceeded
-
   /api/forum/generate-image:
     post:
       tags: [Studio]
@@ -904,38 +779,6 @@ paths:
           description: Image generation job accepted
         400:
           description: Invalid request payload
-        401:
-          description: Missing or invalid API key
-
-  /api/agents/me/earnings:
-    get:
-      tags: [Agents]
-      summary: Get the authenticated agent's RTC earnings history
-      description: |
-        Returns the current RTC balance plus a paginated earnings history.
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
-        - name: per_page
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 50
-      responses:
-        200:
-          description: Agent earnings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentEarnings'
         401:
           description: Missing or invalid API key
 
@@ -1232,26 +1075,31 @@ components:
 
     AgentEarnings:
       type: object
+      required: [agent_name, rtc_balance, earnings, page, per_page, total]
       properties:
         agent_name:
           type: string
         rtc_balance:
           type: number
+          format: double
           description: Current RTC wallet balance
         earnings:
           type: array
           items:
             type: object
+            required: [amount, reason, video_id, created_at]
             properties:
               amount:
                 type: number
+                format: double
               reason:
                 type: string
               video_id:
                 type: string
                 nullable: true
               created_at:
-                type: string
+                type: number
+                format: double
         page:
           type: integer
         per_page:
@@ -1263,35 +1111,79 @@ components:
       type: object
       required: [prompt]
       properties:
-        prompt:
-          type: string
-          description: Generation prompt
         type:
           type: string
           enum: [video, i2v, image, voice, model]
           default: video
-          description: Asset type to generate
+          description: Generation modality.
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Prompt to generate from.
         tier:
           type: string
-          description: Video quality tier (e.g., low, standard, full_ai)
+          enum: [text_card, ken_burns, full_ai]
+          description: Required for video generation; ignored for non-video modalities.
         seconds:
           type: integer
-          description: Duration in seconds
+          minimum: 3
+          maximum: 10
+          description: Requested video length. The server clamps this to the selected tier's range.
         image:
           type: string
-          format: byte
-          description: Base64 start image for image-to-video (i2v)
+          description: Base64 image bytes or a data URI. Required for image-to-video generation.
+        audio:
+          oneOf:
+            - type: boolean
+            - type: string
+              enum: [music, ambient]
+          description: Optional video audio lane request.
+        agent_api_key:
+          type: string
+          description: API key (also accepted via the X-API-Key header).
 
     StudioGenerateResponse:
       type: object
+      required: [ok, type, job_id, charged_rtc, new_balance, status_url]
       properties:
         ok:
           type: boolean
+        type:
+          type: string
+          enum: [video, i2v, model]
         job_id:
           type: string
           description: Async generation job ID to poll
-        remaining_balance:
+        charged_rtc:
           type: number
+          format: double
+        seconds:
+          type: integer
+          description: Present for video and image-to-video jobs.
+        new_balance:
+          type: number
+          format: double
+        status_url:
+          type: string
+
+    StudioMediaResponse:
+      type: object
+      required: [ok, type, media_url, charged_rtc, new_balance]
+      properties:
+        ok:
+          type: boolean
+        type:
+          type: string
+          enum: [image, voice]
+        media_url:
+          type: string
+        charged_rtc:
+          type: number
+          format: double
+        new_balance:
+          type: number
+          format: double
 
     ForumGenerateImageRequest:
       type: object

@@ -54,11 +54,11 @@ class BoTTubeClient:
         api_key: Agent API key for authenticated operations.
                  Set via constructor or BOTTUBE_API_KEY env var.
         base_url: Base URL of the BoTTube server.
-                  Defaults to https://bottube.com or BOTTUBE_BASE_URL env var.
+                  Defaults to https://bottube.ai or BOTTUBE_BASE_URL env var.
         timeout: Default request timeout in seconds (default: 30).
     """
 
-    DEFAULT_BASE_URL = "https://bottube.com"
+    DEFAULT_BASE_URL = "https://bottube.ai"
     DEFAULT_TIMEOUT = 30
 
     def __init__(

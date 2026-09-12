@@ -291,6 +291,12 @@ def usdc_deposit():
     tx_hash = tx_hash_raw.strip() if isinstance(tx_hash_raw, str) else ""
     if not tx_hash or not tx_hash.startswith("0x"):
         return jsonify({"error": "tx_hash required (0x-prefixed Base chain transaction hash)"}), 400
+    # SECURITY: canonicalize + validate BEFORE use as the dedup key AND the on-chain
+    # lookup, so a case/format alias cannot resolve to the same tx but a different
+    # UNIQUE key and mint the deposit twice.
+    tx_hash = tx_hash.lower()
+    if len(tx_hash) != 66 or any(ch not in "0123456789abcdef" for ch in tx_hash[2:]):
+        return jsonify({"error": "tx_hash must be 0x followed by 64 hexadecimal characters"}), 400
 
     db = get_db()
     init_usdc_tables(db)
@@ -459,13 +465,16 @@ def usdc_tip():
     platform_amount = round(amount * PLATFORM_SHARE, 6)
 
     # Debit sender
-    db.execute("""
+    _cur = db.execute("""
         UPDATE usdc_balances SET
             balance_usdc = balance_usdc - ?,
             total_spent = total_spent + ?,
             updated_at = ?
-        WHERE agent_name = ?
-    """, (amount, amount, time.time(), agent_name))
+        WHERE agent_name = ? AND balance_usdc >= ?
+    """, (amount, amount, time.time(), agent_name, amount))
+    if _cur.rowcount != 1:
+        db.rollback()
+        return jsonify({"error": "Insufficient USDC balance"}), 400
 
     # Credit creator
     get_or_create_balance(db, to_agent)
@@ -536,13 +545,16 @@ def usdc_premium():
         }), 400
 
     # Debit
-    db.execute("""
+    _cur = db.execute("""
         UPDATE usdc_balances SET
             balance_usdc = balance_usdc - ?,
             total_spent = total_spent + ?,
             updated_at = ?
-        WHERE agent_name = ?
-    """, (price, price, time.time(), agent_name))
+        WHERE agent_name = ? AND balance_usdc >= ?
+    """, (price, price, time.time(), agent_name, price))
+    if _cur.rowcount != 1:
+        db.rollback()
+        return jsonify({"error": "Insufficient USDC balance"}), 400
 
     # Create premium access
     expires_at = time.time() + (tier_info["duration_days"] * 86400)
@@ -600,13 +612,16 @@ def usdc_payout():
         }), 400
 
     # Debit balance and create payout request
-    db.execute("""
+    _cur = db.execute("""
         UPDATE usdc_balances SET
             balance_usdc = balance_usdc - ?,
             total_spent = total_spent + ?,
             updated_at = ?
-        WHERE agent_name = ?
-    """, (amount, amount, time.time(), agent_name))
+        WHERE agent_name = ? AND balance_usdc >= ?
+    """, (amount, amount, time.time(), agent_name, amount))
+    if _cur.rowcount != 1:
+        db.rollback()
+        return jsonify({"error": "Insufficient USDC balance"}), 400
 
     db.execute("""
         INSERT INTO usdc_payouts (agent_name, amount_usdc, to_address, status, created_at)

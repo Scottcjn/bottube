@@ -401,6 +401,14 @@ def ergo_deposit():
     if not tx_id:
         return jsonify({"error": "tx_id required"}), 400
 
+    # SECURITY (D1): canonicalize + strictly validate tx_id BEFORE it is used
+    # as both the on-chain lookup and the UNIQUE dedup key. Without this an
+    # alias (case variant, URL fragment, etc.) resolves to the same on-chain
+    # tx but a different dedup key -> the same deposit is minted repeatedly.
+    tx_id = tx_id.lower()
+    if len(tx_id) != 64 or any(ch not in "0123456789abcdef" for ch in tx_id):
+        return jsonify({"error": "tx_id must be 64 hexadecimal characters"}), 400
+
     # Check if already claimed
     existing = db.execute(
         "SELECT id FROM ergo_deposits WHERE tx_id = ?", (tx_id,)
@@ -470,6 +478,11 @@ def ergo_deposit():
 
 @ergo_bp.route("/api/ergo/withdraw", methods=["POST"])
 def ergo_withdraw():
+    # COMPLIANCE: crypto off-ramp DISABLED. Ergo/Banano deposits are consumable-
+    # only (crypto -> on-platform video generation); there is no cash-out that
+    # would make the balance a tradeable/withdrawable asset (Howey). Deposits stay.
+    return jsonify({"error": "Withdrawals are disabled; balances are for on-platform use only.", "code": "OFFRAMP_DISABLED"}), 410
+
     """Request RTC → ERG withdrawal.
 
     Request JSON:
@@ -626,6 +639,11 @@ def ergo_rate():
 
 @ergo_bp.route("/api/ergo/process-withdrawals", methods=["POST"])
 def process_withdrawals():
+    # COMPLIANCE: crypto off-ramp DISABLED. Ergo/Banano deposits are consumable-
+    # only (crypto -> on-platform video generation); there is no cash-out that
+    # would make the balance a tradeable/withdrawable asset (Howey). Deposits stay.
+    return jsonify({"error": "Withdrawals are disabled; balances are for on-platform use only.", "code": "OFFRAMP_DISABLED"}), 410
+
     """Admin endpoint: mark withdrawals as completed with TX ID.
 
     Request JSON:

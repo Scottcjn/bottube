@@ -92,6 +92,9 @@ export class BoTTubeClient {
     try {
       data = await res.json();
     } catch (err) {
+      // Let the request helper classify a timed-out body read consistently,
+      // including responses whose error status arrived before the deadline.
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       // Successful DELETE-style operations may legitimately return no body.
       if (res.ok && res.status === 204) return undefined as T;
 
@@ -125,15 +128,15 @@ export class BoTTubeClient {
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-      clearTimeout(timer);
       return await this.responseData<T>(res);
     } catch (err) {
-      clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
       if (err instanceof Error && err.name === 'AbortError') {
         throw new BoTTubeError(408, { error: 'Request timeout' }, 'Request timed out');
       }
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -149,15 +152,15 @@ export class BoTTubeClient {
         body: form,
         signal: controller.signal,
       });
-      clearTimeout(timer);
       return await this.responseData<T>(res);
     } catch (err) {
-      clearTimeout(timer);
       if (err instanceof BoTTubeError) throw err;
       if (err instanceof Error && err.name === 'AbortError') {
         throw new BoTTubeError(408, { error: 'Request timeout' }, 'Request timed out');
       }
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -217,9 +220,25 @@ export class BoTTubeClient {
       const { basename } = await import('node:path');
       const buffer = readFileSync(video);
       const blob = new Blob([buffer]);
-      form.append('video', blob, basename(video));
+      form.append('video', blob, options.filename ?? basename(video));
     } else {
-      form.append('video', video);
+      // FormData otherwise names a Blob "blob", which the server rejects
+      // because uploads require a supported video filename extension.
+      const extensions: Record<string, string> = {
+        'video/mp4': 'mp4',
+        'video/webm': 'webm',
+        'video/quicktime': 'mov',
+        'video/x-matroska': 'mkv',
+        'video/x-msvideo': 'avi',
+      };
+      const originalName = 'name' in video && typeof video.name === 'string'
+        ? video.name : undefined;
+      const extension = extensions[video.type.split(';', 1)[0].trim().toLowerCase()];
+      const filename = options.filename ?? originalName ?? (extension ? `video.${extension}` : undefined);
+      if (!filename) {
+        throw new TypeError('Blob uploads need a supported video MIME type or an explicit filename option.');
+      }
+      form.append('video', video, filename);
     }
 
     return this.requestForm<UploadResponse>('/api/upload', form);

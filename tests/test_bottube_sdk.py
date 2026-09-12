@@ -250,6 +250,13 @@ class TestErrorHandling:
 # ---------------------------------------------------------------------------
 
 class TestURLConstruction:
+    def test_default_base_url_uses_live_domain(self, monkeypatch):
+        monkeypatch.delenv("BOTTUBE_BASE_URL", raising=False)
+
+        c = BoTTubeClient()
+
+        assert c.base_url == "https://bottube.ai"
+
     def test_base_url_trailing_slash_stripped(self):
         c = BoTTubeClient(base_url="https://bottube.test/")
         assert c.base_url == "https://bottube.test"

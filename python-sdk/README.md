@@ -73,9 +73,16 @@ video = client.get_video("video-id")
 
 # Search
 results = client.search("query")
+# Fetch another page (per_page maximum: 50)
+results = client.search("query", page=2, per_page=10)
+# The existing limit argument is an alias for per_page; do not supply both.
 
 # Trending
 trending = client.get_trending(limit=10, timeframe="day")
+# timeframe accepts day/week/month; use days for a custom 1-90 day window.
+trending = client.get_trending(days=14, category="science-tech")
+# Or use an absolute creation timestamp, without timeframe/days.
+trending = client.get_trending(since=1710000000)
 
 # Feed
 feed = client.get_feed(page=1, per_page=20, since=1710000000)
@@ -110,6 +117,9 @@ client.comment("video-id", "I agree!", parent_id=123)
 
 # Get comments
 comments = client.get_comments("video-id")
+
+# Get top-level comments only; count reflects the filtered list.
+comments = client.get_comments("video-id", include_replies=False)
 
 # Recent comments across all videos
 recent = client.get_recent_comments(limit=50)
@@ -265,8 +275,15 @@ graph = client.get_social_graph()
 # Get notifications
 notifications = client.get_notifications(limit=20)
 
+# Fetch another page of unread notifications (per_page maximum: 50)
+notifications = client.get_notifications(page=2, per_page=20, unread_only=True)
+# limit remains an alias for per_page; supply only one of the two.
+
 # Get unread count
 count = client.get_notification_count()
+
+# Mark one notification as read
+client.mark_notification_read(123)
 
 # Mark all as read
 client.mark_notifications_read()

@@ -29,6 +29,13 @@ log = logging.getLogger("generation.providers.comfyui_ltx")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://100.95.77.124:8188")
 COMFYUI_TIMEOUT = int(os.environ.get("COMFYUI_TIMEOUT", "300"))
 
+# get_status() polls a flaky LAN endpoint; a handful of consecutive transport
+# errors (timeout, DNS blip, ComfyUI restart) should not be indistinguishable
+# from a job that is genuinely still queued forever. After this many
+# consecutive poll failures for the same prompt_id we give up and report the
+# job failed instead of silently returning "pending" forever.
+_MAX_CONSECUTIVE_POLL_ERRORS = 5
+
 # LTX-2 workflow template
 _LTX_WORKFLOW = {
     "1": {
@@ -90,6 +97,10 @@ class ComfyUILTXProvider(GenerationProvider):
         """Set up the in-memory prompt_id -> outputs cache for completed jobs."""
         # Completed jobs: prompt_id -> local path
         self._completed: dict = {}
+        # prompt_id -> count of consecutive get_status() poll failures
+        # (transport error, timeout, malformed JSON). Reset on any poll that
+        # actually reaches ComfyUI, whether or not the job has an entry yet.
+        self._consecutive_poll_errors: dict = {}
 
     def get_name(self) -> str:
         """Return the provider's registry key."""
@@ -146,24 +157,48 @@ class ComfyUILTXProvider(GenerationProvider):
             return False, str(exc)
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
-        """Poll ComfyUI history for this prompt_id."""
+        """Poll ComfyUI history for this prompt_id.
+
+        A transport error, timeout, HTTP error, or malformed JSON is a
+        transient poll failure, not proof the job is still queued -- it is
+        tracked separately from "no history entry yet" and, after
+        _MAX_CONSECUTIVE_POLL_ERRORS in a row, turns into a "failed" status
+        so callers stop polling forever instead of timing out silently.
+        """
         if external_id in self._completed:
+            self._consecutive_poll_errors.pop(external_id, None)
             return "completed", 1.0
         try:
             with urllib.request.urlopen(
                 f"{COMFYUI_URL}/history/{external_id}", timeout=10
             ) as resp:
                 history = json.loads(resp.read())
-            if external_id in history:
-                entry = history[external_id]
-                if entry.get("status", {}).get("status_str") == "error":
-                    return "failed", 0.0
-                if entry.get("outputs"):
-                    self._completed[external_id] = entry["outputs"]
-                    return "completed", 1.0
-                return "running", 0.5
-        except Exception:
-            pass
+        except Exception as exc:
+            errors = self._consecutive_poll_errors.get(external_id, 0) + 1
+            self._consecutive_poll_errors[external_id] = errors
+            log.warning(
+                "ComfyUI status poll failed for %s (attempt %d/%d): %s",
+                external_id, errors, _MAX_CONSECUTIVE_POLL_ERRORS, exc,
+            )
+            if errors >= _MAX_CONSECUTIVE_POLL_ERRORS:
+                self._consecutive_poll_errors.pop(external_id, None)
+                return "failed", 0.0
+            return "pending", 0.0
+
+        # History fetch succeeded -- the endpoint is reachable, so any prior
+        # transport errors for this job were transient. Reset the budget
+        # even if this particular prompt_id has no entry yet (genuinely
+        # still queued, not an error).
+        self._consecutive_poll_errors.pop(external_id, None)
+
+        if external_id in history:
+            entry = history[external_id]
+            if entry.get("status", {}).get("status_str") == "error":
+                return "failed", 0.0
+            if entry.get("outputs"):
+                self._completed[external_id] = entry["outputs"]
+                return "completed", 1.0
+            return "running", 0.5
         return "pending", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:

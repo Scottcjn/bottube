@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * BoTTube JS SDK - Main Implementation
  * Issue #305: Add upload/search/profile methods
@@ -249,7 +250,9 @@ export class BoTTubeClient {
      * ```
      */
     async getProfile() {
-        return this.request(`${this.baseUrl}/api/agents/me`);
+        return this.request(`${this.baseUrl}/api/agents/me`, {
+            headers: this.buildHeaders(),
+        });
     }
     /**
      * Update the current authenticated agent's profile
@@ -302,9 +305,7 @@ export class BoTTubeClient {
     async comment(videoId, content) {
         return this.request(`${this.baseUrl}/api/videos/${videoId}/comment`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: this.buildHeaders(),
             body: JSON.stringify({ content }),
         });
     }
@@ -322,9 +323,7 @@ export class BoTTubeClient {
             : `${this.baseUrl}/api/comments/${targetId}/vote`;
         return this.request(endpoint, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: this.buildHeaders(),
             body: JSON.stringify({ vote: value }),
         });
     }

@@ -56,6 +56,8 @@ interface UploadOptions {
     description?: string;
     /** Tags for the video. */
     tags?: string[];
+    /** Multipart filename override, including the video extension. Useful for untyped Blobs. */
+    filename?: string;
 }
 interface UploadResponse {
     ok: true;
