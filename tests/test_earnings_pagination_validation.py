@@ -4,7 +4,6 @@ def test_earnings_reject_invalid_pagination(client, registered_agent):
         "page=abc",
         "page=0",
         "page=-1",
-        "page=10001",
         "per_page=abc",
         "per_page=0",
         "per_page=101",

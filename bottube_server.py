@@ -12411,7 +12411,9 @@ def manage_wallet_web():
 def my_earnings():
     """Get your RTC balance and earnings history."""
     db = get_db()
-    page, error = _parse_positive_int_query("page", 1, max_value=10000)
+    # No arbitrary page cap: bounded by whether computed SQLite OFFSET overflows
+    # signed 64-bit integer, matching test_earnings_page_offset_overflow contract.
+    page, error = _parse_positive_int_query("page", 1)
     if error:
         return error
     per_page, error = _parse_positive_int_query("per_page", 50, max_value=100)
