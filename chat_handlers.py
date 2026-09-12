@@ -98,12 +98,33 @@ def _coerce_non_negative_number(value, field_name):
     return value
 
 
+def _video_exists(db, video_id: str) -> bool:
+    """Return True if video exists in videos table and is not removed."""
+    if not video_id or not isinstance(video_id, str):
+        return False
+    try:
+        has_videos_table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='videos'"
+        ).fetchone()
+        if not has_videos_table:
+            return True
+        row = db.execute(
+            "SELECT 1 FROM videos WHERE video_id = ? AND COALESCE(is_removed, 0) = 0",
+            (video_id.strip(),),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
 # ── Routes ──────────────────────────────────────────────────────
 @chat_bp.route("/chat/<video_id>")
 def chat_page(video_id):
     """Render the live-chat sidebar/page for a video."""
     db = get_db()
     init_chat_tables(db)
+    if not _video_exists(db, video_id):
+        return render_template("404.html"), 404
     username = session.get("username", "Anonymous")
     is_mod = session.get("is_mod", False)
     return render_template(
@@ -119,6 +140,8 @@ def chat_history(video_id):
     """Return recent chat messages (last 100)."""
     db = get_db()
     init_chat_tables(db)
+    if not _video_exists(db, video_id):
+        return jsonify({"error": "Video not found"}), 404
     rows = db.execute(
         "SELECT * FROM chat_messages WHERE video_id = ? ORDER BY created_at DESC LIMIT 100",
         (video_id,),
@@ -134,6 +157,8 @@ def send_message(video_id):
     data, error = _json_object_body()
     if error:
         return error
+    if not _video_exists(db, video_id):
+        return jsonify({"error": "Video not found"}), 404
     username = session.get("username", data.get("username", "Anonymous"))
     msg_value = data.get("message")
     if msg_value is None:
@@ -190,6 +215,8 @@ def ban_user(video_id):
         return _bad_request("user_id is required")
     db = get_db()
     init_chat_tables(db)
+    if not _video_exists(db, video_id):
+        return jsonify({"error": "Video not found"}), 404
     duration = None
     if data.get("duration") is not None:
         duration = _coerce_non_negative_number(data.get("duration"), "duration")
@@ -211,6 +238,8 @@ def chat_settings(video_id):
     """Get or update chat settings (slow mode, sub-only, premiere)."""
     db = get_db()
     init_chat_tables(db)
+    if not _video_exists(db, video_id):
+        return jsonify({"error": "Video not found"}), 404
     if request.method == "POST":
         if not session.get("is_mod"):
             return jsonify({"error": "Moderator only"}), 403
