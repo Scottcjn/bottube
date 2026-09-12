@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -385,3 +386,15 @@ def test_badge_candidates_follow_referral_activation_and_scout_thresholds(client
     assert len(scout_badges) == 1
     assert scout_badges[0]["evidence"]["pair_count"] == 3
     assert 3 in scout_badges[0]["evidence"]["bonus_thresholds_reached"]
+
+
+def test_badges_page_verification_preview_iframe_has_an_accessible_name(client):
+    """The live "Sandboxed iframe widget" preview needs a `title` so screen
+    readers can name the frame (WCAG 4.1.2); the sample embed code below it
+    already carried one, the rendered preview did not."""
+    response = client.get("/badges")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    preview = re.search(r'<iframe[^>]*/embed/verify/[^>]*>', html)
+    assert preview is not None, "verification preview iframe missing from /badges"
+    assert 'title="BoTTube verification preview"' in preview.group(0)
