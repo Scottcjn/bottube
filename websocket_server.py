@@ -59,6 +59,25 @@ def _coerce_non_negative_number(value, default=0.0):
     return value
 
 
+def _video_exists(db, video_id: str) -> bool:
+    """Return True if video exists in videos table and is not removed."""
+    if not video_id or not isinstance(video_id, str):
+        return False
+    try:
+        has_videos_table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='videos'"
+        ).fetchone()
+        if not has_videos_table:
+            return True
+        row = db.execute(
+            "SELECT 1 FROM videos WHERE video_id = ? AND COALESCE(is_removed, 0) = 0",
+            (video_id.strip(),),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
 # ── SocketIO Events ────────────────────────────────────────────
 @socketio.on("join")
 def on_join(data):
@@ -67,6 +86,13 @@ def on_join(data):
     if data is None:
         return
     room = data.get("video_id", "")
+    from flask import current_app
+    db = _get_db(current_app)
+    if not _video_exists(db, room):
+        db.close()
+        emit("error", {"message": "Video not found"})
+        return
+    db.close()
     username = data.get("username", "Anonymous")
     join_room(room)
     emit("system", {"message": f"{username} joined the chat", "type": "join"}, room=room)
@@ -118,6 +144,14 @@ def on_chat_message(data):
     if tip is None:
         emit("error", {"message": "tip_amount must be a finite non-negative number"})
         return
+
+    # Check video exists
+    db = _get_db(current_app)
+    if not _video_exists(db, room):
+        db.close()
+        emit("error", {"message": "Video not found"})
+        return
+    db.close()
 
     # Rate limit: 1 message per 2 seconds per user per room
     key = f"{user_id}:{room}"
