@@ -135,12 +135,12 @@ TRENDING_PENALTY_LOW_INFO = float(os.environ.get("BOTTUBE_TRENDING_PENALTY_LOW_I
 CATEGORY_LIMITS = {
     "music":        {"max_duration": 300, "max_file_mb": 15, "keep_audio": True},
     "film":         {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
-    "education":    {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
+    "education":    {"max_duration": 420, "max_file_mb": 25, "keep_audio": True},
     "comedy":       {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
     "vlog":         {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
-    "science-tech": {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
+    "science-tech": {"max_duration": 420, "max_file_mb": 25, "keep_audio": True},
     "gaming":       {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
-    "science":      {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
+    "science":      {"max_duration": 420, "max_file_mb": 25, "keep_audio": True},
     "retro":        {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
     "robots":       {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
     "creative":     {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
@@ -148,6 +148,23 @@ CATEGORY_LIMITS = {
     "news":         {"max_duration": 120, "max_file_mb": 8,  "keep_audio": True},
     "weather":      {"max_duration": 60,  "max_file_mb": 5,  "keep_audio": True},
 }
+
+
+def get_category_limits(category: str) -> dict:
+    """Return per-category limits (duration, max file size, audio retention).
+
+    Supports dynamic environment variable overrides (e.g.,
+    BOTTUBE_MAX_DURATION_EDUCATION, BOTTUBE_MAX_FILE_MB_EDUCATION).
+    """
+    limits = dict(CATEGORY_LIMITS.get(category, {}))
+    clean_cat = category.upper().replace("-", "_")
+    env_dur = os.environ.get(f"BOTTUBE_MAX_DURATION_{clean_cat}")
+    if env_dur and env_dur.isdigit():
+        limits["max_duration"] = int(env_dur)
+    env_file = os.environ.get(f"BOTTUBE_MAX_FILE_MB_{clean_cat}")
+    if env_file and env_file.isdigit():
+        limits["max_file_mb"] = int(env_file)
+    return limits
 MAX_TITLE_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 2000
 MAX_BIO_LENGTH = 500
@@ -6928,7 +6945,7 @@ def upload_video():
     duration, width, height = get_video_metadata(video_path)
 
     # Per-category limits
-    cat_limits = CATEGORY_LIMITS.get(category, {})
+    cat_limits = get_category_limits(category)
     max_dur = cat_limits.get("max_duration", MAX_VIDEO_DURATION)
     max_file = cat_limits.get("max_file_mb", MAX_FINAL_FILE_SIZE / (1024 * 1024))
     keep_audio = cat_limits.get("keep_audio", True)
@@ -8659,12 +8676,15 @@ def api_categories():
         counts[row["category"]] = row["cnt"]
     result = []
     for cat in VIDEO_CATEGORIES:
+        limits = get_category_limits(cat["id"])
         result.append({
             "id": cat["id"],
             "name": cat["name"],
             "icon": cat["icon"],
             "desc": cat["desc"],
             "video_count": counts.get(cat["id"], 0),
+            "max_duration": limits.get("max_duration", MAX_VIDEO_DURATION),
+            "max_file_mb": limits.get("max_file_mb", MAX_FINAL_FILE_SIZE / (1024 * 1024)),
         })
     return jsonify({"categories": result})
 
@@ -15366,7 +15386,7 @@ def upload_page():
     duration, width, height = get_video_metadata(video_path)
 
     # Per-category limits
-    cat_limits = CATEGORY_LIMITS.get(category, {})
+    cat_limits = get_category_limits(category)
     max_dur = cat_limits.get("max_duration", MAX_VIDEO_DURATION)
     max_file = cat_limits.get("max_file_mb", MAX_FINAL_FILE_SIZE / (1024 * 1024))
     keep_audio = cat_limits.get("keep_audio", True)
