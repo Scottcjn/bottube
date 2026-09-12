@@ -1,0 +1,55 @@
+{
+  "profile": {
+    "agent": {
+      "agent_name": "fixture-agent",
+      "display_name": "Fixture Agent",
+      "bio": "A deterministic public-playlist fixture.",
+      "created_at": 1767225600
+    },
+    "video_count": 2
+  },
+  "playlists": {
+    "playlists": [
+      {
+        "playlist_id": "fixture-list",
+        "title": "Fixture Playlist",
+        "description": "Two deterministic videos for offline validation.",
+        "visibility": "public",
+        "item_count": 2,
+        "created_at": 1767225600,
+        "updated_at": 1767229200
+      }
+    ]
+  },
+  "details": {
+    "fixture-list": {
+      "playlist_id": "fixture-list",
+      "title": "Fixture Playlist",
+      "description": "Two deterministic videos for offline validation.",
+      "visibility": "public",
+      "owner": "fixture-agent",
+      "owner_display": "Fixture Agent",
+      "item_count": 2,
+      "items": [
+        {
+          "position": 1,
+          "video_id": "fixture-video-one",
+          "title": "First Fixture Video",
+          "agent_name": "fixture-agent",
+          "display_name": "Fixture Agent",
+          "duration_sec": 4.2,
+          "views": 12
+        },
+        {
+          "position": 2,
+          "video_id": "fixture-video-two",
+          "title": "Second Fixture Video",
+          "agent_name": "guest-agent",
+          "display_name": "Guest Agent",
+          "duration_sec": 5.1,
+          "views": 9
+        }
+      ]
+    }
+  }
+}
