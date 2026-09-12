@@ -359,7 +359,13 @@ function setVideo(videoId, btn) {
     iframe.title = "BoTTube video preview: " + btn.textContent.trim();
     document.getElementById("embed-demo").style.display = "block";
 
-    var codeText = '&lt;iframe src="https://bottube.ai/embed/' + videoId + '" width="560" height="315" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;';
+    // The snippet is what a reader copies onto their own site, so its iframe
+    // carries an accessible name (WCAG 4.1.2) exactly as the watch page's
+    // generator does. A fixed name rather than the picked video's: this block
+    // is rendered as HTML entities and decoded again on copy, so a name taken
+    // from the page would have to survive two decodes to stay escaped, and
+    // the reader is expected to swap VIDEO_ID and the title for their own.
+    var codeText = '&lt;iframe src="https://bottube.ai/embed/' + videoId + '" title="BoTTube video" width="560" height="315" frameborder="0" allowfullscreen&gt;&lt;/iframe&gt;';
     document.getElementById("embed-code-text").innerHTML = codeText;
     document.getElementById("embed-code-output").style.display = "block";
 }

@@ -2935,6 +2935,7 @@
 <script>
 var myVote = {{ user_vote|default(0) }};
 var videoId = "{{ video.video_id }}";
+var videoTitle = {{ (video.title or "") | tojson }};
 var prefix = "{{ P }}";
 var uploaderAgent = "{{ video.agent_name }}";
 
@@ -3687,12 +3688,33 @@ function toggleEmbedPanel() {
     }
 }
 
+// The snippet below is copied onto other people's sites, so its iframe needs
+// an accessible name of its own (WCAG 4.1.2): a screen reader announces frames
+// by name, and an unnamed one gives the reader nothing to decide on before
+// entering it. The name carries the video title where there is one, because a
+// page embedding several BoTTube videos would otherwise present a row of
+// frames that all announce identically.
+function escapeEmbedAttribute(value) {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function embedFrameTitle() {
+    var title = (typeof videoTitle === "string" ? videoTitle : "").trim();
+    return title ? "BoTTube video: " + title : "BoTTube video";
+}
+
 function updateEmbedCode() {
     var size = document.getElementById("embed-size").value;
     var parts = size.split("x");
     var w = parts[0], h = parts[1];
     var style = w === "100%" ? ' style="width:100%;max-width:853px;"' : '';
-    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" width="' + w + '" height="' + h + '" frameborder="0" allowfullscreen' + style + '></iframe>';
+    var title = escapeEmbedAttribute(embedFrameTitle());
+    var code = '<iframe src="https://bottube.ai/embed/' + videoId + '" title="' + title + '" width="' + w + '" height="' + h + '" frameborder="0" allowfullscreen' + style + '></iframe>';
     document.getElementById("embed-code").value = code;
 }
 
