@@ -22999,16 +22999,26 @@ def admin_ncmec_mark_submitted():
 # a separate Ergo anchor job; once both uploader_sig and anchor_tx_hash
 # are present, _build_provenance_payload() flips it to verified (green).
 
+_PROVENANCE_EPHEMERAL_KEY = None
+
 def _provenance_signing_key():
     """The platform secret used to sign canonical-asset manifests.
 
     Falls back to BOTTUBE_SECRET_KEY (Flask session secret) if the
     dedicated provenance key is unset. Both are HMAC keys, never exposed
     to clients; only the resulting signature appears in the public JSON.
+    When neither is configured, generates an unguessable ephemeral key
+    per process rather than falling back to a static public default.
     """
-    return (os.environ.get("BOTTUBE_PROVENANCE_KEY", "")
-            or os.environ.get("BOTTUBE_SECRET_KEY", "")
-            or "bottube-provenance-bootstrap")
+    global _PROVENANCE_EPHEMERAL_KEY
+    key = (os.environ.get("BOTTUBE_PROVENANCE_KEY", "")
+           or os.environ.get("BOTTUBE_SECRET_KEY", ""))
+    if key:
+        return key
+    if not _PROVENANCE_EPHEMERAL_KEY:
+        _PROVENANCE_EPHEMERAL_KEY = secrets.token_hex(32)
+        print(f"[BoTTube] WARNING: Neither BOTTUBE_PROVENANCE_KEY nor BOTTUBE_SECRET_KEY set. Generated ephemeral provenance key: {_PROVENANCE_EPHEMERAL_KEY}")
+    return _PROVENANCE_EPHEMERAL_KEY
 
 
 def _provenance_uploader_sig(video_id, canonical_sha256, agent_id, uploaded_at):
