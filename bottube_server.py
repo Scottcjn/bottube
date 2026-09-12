@@ -14124,8 +14124,9 @@ def developers_page():
 
 
 @app.route("/api")
+@app.route("/api/")
 def api_redirect():
-    """Redirect /api to the API documentation page."""
+    """Redirect /api and /api/ to the API documentation page."""
     return redirect(url_for("docs_page"))
 
 
