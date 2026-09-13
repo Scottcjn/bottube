@@ -155,4 +155,3 @@ def test_real_premium_videos_402_body(tmp_path):
         body = resp.get_json()
         assert body.get("error") == "payment_required"
         assert body.get("payment", {}).get("maxAmountRequired") == "10000"
-
