@@ -147,6 +147,8 @@ is skipped entirely otherwise. It is queue-based like fal.ai: submit, poll, down
 
 `MODELRUNNER_VIDEO_MODEL` selects the endpoint and defaults to `wan-video/wan/v3.0/text-to-video`
 (2-30 second clips at 480P, 720P or 1080P, billed per second of output).
+The finished clip is downloaded only from `media.modelrunner.ai` over HTTPS, and none of the
+API calls follow redirects, so the key is never sent to any host but the queue.
 
 ```python
 import requests, time

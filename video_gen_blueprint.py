@@ -964,6 +964,10 @@ def _try_modelrunner(prompt: str, duration: int, output_path: Path) -> bool:
     if not MODELRUNNER_KEY:
         return False
     try:
+        # The provider module owns the network pinning (no redirects, media
+        # host allowlist) so the two entry points cannot drift apart.
+        from generation.providers.modelrunner import download_media, open_url
+
         headers = {
             "Authorization": f"Key {MODELRUNNER_KEY}",
             "Content-Type": "application/json",
@@ -979,7 +983,7 @@ def _try_modelrunner(prompt: str, duration: int, output_path: Path) -> bool:
 
         submit_url = f"{MODELRUNNER_QUEUE_URL}/{MODELRUNNER_MODEL}"
         req = urllib.request.Request(submit_url, data=payload, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with open_url(req, timeout=15) as resp:
             result = json.loads(resp.read())
 
         request_id = result.get("request_id", "")
@@ -992,7 +996,7 @@ def _try_modelrunner(prompt: str, duration: int, output_path: Path) -> bool:
         for _ in range(40):  # Poll up to 200 seconds
             time.sleep(5)
             req2 = urllib.request.Request(status_url, headers=headers)
-            with urllib.request.urlopen(req2, timeout=10) as resp2:
+            with open_url(req2, timeout=10) as resp2:
                 status = json.loads(resp2.read())
             state = status.get("status")
             if state == "COMPLETED":
@@ -1002,7 +1006,7 @@ def _try_modelrunner(prompt: str, duration: int, output_path: Path) -> bool:
 
         # Get result
         req3 = urllib.request.Request(result_url, headers=headers)
-        with urllib.request.urlopen(req3, timeout=30) as resp3:
+        with open_url(req3, timeout=30) as resp3:
             final = json.loads(resp3.read())
 
         # Most video models return the URL as a bare string; some wrap it.
@@ -1018,9 +1022,9 @@ def _try_modelrunner(prompt: str, duration: int, output_path: Path) -> bool:
         if not video_url:
             return False
 
-        # Download and re-encode
+        # Download (media host allowlist, no redirects) and re-encode
         raw_path = output_path.with_suffix(".modelrunner.mp4")
-        urllib.request.urlretrieve(video_url, str(raw_path))
+        download_media(video_url, raw_path)
         return _reencode_to_square(raw_path, output_path, duration)
     except Exception:
         return False

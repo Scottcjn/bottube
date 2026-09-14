@@ -13,8 +13,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
-import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -30,6 +32,17 @@ MODELRUNNER_MODEL = os.environ.get(
     "MODELRUNNER_VIDEO_MODEL", "wan-video/wan/v3.0/text-to-video"
 )
 MODELRUNNER_QUEUE_URL = "https://queue.modelrunner.run"
+
+# Finished videos are fetched only from the platform's own media CDN, over
+# HTTPS. The result payload names the download host, so without this pin a
+# mis-pointed or tampered response could make the worker fetch from anywhere.
+MEDIA_HOSTS = ("media.modelrunner.ai",)
+
+# get_status() polls a remote queue; a run of transport errors (timeout, DNS
+# blip, 5xx) must not be indistinguishable from a job that is genuinely still
+# queued. After this many consecutive poll failures for the same request we
+# report it failed instead of returning "pending" forever.
+_MAX_CONSECUTIVE_POLL_ERRORS = 5
 
 # Model accepts 2-30s; the router may ask for more, so requests are clamped.
 MIN_DURATION = 2
@@ -47,7 +60,106 @@ def _headers() -> dict:
     }
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Fail any 3xx instead of following it.
+
+    urllib copies every header except Content-* onto a redirected request, so
+    a redirect off the queue host would carry the API key to whichever host it
+    named. The queue API never redirects, so refusing them all costs nothing.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, f"redirect to {newurl} refused", headers, fp
+        )
+
+
+_opener = urllib.request.build_opener(_RefuseRedirects())
+
+
+def open_url(req: urllib.request.Request, timeout: float):
+    """urlopen() that refuses redirects; every network call goes through it."""
+    return _opener.open(req, timeout=timeout)
+
+
+def is_allowed_media_url(url: str) -> bool:
+    """True only for an HTTPS URL on the media CDN (exact host or a subdomain).
+
+    Matched on the parsed hostname, not by substring, so
+    `media.modelrunner.ai.evil.example` and `media.modelrunner.ai@evil.example`
+    are both rejected.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    if parts.scheme != "https" or not host:
+        return False
+    return any(
+        host == allowed or host.endswith(f".{allowed}") for allowed in MEDIA_HOSTS
+    )
+
+
+def download_media(url: str, dest: Path) -> None:
+    """Stream an allowed media URL to `dest`.
+
+    Sends no Authorization header (the CDN is public, and the key belongs to
+    the queue host alone) and, via open_url, follows no redirects.
+    """
+    if not is_allowed_media_url(url):
+        raise ValueError(f"refusing to download from outside {MEDIA_HOSTS}: {url}")
+    with open_url(urllib.request.Request(url), timeout=120) as resp, dest.open("wb") as fh:
+        shutil.copyfileobj(resp, fh)
+
+
+def _reencode(raw_path: Path, out_path: Path) -> bool:
+    """Re-encode to the standard 720x720 H.264 MP4 with a silent stereo track.
+
+    Both inputs are declared before any output option: ffmpeg reads its
+    arguments positionally, so a filter or codec flag placed ahead of the
+    second `-i` is taken as an option *for that input* and the whole command
+    is rejected. The explicit maps take video from the download and audio from
+    the silent source even when the model returned a soundtrack.
+    """
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(raw_path),
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-vf", (
+            f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
+            f":force_original_aspect_ratio=decrease,"
+            f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x1a1a2e"
+        ),
+        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest",
+        str(out_path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=60, check=False)
+    except subprocess.TimeoutExpired:
+        log.warning("ffmpeg re-encode timed out after 60s")
+        out_path.unlink(missing_ok=True)
+        return False
+    if proc.returncode != 0:
+        log.warning(
+            "ffmpeg re-encode failed (exit %d): %s",
+            proc.returncode, proc.stderr.decode(errors="replace")[-500:],
+        )
+        # ffmpeg may have opened the output before failing; leave nothing partial.
+        out_path.unlink(missing_ok=True)
+        return False
+    return out_path.exists()
+
+
 class ModelRunnerProvider(GenerationProvider):
+
+    def __init__(self):
+        # request_id -> consecutive get_status() poll failures (transport
+        # error, HTTP error, malformed JSON). Reset on any poll that reaches
+        # the queue, whatever state it reports.
+        self._consecutive_poll_errors: dict = {}
 
     def get_name(self) -> str:
         """Return this provider's registry key."""
@@ -99,7 +211,7 @@ class ModelRunnerProvider(GenerationProvider):
                 data=payload,
                 headers=_headers(),
             )
-            with urllib.request.urlopen(http_req, timeout=15) as resp:
+            with open_url(http_req, timeout=15) as resp:
                 result = json.loads(resp.read())
 
             request_id = result.get("request_id", "")
@@ -110,25 +222,46 @@ class ModelRunnerProvider(GenerationProvider):
             return False, str(exc)
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
-        """Poll the queue for a job's status; returns (status_label, progress_fraction)."""
+        """Poll the queue for a job's status; returns (status_label, progress_fraction).
+
+        A transport error, HTTP error, or malformed body is a transient poll
+        failure, not proof the job is still queued: it is counted separately
+        and, after _MAX_CONSECUTIVE_POLL_ERRORS in a row, reported as "failed"
+        so the router stops polling instead of waiting out its own deadline.
+        """
         status_url = (
             f"{MODELRUNNER_QUEUE_URL}/{MODELRUNNER_MODEL}"
             f"/requests/{external_id}/status"
         )
         try:
             req = urllib.request.Request(status_url, headers=_headers())
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with open_url(req, timeout=10) as resp:
                 data = json.loads(resp.read())
-            status = data.get("status", "IN_QUEUE")
-            if status == "COMPLETED":
-                return "completed", 1.0
-            if status in ("FAILED", "CANCELLED"):
+            if not isinstance(data, dict):
+                raise ValueError("status payload is not an object")
+        except Exception as exc:
+            errors = self._consecutive_poll_errors.get(external_id, 0) + 1
+            self._consecutive_poll_errors[external_id] = errors
+            log.warning(
+                "ModelRunner status poll failed for %s (attempt %d/%d): %s",
+                external_id, errors, _MAX_CONSECUTIVE_POLL_ERRORS, exc,
+            )
+            if errors >= _MAX_CONSECUTIVE_POLL_ERRORS:
+                self._consecutive_poll_errors.pop(external_id, None)
                 return "failed", 0.0
-            if status == "IN_PROGRESS":
-                return "running", 0.5
             return "pending", 0.0
-        except Exception:
-            return "pending", 0.0
+
+        # The queue answered, so any earlier errors for this job were transient.
+        self._consecutive_poll_errors.pop(external_id, None)
+
+        status = data.get("status", "IN_QUEUE")
+        if status == "COMPLETED":
+            return "completed", 1.0
+        if status in ("FAILED", "CANCELLED"):
+            return "failed", 0.0
+        if status == "IN_PROGRESS":
+            return "running", 0.5
+        return "pending", 0.0
 
     def get_result(self, external_id: str, output_dir: Path) -> Optional[Path]:
         """Download a completed job's video and re-encode it to the standard output format."""
@@ -137,7 +270,7 @@ class ModelRunnerProvider(GenerationProvider):
         )
         try:
             req = urllib.request.Request(result_url, headers=_headers())
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with open_url(req, timeout=30) as resp:
                 final = json.loads(resp.read())
 
             video_url = _extract_video_url(final.get("output"))
@@ -146,24 +279,12 @@ class ModelRunnerProvider(GenerationProvider):
 
             raw_path = output_dir / f"modelrunner_raw_{uuid.uuid4().hex[:8]}.mp4"
             out_path = output_dir / f"modelrunner_{uuid.uuid4().hex[:8]}.mp4"
-            urllib.request.urlretrieve(video_url, str(raw_path))
-
-            # Re-encode to standard format
-            cmd = [
-                "ffmpeg", "-y", "-i", str(raw_path),
-                "-vf", (
-                    f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
-                    f":force_original_aspect_ratio=decrease,"
-                    f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x1a1a2e"
-                ),
-                "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-                "-c:a", "aac", "-shortest",
-                str(out_path),
-            ]
-            subprocess.run(cmd, capture_output=True, timeout=60, check=False)
-            raw_path.unlink(missing_ok=True)
-            return out_path if out_path.exists() else None
+            try:
+                download_media(video_url, raw_path)
+                ok = _reencode(raw_path, out_path)
+            finally:
+                raw_path.unlink(missing_ok=True)
+            return out_path if ok else None
         except Exception as exc:
             log.warning("ModelRunner result download failed: %s", exc)
             return None
@@ -178,7 +299,8 @@ class ModelRunnerProvider(GenerationProvider):
             req = urllib.request.Request(
                 cancel_url, method="PUT", headers=_headers()
             )
-            urllib.request.urlopen(req, timeout=10)
+            with open_url(req, timeout=10):
+                pass
             return True
         except Exception:
             return False
