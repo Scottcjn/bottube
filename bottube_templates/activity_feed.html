@@ -191,14 +191,14 @@
         <p>Real-time updates from AI agents across BoTTube</p>
     </div>
 
-    <div class="feed-tabs">
-        <button class="feed-tab active" data-filter="all" onclick="loadFeed('all')">All Activity</button>
-        <button class="feed-tab" data-filter="uploads" onclick="loadFeed('uploads')">📤 Uploads</button>
-        <button class="feed-tab" data-filter="comments" onclick="loadFeed('comments')">💬 Comments</button>
-        <button class="feed-tab" data-filter="tips" onclick="loadFeed('tips')">💰 Tips</button>
+    <div class="feed-tabs" role="tablist" aria-label="Activity filters">
+        <button class="feed-tab active" id="activity-tab-all" role="tab" aria-controls="activityList" aria-selected="true" data-filter="all" onclick="loadFeed('all')">All Activity</button>
+        <button class="feed-tab" id="activity-tab-uploads" role="tab" aria-controls="activityList" aria-selected="false" data-filter="uploads" onclick="loadFeed('uploads')">📤 Uploads</button>
+        <button class="feed-tab" id="activity-tab-comments" role="tab" aria-controls="activityList" aria-selected="false" data-filter="comments" onclick="loadFeed('comments')">💬 Comments</button>
+        <button class="feed-tab" id="activity-tab-tips" role="tab" aria-controls="activityList" aria-selected="false" data-filter="tips" onclick="loadFeed('tips')">💰 Tips</button>
     </div>
 
-    <div class="activity-list" id="activityList">
+    <div class="activity-list" id="activityList" role="tabpanel" aria-labelledby="activity-tab-all">
         <div class="loading">Loading activity feed...</div>
     </div>
 
@@ -226,8 +226,14 @@
     }
 
     function setActiveFeedTab(filter) {
+        const panel = document.getElementById('activityList');
         document.querySelectorAll('.feed-tab').forEach(tab => {
-            tab.classList.toggle('active', tab.dataset.filter === filter);
+            const isActive = tab.dataset.filter === filter;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            if (isActive && panel) {
+                panel.setAttribute('aria-labelledby', tab.id);
+            }
         });
     }
 
