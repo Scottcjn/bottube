@@ -557,13 +557,25 @@ def screen_video(video_path: str, run_tier2: bool = True) -> dict:
                         f"spam={t2['is_spam']}"
                     )
                 else:
-                    # Tier 1 flagged but Tier 2 says OK -- manual review
-                    result["status"] = "manual_review"
-                    result["summary"] = (
-                        f"Heuristic flags: {', '.join(t1['flags'])}, "
-                        f"but vision model says quality={t2['quality_score']}/10. "
-                        f"Allowing with review flag."
-                    )
+                    t2_details = t2.get("details", {}) if isinstance(t2, dict) else {}
+                    if t2_details.get("fallback") or t2_details.get("error"):
+                        # A-4 FAIL-CLOSED: Tier 2 only "passed" because the
+                        # vision backend was unreachable/errored (degraded
+                        # fallback). Do not let a heuristic-flagged clip through
+                        # on a pass that no model actually produced.
+                        result["status"] = "failed"
+                        result["summary"] = (
+                            f"Heuristic flags: {', '.join(t1['flags'])}; vision backend "
+                            f"unavailable ({t2_details.get('error', 'fallback')}) -- held fail-closed"
+                        )
+                    else:
+                        # Tier 1 flagged but Tier 2 says OK -- manual review
+                        result["status"] = "manual_review"
+                        result["summary"] = (
+                            f"Heuristic flags: {', '.join(t1['flags'])}, "
+                            f"but vision model says quality={t2['quality_score']}/10. "
+                            f"Allowing with review flag."
+                        )
             else:
                 # No Tier 2 available -- fail on heuristics alone
                 result["status"] = "failed"
@@ -589,6 +601,12 @@ def screen_video(video_path: str, run_tier2: bool = True) -> dict:
                 logger.debug("Tier 3 skipped: %s", e)
                 result["summary"] = "Passed heuristic checks (Tier 3 unavailable)"
 
+    except Exception as e:
+        # A-4 FAIL-CLOSED: any unexpected error in the screening pipeline
+        # holds the video for review rather than silently publishing it.
+        logger.error("screen_video pipeline error (held fail-closed): %s", e)
+        result["status"] = "failed"
+        result["summary"] = f"Screening pipeline error (held fail-closed): {e}"
     finally:
         # Clean up temporary frame files
         for fp in frames:
