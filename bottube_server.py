@@ -6397,7 +6397,17 @@ def upload_video():
                 "category": ts_info.get("category"),
             }), 451
     except Exception as _ts_e:
-        app.logger.warning("TS hash check failed (non-fatal): %s", _ts_e)
+        # FAIL CLOSED: if the hash check itself errors, quarantine rather than
+        # publish un-inspected content (mirrors the web /upload handler).
+        app.logger.error("TS hash check errored on /api/upload: %s", _ts_e)
+        try:
+            video_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return jsonify({
+            "error": "Upload could not be verified. Please try again later.",
+            "code": "MODERATION_UNAVAILABLE",
+        }), 503
 
     # Get metadata
     duration, width, height = get_video_metadata(video_path)
@@ -6519,6 +6529,25 @@ def upload_video():
             ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
         ),
     )
+    # If screening HELD the video, do not reward or advertise it, and remove
+    # its pre-screening thumbnail so no frame is publicly fetchable. is_removed=1
+    # was written above. Mirrors the web /upload handler's held early-return.
+    if screening_status == "failed":
+        app.logger.warning("VISION SCREEN HOLD (api): video=%s agent=%s", video_id, g.agent["agent_name"])
+        if thumb_filename:
+            try:
+                (THUMB_DIR / thumb_filename).unlink(missing_ok=True)
+            except Exception:
+                pass
+        db.commit()
+        return jsonify({
+            "ok": True,
+            "video_id": video_id,
+            "screening": {"status": screening_status,
+                          "summary": screening_result.get("summary", "")},
+            "warning": "Video is held for review and is not public yet.",
+        }), 201
+
     # Award RTC for upload
     award_rtc(db, g.agent["id"], RTC_REWARD_UPLOAD, "video_upload", video_id)
     _referral_mark_first_upload(db, g.agent["id"])
@@ -11622,6 +11651,19 @@ def _post_to_x(text: str) -> str:
 def serve_thumbnail(filename):
     """Serve thumbnail images."""
     if "/" in filename or "\\" in filename or ".." in filename:
+        abort(404)
+    # Never serve the thumbnail of a held/removed video — a held frame must not
+    # leak via this static route (feed/watch already filter is_removed).
+    removed = False
+    try:
+        row = get_db().execute(
+            "SELECT COALESCE(is_removed, 0) FROM videos WHERE thumbnail = ? LIMIT 1",
+            (filename,),
+        ).fetchone()
+        removed = bool(row and row[0])
+    except Exception:
+        removed = False
+    if removed:
         abort(404)
     resp = send_from_directory(str(THUMB_DIR), filename)
     resp.headers.setdefault("Cache-Control", "public, max-age=86400")
@@ -18928,7 +18970,7 @@ def ts_inspect_uploaded_file(file_path, agent_id):
 
         # Snapshot upload provenance before we move the file. CSAM and
         # other federal-reportable categories are *quarantined*, never
-        # deleted; § 2258A(h)(2)(A) requires 90-day preservation. For
+        # deleted; § 2258A(h) requires 1-year preservation (REPORT Act 2024). For
         # categories without a federal reporting duty we still preserve
         # the file under quarantine so an operator can review.
         ip = _get_client_ip()
@@ -20183,7 +20225,7 @@ def admin_embeddings_backfill():
 # --- NCMEC submission queue + quarantine -----------------------------------
 # 18 U.S.C. § 2258A obligates a "provider" to report apparent child sexual
 # abuse material to NCMEC's CyberTipline as soon as reasonably possible
-# after obtaining actual knowledge, and to preserve the content for 90 days
+# after obtaining actual knowledge, and to preserve the content for 1 year
 # (§ 2258A(h)(2)(A)). This module:
 #   * Creates a quarantine directory and a metadata sidecar per incident.
 #   * Replaces the previous "unlink on match" behaviour with a move to
@@ -20258,7 +20300,7 @@ def _ts_quarantine_file(src_path, sha, category="csam", meta=None):
     """Move a flagged upload to the quarantine dir with restrictive perms.
 
     Writes a JSON sidecar with discovery metadata. The original file is
-    *not* deleted — § 2258A(h) requires 90-day preservation. The caller is
+    *not* deleted — § 2258A(h) requires 1-year preservation (REPORT Act 2024). The caller is
     responsible for separately invoking the NCMEC enqueue helper.
 
     Returns the quarantine file path on success, "" on failure.
@@ -20290,7 +20332,7 @@ def _ts_quarantine_file(src_path, sha, category="csam", meta=None):
             "sha256": sha,
             "src_path": str(src_path),
             "quarantined_at": ts,
-            "preserve_until": ts + 86400 * 90,
+            "preserve_until": ts + 86400 * 365,  # REPORT Act (2024): 1yr from report submission
             "meta": meta or {},
         }, indent=2))
         try:
@@ -20384,7 +20426,7 @@ def _ncmec_packet_text(row):
     sections.append("Service URL:        https://bottube.ai")
     sections.append("Statutory basis:    18 U.S.C. § 2258A — mandatory CyberTipline reporting.")
     sections.append("Preservation:       File preserved on quarantine storage; will be retained")
-    sections.append("                    at least 90 days from discovery per § 2258A(h)(2)(A).")
+    sections.append("                    at least 1 year from report submission per § 2258A(h) (REPORT Act 2024).")
     sections.append("")
 
     sections.append("INVOLVED PERSON / ACCOUNT")
@@ -20420,7 +20462,7 @@ def _ncmec_packet_text(row):
     sections.append("  4. After submission, NCMEC returns a Report ID. Record it via:")
     sections.append("       POST /admin/ncmec/mark-submitted")
     sections.append("       body: {\"queue_id\": \"" + row["queue_id"] + "\", \"ncmec_report_id\": \"<id>\"}")
-    sections.append("  5. Do not modify or delete the quarantined content for 90 days from the")
+    sections.append("  5. Do not modify or delete the quarantined content for 1 year from the")
     sections.append("     discovered date above (§ 2258A(h)(2)(A)). Cooperate with any law-enforcement")
     sections.append("     preservation request.")
     return "\n".join(sections) + "\n"
@@ -21375,6 +21417,18 @@ def serve_rendition(video_id, filename):
     if "/" in filename or ".." in filename or "/" in video_id or ".." in video_id:
         abort(404)
     if not re.fullmatch(r"[A-Za-z0-9_-]{5,32}", video_id):
+        abort(404)
+    # Never serve a rendition of a held/removed video.
+    removed = False
+    try:
+        row = get_db().execute(
+            "SELECT COALESCE(is_removed, 0) FROM videos WHERE video_id = ? LIMIT 1",
+            (video_id,),
+        ).fetchone()
+        removed = bool(row and row[0])
+    except Exception:
+        removed = False
+    if removed:
         abort(404)
     return send_from_directory(
         RENDITION_DIR / video_id, filename, max_age=86400 * 30, mimetype="video/mp4",
