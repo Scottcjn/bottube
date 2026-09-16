@@ -84,24 +84,30 @@ jobs:
 
   deployment-drift:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
+      timeout-minutes: 3
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+      timeout-minutes: 5
 
     - name: Install drift check dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install pytest PyYAML
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 pytest PyYAML
+      timeout-minutes: 5
 
     - name: Test deployment drift sentinel
       run: python -m pytest tests/test_deployment_drift.py tests/test_openapi_contract_preservation.py -q
+      timeout-minutes: 5
 
     - name: Check OpenAPI and Flask route drift
       run: python deployment_drift.py --config deployment-drift.json
+      timeout-minutes: 5
 
   security:
     runs-on: ubuntu-latest
@@ -144,7 +150,7 @@ jobs:
   report:
     name: CI outcome report
     runs-on: ubuntu-latest
-    needs: [lint, test, security]
+    needs: [lint, test, deployment-drift, security]
     if: always()
     timeout-minutes: 2
     steps:
@@ -152,12 +158,13 @@ jobs:
         run: |
           L="${{ needs.lint.result }}"
           T="${{ needs.test.result }}"
+          D="${{ needs.deployment-drift.result }}"
           S="${{ needs.security.result }}"
-          echo "lint=$L test=$T security=$S"
-          if echo "$L $T $S" | grep -q cancelled; then
+          echo "lint=$L test=$T deployment-drift=$D security=$S"
+          if echo "$L $T $D $S" | grep -q cancelled; then
             echo "::error::A CI job was CANCELLED at its timeout-minutes limit (infrastructure hang, not necessarily a code failure). Re-run the workflow to confirm."
             exit 1
-          elif echo "$L $T $S" | grep -qE 'failure|error'; then
+          elif echo "$L $T $D $S" | grep -qE 'failure|error'; then
             echo "::error::A CI job FAILED on a step. Look at the failing job's logs above - that is a real failure."
             exit 1
           else

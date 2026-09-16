@@ -12,6 +12,7 @@ jobs:
   reward:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Award RTC to contributor
         continue-on-error: true  # rewards are best-effort; never gate CI
@@ -25,3 +26,4 @@ jobs:
           amount: 5
           wallet-from: founder_community
           admin-key: ${{ secrets.RTC_ADMIN_KEY }}
+        timeout-minutes: 4
