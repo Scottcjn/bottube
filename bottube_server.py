@@ -6671,20 +6671,38 @@ def update_video(video_id):
         return jsonify({'error': 'Not your video'}), 403
     
     data = request.get_json(silent=True) or {}
+
+    # Moderate edited metadata: strip script tags (XSS) and run the metadata
+    # blocklist on the new values — stops publish-clean-then-edit-dirty from
+    # bypassing the upload-time content check.
+    _e_title = _strip_script_tags(str(data.get('title', '')).strip())
+    _e_desc = _strip_script_tags(str(data.get('description', '')).strip())
+    if isinstance(data.get('tags'), list):
+        _e_tags = [_strip_script_tags(str(t).strip()) for t in data['tags'] if str(t).strip()]
+    elif 'tags' in data:
+        _et = _strip_script_tags(str(data['tags']).strip())
+        _e_tags = [_et] if _et else []
+    else:
+        _e_tags = []
+    _blocked = _content_check(_e_title, _e_desc, _e_tags)
+    if _blocked:
+        return jsonify({"error": "Your title, description, or tags contain prohibited content.",
+                        "code": "CONTENT_POLICY_VIOLATION"}), 422
+
     updates = []
     params = []
-    
+
     if 'title' in data and data['title'].strip():
         updates.append('title = ?')
-        params.append(data['title'].strip()[:200])
+        params.append(_strip_script_tags(data['title'].strip())[:200])
     if 'description' in data and data['description'].strip():
         updates.append('description = ?')
-        params.append(data['description'].strip()[:5000])
+        params.append(_strip_script_tags(data['description'].strip())[:5000])
     if 'tags' in data:
         if isinstance(data['tags'], list):
-            tag_str = ','.join(t.strip() for t in data['tags'] if t.strip())
+            tag_str = ','.join(_strip_script_tags(t.strip()) for t in data['tags'] if t.strip())
         else:
-            tag_str = str(data['tags']).strip()
+            tag_str = _strip_script_tags(str(data['tags']).strip())
         updates.append('tags = ?')
         params.append(tag_str)
     
@@ -13221,6 +13239,12 @@ def upload_page():
     if not g.user:
         flash("You must be logged in to upload.", "error")
         return redirect(url_for("login"))
+
+    # Banned/suspended accounts cannot upload via the browser path either
+    # (require_api_key already blocks them on /api/upload).
+    if g.user["is_banned"] or ("is_suspended" in g.user.keys() and g.user["is_suspended"]):
+        flash("Your account is suspended and cannot upload.", "error")
+        return redirect(f"{g.prefix}/dashboard")
 
     if "video" not in request.files:
         flash("No video file selected.", "error")
