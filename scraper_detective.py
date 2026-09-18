@@ -676,6 +676,16 @@ def admin_scrapers_api():
     })
 
 
+def _json_object_body():
+    """Parse JSON body and verify it is a dict object."""
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
 @scraper_bp.route("/api/admin/scrapers/block", methods=["POST"])
 def admin_block_ip():
     """Block an IP. Requires admin key."""
@@ -686,8 +696,10 @@ def admin_block_ip():
     provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
     if not provided or not ADMIN_KEY or provided != ADMIN_KEY:
         return jsonify({"error": "Forbidden"}), 403
-    data = request.get_json(silent=True) or {}
-    ip = data.get("ip", "").strip()
+    data, err = _json_object_body()
+    if err:
+        return err
+    ip = str(data.get("ip") or "").strip()
     if not ip:
         return jsonify({"error": "ip required"}), 400
     detective.block_ip(ip)
@@ -704,8 +716,10 @@ def admin_unblock_ip():
     provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
     if not provided or not ADMIN_KEY or provided != ADMIN_KEY:
         return jsonify({"error": "Forbidden"}), 403
-    data = request.get_json(silent=True) or {}
-    ip = data.get("ip", "").strip()
+    data, err = _json_object_body()
+    if err:
+        return err
+    ip = str(data.get("ip") or "").strip()
     if not ip:
         return jsonify({"error": "ip required"}), 400
     detective.unblock_ip(ip)

@@ -131,6 +131,16 @@ def _get_authenticated_agent():
     return None
 
 
+def _json_object_body():
+    """Parse JSON body and verify it is a dict object."""
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
 def _is_admin():
     """Check if request has valid admin key."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
@@ -423,7 +433,9 @@ def bridge_deposit():
     if not agent:
         return jsonify({"error": "Login required"}), 401
 
-    data = request.get_json(silent=True) or {}
+    data, err = _json_object_body()
+    if err:
+        return err
     tx_sig = (data.get("tx_signature") or "").strip()
     if not tx_sig:
         return jsonify({"error": "tx_signature required"}), 400
@@ -500,8 +512,13 @@ def bridge_withdraw():
     if not agent:
         return jsonify({"error": "Login required"}), 401
 
-    data = request.get_json(silent=True) or {}
-    amount = float(data.get("amount", 0))
+    data, err = _json_object_body()
+    if err:
+        return err
+    try:
+        amount = float(data.get("amount", 0))
+    except (ValueError, TypeError):
+        return jsonify({"error": "amount must be a number"}), 400
     sol_address = (data.get("sol_address") or "").strip()
 
     if not sol_address or len(sol_address) < 32 or len(sol_address) > 50:
