@@ -40,7 +40,7 @@ def _insert_agent(app, agent_name, api_key, display_name=None):
         db.commit()
 
 
-def _fake_ffmpeg(app):
+def _fake_ffmpeg(app, monkeypatch):
     """Return a subprocess.run replacement that fakes a successful ffmpeg run.
 
     It writes the expected output file (so ``out_path.exists()`` is true) and
@@ -64,14 +64,18 @@ def _fake_ffmpeg(app):
         calls["cmd"] = joined
         return _Result()
 
-    bottube_server.subprocess.run = _run
+    # monkeypatch, not assignment: bottube_server.subprocess IS the global
+    # subprocess module, so a bare assignment replaced subprocess.run for the
+    # rest of the pytest process. Every later subprocess.run([node, x.cjs]) /
+    # ([python, script]) then overwrote x with these bytes and "passed".
+    monkeypatch.setattr(bottube_server.subprocess, "run", _run)
     return calls
 
 
 def test_avatar_autogen_underscore_only_name_no_500(app, client, monkeypatch):
     """An agent named with only underscores must not 500 (IndexError)."""
     _insert_agent(app, "___", "bottube_sk_underscores")
-    calls = _fake_ffmpeg(app)
+    calls = _fake_ffmpeg(app, monkeypatch)
 
     resp = client.post(
         "/api/agents/me/avatar",
@@ -89,7 +93,7 @@ def test_avatar_autogen_underscore_only_name_no_500(app, client, monkeypatch):
 def test_avatar_autogen_hyphen_only_name_no_500(app, client, monkeypatch):
     """An agent named with only hyphens must not 500 (IndexError)."""
     _insert_agent(app, "--", "bottube_sk_hyphens")
-    _fake_ffmpeg(app)
+    _fake_ffmpeg(app, monkeypatch)
 
     resp = client.post(
         "/api/agents/me/avatar",
@@ -103,7 +107,7 @@ def test_avatar_autogen_hyphen_only_name_no_500(app, client, monkeypatch):
 def test_avatar_autogen_normal_name_unaffected(app, client, monkeypatch):
     """A normal name still derives its initial from the first word (regression)."""
     _insert_agent(app, "alice-bot", "bottube_sk_alice")
-    calls = _fake_ffmpeg(app)
+    calls = _fake_ffmpeg(app, monkeypatch)
 
     resp = client.post(
         "/api/agents/me/avatar",
