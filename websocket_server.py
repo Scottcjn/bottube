@@ -78,6 +78,22 @@ def _video_exists(db, video_id: str) -> bool:
         return False
 
 
+def _require_video(app, video_id):
+    """Reject a SocketIO event that targets a missing video.
+
+    Mirrors the REST live-chat adapter's video-existence contract so the
+    realtime path cannot create orphan rows or broadcast for ghost videos.
+    """
+    db = _get_db(app)
+    try:
+        exists = _video_exists(db, video_id)
+    finally:
+        db.close()
+    if not exists:
+        emit("error", {"message": "Video not found"})
+    return exists
+
+
 # ── SocketIO Events ────────────────────────────────────────────
 @socketio.on("join")
 def on_join(data):
@@ -110,6 +126,9 @@ def on_leave(data):
         return
     room = data.get("video_id", "")
     username = data.get("username", "Anonymous")
+    from flask import current_app
+    if not _require_video(current_app, room):
+        return
     leave_room(room)
     emit("system", {"message": f"{username} left the chat", "type": "leave"}, room=room)
 
@@ -217,9 +236,12 @@ def on_mod_action(data):
     data = _event_object(data)
     if data is None:
         return
+
     action = data.get("action")
     room = data.get("video_id", "")
-    
+    if not _require_video(current_app, room):
+        return
+
     if action == "ban":
         user_id = data.get("target_user_id", "")
         duration = data.get("duration")  # None = permanent

@@ -14,9 +14,13 @@ def _init_chat_db(db_path):
         db.executescript(
             """
             CREATE TABLE chat_bans (
+                id TEXT,
                 video_id TEXT,
                 user_id TEXT,
-                expires_at REAL
+                banned_by TEXT,
+                reason TEXT,
+                expires_at REAL,
+                created_at REAL
             );
             CREATE TABLE chat_messages (
                 id TEXT,
@@ -28,6 +32,8 @@ def _init_chat_db(db_path):
                 tip_amount REAL,
                 created_at REAL
             );
+            CREATE TABLE videos (video_id TEXT PRIMARY KEY, is_removed INTEGER DEFAULT 0);
+            INSERT INTO videos (video_id) VALUES ('video-1');
             """
         )
 
@@ -199,20 +205,106 @@ def test_mod_action_rejects_malformed_ban_duration_without_insert(
     assert _table_count(db_path, "chat_bans") == 0
 
 
-def test_mod_action_rejects_malformed_timeout_duration(monkeypatch):
+def test_mod_action_rejects_malformed_timeout_duration(monkeypatch, tmp_path):
     websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    app = Flask(__name__)
+    app.config["CHAT_DB_PATH"] = str(db_path)
     websocket_server._last_message_time.clear()
 
-    websocket_server.on_mod_action(
-        {
-            "action": "timeout",
-            "video_id": "video-1",
-            "target_user_id": "user-1",
-            "duration": "later",
-        }
-    )
+    with app.app_context():
+        websocket_server.on_mod_action(
+            {
+                "action": "timeout",
+                "video_id": "video-1",
+                "target_user_id": "user-1",
+                "duration": "later",
+            }
+        )
 
     assert events == [
         (("error", {"message": "duration must be a finite non-negative number"}), {})
     ]
     assert websocket_server._last_message_time == {}
+
+
+def test_leave_rejects_missing_video_without_room_action(monkeypatch, tmp_path):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    app = Flask(__name__)
+    app.config["CHAT_DB_PATH"] = str(db_path)
+
+    with app.app_context():
+        websocket_server.on_leave({"video_id": "ghost-video", "username": "alice"})
+
+    assert events == [(("error", {"message": "Video not found"}), {})]
+
+
+def test_leave_accepts_existing_video(monkeypatch, tmp_path):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    app = Flask(__name__)
+    app.config["CHAT_DB_PATH"] = str(db_path)
+
+    with app.app_context():
+        websocket_server.on_leave({"video_id": "video-1", "username": "alice"})
+
+    assert events == [
+        (("system", {"message": "alice left the chat", "type": "leave"}), {"room": "video-1"})
+    ]
+
+
+def test_mod_action_ban_rejects_missing_video_without_insert(monkeypatch, tmp_path):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    app = Flask(__name__)
+    app.config["CHAT_DB_PATH"] = str(db_path)
+
+    with app.app_context():
+        websocket_server.on_mod_action(
+            {
+                "action": "ban",
+                "video_id": "ghost-video",
+                "target_user_id": "user-1",
+                "mod_name": "mod",
+                "reason": "spam",
+            }
+        )
+
+    assert events == [(("error", {"message": "Video not found"}), {})]
+    assert _table_count(db_path, "chat_bans") == 0
+
+
+def test_mod_action_ban_accepts_existing_video(monkeypatch, tmp_path):
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    app = Flask(__name__)
+    app.config["CHAT_DB_PATH"] = str(db_path)
+
+    with app.app_context():
+        websocket_server.on_mod_action(
+            {
+                "action": "ban",
+                "video_id": "video-1",
+                "target_user_id": "user-1",
+                "mod_name": "mod",
+                "reason": "spam",
+            }
+        )
+
+    assert any(
+        (("system", {"message": "User banned by moderator", "type": "ban"}), {"room": "video-1"})
+        == item
+        for item in events
+    )
+    assert _table_count(db_path, "chat_bans") == 1
