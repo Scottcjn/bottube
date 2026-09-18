@@ -23044,7 +23044,10 @@ def _provenance_signing_key():
         return key
     if not _PROVENANCE_EPHEMERAL_KEY:
         _PROVENANCE_EPHEMERAL_KEY = secrets.token_hex(32)
-        print(f"[BoTTube] WARNING: Neither BOTTUBE_PROVENANCE_KEY nor BOTTUBE_SECRET_KEY set. Generated ephemeral provenance key: {_PROVENANCE_EPHEMERAL_KEY}")
+        # Never log the key itself: anyone with log access could forge
+        # provenance signatures for the life of this process.
+        print("[BoTTube] WARNING: Neither BOTTUBE_PROVENANCE_KEY nor BOTTUBE_SECRET_KEY set. "
+              "Using an ephemeral per-process provenance key (signatures will not verify after restart).")
     return _PROVENANCE_EPHEMERAL_KEY
 
 
