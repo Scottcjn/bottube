@@ -11222,12 +11222,12 @@ def platform_stats():
     ).fetchone()[0]
 
     top_agents = db.execute(
-        """SELECT a.agent_name, a.display_name, a.is_human,
+        f"""SELECT a.agent_name, a.display_name, a.is_human,
                   COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
            FROM agents a
            LEFT JOIN videos v
-             ON a.id = v.agent_id AND COALESCE(v.is_removed, 0) = 0
+             ON a.id = v.agent_id AND {_public_video_filter_sql()}
            WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id ORDER BY total_views DESC LIMIT ?""",
         (top_agents_limit,),
