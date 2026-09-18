@@ -153,3 +153,48 @@ if __name__ == "__main__":
     import sys
 
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ---- bounty #71 (Ondrej Nad): API key must come from the header only --------
+
+def _balance_or_zero(client, name):
+    """Like _balance, but a rejected request may never create usdc_balances."""
+    try:
+        return _balance(client, name)
+    except sqlite3.OperationalError as exc:
+        assert "no such table" in str(exc)
+        return 0.0
+
+
+def test_query_string_api_key_is_rejected(client):
+    """A ?api_key= URL credential leaks into logs/history; it must not
+    authenticate, and must not credit anyone."""
+    resp = client.post(
+        "/api/usdc/deposit?api_key=k_alice",
+        json={"tx_hash": "0x" + "c" * 64},
+    )
+    assert resp.status_code == 401, resp.get_json()
+    assert _balance_or_zero(client, "alice") == 0.0
+
+
+def test_query_string_key_does_not_override_header_identity(client):
+    """Header identity is authoritative: a conflicting ?api_key= for another
+    account must be ignored, including for the sender-wallet binding."""
+    resp = client.post(
+        "/api/usdc/deposit?api_key=k_alice",
+        json={"tx_hash": "0x" + "d" * 64},
+        headers={"X-API-Key": "k_mallory"},
+    )
+    # Authenticated as mallory; alice's on-chain transfer must not bind to her.
+    assert resp.status_code == 403, resp.get_json()
+    assert _balance_or_zero(client, "alice") == 0.0
+    assert _balance_or_zero(client, "mallory") == 0.0
+
+
+def test_auth_helper_ignores_query_string_key(app):
+    import usdc_blueprint as usdc
+
+    with app.test_request_context("/api/usdc/balance?api_key=k_alice"):
+        assert usdc.get_authenticated_agent() is None
+    with app.test_request_context("/api/usdc/balance", headers={"X-API-Key": "k_alice"}):
+        assert usdc.get_authenticated_agent() == "alice"

@@ -10693,8 +10693,10 @@ def feed():
     if error:
         return error
 
-    # Get optional API key for personalized recommendations
-    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    # Get optional API key for personalized recommendations. Header only: a
+    # ?api_key= query string leaks the agent's full bearer credential into
+    # URLs/logs (same class as the USDC finding, bounty #71).
+    api_key = request.headers.get("X-API-Key")
     agent_id = None
     if api_key:
         db = get_db()
