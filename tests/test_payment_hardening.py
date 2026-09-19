@@ -133,6 +133,45 @@ def test_x402_requires_structured_receipt_and_blocks_cross_endpoint_replay(clien
     assert replay.get_json()["reason"] == "payment_already_consumed"
 
 
+def test_x402_accepts_caip2_network_in_receipt(client, monkeypatch):
+    tx_hash = "0x" + ("ef" * 32)
+
+    def _fake_verify(tx_hash_arg, network, recipient):
+        assert network == "base"
+        return (
+            {
+                "tx_hash": tx_hash_arg,
+                "network": network,
+                "recipient": recipient,
+                "amount_raw": 100,
+                "amount_usdc": 0.0001,
+                "block_number": 123,
+            },
+            None,
+        )
+
+    monkeypatch.setattr(x402_payment, "_verify_evm_usdc_transfer", _fake_verify)
+    receipt = json.dumps(
+        {
+            "tx_hash": tx_hash,
+            "network": "eip155:8453",
+            "recipient": x402_payment.USDC_RECEIVING_ADDRESS,
+            "amount": "0.000100",
+        }
+    )
+    paid = client.get("/x402/api/search?q=retro", headers={"X-PAYMENT": receipt})
+    assert paid.status_code == 200
+    assert paid.headers["X-Payment-Network"] == "base"
+
+
+def test_x402_stats_has_no_rtc_reference_rate(client):
+    resp = client.get("/x402/api/stats")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert "reference_rate" not in body["economy"]
+    assert "$" not in json.dumps(body["economy"])
+
+
 @pytest.mark.parametrize(
     ("query", "error"),
     [

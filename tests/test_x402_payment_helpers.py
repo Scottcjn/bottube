@@ -48,6 +48,29 @@ def test_parse_payment_receipt_defaults_network_and_normalizes_fields():
 
 
 @pytest.mark.parametrize(
+    ("network", "expected"),
+    [
+        ("eip155:8453", "base"),
+        (" EIP155:8453 ", "base"),
+        ("base", "base"),
+        ("eip155:1", "ethereum"),
+        # Networks without an RPC/contract are passed through unchanged and
+        # rejected later by _supported_networks(); nothing new is advertised.
+        ("eip155:84532", "eip155:84532"),
+    ],
+)
+def test_parse_payment_receipt_normalizes_caip2_network(network, expected):
+    receipt = json.dumps({"tx_hash": "0x" + ("ab" * 32), "network": network})
+    assert x402_payment._parse_payment_receipt(receipt)["network"] == expected
+
+
+def test_supported_networks_only_lists_networks_with_rpc():
+    for network in x402_payment._supported_networks():
+        assert x402_payment.NETWORK_RPCS.get(network)
+        assert x402_payment.USDC_CONTRACTS.get(network)
+
+
+@pytest.mark.parametrize(
     ("payload", "reason"),
     [
         ("", "invalid_payment_format"),

@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: MIT
 """BoTTube x402 Integration - Premium API + Agent Wallets"""
+import fnmatch
+import inspect
 import sys
 import os
-import time
-import json
+import re
 import sqlite3
 import logging
+from decimal import Decimal
+from urllib.parse import urlparse
 
 sys.path.insert(0, "/root/shared")
 
@@ -14,8 +17,8 @@ log = logging.getLogger("bottube.x402")
 # --- Import shared x402 config (graceful fallback) ---
 try:
     from x402_config import (
-        X402_NETWORK, USDC_BASE, WRTC_BASE, FACILITATOR_URL,
-        BOTTUBE_TREASURY, PRICE_VIDEO_STREAM_PREMIUM, PRICE_API_BULK,
+        X402_NETWORK, USDC_BASE, FACILITATOR_URL,
+        BOTTUBE_TREASURY, PRICE_VIDEO_STREAM_PREMIUM,
         PRICE_PREMIUM_ANALYTICS, PRICE_PREMIUM_EXPORT,
         is_free, has_cdp_credentials, create_agentkit_wallet,
     )
@@ -24,13 +27,118 @@ except ImportError:
     X402_AVAILABLE = False
     log.warning("x402_config not found at /root/shared/x402_config.py - running without x402")
 
+# Optional hook: a callable returning facilitator auth headers, in the shape
+# the x402 SDK's FacilitatorConfig["create_headers"] expects. Hosted mainnet
+# facilitators (for example Coinbase CDP) require authenticated requests.
+# The SDK awaits this hook, so it may be an async callable; a plain sync
+# callable is wrapped in an async shim by _async_headers_hook().
+try:
+    from x402_config import facilitator_create_headers as _FACILITATOR_CREATE_HEADERS
+except ImportError:
+    _FACILITATOR_CREATE_HEADERS = None
+
 # --- Import x402 Flask middleware (optional) ---
 try:
     from x402.flask.middleware import PaymentMiddleware
     X402_MIDDLEWARE = True
 except ImportError:
     X402_MIDDLEWARE = False
-    log.info("x402.flask not available - premium routes will be open")
+    log.info("x402.flask not available - paid premium routes will return 503")
+
+
+USDC_DECIMALS = 6
+_ATOMIC_PRICE_RE = re.compile(r"^[0-9]+$")
+
+# x402_config uses CAIP-2 ids. The legacy x402 SDK (x402.flask.middleware)
+# only accepts its own short names, so map explicitly and never guess.
+_CAIP2_TO_SDK_NETWORK = {
+    "eip155:8453": "base",
+    "eip155:84532": "base-sepolia",
+}
+_MAINNET_SDK_NETWORKS = {"base"}
+
+# The public x402.org facilitator only settles testnet payments. It must
+# never be used (or defaulted to) for a mainnet paywall.
+_TESTNET_ONLY_FACILITATOR_HOSTS = {"x402.org", "www.x402.org"}
+
+
+def _sdk_network(caip2):
+    """Map a CAIP-2 network id to the legacy SDK network name, or None."""
+    return _CAIP2_TO_SDK_NETWORK.get(str(caip2 or "").strip().lower())
+
+
+def _atomic_to_usdc(price):
+    """Convert a USDC atomic-unit price string ("10000") to a decimal string ("0.01").
+
+    x402_config documents every PRICE_* value as USDC atomic units (6 decimals).
+    Anything that is not a plain non-negative integer string is rejected rather
+    than reinterpreted, because guessing units is how a 0.01 USDC price turned
+    into 10,000 USDC.
+    """
+    text = str(price).strip()
+    if not _ATOMIC_PRICE_RE.match(text):
+        raise ValueError("price must be USDC atomic units (digits only), got %r" % (price,))
+    usdc = Decimal(text) / (Decimal(10) ** USDC_DECIMALS)
+    return format(usdc.normalize(), "f")
+
+
+def _atomic_to_sdk_money(price):
+    """Return the legacy SDK Money string for an atomic-unit price.
+
+    x402.common.process_price_to_atomic_amount treats a str/int price as USD
+    and multiplies by 10**6 itself, so it must receive "$0.01", not "10000".
+    """
+    return "$" + _atomic_to_usdc(price)
+
+
+def _async_headers_hook(hook):
+    """Return an awaitable-returning version of a facilitator headers hook.
+
+    x402 0.3.0 FacilitatorClient.verify/settle run
+    ``await self.config["create_headers"]()``. Passing a plain sync function
+    makes every paid request fail with a TypeError, so wrap it.
+    """
+    if inspect.iscoroutinefunction(hook):
+        return hook
+
+    async def _create_headers():
+        result = hook()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return _create_headers
+
+
+def _facilitator_config(sdk_network):
+    """Build the SDK FacilitatorConfig for the paywall.
+
+    Returns (config, reason). config is None when no usable facilitator is
+    configured, in which case the paid routes fail closed.
+    """
+    url = (os.environ.get("X402_FACILITATOR_URL") or FACILITATOR_URL or "").strip().rstrip("/")
+    if not url:
+        return None, "no_facilitator_configured"
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None, "facilitator_url_must_be_https"
+    if sdk_network in _MAINNET_SDK_NETWORKS and parsed.hostname.lower() in _TESTNET_ONLY_FACILITATOR_HOSTS:
+        return None, "testnet_only_facilitator_on_mainnet"
+    config = {"url": url}
+    if _FACILITATOR_CREATE_HEADERS is not None:
+        config["create_headers"] = _async_headers_hook(_FACILITATOR_CREATE_HEADERS)
+    return config, None
+
+
+def _extract_api_key(req):
+    """Read the agent API key from X-API-Key, falling back to Authorization: Bearer."""
+    key = (req.headers.get("X-API-Key") or "").strip()
+    if key:
+        return key
+    auth = (req.headers.get("Authorization") or "").strip()
+    if auth[:7].lower() == "bearer ":
+        return auth[7:].strip()
+    return ""
 
 
 def init_app(app, db_path):
@@ -71,15 +179,40 @@ def init_app(app, db_path):
             pass
         conn.commit()
 
-    # --- Determine pricing mode ---
-    _all_free = True
+    # --- Determine pricing mode and paywall plan ---
+    # (route pattern, public path, config price, description)
+    _premium_routes = []
     if X402_AVAILABLE:
-        _all_free = all(
-            is_free(p) for p in [
-                PRICE_VIDEO_STREAM_PREMIUM, PRICE_API_BULK,
-                PRICE_PREMIUM_ANALYTICS, PRICE_PREMIUM_EXPORT,
-            ]
-        )
+        _premium_routes = [
+            ("/api/premium/videos", "/api/premium/videos",
+             PRICE_VIDEO_STREAM_PREMIUM, "Bulk video data export"),
+            ("/api/premium/analytics/*", "/api/premium/analytics/<agent>",
+             PRICE_PREMIUM_ANALYTICS, "Deep agent analytics"),
+            ("/api/premium/trending/export", "/api/premium/trending/export",
+             PRICE_PREMIUM_EXPORT, "Trending data export"),
+        ]
+    _paid_routes = [r for r in _premium_routes if not is_free(r[2])]
+    _all_free = not _paid_routes
+
+    _sdk_net = _sdk_network(X402_NETWORK) if X402_AVAILABLE else None
+    _facilitator = None
+    _paywall_problem = None
+    if _paid_routes:
+        if not X402_MIDDLEWARE:
+            _paywall_problem = "x402_sdk_not_installed"
+        elif not _sdk_net:
+            _paywall_problem = "unsupported_network"
+        elif not BOTTUBE_TREASURY:
+            _paywall_problem = "treasury_not_configured"
+        else:
+            _facilitator, _paywall_problem = _facilitator_config(_sdk_net)
+        if _paywall_problem is None:
+            try:
+                for _pattern, _public, _price, _desc in _paid_routes:
+                    _atomic_to_sdk_money(_price)
+            except ValueError as exc:
+                log.error("x402 price config invalid: %s", exc)
+                _paywall_problem = "invalid_price_config"
 
     # ------------------------------------------------------------------
     # Premium Endpoints
@@ -169,7 +302,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["GET"])
     def x402_get_agent_wallet():
         """Get agent's Coinbase wallet info."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
         db = _get_db()
@@ -187,7 +320,6 @@ def init_app(app, db_path):
                 "coinbase_address": agent["coinbase_address"],
                 "wallet_created_via_agentkit": bool(agent["coinbase_wallet_created"]),
                 "network": "Base (eip155:8453)",
-                "wrtc_contract": WRTC_BASE if X402_AVAILABLE else None,
             })
         finally:
             db.close()
@@ -195,7 +327,7 @@ def init_app(app, db_path):
     @app.route("/api/agents/me/coinbase-wallet", methods=["POST"])
     def x402_create_agent_wallet():
         """Create or link Coinbase wallet for agent."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
 
@@ -270,7 +402,7 @@ def init_app(app, db_path):
     @app.route("/api/x402/payments", methods=["GET"])
     def x402_payment_history():
         """View x402 payment history."""
-        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        api_key = _extract_api_key(request)
         db = _get_db()
         try:
             if api_key:
@@ -286,54 +418,94 @@ def init_app(app, db_path):
             row = db.execute("SELECT COUNT(*) as cnt FROM x402_payments").fetchone()
             return _jsonify({
                 "total_payments": row["cnt"],
-                "hint": "Provide Bearer API key for detailed history",
+                "hint": "Provide X-API-Key (or Authorization: Bearer) for detailed history",
             })
         finally:
             db.close()
 
+    def _endpoint_price(price):
+        """Describe a config price for /api/x402/info in USDC and atomic units."""
+        if not X402_AVAILABLE or is_free(price):
+            return {"price_usdc": "0", "price_atomic": "0"}
+        try:
+            return {"price_usdc": _atomic_to_usdc(price), "price_atomic": str(price).strip()}
+        except ValueError:
+            return {"price_usdc": None, "price_atomic": None}
+
     @app.route("/api/x402/info", methods=["GET"])
     def x402_info():
         """Public x402 integration info."""
-        return _jsonify({
+        if _all_free:
+            pricing_mode = "free"
+        elif _paywall_problem:
+            pricing_mode = "unavailable"
+        else:
+            pricing_mode = "paid"
+        body = {
             "x402_enabled": X402_AVAILABLE,
             "network": X402_NETWORK if X402_AVAILABLE else None,
-            "facilitator": FACILITATOR_URL if X402_AVAILABLE else None,
+            "network_name": _sdk_net,
+            "facilitator": _facilitator["url"] if _facilitator and not _paywall_problem else None,
             "payment_token": USDC_BASE if X402_AVAILABLE else None,
-            "wrtc_token": WRTC_BASE if X402_AVAILABLE else None,
             "treasury": BOTTUBE_TREASURY if X402_AVAILABLE else None,
             "premium_endpoints": [
-                {"path": "/api/premium/videos", "price_usdc": PRICE_VIDEO_STREAM_PREMIUM if X402_AVAILABLE else "0"},
-                {"path": "/api/premium/analytics/<agent>", "price_usdc": PRICE_PREMIUM_ANALYTICS if X402_AVAILABLE else "0"},
-                {"path": "/api/premium/trending/export", "price_usdc": PRICE_PREMIUM_EXPORT if X402_AVAILABLE else "0"},
+                dict({"path": public}, **_endpoint_price(price))
+                for _pattern, public, price, _desc in _premium_routes
+            ] or [
+                {"path": "/api/premium/videos", "price_usdc": "0", "price_atomic": "0"},
+                {"path": "/api/premium/analytics/<agent>", "price_usdc": "0", "price_atomic": "0"},
+                {"path": "/api/premium/trending/export", "price_usdc": "0", "price_atomic": "0"},
             ],
-            "pricing_mode": "free" if (not X402_AVAILABLE or _all_free) else "paid",
+            "pricing_mode": pricing_mode,
             "wallet_endpoints": [
                 {"path": "/api/agents/me/coinbase-wallet", "methods": ["GET", "POST"]},
             ],
-        })
+        }
+        if pricing_mode == "unavailable":
+            body["unavailable_reason"] = _paywall_problem
+        return _jsonify(body)
 
     # ------------------------------------------------------------------
     # x402 WSGI Payment Middleware (path-based paywall)
     # ------------------------------------------------------------------
-    if X402_MIDDLEWARE and X402_AVAILABLE and not _all_free:
-        _addr = BOTTUBE_TREASURY or "0x0000000000000000000000000000000000000000"
-        _net = "base" if "8453" in X402_NETWORK else "base-sepolia"
+    if _paid_routes and not _paywall_problem:
         mw = PaymentMiddleware(app)
-        if not is_free(PRICE_VIDEO_STREAM_PREMIUM):
-            mw.add(price=PRICE_VIDEO_STREAM_PREMIUM, pay_to_address=_addr,
-                   path="/api/premium/videos", network=_net,
-                   description="Bulk video data export")
-        if not is_free(PRICE_PREMIUM_ANALYTICS):
-            mw.add(price=PRICE_PREMIUM_ANALYTICS, pay_to_address=_addr,
-                   path="/api/premium/analytics/*", network=_net,
-                   description="Deep agent analytics")
-        if not is_free(PRICE_PREMIUM_EXPORT):
-            mw.add(price=PRICE_PREMIUM_EXPORT, pay_to_address=_addr,
-                   path="/api/premium/trending/export", network=_net,
-                   description="Trending data export")
-        print("[x402] Payment middleware active on /api/premium/* routes")
+        for pattern, _public, price, desc in _paid_routes:
+            mw.add(
+                price=_atomic_to_sdk_money(price),
+                pay_to_address=BOTTUBE_TREASURY,
+                path=pattern,
+                network=_sdk_net,
+                description=desc,
+                facilitator_config=_facilitator,
+            )
+        print("[x402] Payment middleware active on /api/premium/* routes "
+              "(network={}, facilitator={})".format(_sdk_net, _facilitator["url"]))
+    elif _paid_routes:
+        # A price is configured but the paywall cannot collect it. Fail closed:
+        # never serve paid data for free, and never quote a price that no
+        # facilitator can settle.
+        _blocked = [pattern for pattern, _public, _price, _desc in _paid_routes]
+
+        @app.before_request
+        def _x402_paywall_unavailable():
+            # Same matching rules as the SDK middleware (glob or exact).
+            path = request.path
+            if not any(
+                fnmatch.fnmatch(path, pattern) if "*" in pattern else path == pattern
+                for pattern in _blocked
+            ):
+                return None
+            return _jsonify({
+                "error": "payment_unavailable",
+                "reason": _paywall_problem,
+                "protocol": "x402",
+            }), 503
+
+        log.error("x402 paywall disabled (%s); paid premium routes return 503", _paywall_problem)
+        print("[x402] Paywall unavailable ({}); paid premium routes return 503".format(_paywall_problem))
 
     _route_count = 7  # premium(3) + wallet(2) + payments(1) + info(1)
-    mode = "free" if _all_free else "paid"
+    mode = "free" if _all_free else ("unavailable" if _paywall_problem else "paid")
     print("[x402] BoTTube x402 module loaded: {} routes, mode={}, middleware={}".format(
         _route_count, mode, "yes" if X402_MIDDLEWARE else "no"))
