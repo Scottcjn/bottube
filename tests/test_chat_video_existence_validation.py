@@ -10,7 +10,7 @@ import sqlite3
 import sys
 import types
 import pytest
-from flask import Flask, g
+from flask import Flask, g, session
 import chat_handlers
 
 
@@ -142,11 +142,14 @@ def test_settings_404_for_nonexistent_video(chat_app_with_videos):
 def test_websocket_chat_rejects_nonexistent_video(chat_app_with_videos, monkeypatch):
     ws_module, events = _load_websocket_server(monkeypatch)
 
-    with chat_app_with_videos.app.app_context():
+    with chat_app_with_videos.app.test_request_context():
+        session["user_id"] = "tester"
+        session["username"] = "tester"
         ws_module.on_chat_message({
             "video_id": "ghost-video",
             "message": "hello",
-            "username": "tester"
+            "username": "tester",
+            "user_id": "tester"
         })
 
     assert len(events) == 1
