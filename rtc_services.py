@@ -166,6 +166,22 @@ def init_service_tables(db_path):
 # Auth Helper
 # ---------------------------------------------------------------------------
 
+def _json_object_body():
+    """Parse the request body, requiring a JSON object.
+
+    ``request.get_json(...) or {}`` is not a sufficient guard: a JSON array,
+    string or number is truthy, so it survives the ``or`` and the next
+    ``data.get(...)`` raises AttributeError -> HTTP 500. Return a 400 instead,
+    matching the contract the rest of the server uses.
+    """
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        return {}, None
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
 def _get_agent(db):
     """Get the authenticated agent from the X-API-Key request header.
 
@@ -232,7 +248,9 @@ def init_app(app, db_path):
         if not agent:
             return jsonify({"error": "Unauthorized — X-API-Key required"}), 401
 
-        data = request.get_json(force=True, silent=True) or {}
+        data, err = _json_object_body()
+        if err:
+            return err
         service_key = data.get("service_key", "")
         # quantity is client-supplied and multiplies straight into the cost.
         # A negative value flips `rtc_balance - total_cost` into a credit and
@@ -351,7 +369,9 @@ def init_app(app, db_path):
     @app.route("/api/rtc/redeem", methods=["POST"])
     def rtc_redeem():
         """Validate a service token and return its status."""
-        data = request.get_json(force=True, silent=True) or {}
+        data, err = _json_object_body()
+        if err:
+            return err
         token = data.get("service_token", "")
         if not token:
             return jsonify({"error": "service_token required"}), 400
@@ -397,7 +417,9 @@ def init_app(app, db_path):
     @app.route("/api/rtc/use", methods=["POST"])
     def rtc_use():
         """Consume one use of a service token."""
-        data = request.get_json(force=True, silent=True) or {}
+        data, err = _json_object_body()
+        if err:
+            return err
         token = data.get("service_token", "")
         if not token:
             return jsonify({"error": "service_token required"}), 400
