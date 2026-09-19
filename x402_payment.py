@@ -60,6 +60,13 @@ PAYMENT_CONFIRMATIONS = {
     "ethereum": int(os.environ.get("X402_ETH_CONFIRMATIONS", "12")),
 }
 _ETH_TX_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+# Receipts may name the network by CAIP-2 id (the form /api/x402/info
+# reports) or by short name. Map CAIP-2 ids onto the short names used by
+# NETWORK_RPCS / USDC_CONTRACTS; support is still decided by those tables.
+CAIP2_TO_SHORT_NETWORK = {
+    "eip155:8453": "base",
+    "eip155:1": "ethereum",
+}
 
 PRICING = {
     "video_list":       0.0001,
@@ -73,6 +80,12 @@ PRICING = {
 
 _payment_cache = {}
 CACHE_TTL = 3600
+
+
+def _normalize_network(network):
+    """Normalize a receipt network (short name or CAIP-2 id) to its short name."""
+    name = str(network).strip().lower()
+    return CAIP2_TO_SHORT_NETWORK.get(name, name)
 
 
 def _supported_networks():
@@ -132,7 +145,7 @@ def _parse_payment_receipt(payment_data):
         raise ValueError("invalid_payment_format")
 
     tx_hash = str(data.get("tx_hash", "")).strip()
-    network = str(data.get("network", "base")).strip().lower()
+    network = _normalize_network(data.get("network", "base"))
     recipient = str(data.get("recipient", "")).strip().lower()
     amount_value = data.get("amount")
     amount_raw = None
@@ -441,7 +454,6 @@ def x402_stats():
         "economy": {
             "token": "RTC (RustChain Token)",
             "earning_model": "Views, tips, GPU compute contributions",
-            "reference_rate": "1 RTC = $0.10 USD",
             "blockchain": "RustChain (Proof-of-Antiquity consensus)",
         },
         "x402": {
