@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """BoTTube x402 Integration - Premium API + Agent Wallets"""
 import fnmatch
+import inspect
 import sys
 import os
 import re
@@ -29,6 +30,8 @@ except ImportError:
 # Optional hook: a callable returning facilitator auth headers, in the shape
 # the x402 SDK's FacilitatorConfig["create_headers"] expects. Hosted mainnet
 # facilitators (for example Coinbase CDP) require authenticated requests.
+# The SDK awaits this hook, so it may be an async callable; a plain sync
+# callable is wrapped in an async shim by _async_headers_hook().
 try:
     from x402_config import facilitator_create_headers as _FACILITATOR_CREATE_HEADERS
 except ImportError:
@@ -88,6 +91,25 @@ def _atomic_to_sdk_money(price):
     return "$" + _atomic_to_usdc(price)
 
 
+def _async_headers_hook(hook):
+    """Return an awaitable-returning version of a facilitator headers hook.
+
+    x402 0.3.0 FacilitatorClient.verify/settle run
+    ``await self.config["create_headers"]()``. Passing a plain sync function
+    makes every paid request fail with a TypeError, so wrap it.
+    """
+    if inspect.iscoroutinefunction(hook):
+        return hook
+
+    async def _create_headers():
+        result = hook()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return _create_headers
+
+
 def _facilitator_config(sdk_network):
     """Build the SDK FacilitatorConfig for the paywall.
 
@@ -104,7 +126,7 @@ def _facilitator_config(sdk_network):
         return None, "testnet_only_facilitator_on_mainnet"
     config = {"url": url}
     if _FACILITATOR_CREATE_HEADERS is not None:
-        config["create_headers"] = _FACILITATOR_CREATE_HEADERS
+        config["create_headers"] = _async_headers_hook(_FACILITATOR_CREATE_HEADERS)
     return config, None
 
 

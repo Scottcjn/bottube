@@ -13,8 +13,10 @@ Two kinds of test:
     unsupported network, SDK missing). Those never need the SDK.
 """
 
+import asyncio
 import base64
 import importlib.util
+import inspect
 import json
 import sqlite3
 import sys
@@ -207,7 +209,73 @@ def test_facilitator_env_override_and_auth_hook(monkeypatch, tmp_path, recorder)
 
     call = recorder.instances[0].calls[0]
     assert call["facilitator_config"]["url"] == "https://mainnet-facilitator.example.org"
-    assert call["facilitator_config"]["create_headers"] is _headers
+    hook = call["facilitator_config"]["create_headers"]
+    # The SDK awaits create_headers(), so a sync hook must come back wrapped.
+    assert inspect.iscoroutinefunction(hook)
+    assert asyncio.run(hook()) == {"verify": {}, "settle": {}}
+
+
+def test_async_auth_hook_passes_through(monkeypatch, tmp_path, recorder):
+    async def _headers():
+        return {"verify": {"Authorization": "Bearer v"}, "settle": {}}
+
+    module = _load_module(monkeypatch, _stub_config(facilitator_create_headers=_headers))
+    _with_recorder(module, recorder)
+    _app(module, tmp_path)
+
+    assert recorder.instances[0].calls[0]["facilitator_config"]["create_headers"] is _headers
+
+
+def test_sync_auth_hook_works_with_real_sdk_facilitator(monkeypatch, tmp_path, recorder):
+    """Drive the real SDK FacilitatorClient.verify/settle with the wrapped hook."""
+    facilitator_mod = pytest.importorskip("x402.facilitator")
+
+    def _headers():
+        return {"verify": {"Authorization": "Bearer v"}, "settle": {"Authorization": "Bearer s"}}
+
+    module = _load_module(monkeypatch, _stub_config(facilitator_create_headers=_headers))
+    _with_recorder(module, recorder)
+    _app(module, tmp_path)
+    cfg = recorder.instances[0].calls[0]["facilitator_config"]
+
+    seen = []
+
+    class _Resp:
+        def json(self):
+            return {"isValid": True, "success": True, "network": "base"}
+
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, headers=None, follow_redirects=None):
+            seen.append((url, dict(headers or {})))
+            return _Resp()
+
+    class _Model:
+        x402_version = 1
+
+        def model_dump(self, **kwargs):
+            return {}
+
+    monkeypatch.setattr(facilitator_mod.httpx, "AsyncClient", _FakeAsyncClient)
+    client = facilitator_mod.FacilitatorClient(cfg)
+    try:
+        asyncio.run(client.verify(_Model(), _Model()))
+    except Exception as exc:  # response model validation is not what we test
+        assert "await" not in str(exc), exc
+    try:
+        asyncio.run(client.settle(_Model(), _Model()))
+    except Exception as exc:
+        assert "await" not in str(exc), exc
+
+    assert seen[0][0].endswith("/verify")
+    assert seen[0][1]["Authorization"] == "Bearer v"
+    assert seen[1][0].endswith("/settle")
+    assert seen[1][1]["Authorization"] == "Bearer s"
 
 
 def test_testnet_facilitator_allowed_on_testnet(monkeypatch, tmp_path, recorder):
