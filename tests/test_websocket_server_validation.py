@@ -390,18 +390,76 @@ def test_payload_identity_spoofing_rejected(monkeypatch, tmp_path):
     assert "spoofing" in events[0][0][1]["message"].lower() or "mismatch" in events[0][0][1]["message"].lower()
 
 
-def test_mod_action_rejected_for_non_mod_non_owner(monkeypatch, tmp_path):
-    """Ensure mod_action is rejected when user is neither channel owner nor platform mod."""
+def test_cookie_and_api_key_give_same_user_id(monkeypatch, tmp_path):
+    """Ensure cookie session (session['user_id'] = agents.id) and API key produce identical user_id."""
     websocket_server, events = _load_websocket_server(monkeypatch)
     db_path = tmp_path / "chat.db"
     _init_chat_db(db_path)
 
     app = _create_app(db_path)
 
+    # Insert agent with id=42, agent_name='alice', display_name='Alice Agent', api_key='key-alice'
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "INSERT INTO agents (id, agent_name, display_name, api_key) VALUES (42, 'alice', 'Alice Agent', 'key-alice')"
+        )
+
+    # 1. Cookie path (real login sets session["user_id"] = 42)
     with app.test_request_context():
-        session["user_id"] = "regular-user"
-        session["username"] = "regular_user"
-        session["is_mod"] = False
+        session["user_id"] = 42
+        auth_cookie = websocket_server._get_authenticated_user({}, app)
+
+    # 2. API key path
+    with app.test_request_context(headers={"X-API-Key": "key-alice"}):
+        auth_apikey = websocket_server._get_authenticated_user({}, app)
+
+    assert auth_cookie is not None
+    assert auth_apikey is not None
+    assert auth_cookie["user_id"] == "42"
+    assert auth_apikey["user_id"] == "42"
+    assert auth_cookie["username"] == "Alice Agent"
+    assert auth_apikey["username"] == "Alice Agent"
+
+
+def test_banned_agent_rejected_on_api_key_path(monkeypatch, tmp_path):
+    """Ensure banned agents are rejected on the API-key path like require_api_key does."""
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    # Add is_banned column and insert a banned agent
+    with sqlite3.connect(db_path) as db:
+        try:
+            db.execute("ALTER TABLE agents ADD COLUMN is_banned INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        db.execute(
+            "INSERT INTO agents (id, agent_name, api_key, is_banned) VALUES (99, 'banned-agent', 'key-banned', 1)"
+        )
+
+    app = _create_app(db_path)
+
+    with app.test_request_context(headers={"X-API-Key": "key-banned"}):
+        auth_user = websocket_server._get_authenticated_user({}, app)
+
+    assert auth_user is None
+
+
+def test_mod_action_rejected_for_non_mod_non_owner(monkeypatch, tmp_path):
+    """Ensure mod_action is rejected when user is neither channel owner nor platform mod."""
+    websocket_server, events = _load_websocket_server(monkeypatch)
+    db_path = tmp_path / "chat.db"
+    _init_chat_db(db_path)
+
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "INSERT INTO agents (id, agent_name, api_key) VALUES (10, 'regular-agent', 'key-reg')"
+        )
+
+    app = _create_app(db_path)
+
+    with app.test_request_context():
+        session["user_id"] = 10  # Real login session user_id integer
         websocket_server.on_mod_action({
             "action": "ban",
             "video_id": "video-1",
@@ -414,17 +472,16 @@ def test_mod_action_rejected_for_non_mod_non_owner(monkeypatch, tmp_path):
 
 
 def test_mod_action_accepted_for_channel_owner(monkeypatch, tmp_path):
-    """Ensure mod_action succeeds for the channel owner of the video."""
+    """Ensure mod_action succeeds for channel owner (videos.agent_id == agents.id)."""
     websocket_server, events = _load_websocket_server(monkeypatch)
     db_path = tmp_path / "chat.db"
     _init_chat_db(db_path)
 
     app = _create_app(db_path)
 
+    # Video 'video-1' has agent_id=1, which matches agent id=1 ('owner-user')
     with app.test_request_context():
-        session["user_id"] = "owner-user"
-        session["username"] = "Owner"
-        session["is_mod"] = False
+        session["user_id"] = 1  # Real login session user_id (agents.id = 1)
         websocket_server.on_mod_action({
             "action": "ban",
             "video_id": "video-1",
@@ -436,17 +493,24 @@ def test_mod_action_accepted_for_channel_owner(monkeypatch, tmp_path):
 
 
 def test_mod_action_accepted_for_platform_mod(monkeypatch, tmp_path):
-    """Ensure mod_action succeeds for a platform moderator."""
+    """Ensure mod_action succeeds for platform moderator when agents table has is_mod=1."""
     websocket_server, events = _load_websocket_server(monkeypatch)
     db_path = tmp_path / "chat.db"
     _init_chat_db(db_path)
 
+    with sqlite3.connect(db_path) as db:
+        try:
+            db.execute("ALTER TABLE agents ADD COLUMN is_mod INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        db.execute(
+            "INSERT INTO agents (id, agent_name, api_key, is_mod) VALUES (55, 'mod-agent', 'key-mod', 1)"
+        )
+
     app = _create_app(db_path)
 
     with app.test_request_context():
-        session["user_id"] = "mod-user"
-        session["username"] = "mod_user"
-        session["is_mod"] = True
+        session["user_id"] = 55  # Real login session user_id (agents.id = 55)
         websocket_server.on_mod_action({
             "action": "ban",
             "video_id": "video-1",

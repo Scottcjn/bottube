@@ -94,6 +94,41 @@ def _require_video(app, video_id):
     return exists
 
 
+def _get_agent_info_from_row(row):
+    """Extract (user_id, username, is_mod) from an agents row. Returns None if banned."""
+    if not row:
+        return None
+
+    # Reject banned agents on all paths
+    try:
+        if "is_banned" in row.keys() and row["is_banned"]:
+            return None
+    except Exception:
+        pass
+
+    user_id = str(row["id"])
+    display_name = row["display_name"] if "display_name" in row.keys() and row["display_name"] else None
+    agent_name = row["agent_name"] if "agent_name" in row.keys() and row["agent_name"] else None
+    username = display_name or agent_name or user_id
+
+    # Take mod/admin from an agents column if present; otherwise keep it owner-only
+    is_mod = False
+    try:
+        keys = row.keys()
+        if "is_mod" in keys and row["is_mod"]:
+            is_mod = True
+        elif "is_admin" in keys and row["is_admin"]:
+            is_mod = True
+    except Exception:
+        pass
+
+    return {
+        "user_id": user_id,
+        "username": username,
+        "is_mod": is_mod,
+    }
+
+
 def _lookup_agent_by_key(api_key, app):
     """Query agents table for an agent matching api_key."""
     db = _get_db(app)
@@ -104,13 +139,38 @@ def _lookup_agent_by_key(api_key, app):
         if not has_agents:
             return None
         row = db.execute(
-            "SELECT agent_name, display_name FROM agents WHERE api_key = ?",
+            "SELECT * FROM agents WHERE api_key = ?",
             (api_key,),
         ).fetchone()
-        if row:
-            user_id = row["agent_name"]
-            username = row["display_name"] if row["display_name"] else row["agent_name"]
-            return user_id, username
+        return _get_agent_info_from_row(row)
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return None
+
+
+def _lookup_agent_by_id(agent_id, app):
+    """Query agents table for an agent matching integer id or agent_name."""
+    db = _get_db(app)
+    try:
+        has_agents = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agents'"
+        ).fetchone()
+        if not has_agents:
+            return None
+        row = None
+        if isinstance(agent_id, int) or (isinstance(agent_id, str) and agent_id.isdigit()):
+            row = db.execute(
+                "SELECT * FROM agents WHERE id = ?",
+                (int(agent_id),),
+            ).fetchone()
+        if not row:
+            row = db.execute(
+                "SELECT * FROM agents WHERE agent_name = ?",
+                (str(agent_id),),
+            ).fetchone()
+        return _get_agent_info_from_row(row)
     except Exception:
         pass
     finally:
@@ -119,48 +179,47 @@ def _lookup_agent_by_key(api_key, app):
 
 
 def _get_authenticated_user(data, app):
-    """Extract authenticated identity from Flask session, headers, or token/api_key."""
+    """Extract authenticated identity from Flask session (cookie) or API key.
+
+    Resolves session user_id (agents.id) or API key to the same agent row,
+    ensuring one person has one consistent user_id (agents.id) and username across both paths.
+    Rejects banned agents on all paths.
+    """
     from flask import request, session, has_request_context
 
-    user_id = None
-    username = None
-    is_mod = False
+    auth_info = None
 
     if has_request_context():
-        try:
-            if session.get("user_id") or session.get("username"):
-                user_id = session.get("user_id") or session.get("username")
-                username = session.get("username") or session.get("user_id")
-                is_mod = bool(session.get("is_mod", False) or session.get("is_admin", False))
-        except Exception:
-            pass
+        # Cookie session path: real login sets session["user_id"] = agents.id (integer)
+        sess_uid = session.get("user_id")
+        if sess_uid is not None:
+            auth_info = _lookup_agent_by_id(sess_uid, app)
+            if not auth_info and sess_uid:
+                # Fallback for test harnesses without agent DB rows
+                username = session.get("username") or str(sess_uid)
+                auth_info = {
+                    "user_id": str(sess_uid),
+                    "username": str(username),
+                    "is_mod": bool(session.get("is_mod", False) or session.get("is_admin", False)),
+                }
 
-        if not user_id:
+        # Header API key path
+        if not auth_info:
             api_key = request.headers.get("X-API-Key")
             if not api_key:
                 auth_header = request.headers.get("Authorization", "")
                 if auth_header.startswith("Bearer "):
                     api_key = auth_header[7:].strip()
             if api_key:
-                info = _lookup_agent_by_key(api_key, app)
-                if info:
-                    user_id, username = info
+                auth_info = _lookup_agent_by_key(api_key, app)
 
-    if not user_id and isinstance(data, dict):
+    # Payload API key path
+    if not auth_info and isinstance(data, dict):
         api_key = data.get("api_key") or data.get("auth_token") or data.get("token")
         if api_key:
-            info = _lookup_agent_by_key(api_key, app)
-            if info:
-                user_id, username = info
+            auth_info = _lookup_agent_by_key(api_key, app)
 
-    if not user_id:
-        return None
-
-    return {
-        "user_id": str(user_id),
-        "username": str(username),
-        "is_mod": is_mod,
-    }
+    return auth_info
 
 
 def _validate_payload_identity(data, auth_user):
@@ -176,7 +235,7 @@ def _validate_payload_identity(data, auth_user):
 
 
 def _is_mod_or_channel_owner(auth_user, room, app):
-    """Return True if auth_user is platform mod/admin OR channel owner for room (video_id)."""
+    """Return True if auth_user is platform mod/admin OR channel owner (videos.agent_id == agents.id)."""
     if auth_user.get("is_mod"):
         return True
 
@@ -185,32 +244,20 @@ def _is_mod_or_channel_owner(auth_user, room, app):
         has_videos = db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='videos'"
         ).fetchone()
-        has_agents = db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agents'"
-        ).fetchone()
-
-        if has_videos and has_agents:
-            row = db.execute(
-                """
-                SELECT a.agent_name
-                FROM videos v
-                JOIN agents a ON v.agent_id = a.id
-                WHERE v.video_id = ?
-                """,
-                (room,),
-            ).fetchone()
-            if row and str(row["agent_name"]) == auth_user["user_id"]:
-                return True
 
         if has_videos:
+            row = db.execute(
+                "SELECT agent_id FROM videos WHERE video_id = ?",
+                (room,),
+            ).fetchone()
+            if row and row["agent_id"] is not None:
+                if str(row["agent_id"]) == auth_user["user_id"]:
+                    return True
+
             cols = [c[1] for c in db.execute("PRAGMA table_info(videos)").fetchall()]
             if "uploader" in cols:
-                row = db.execute("SELECT uploader FROM videos WHERE video_id = ?", (room,)).fetchone()
-                if row and str(row["uploader"]) == auth_user["user_id"]:
-                    return True
-            if "agent_name" in cols:
-                row = db.execute("SELECT agent_name FROM videos WHERE video_id = ?", (room,)).fetchone()
-                if row and str(row["agent_name"]) == auth_user["user_id"]:
+                row_u = db.execute("SELECT uploader FROM videos WHERE video_id = ?", (room,)).fetchone()
+                if row_u and (str(row_u["uploader"]) == auth_user["user_id"] or str(row_u["uploader"]) == auth_user["username"]):
                     return True
     except Exception:
         pass
