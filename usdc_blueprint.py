@@ -235,8 +235,14 @@ def get_or_create_balance(db, agent_name):
 
 # ─── Authentication Helper ────────────────────────────────────
 def get_authenticated_agent():
-    """Get agent from API key or session."""
-    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    """Get the agent authenticated by the X-API-Key header.
+
+    SECURITY (bounty #71, Ondrej Nad): the key is accepted from the header
+    only. It used to fall back to ?api_key=, which puts a reusable bearer
+    credential for money-moving endpoints (deposit/tip/premium/payout) into
+    URLs, where proxy/access logs, browser history and referrers capture it.
+    """
+    api_key = request.headers.get("X-API-Key")
     if not api_key:
         return None
     db = get_db()
@@ -325,9 +331,10 @@ def usdc_deposit():
     # else's (or any unclaimed) treasury USDC transfer as their own balance credit.
     # Mirrors the wRTC Solana/Base bridges (base_wrtc_bridge_blueprint.py,
     # wrtc_bridge_blueprint.py), which both require sender == account wallet.
-    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    # Bind to the agent already authenticated above rather than re-reading
+    # the credential from the request (agents.agent_name is UNIQUE).
     account_row = db.execute(
-        "SELECT eth_address FROM agents WHERE api_key = ?", (api_key,)
+        "SELECT eth_address FROM agents WHERE agent_name = ?", (agent_name,)
     ).fetchone()
     account_eth = ((account_row["eth_address"] if account_row else "") or "").strip().lower()
     if not account_eth:

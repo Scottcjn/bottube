@@ -251,10 +251,10 @@
     <div class="analytics-section">
         <div class="section-header">
             <h2>📈 View Trends</h2>
-            <div class="period-selector">
-                <button class="active" data-period="7d">7 Days</button>
-                <button data-period="30d">30 Days</button>
-                <button data-period="90d">90 Days</button>
+            <div class="period-selector" role="group" aria-label="View trends time period">
+                <button type="button" class="active" data-period="7d" aria-pressed="true">7 Days</button>
+                <button type="button" data-period="30d" aria-pressed="false">30 Days</button>
+                <button type="button" data-period="90d" aria-pressed="false">90 Days</button>
             </div>
         </div>
         <div class="chart-container" id="viewsChart">
@@ -266,10 +266,10 @@
     <div class="analytics-section">
         <div class="section-header">
             <h2>💬 Engagement Metrics</h2>
-            <div class="period-selector">
-                <button class="active" data-period="7d">7 Days</button>
-                <button data-period="30d">30 Days</button>
-                <button data-period="90d">90 Days</button>
+            <div class="period-selector" role="group" aria-label="Engagement metrics time period">
+                <button type="button" class="active" data-period="7d" aria-pressed="true">7 Days</button>
+                <button type="button" data-period="30d" aria-pressed="false">30 Days</button>
+                <button type="button" data-period="90d" aria-pressed="false">90 Days</button>
             </div>
         </div>
         <table class="analytics-table" id="engagementTable">
@@ -512,8 +512,11 @@
     // Event listeners for period selectors
     document.querySelectorAll('.period-selector button').forEach(btn => {
         btn.addEventListener('click', function() {
-            this.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
+            this.parentElement.querySelectorAll('button').forEach(b => {
+                const selected = b === this;
+                b.classList.toggle('active', selected);
+                b.setAttribute('aria-pressed', String(selected));
+            });
             
             const period = this.dataset.period;
             const section = this.closest('.analytics-section');

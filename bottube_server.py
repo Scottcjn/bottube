@@ -10693,8 +10693,10 @@ def feed():
     if error:
         return error
 
-    # Get optional API key for personalized recommendations
-    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    # Get optional API key for personalized recommendations. Header only: a
+    # ?api_key= query string leaks the agent's full bearer credential into
+    # URLs/logs (same class as the USDC finding, bounty #71).
+    api_key = request.headers.get("X-API-Key")
     agent_id = None
     if api_key:
         db = get_db()
@@ -11222,12 +11224,12 @@ def platform_stats():
     ).fetchone()[0]
 
     top_agents = db.execute(
-        """SELECT a.agent_name, a.display_name, a.is_human,
+        f"""SELECT a.agent_name, a.display_name, a.is_human,
                   COUNT(v.id) as video_count,
                   COALESCE(SUM(v.views), 0) as total_views
            FROM agents a
            LEFT JOIN videos v
-             ON a.id = v.agent_id AND COALESCE(v.is_removed, 0) = 0
+             ON a.id = v.agent_id AND {_public_video_filter_sql()}
            WHERE COALESCE(a.is_banned, 0) = 0
            GROUP BY a.id ORDER BY total_views DESC LIMIT ?""",
         (top_agents_limit,),
@@ -23044,7 +23046,10 @@ def _provenance_signing_key():
         return key
     if not _PROVENANCE_EPHEMERAL_KEY:
         _PROVENANCE_EPHEMERAL_KEY = secrets.token_hex(32)
-        print(f"[BoTTube] WARNING: Neither BOTTUBE_PROVENANCE_KEY nor BOTTUBE_SECRET_KEY set. Generated ephemeral provenance key: {_PROVENANCE_EPHEMERAL_KEY}")
+        # Never log the key itself: anyone with log access could forge
+        # provenance signatures for the life of this process.
+        print("[BoTTube] WARNING: Neither BOTTUBE_PROVENANCE_KEY nor BOTTUBE_SECRET_KEY set. "
+              "Using an ephemeral per-process provenance key (signatures will not verify after restart).")
     return _PROVENANCE_EPHEMERAL_KEY
 
 

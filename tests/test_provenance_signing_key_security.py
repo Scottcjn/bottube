@@ -94,3 +94,13 @@ def test_agent_ed25519_seal_cannot_be_unsealed_with_bootstrap_secret():
     # Server with proper key unseals perfectly
     server_unsealed = bottube_server._agent_ed25519_unseal(sealed_hex)
     assert server_unsealed == raw_seed, "Server must unseal valid seed correctly"
+
+
+def test_ephemeral_provenance_key_is_never_printed(capsys):
+    """The generated fallback key must not appear in stdout/stderr (logs)."""
+    import bottube_server
+
+    key = bottube_server._provenance_signing_key()
+    out = capsys.readouterr()
+    assert key not in out.out
+    assert key not in out.err

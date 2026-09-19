@@ -281,3 +281,98 @@ class TestIndividualDownloadEndpoints:
         data: Dict = resp.get_json()
         assert "downloads" in data
         assert isinstance(data["downloads"], int)
+
+
+class TestPlatformStatsVisibility:
+    """Tests for /api/stats public vs non-public visibility denominators (#1883)."""
+
+    def test_api_stats_public_denominators(self, client: Any) -> None:
+        """Verify banned agents, removed videos, and non-public metrics are excluded."""
+        with bottube_server.app.app_context():
+            db = bottube_server.get_db()
+            # 1 visible bot agent
+            bot_cur = db.execute(
+                "INSERT INTO agents (agent_name, display_name, api_key, is_human, is_banned, created_at, last_active) VALUES ('goodbot', 'Good Bot', 'k1', 0, 0, 1.0, 1.0)"
+            )
+            good_bot_id = int(bot_cur.lastrowid)
+
+            # 1 visible human agent
+            human_cur = db.execute(
+                "INSERT INTO agents (agent_name, display_name, api_key, is_human, is_banned, created_at, last_active) VALUES ('goodhuman', 'Good Human', 'k2', 1, 0, 1.0, 1.0)"
+            )
+            good_human_id = int(human_cur.lastrowid)
+
+            # 1 banned agent
+            banned_cur = db.execute(
+                "INSERT INTO agents (agent_name, display_name, api_key, is_human, is_banned, created_at, last_active) VALUES ('bannedguy', 'Banned Guy', 'k3', 0, 1, 1.0, 1.0)"
+            )
+            banned_id = int(banned_cur.lastrowid)
+
+            # Videos:
+            # - Visible bot video: 10 views, 2 likes
+            db.execute(
+                "INSERT INTO videos (video_id, agent_id, title, filename, thumbnail, duration_sec, views, likes, is_removed, created_at) VALUES ('v1', ?, 'Bot V1', 'f1.mp4', 't1.jpg', 60, 10, 2, 0, 1.0)",
+                (good_bot_id,),
+            )
+            # - Removed video from visible bot: 100 views, 20 likes
+            db.execute(
+                "INSERT INTO videos (video_id, agent_id, title, filename, thumbnail, duration_sec, views, likes, is_removed, created_at) VALUES ('v2', ?, 'Bot V2 Removed', 'f2.mp4', 't2.jpg', 60, 100, 20, 1, 1.0)",
+                (good_bot_id,),
+            )
+            # - Visible human video: 5 views, 1 like
+            db.execute(
+                "INSERT INTO videos (video_id, agent_id, title, filename, thumbnail, duration_sec, views, likes, is_removed, created_at) VALUES ('v3', ?, 'Human V1', 'f3.mp4', 't3.jpg', 60, 5, 1, 0, 1.0)",
+                (good_human_id,),
+            )
+            # - Video from banned agent: 200 views, 30 likes
+            db.execute(
+                "INSERT INTO videos (video_id, agent_id, title, filename, thumbnail, duration_sec, views, likes, is_removed, created_at) VALUES ('v4', ?, 'Banned V1', 'f4.mp4', 't4.jpg', 60, 200, 30, 0, 1.0)",
+                (banned_id,),
+            )
+
+            # Comments:
+            # - Valid comment on visible video
+            db.execute(
+                "INSERT INTO comments (video_id, agent_id, content, created_at) VALUES ('v1', ?, 'Nice', 1.0)",
+                (good_human_id,),
+            )
+            # - Valid comment on another visible video
+            db.execute(
+                "INSERT INTO comments (video_id, agent_id, content, created_at) VALUES ('v3', ?, 'Cool', 1.0)",
+                (good_bot_id,),
+            )
+            # - Comment from banned agent (must be excluded)
+            db.execute(
+                "INSERT INTO comments (video_id, agent_id, content, created_at) VALUES ('v1', ?, 'Spam', 1.0)",
+                (banned_id,),
+            )
+            # - Comment on removed video (must be excluded)
+            db.execute(
+                "INSERT INTO comments (video_id, agent_id, content, created_at) VALUES ('v2', ?, 'Removed vid comment', 1.0)",
+                (good_human_id,),
+            )
+            # - Comment on banned video (must be excluded)
+            db.execute(
+                "INSERT INTO comments (video_id, agent_id, content, created_at) VALUES ('v4', ?, 'Banned vid comment', 1.0)",
+                (good_human_id,),
+            )
+            db.commit()
+
+        resp = client.get("/api/stats")
+        assert resp.status_code == 200
+        stats = resp.get_json()
+
+        assert stats["videos"] == 2
+        assert stats["agents"] == 1
+        assert stats["humans"] == 1
+        assert stats["total_views"] == 15
+        assert stats["total_likes"] == 3
+        assert stats["total_comments"] == 2
+
+        # top_agents should exclude banned agents and removed videos
+        agent_names = [a["agent_name"] for a in stats["top_agents"]]
+        assert "bannedguy" not in agent_names
+        good_bot_stat = next(a for a in stats["top_agents"] if a["agent_name"] == "goodbot")
+        assert good_bot_stat["video_count"] == 1
+        assert good_bot_stat["total_views"] == 10
+

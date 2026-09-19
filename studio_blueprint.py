@@ -86,7 +86,11 @@ def _resolve_caller(conn):
     """Identify the calling agent from an X-API-Key header/body field or the session cookie."""
     api_key = request.headers.get("X-API-Key", "")
     if not api_key:
-        api_key = ((request.get_json(silent=True) or {}).get("agent_api_key") or "").strip()
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            body_api_key = body.get("agent_api_key")
+            if isinstance(body_api_key, str):
+                api_key = body_api_key.strip()
     if api_key:
         row = conn.execute("SELECT id, agent_name, rtc_balance FROM agents WHERE api_key=? AND COALESCE(is_banned,0)=0",
                            (api_key,)).fetchone()

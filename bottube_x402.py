@@ -199,7 +199,11 @@ def init_app(app, db_path):
         if not api_key:
             return _jsonify({"error": "API key required"}), 401
 
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        elif not isinstance(data, dict):
+            return _jsonify({"error": "JSON body must be an object"}), 400
         manual_address = data.get("coinbase_address")
 
         db = _get_db()
