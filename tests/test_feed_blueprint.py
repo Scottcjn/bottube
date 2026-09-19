@@ -263,6 +263,40 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
     assert feed_blueprint._fetch_videos() == []
 
 
+def test_fetch_videos_outside_request_context_uses_api_base(monkeypatch):
+    """Verify _fetch_videos resolves BOTTUBE_API_BASE outside Flask request context without raising RuntimeError (issue #1983)."""
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"videos": [{"id": "bg_video"}]}
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params, timeout))
+        return FakeResponse()
+
+    monkeypatch.setenv("BOTTUBE_API_BASE", "https://api.example.test/")
+    monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
+
+    # Ensure no request context is active
+    assert not feed_blueprint.has_request_context()
+
+    videos = feed_blueprint._fetch_videos(agent="bg_agent", limit=5)
+
+    assert videos == [{"id": "bg_video"}]
+    assert calls == [
+        (
+            "https://api.example.test/api/videos",
+            {"per_page": 5, "agent": "bg_agent"},
+            10,
+        )
+    ]
+
+
+
 def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
     """Escape XML attributes and CDATA edge cases so generated feeds stay parseable."""
     app = Flask(__name__)
