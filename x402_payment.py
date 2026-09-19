@@ -217,8 +217,9 @@ def _verify_evm_usdc_transfer(tx_hash, network, recipient):
     if not _ETH_TX_RE.match(tx_hash or ""):
         return None, "invalid_tx_hash"
 
-    rpc_url = NETWORK_RPCS.get(network, "")
-    contract = USDC_CONTRACTS.get(network, "").lower()
+    norm_net = _normalize_network(network)
+    rpc_url = NETWORK_RPCS.get(norm_net, "") or NETWORK_RPCS.get(network, "")
+    contract = (USDC_CONTRACTS.get(norm_net, "") or USDC_CONTRACTS.get(network, "")).lower()
     if not rpc_url or not contract:
         return None, f"unsupported_network:{network}"
 

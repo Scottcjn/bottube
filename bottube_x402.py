@@ -35,14 +35,26 @@ except ImportError:
 
 def _extract_api_key(req):
     """Extract API key from X-API-Key or Authorization Bearer header."""
-    key = req.headers.get("X-API-Key")
+    key = (req.headers.get("X-API-Key") or "").strip()
     if not key:
-        auth = req.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            key = auth[7:]
+        auth = (req.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            key = auth[7:].strip()
         else:
             key = auth
     return key.strip() if key else ""
+
+
+def _get_facilitator_url():
+    """Return a valid, non-NXDOMAIN facilitator URL."""
+    f_url = "https://www.x402.org/facilitator"
+    if X402_AVAILABLE:
+        configured_f = os.environ.get("FACILITATOR_URL", FACILITATOR_URL)
+        if configured_f and "x402-facilitator.cdp.coinbase.com" not in str(configured_f):
+            f_url = configured_f
+    else:
+        f_url = os.environ.get("FACILITATOR_URL", f_url)
+    return f_url
 
 
 def init_app(app, db_path):
@@ -294,7 +306,7 @@ def init_app(app, db_path):
             row = db.execute("SELECT COUNT(*) as cnt FROM x402_payments").fetchone()
             return _jsonify({
                 "total_payments": row["cnt"],
-                "hint": "Provide Bearer API key for detailed history",
+                "hint": "Provide X-API-Key or Bearer API key for detailed history",
             })
         finally:
             db.close()

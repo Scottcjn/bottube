@@ -115,3 +115,114 @@ def test_bottube_x402_coinbase_wallet_requires_api_key(tmp_path):
     body = resp.get_json()
     assert body is not None
     assert "error" in body
+
+
+def test_extract_api_key_unit():
+    from unittest.mock import MagicMock
+    from bottube_x402 import _extract_api_key
+
+    # X-API-Key header
+    req1 = MagicMock()
+    req1.headers.get.side_effect = lambda k, default=None: "key_x_api" if k == "X-API-Key" else default
+    assert _extract_api_key(req1) == "key_x_api"
+
+    # Authorization: Bearer <key>
+    req2 = MagicMock()
+    req2.headers.get.side_effect = lambda k, default=None: "Bearer key_bearer" if k == "Authorization" else default
+    assert _extract_api_key(req2) == "key_bearer"
+
+    # Authorization: bearer <key> (case-insensitive)
+    req3 = MagicMock()
+    req3.headers.get.side_effect = lambda k, default=None: "bearer key_lower_bearer" if k == "Authorization" else default
+    assert _extract_api_key(req3) == "key_lower_bearer"
+
+    # Authorization: <key> (no prefix)
+    req4 = MagicMock()
+    req4.headers.get.side_effect = lambda k, default=None: "key_raw" if k == "Authorization" else default
+    assert _extract_api_key(req4) == "key_raw"
+
+    # Empty X-API-Key falls back to Authorization
+    req5 = MagicMock()
+    req5.headers.get.side_effect = lambda k, default=None: " " if k == "X-API-Key" else ("Bearer key_fallback" if k == "Authorization" else default)
+    assert _extract_api_key(req5) == "key_fallback"
+
+
+def _app_with_agent(tmp_path):
+    import sqlite3
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    db_path = tmp_path / "bottube.db"
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_name TEXT UNIQUE NOT NULL,
+            display_name TEXT,
+            api_key TEXT UNIQUE,
+            bio TEXT,
+            is_human INTEGER DEFAULT 0,
+            coinbase_address TEXT DEFAULT NULL,
+            coinbase_wallet_created INTEGER DEFAULT 0
+        )""")
+        conn.execute(
+            "INSERT INTO agents (agent_name, display_name, api_key) VALUES (?, ?, ?)",
+            ("testagent", "Test Agent", "valid_secret_key_123"),
+        )
+        conn.commit()
+
+    bottube_x402.init_app(app, str(db_path))
+    return app
+
+
+def test_x402_auth_header_consistency_wallet_get(tmp_path):
+    app = _app_with_agent(tmp_path)
+    client = app.test_client()
+
+    # Via X-API-Key
+    resp1 = client.get("/api/agents/me/coinbase-wallet", headers={"X-API-Key": "valid_secret_key_123"})
+    assert resp1.status_code == 200
+    assert resp1.get_json()["agent"] == "testagent"
+
+    # Via Authorization: Bearer
+    resp2 = client.get("/api/agents/me/coinbase-wallet", headers={"Authorization": "Bearer valid_secret_key_123"})
+    assert resp2.status_code == 200
+    assert resp2.get_json()["agent"] == "testagent"
+
+    # Via Authorization: bearer (case-insensitive)
+    resp3 = client.get("/api/agents/me/coinbase-wallet", headers={"Authorization": "bearer valid_secret_key_123"})
+    assert resp3.status_code == 200
+    assert resp3.get_json()["agent"] == "testagent"
+
+
+def test_x402_auth_header_consistency_wallet_post(tmp_path):
+    app = _app_with_agent(tmp_path)
+    client = app.test_client()
+
+    payload = {"coinbase_address": "0x1111111111111111111111111111111111111111"}
+
+    # Via X-API-Key
+    resp1 = client.post("/api/agents/me/coinbase-wallet", headers={"X-API-Key": "valid_secret_key_123"}, json=payload)
+    assert resp1.status_code == 200
+    assert resp1.get_json()["ok"] is True
+
+    payload2 = {"coinbase_address": "0x2222222222222222222222222222222222222222"}
+
+    # Via Authorization: Bearer
+    resp2 = client.post("/api/agents/me/coinbase-wallet", headers={"Authorization": "Bearer valid_secret_key_123"}, json=payload2)
+    assert resp2.status_code == 200
+    assert resp2.get_json()["ok"] is True
+
+
+def test_x402_auth_header_consistency_payments_get(tmp_path):
+    app = _app_with_agent(tmp_path)
+    client = app.test_client()
+
+    # Via X-API-Key
+    resp1 = client.get("/api/x402/payments", headers={"X-API-Key": "valid_secret_key_123"})
+    assert resp1.status_code == 200
+    assert "payments" in resp1.get_json()
+
+    # Via Authorization: Bearer
+    resp2 = client.get("/api/x402/payments", headers={"Authorization": "Bearer valid_secret_key_123"})
+    assert resp2.status_code == 200
+    assert "payments" in resp2.get_json()
