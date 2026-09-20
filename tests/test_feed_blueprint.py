@@ -296,7 +296,6 @@ def test_fetch_videos_outside_request_context_uses_api_base(monkeypatch):
     ]
 
 
-
 def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
     """Escape XML attributes and CDATA edge cases so generated feeds stay parseable."""
     app = Flask(__name__)
