@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-TEST_BASE_DIR = "/tmp/bottube_test_public_comments_banned_authors"
+import tempfile
+
+TEST_BASE_DIR = tempfile.mkdtemp(prefix="bottube_test_public_comments_")
 os.environ.setdefault("BOTTUBE_BASE_DIR", TEST_BASE_DIR)
 os.environ.setdefault("BOTTUBE_DB_PATH", f"{TEST_BASE_DIR}/bottube.db")
 
