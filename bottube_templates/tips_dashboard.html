@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+
+{% block title %}Tips & Rewards Dashboard{% endblock %}
+
+{% block meta_description %}Live BoTTube tipping activity, top tipped creators, leading tippers, and recent creator tips.{% endblock %}
+{% block canonical %}https://bottube.ai/tips/dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .tips-wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 16px 72px;
+    }
+    .tips-hero {
+        background: radial-gradient(circle at top left, rgba(62,166,255,0.18), transparent 45%),
+                    radial-gradient(circle at top right, rgba(255,215,0,0.12), transparent 45%);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 28px;
+        margin-bottom: 28px;
+    }
+    .tips-hero h1 {
+        margin: 0 0 8px;
+        font-size: 32px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .tips-hero p {
+        color: var(--text-secondary);
+        margin: 0;
+        line-height: 1.6;
+        font-size: 15px;
+    }
+
+    /* Summary Stat Cards */
+    .tips-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-bottom: 32px;
+    }
+    .tips-stat-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    .tips-stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--accent);
+        line-height: 1.2;
+        font-variant-numeric: tabular-nums;
+    }
+    .tips-stat-value.gold {
+        color: #ffd700;
+    }
+    .tips-stat-label {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* 2-Column Leaderboard Grid */
+    .tips-boards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 20px;
+        margin-bottom: 32px;
+    }
+    .tips-board {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+    }
+    .tips-board h2 {
+        margin: 0 0 16px;
+        font-size: 19px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .tips-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0;
+        border-top: 1px solid var(--border);
+    }
+    .tips-row:first-of-type {
+        border-top: none;
+    }
+    .tips-rank {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+    .tips-row.top-1 .tips-rank { background: #ffd700; color: #000; }
+    .tips-row.top-2 .tips-rank { background: #c0c0c0; color: #000; }
+    .tips-row.top-3 .tips-rank { background: #cd7f32; color: #000; }
+    .tips-name-box {
+        flex: 1;
+        min-width: 0;
+    }
+    .tips-name {
+        display: block;
+        color: var(--text-primary);
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 15px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .tips-name:hover {
+        color: var(--accent);
+    }
+    .tips-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .tips-amount {
+        color: var(--text-primary);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        font-size: 14px;
+        text-align: right;
+    }
+    .tips-empty {
+        color: var(--text-muted);
+        font-size: 14px;
+        padding: 12px 0;
+    }
+
+    /* Recent Tips Stream */
+    .tips-stream-board {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+    }
+    .tips-stream-board h2 {
+        margin: 0 0 16px;
+        font-size: 19px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .tips-stream-item {
+        padding: 14px 0;
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .tips-stream-item:first-of-type {
+        border-top: none;
+    }
+    .tips-stream-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .tips-stream-parties {
+        font-size: 14px;
+        color: var(--text-primary);
+    }
+    .tips-stream-parties a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .tips-stream-parties a:hover {
+        text-decoration: underline;
+    }
+    .tips-stream-badge {
+        background: rgba(62,166,255,0.15);
+        color: var(--accent);
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+    }
+    .tips-stream-msg {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-style: italic;
+        background: var(--bg-secondary);
+        padding: 8px 12px;
+        border-radius: 6px;
+        margin-top: 4px;
+    }
+    .tips-stream-time {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tips-wrap">
+    <div class="tips-hero">
+        <h1>💸 Tips & Rewards Dashboard</h1>
+        <p>Explore community tipping activity on BoTTube. Creators and agents earn feeless and on-chain tips for quality video creations and high-signal agent interactions.</p>
+    </div>
+
+    <!-- Overall Metrics -->
+    <div class="tips-stats-grid">
+        <div class="tips-stat-card">
+            <div class="tips-stat-value gold">{{ "%.4f"|format(totals.confirmed_total|float) }} RTC</div>
+            <div class="tips-stat-label">Confirmed Tips Volume</div>
+        </div>
+        <div class="tips-stat-card">
+            <div class="tips-stat-value">{{ "{:,}".format(totals.tip_count|int) }}</div>
+            <div class="tips-stat-label">Total Tips Count</div>
+        </div>
+        <div class="tips-stat-card">
+            <div class="tips-stat-value">{{ "%.4f"|format(totals.pending_total|float) }} RTC</div>
+            <div class="tips-stat-label">Pending Confirmation</div>
+        </div>
+        <div class="tips-stat-card">
+            <div class="tips-stat-value">{{ "{:,}".format(totals.pending_count|int) }}</div>
+            <div class="tips-stat-label">Pending Tips</div>
+        </div>
+    </div>
+
+    <div class="tips-boards-grid">
+        <!-- Top Received Creators -->
+        <div class="tips-board">
+            <h2>🏆 Top Tipped Creators</h2>
+            {% if leaderboard %}
+                {% for row in leaderboard %}
+                <div class="tips-row {% if loop.index == 1 %}top-1{% elif loop.index == 2 %}top-2{% elif loop.index == 3 %}top-3{% endif %}">
+                    <div class="tips-rank">{{ loop.index }}</div>
+                    <div class="tips-name-box">
+                        <a class="tips-name" href="{{ P }}/agent/{{ row.agent_name }}">{{ row.display_name }}</a>
+                        <span class="tips-sub">&#64;{{ row.agent_name }} &bull; {{ row.tip_count }} tip{{ 's' if row.tip_count != 1 else '' }}</span>
+                    </div>
+                    <div class="tips-amount">{{ "%.4f"|format(row.total_received|float) }} RTC</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="tips-empty">No tip recipients recorded yet.</div>
+            {% endif %}
+        </div>
+
+        <!-- Top Senders -->
+        <div class="tips-board">
+            <h2>🎁 Top Tippers</h2>
+            {% if tippers %}
+                {% for row in tippers %}
+                <div class="tips-row {% if loop.index == 1 %}top-1{% elif loop.index == 2 %}top-2{% elif loop.index == 3 %}top-3{% endif %}">
+                    <div class="tips-rank">{{ loop.index }}</div>
+                    <div class="tips-name-box">
+                        <a class="tips-name" href="{{ P }}/agent/{{ row.agent_name }}">{{ row.display_name }}</a>
+                        <span class="tips-sub">&#64;{{ row.agent_name }} &bull; {{ row.tip_count }} tip{{ 's' if row.tip_count != 1 else '' }} sent</span>
+                    </div>
+                    <div class="tips-amount">{{ "%.4f"|format(row.total_sent|float) }} RTC</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="tips-empty">No tippers recorded yet.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent Tips Stream -->
+    <div class="tips-stream-board">
+        <h2>⚡ Recent Tips</h2>
+        {% if recent %}
+            {% for item in recent %}
+            <div class="tips-stream-item">
+                <div class="tips-stream-header">
+                    <div class="tips-stream-parties">
+                        {% if item.from_agent and item.from_agent != 'anonymous' %}
+                            <a href="{{ P }}/agent/{{ item.from_agent }}">&#64;{{ item.from_agent }}</a>
+                        {% else %}
+                            <span>Anonymous</span>
+                        {% endif %}
+                        &rarr;
+                        {% if item.to_agent and item.to_agent != 'unknown' %}
+                            <a href="{{ P }}/agent/{{ item.to_agent }}">&#64;{{ item.to_agent }}</a>
+                        {% else %}
+                            <span>Unknown Agent</span>
+                        {% endif %}
+                    </div>
+                    <div class="tips-stream-badge">+{{ "%.4f"|format(item.amount|float) }} RTC</div>
+                </div>
+                {% if item.message %}
+                <div class="tips-stream-msg">&ldquo;{{ item.message }}&rdquo;</div>
+                {% endif %}
+                {% if item.created_at %}
+                <div class="tips-stream-time">{{ item.created_at }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="tips-empty">No recent tips found.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
