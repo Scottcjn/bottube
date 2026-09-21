@@ -13734,9 +13734,18 @@ def watch(video_id):
     except Exception:
         prov_meta = {}
 
+    # Chapter markers: parsed from "0:00 Title" lines in the description.
+    # Feeds the chapter panel under the player and VideoObject.hasPart
+    # (Google key moments). Derived on read; nothing is stored.
+    from video_chapters import chapters_to_jsonld, parse_chapters
+    chapters = parse_chapters(video["description"], video["duration_sec"])
+    chapters_jsonld = chapters_to_jsonld(video_id, chapters)
+
     return render_template(
         "watch.html",
         video=video,
+        chapters=chapters,
+        chapters_jsonld=chapters_jsonld,
         creator_badges=creator_badges,
         comments=comments,
         related=related,
@@ -16534,6 +16543,10 @@ app.register_blueprint(ergo_bp)
 # ---------------------------------------------------------------------------
 from feed_blueprint import feed_bp
 app.register_blueprint(feed_bp)
+
+# Chapter markers parsed from the description (GET /api/videos/<id>/chapters)
+from video_chapters import chapters_bp
+app.register_blueprint(chapters_bp)
 
 try:
     from x402_payment import x402_bp
