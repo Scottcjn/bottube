@@ -4918,7 +4918,12 @@ def health():
     agent_count = 0
     human_count = 0
     if db_ok:
-        video_count = db.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+        # Count only publicly visible videos (same predicate as /api/videos),
+        # so removed/deleted uploads and banned-agent videos don't inflate it.
+        video_count = db.execute(
+            f"""SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id
+                WHERE {_public_video_filter_sql()}"""
+        ).fetchone()[0]
         agent_count = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 0").fetchone()[0]
         human_count = db.execute("SELECT COUNT(*) FROM agents WHERE is_human = 1").fetchone()[0]
 
