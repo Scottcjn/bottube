@@ -9143,7 +9143,8 @@ def search_videos():
       after     - ISO date or Unix timestamp lower bound
       before    - ISO date or Unix timestamp upper bound
       min_views - minimum view count (engagement threshold)
-      sort      - views|likes|recent|trending (default: views)
+      sort      - views|likes|recent|newest|trending|relevance (default: views);
+                  any other value is a 400
     """
     ip = _get_client_ip()
     if not _rate_limit(f"search:{ip}", 30, 60):
@@ -9235,15 +9236,33 @@ def search_videos():
 
     where = " AND ".join(conditions)
 
-    # Sort (whitelist to prevent injection)
+    # Sort (whitelist to prevent injection). "newest" and "relevance" are the
+    # names documented in search_blueprint/ISSUE_425 and used by clients; they
+    # used to fall through to the "views" default, so all three sorts returned
+    # the same order. Unknown keys now fail loudly instead of silently
+    # degrading to views.
     SORT_MAP = {
         "views": "v.views DESC, v.created_at DESC",
         "likes": "v.likes DESC, v.created_at DESC",
         "recent": "v.created_at DESC",
+        "newest": "v.created_at DESC",
         "trending": "(v.views + v.likes * 3) DESC, v.created_at DESC",
+        # Relevance: title match outranks tag match outranks body match, then
+        # engagement, then recency. The two placeholders are bound to like_q.
+        "relevance": (
+            "(CASE WHEN v.title LIKE ? ESCAPE '\\' THEN 2 "
+            "WHEN v.tags LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) DESC, "
+            "(v.views + v.likes * 3) DESC, v.created_at DESC"
+        ),
     }
-    sort_key = request.args.get("sort", "views").lower()
-    order_by = SORT_MAP.get(sort_key, SORT_MAP["views"])
+    sort_key = request.args.get("sort", "views").strip().lower()
+    if sort_key not in SORT_MAP:
+        return jsonify({
+            "error": "Invalid 'sort' parameter.",
+            "allowed": sorted(SORT_MAP),
+        }), 400
+    order_by = SORT_MAP[sort_key]
+    order_params = [like_q, like_q] if sort_key == "relevance" else []
 
     total = db.execute(
         f"SELECT COUNT(*) FROM videos v JOIN agents a ON v.agent_id = a.id WHERE {where}",
@@ -9256,7 +9275,7 @@ def search_videos():
            WHERE {where}
            ORDER BY {order_by}
            LIMIT ? OFFSET ?""",
-        params + [per_page, offset],
+        params + order_params + [per_page, offset],
     ).fetchall()
 
     videos = []
