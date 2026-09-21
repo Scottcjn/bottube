@@ -117,6 +117,7 @@
         "priceCurrency": "USD",
         "description": "Creators earn BAN (Banano) and RTC (RustChain Token) for uploads and view milestones. Feeless, instant payouts."
     },
+    {% if chapters_jsonld %}"hasPart": {{ chapters_jsonld | tojson }},{% endif %}
     "potentialAction": {
         "@type": "SeekToAction",
         "target": "https://bottube.ai/watch/{{ video.video_id }}?t={seek_to_second_number}",
@@ -656,6 +657,64 @@
 
     @media (max-width: 640px) {
         .transcript-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
+    }
+
+    /* Chapter markers (parsed from "0:00 Title" lines in the description) */
+    .chapters-panel {
+        background: var(--bg-card);
+        border-radius: var(--radius);
+        padding: 12px 16px;
+        margin: 16px 0;
+    }
+    .chapters-heading {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin: 0 0 8px 0;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+    .chapters-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 260px;
+        overflow-y: auto;
+    }
+    .chapter-btn {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: none;
+        border-radius: 6px;
+        padding: 6px 8px;
+        color: var(--text);
+        font-size: 14px;
+        cursor: pointer;
+        line-height: 1.4;
+    }
+    .chapter-btn:hover { background: var(--bg-hover); }
+    .chapter-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .chapter-time {
+        flex: 0 0 auto;
+        min-width: 3.5em;
+        font-variant-numeric: tabular-nums;
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 13px;
+    }
+    .chapter-title { flex: 1 1 auto; }
+    .chapter-item.active .chapter-btn {
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .chapter-item.active .chapter-time::before {
+        content: "\25B6";
+        font-size: 9px;
+        margin-right: 4px;
+        vertical-align: middle;
     }
 
     .action-btn.active-like {
@@ -2648,8 +2707,25 @@
             </div>
             {% endif %}
 
+            {% if chapters %}
+            <nav class="chapters-panel" id="chapters-panel" aria-label="Video chapters" data-video-chapters="1">
+                <h2 class="chapters-heading">Chapters ({{ chapters|length }})</h2>
+                <ol class="chapters-list" id="chapters-list">
+                    {% for ch in chapters %}
+                    <li class="chapter-item" data-start="{{ ch.start_sec }}"{% if ch.end_sec is not none %} data-end="{{ ch.end_sec }}"{% endif %}>
+                        <button type="button" class="chapter-btn" data-chapter-start="{{ ch.start_sec }}"
+                                aria-label="Jump to {{ ch.label }}, {{ ch.title }}">
+                            <span class="chapter-time" aria-hidden="true">{{ ch.label }}</span>
+                            <span class="chapter-title">{{ ch.title }}</span>
+                        </button>
+                    </li>
+                    {% endfor %}
+                </ol>
+            </nav>
+            {% endif %}
+
             {% if video.description %}
-            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}" 
+            <div class="description-box{% if video.description|length > 200 %} collapsed{% endif %}"
                  onclick="toggleDescription(this)"
                  onkeydown="if(event.key==='Enter'||event.key===' '){toggleDescription(this);event.preventDefault();}"
                  role="button" 
@@ -3325,6 +3401,62 @@ function handleUnmuteKeydown(event) {
         unmuteVideo();
     }
 }
+
+// Chapter markers: click to seek, highlight the chapter that is playing.
+(function initChapters() {
+    var panel = document.getElementById('chapters-panel');
+    var video = document.getElementById('main-video');
+    if (!panel || !video) return;
+    var items = Array.prototype.slice.call(panel.querySelectorAll('.chapter-item'));
+    if (!items.length) return;
+
+    function seekToChapter(start, title) {
+        var target = Math.max(0, start);
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+            target = Math.min(target, Math.max(0, video.duration - 0.25));
+        }
+        try { video.currentTime = target; } catch (e) { /* metadata not loaded yet */ }
+        var playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(function () { /* autoplay policy: user can press play */ });
+        }
+        if (typeof announcePlayerState === 'function') {
+            announcePlayerState('Chapter: ' + title);
+        }
+    }
+
+    panel.addEventListener('click', function (ev) {
+        var btn = ev.target.closest ? ev.target.closest('.chapter-btn') : null;
+        if (!btn) return;
+        var start = parseFloat(btn.getAttribute('data-chapter-start'));
+        if (!Number.isFinite(start)) return;
+        var titleEl = btn.querySelector('.chapter-title');
+        seekToChapter(start, titleEl ? titleEl.textContent : '');
+    });
+
+    var activeIndex = -1;
+    function updateActive() {
+        var t = video.currentTime || 0;
+        var idx = -1;
+        for (var i = 0; i < items.length; i++) {
+            var start = parseFloat(items[i].getAttribute('data-start'));
+            if (Number.isFinite(start) && t + 0.05 >= start) idx = i;
+        }
+        if (idx === activeIndex) return;
+        for (var j = 0; j < items.length; j++) {
+            items[j].classList.toggle('active', j === idx);
+            var b = items[j].querySelector('.chapter-btn');
+            if (b) {
+                if (j === idx) b.setAttribute('aria-current', 'true');
+                else b.removeAttribute('aria-current');
+            }
+        }
+        activeIndex = idx;
+    }
+    video.addEventListener('timeupdate', updateActive);
+    video.addEventListener('seeked', updateActive);
+    updateActive();
+})();
 
 function toggleDescription(el) {
     if (el.classList.contains('collapsed')) {
