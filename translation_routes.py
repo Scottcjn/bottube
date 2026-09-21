@@ -203,7 +203,11 @@ def get_videos_by_language(language):
         language: Parameter value.
     """
     db = get_db()
-    
+
+    # video_translations is UNIQUE(video_id, language, translator_id), so a
+    # video translated into the same language by N translators has N rows.
+    # Emit one row per video -- its most recent translation for this
+    # language -- instead of listing the video N times.
     videos = db.execute('''
         SELECT v.*, vt.title as translated_title, vt.description as translated_description
         FROM videos v
@@ -212,6 +216,12 @@ def get_videos_by_language(language):
         WHERE vt.language = ?
           AND COALESCE(v.is_removed, 0) = 0
           AND COALESCE(a.is_banned, 0) = 0
+          AND vt.id = (
+              SELECT vt2.id FROM video_translations vt2
+              WHERE vt2.video_id = vt.video_id AND vt2.language = vt.language
+              ORDER BY vt2.created_at DESC, vt2.id DESC
+              LIMIT 1
+          )
         ORDER BY vt.created_at DESC
     ''', (language,)).fetchall()
     
