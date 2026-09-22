@@ -1,0 +1,53 @@
+name: Rust SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rust-sdk/**'
+      - '.github/workflows/rust-sdk.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'rust-sdk/**'
+      - '.github/workflows/rust-sdk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Rust SDK (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      RUSTDOCFLAGS: -D warnings
+    defaults:
+      run:
+        working-directory: rust-sdk
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo fmt --manifest-path verification/published-client/Cargo.toml --check
+      - run: cargo check --locked --manifest-path verification/published-client/Cargo.toml
+      - run: cargo test --locked --all-targets
+      - run: cargo test --locked --doc
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo doc --locked --no-deps
+      - if: runner.os == 'Linux'
+        run: cargo package --locked
