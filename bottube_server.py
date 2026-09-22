@@ -21102,8 +21102,8 @@ def serve_keyframe(filename):
 # of file + thumbnail), user-facing /api/report endpoint with rate
 # limiting, and a moderation_audit log of every enforcement action.
 
-TOS_VERSION = "1.0"
-TOS_EFFECTIVE = "2026-04-30"
+TOS_VERSION = "1.1"
+TOS_EFFECTIVE = "2026-07-09"
 
 _TS_SCHEMA_READY = False
 _TS_SCHEMA_LOCK = _eng_Lock()
