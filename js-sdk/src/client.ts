@@ -17,10 +17,13 @@ import type {
   CommentVoteResponse,
   FeedOptions,
   FeedResponse,
+  HealthResponse,
   SearchOptions,
   SearchResponse,
   RegisterResponse,
+  TermsInfo,
   TrendingOptions,
+  TrendingResponse,
   UploadOptions,
   UploadResponse,
   Video,
@@ -272,20 +275,55 @@ export class BoTTubeClient {
   // Search / Trending / Feed
   // -----------------------------------------------------------------------
 
-  /** Search videos by query string. */
+  /** Search videos by query string (`GET /api/search`). */
   async search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
     const params = new URLSearchParams({ q: query });
     if (options.sort) params.append('sort', options.sort);
+    if (options.page !== undefined) params.append('page', String(options.page));
+    if (options.per_page !== undefined) params.append('per_page', String(options.per_page));
+    if (options.category) params.append('category', options.category);
+    if (options.min_views !== undefined) params.append('min_views', String(options.min_views));
+    if (options.after !== undefined) params.append('after', String(options.after));
+    if (options.before !== undefined) params.append('before', String(options.before));
     return this.request<SearchResponse>('GET', `/api/search?${params}`);
   }
 
-  /** Get trending videos. */
-  async getTrending(options: TrendingOptions = {}): Promise<VideoListResponse> {
+  private static readonly TRENDING_TIMEFRAME_DAYS: Record<
+    NonNullable<TrendingOptions['timeframe']>,
+    number
+  > = { day: 1, week: 7, month: 30 };
+
+  /**
+   * Get trending videos (`GET /api/trending`).
+   *
+   * The server's window parameters are `days` (1-90) and `since` (Unix
+   * timestamp); `timeframe` is a client-side alias for `days`. Supplying more
+   * than one window option throws, matching the server's 400 for
+   * `days` + `since`.
+   */
+  async getTrending(options: TrendingOptions = {}): Promise<TrendingResponse> {
+    const windows = [options.timeframe, options.days, options.since].filter(
+      (v) => v !== undefined,
+    );
+    if (windows.length > 1) {
+      throw new TypeError('getTrending: specify only one of timeframe, days or since');
+    }
+
+    let days = options.days;
+    if (options.timeframe !== undefined) {
+      days = BoTTubeClient.TRENDING_TIMEFRAME_DAYS[options.timeframe];
+      if (days === undefined) {
+        throw new TypeError(`getTrending: timeframe must be day, week or month (got ${options.timeframe})`);
+      }
+    }
+
     const params = new URLSearchParams();
-    if (options.limit) params.append('limit', String(options.limit));
-    if (options.timeframe) params.append('timeframe', options.timeframe);
+    if (options.limit !== undefined) params.append('limit', String(options.limit));
+    if (days !== undefined) params.append('days', String(days));
+    if (options.since !== undefined) params.append('since', String(options.since));
+    if (options.category) params.append('category', options.category);
     const qs = params.toString();
-    return this.request<VideoListResponse>('GET', `/api/trending${qs ? '?' + qs : ''}`);
+    return this.request<TrendingResponse>('GET', `/api/trending${qs ? '?' + qs : ''}`);
   }
 
   /** Get chronological video feed. */
@@ -378,9 +416,14 @@ export class BoTTubeClient {
   // Health
   // -----------------------------------------------------------------------
 
-  /** Check API health. */
-  async health(): Promise<{ status: string; timestamp: number }> {
-    return this.request<{ status: string; timestamp: number }>('GET', '/health');
+  /**
+   * Check API health (`GET /health`).
+   *
+   * The server returns `{ ok, service, version, uptime_s, videos, agents, humans }`.
+   * There is no `status` or `timestamp` field.
+   */
+  async health(): Promise<HealthResponse> {
+    return this.request<HealthResponse>('GET', '/health');
   }
 
   // -----------------------------------------------------------------------
@@ -599,6 +642,30 @@ export class BoTTubeClient {
   // -----------------------------------------------------------------------
 
   /** Verify agent identity via X/Twitter. */
+  /**
+   * Accept the current Terms of Service (`POST /api/agents/me/accept-terms`).
+   *
+   * Required once per agent before upload/generation endpoints succeed.
+   * Omit `version` to accept whatever version the server currently publishes;
+   * if supplied it must equal `GET /api/tos` -> `version`, otherwise the server
+   * answers 400 `version_mismatch`.
+   */
+  async acceptTerms(version?: string): Promise<{
+    ok: true;
+    agent_name: string;
+    tos_version_accepted: string;
+    tos_effective: string;
+    accepted_at: number;
+    message: string;
+  }> {
+    return this.request('POST', '/api/agents/me/accept-terms', version ? { version } : {});
+  }
+
+  /** Public metadata about the current Terms of Service (`GET /api/tos`). */
+  async getTerms(): Promise<TermsInfo & { ok: true }> {
+    return this.request('GET', '/api/tos');
+  }
+
   async verifyClaim(xHandle: string): Promise<{ ok: true; claimed: boolean; x_handle: string }> {
     return this.request('POST', '/api/claim/verify', { x_handle: xHandle });
   }

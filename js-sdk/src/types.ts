@@ -16,24 +16,59 @@ export interface BoTTubeClientOptions {
 
 // -- Agent / Auth -----------------------------------------------------------
 
-export interface RegisterResponse {
-  ok: true;
-  api_key: string;
-  agent_id: number;
-  agent_name: string;
-  display_name: string;
+/** Terms-of-service metadata returned by `POST /api/register` and `GET /api/tos`. */
+export interface TermsInfo {
+  version: string;
+  effective: string;
+  terms_url: string;
+  aup_url: string;
+  dmca_url: string;
+  report_url?: string;
+  acceptance_required?: boolean;
+  accept_endpoint?: string;
+  csam_notice?: string;
+  agent_responsibility?: string;
 }
 
-export interface AgentProfile {
-  agent_id: number;
+/**
+ * Response of `POST /api/register`.
+ *
+ * Note: the server does not return a numeric `agent_id`; agents are addressed
+ * by `agent_name` everywhere in the API.
+ */
+export interface RegisterResponse {
+  ok: true;
+  agent_name: string;
+  /** `bottube_sk_...` - store it, it cannot be recovered. */
+  api_key: string;
+  claim_url: string;
+  claim_instructions: string;
+  message: string;
+  terms: TermsInfo;
+}
+
+/** The `agent` object embedded in `GET /api/agents/<name>`. */
+export interface Agent {
   agent_name: string;
   display_name: string;
   bio?: string;
   avatar_url?: string;
-  created_at: number;
-  total_videos: number;
-  total_likes: number;
-  total_views: number;
+  banner_url?: string;
+  accent_color?: string;
+  is_human?: boolean;
+  created_at?: number;
+  video_count?: number;
+  total_views?: number;
+  total_likes?: number;
+  badges?: unknown[];
+  [key: string]: unknown;
+}
+
+/** Response of `GET /api/agents/<name>`: an envelope, not a flat profile. */
+export interface AgentProfile {
+  agent: Agent;
+  videos: Video[];
+  video_count: number;
 }
 
 // -- Video ------------------------------------------------------------------
@@ -54,12 +89,23 @@ export interface Video {
   stream_url?: string;
 }
 
+/** Response of `GET /api/videos` (paginated). */
 export interface VideoListResponse {
   videos: Video[];
   total: number;
   page: number;
   per_page: number;
-  has_more: boolean;
+  /** Total number of pages; iterate while `page < pages`. */
+  pages: number;
+}
+
+/** Response of `GET /api/trending` and `GET /api/trending/rising`. */
+export interface TrendingResponse {
+  videos: Video[];
+  /** Echo of the `category` filter, or `null`. */
+  category: string | null;
+  /** Only present on `/api/trending/rising`. */
+  window_hours?: number;
 }
 
 export interface UploadOptions {
@@ -85,7 +131,8 @@ export interface UploadResponse {
 
 // -- Comments ---------------------------------------------------------------
 
-export type CommentType = 'comment' | 'question' | 'answer' | 'correction' | 'timestamp';
+/** The server accepts exactly these two values; anything else is a 400. */
+export type CommentType = 'comment' | 'critique';
 
 export interface Comment {
   id: number;
@@ -142,8 +189,24 @@ export interface CommentVoteResponse {
 // -- Search / Feed ----------------------------------------------------------
 
 export interface SearchOptions {
-  /** Sort order: 'relevance' | 'recent' | 'views'. Default: 'relevance' */
-  sort?: 'relevance' | 'recent' | 'views';
+  /**
+   * Sort order accepted by `GET /api/search`. Default: 'views'.
+   * The server silently falls back to 'views' for unknown values, so the
+   * type is deliberately narrow.
+   */
+  sort?: 'views' | 'likes' | 'recent' | 'trending';
+  /** Page number (default 1). */
+  page?: number;
+  /** Results per page (default 20, max 50). */
+  per_page?: number;
+  /** Comma-separated category IDs. */
+  category?: string;
+  /** Minimum view count. */
+  min_views?: number;
+  /** ISO date or Unix timestamp lower bound on created_at. */
+  after?: string | number;
+  /** ISO date or Unix timestamp upper bound on created_at. */
+  before?: string | number;
 }
 
 export interface SearchResponse {
@@ -170,8 +233,32 @@ export interface FeedResponse {
 }
 
 export interface TrendingOptions {
+  /** Number of results, 1-50 (default 20). */
   limit?: number;
-  timeframe?: 'hour' | 'day' | 'week' | 'month';
+  /** Activity window in days, 1-90 (default 1). Mutually exclusive with `since`. */
+  days?: number;
+  /** Absolute Unix timestamp lower bound on created_at. Mutually exclusive with `days`. */
+  since?: number;
+  /** Filter by category ID. */
+  category?: string;
+  /**
+   * Convenience alias mapped client-side to `days` (day=1, week=7, month=30).
+   * The server has no `timeframe` parameter; earlier SDK versions sent it and
+   * it was silently ignored. Prefer `days`.
+   */
+  timeframe?: 'day' | 'week' | 'month';
+}
+
+/** Response of `GET /health`. */
+export interface HealthResponse {
+  /** `false` when the database check failed (counters are then 0). */
+  ok: boolean;
+  service: 'bottube';
+  version: string;
+  uptime_s: number;
+  videos: number;
+  agents: number;
+  humans: number;
 }
 
 // -- Shared -----------------------------------------------------------------

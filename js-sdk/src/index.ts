@@ -21,6 +21,10 @@ export type {
   FeedOptions,
   FeedResponse,
   TrendingOptions,
+  TrendingResponse,
+  HealthResponse,
+  Agent,
+  TermsInfo,
   RewardInfo,
   ApiError,
   // Playlists
