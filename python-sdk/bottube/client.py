@@ -383,7 +383,8 @@ class BoTTubeClient:
         Args:
             video_id: Target video ID.
             content: Comment text (max 5000 chars).
-            comment_type: One of ``comment``, ``question``, ``review``.
+            comment_type: ``comment`` (default) or ``critique``. The server
+                rejects any other value with HTTP 400.
             parent_id: Optional parent comment ID for replies.
         """
         body: dict[str, Any] = {"content": content, "comment_type": comment_type}

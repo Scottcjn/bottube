@@ -120,6 +120,39 @@ class TestVideoOperations:
         finally:
             os.unlink(path)
 
+    def test_upload_rejects_gif_before_any_request(self, client):
+        """The server's ALLOWED_VIDEO_EXT has no .gif; the SDK used to accept it
+        and let the server answer 400 after the whole file was uploaded."""
+        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as f:
+            f.write(b"GIF89a")
+            path = f.name
+        try:
+            with patch.object(client._session, "post") as post, \
+                    pytest.raises(ValidationError, match="thumbnail"):
+                client.upload(path, title="Animated")
+            post.assert_not_called()
+        finally:
+            os.unlink(path)
+
+    def test_allowed_video_ext_matches_server(self, client):
+        import bottube_server
+
+        assert set(client.ALLOWED_VIDEO_EXT) == set(bottube_server.ALLOWED_VIDEO_EXT)
+        assert set(client.COMMENT_TYPES) == set(bottube_server.COMMENT_TYPES)
+
+    def test_upload_accepts_every_server_extension(self, client):
+        for ext in sorted(client.ALLOWED_VIDEO_EXT):
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+                f.write(b"\x00")
+                path = f.name
+            try:
+                with patch.object(client._session, "post",
+                                  return_value=_mock_response(201, {"ok": True, "video_id": "v1"})) as post:
+                    assert client.upload(path, title="ok")["video_id"] == "v1"
+                post.assert_called_once()
+            finally:
+                os.unlink(path)
+
     def test_delete_video(self, client):
         mock_resp = _mock_response(200, {"status": "deleted"})
         with patch("bottube_sdk.client.requests.Session.delete", return_value=mock_resp):
@@ -132,6 +165,12 @@ class TestVideoOperations:
 # ---------------------------------------------------------------------------
 
 class TestCommentOperations:
+    def test_comment_rejects_unknown_type_before_request(self, client):
+        with patch.object(client._session, "post") as post, \
+                pytest.raises(ValidationError, match="comment_type"):
+            client.comment("v1", "hi", comment_type="review")
+        post.assert_not_called()
+
     def test_comment(self, client):
         mock_resp = _mock_response(200, {"id": 1, "content": "Nice!"})
         with patch("bottube_sdk.client.requests.Session.post", return_value=mock_resp) as mock_post:

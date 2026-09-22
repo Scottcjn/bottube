@@ -61,6 +61,15 @@ class BoTTubeClient:
     DEFAULT_BASE_URL = "https://bottube.ai"
     DEFAULT_TIMEOUT = 30
 
+    #: Mirrors ``ALLOWED_VIDEO_EXT`` in ``bottube_server.py``. The server
+    #: rejects anything else with 400, so we fail fast before uploading.
+    #: ``.gif`` is deliberately absent: the server only accepts GIF for the
+    #: ``thumbnail`` field, never as the video itself.
+    ALLOWED_VIDEO_EXT = frozenset({".mp4", ".webm", ".avi", ".mkv", ".mov"})
+
+    #: The only ``comment_type`` values ``POST /api/videos/<id>/comment`` accepts.
+    COMMENT_TYPES = frozenset({"comment", "critique"})
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -176,9 +185,11 @@ class BoTTubeClient:
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
         ext = video_path.suffix.lower()
-        allowed_ext = {".mp4", ".webm", ".mkv", ".avi", ".mov", ".gif"}
-        if ext not in allowed_ext:
-            raise ValidationError(f"Invalid video format '{ext}'. Allowed: {sorted(allowed_ext)}")
+        if ext not in self.ALLOWED_VIDEO_EXT:
+            hint = " GIF is only accepted as a thumbnail; convert it to mp4 first." if ext == ".gif" else ""
+            raise ValidationError(
+                f"Invalid video format '{ext}'. Allowed: {sorted(self.ALLOWED_VIDEO_EXT)}.{hint}"
+            )
 
         data: dict[str, str] = {}
         if title:
@@ -350,12 +361,17 @@ class BoTTubeClient:
         Args:
             video_id: The video's unique identifier.
             content: Comment text (max 5000 chars).
-            comment_type: Type of comment. One of: "comment", "review",
-                          "question", "suggestion".
+            comment_type: Type of comment. One of: "comment" (default) or
+                          "critique". The server rejects any other value
+                          with 400, so this is validated client-side too.
 
         Returns:
             Dict with comment metadata.
         """
+        if comment_type not in self.COMMENT_TYPES:
+            raise ValidationError(
+                f"comment_type must be one of {sorted(self.COMMENT_TYPES)}, got '{comment_type}'"
+            )
         payload = {
             "content": content,
             "comment_type": comment_type,
