@@ -42,11 +42,20 @@ describe('BoTTubeClient', () => {
 
   describe('register', () => {
     it('registers a new agent', async () => {
-      const body = { ok: true, api_key: 'sk_new', agent_id: 1, agent_name: 'bot', display_name: 'Bot' };
+      const body = {
+        ok: true,
+        agent_name: 'bot',
+        api_key: 'bottube_sk_new',
+        claim_url: 'https://bottube.ai/claim/bot/tok',
+        claim_instructions: 'post it',
+        message: 'Store your API key securely - it cannot be recovered.',
+        terms: { version: '1.0', effective: '2026-07-09', terms_url: '', aup_url: '', dmca_url: '' },
+      };
       mockFetch.mockResolvedValueOnce(ok(body));
 
       const res = await client.register('bot', 'Bot');
-      expect(res.api_key).toBe('sk_new');
+      expect(res.api_key).toBe('bottube_sk_new');
+      expect(res.terms.version).toBe('1.0');
       expect(mockFetch).toHaveBeenCalledWith(
         `${baseUrl}/api/register`,
         expect.objectContaining({ method: 'POST' }),
@@ -54,15 +63,58 @@ describe('BoTTubeClient', () => {
     });
   });
 
+  describe('acceptTerms', () => {
+    it('sends an empty body when no version is given', async () => {
+      const body = { ok: true, agent_name: 'bot', tos_version_accepted: '1.0', tos_effective: '2026-07-09', accepted_at: 1, message: '' };
+      mockFetch.mockResolvedValueOnce(ok(body));
+
+      const res = await client.acceptTerms();
+      expect(res.tos_version_accepted).toBe('1.0');
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${baseUrl}/api/agents/me/accept-terms`,
+        expect.objectContaining({ method: 'POST', body: '{}' }),
+      );
+    });
+
+    it('pins a version when asked', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ ok: true, tos_version_accepted: '1.1' }));
+      await client.acceptTerms('1.1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${baseUrl}/api/agents/me/accept-terms`,
+        expect.objectContaining({ body: JSON.stringify({ version: '1.1' }) }),
+      );
+    });
+
+    it('surfaces version_mismatch as a BoTTubeError', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ ok: false, error: 'version_mismatch', expected: '1.1', received: '1.0' }),
+      });
+      await expect(client.acceptTerms('1.0')).rejects.toThrow(BoTTubeError);
+    });
+  });
+
+  describe('getTerms', () => {
+    it('reads the current terms version', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ ok: true, version: '1.1', effective: '2026-07-09' }));
+      const res = await client.getTerms();
+      expect(res.version).toBe('1.1');
+      expect(mockFetch).toHaveBeenCalledWith(`${baseUrl}/api/tos`, expect.anything());
+    });
+  });
+
   // -- agent profile ------------------------------------------------------
 
   describe('getAgent', () => {
     it('fetches an agent profile', async () => {
-      const profile = { agent_id: 1, agent_name: 'bot', display_name: 'Bot', total_videos: 5 };
+      // GET /api/agents/<name> returns an envelope, not a flat profile.
+      const profile = { agent: { agent_name: 'bot', display_name: 'Bot' }, videos: [], video_count: 0 };
       mockFetch.mockResolvedValueOnce(ok(profile));
 
       const res = await client.getAgent('bot');
-      expect(res.agent_name).toBe('bot');
+      expect(res.agent.agent_name).toBe('bot');
+      expect(res.video_count).toBe(0);
     });
   });
 
@@ -70,11 +122,12 @@ describe('BoTTubeClient', () => {
 
   describe('listVideos', () => {
     it('lists videos with pagination', async () => {
-      const body = { videos: [], total: 0, page: 1, per_page: 20, has_more: false };
+      const body = { videos: [], total: 0, page: 1, per_page: 20, pages: 0 };
       mockFetch.mockResolvedValueOnce(ok(body));
 
       const res = await client.listVideos(1, 20);
       expect(res.videos).toEqual([]);
+      expect(res.pages).toBe(0);
       expect(mockFetch).toHaveBeenCalledWith(
         `${baseUrl}/api/videos?page=1&per_page=20`,
         expect.anything(),
@@ -124,21 +177,88 @@ describe('BoTTubeClient', () => {
 
   describe('search', () => {
     it('searches videos', async () => {
-      const body = { results: [], query: 'demo', total: 0 };
+      // Real /api/search shape: `videos`, never `results`.
+      const body = { videos: [], query: 'demo', total: 0, page: 1, pages: 0, per_page: 20, filters: { sort: 'recent' } };
       mockFetch.mockResolvedValueOnce(ok(body));
 
       const res = await client.search('demo', { sort: 'recent' });
       expect(res.query).toBe('demo');
+      expect(res.videos).toEqual([]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${baseUrl}/api/search?q=demo&sort=recent`,
+        expect.anything(),
+      );
+    });
+
+    it('forwards pagination and filter options', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ videos: [], query: 'x', total: 0 }));
+      await client.search('x', { page: 2, per_page: 5, category: 'retro', min_views: 10 });
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      expect(url.searchParams.get('page')).toBe('2');
+      expect(url.searchParams.get('per_page')).toBe('5');
+      expect(url.searchParams.get('category')).toBe('retro');
+      expect(url.searchParams.get('min_views')).toBe('10');
     });
   });
 
   describe('getTrending', () => {
-    it('fetches trending videos', async () => {
-      const body = { videos: [], total: 0, page: 1, per_page: 10, has_more: false };
+    function trendingUrl(): URL {
+      return new URL(mockFetch.mock.calls[0][0] as string);
+    }
+
+    it('fetches trending videos with the real response shape', async () => {
+      const body = { videos: [], category: null };
       mockFetch.mockResolvedValueOnce(ok(body));
 
-      const res = await client.getTrending({ limit: 10, timeframe: 'day' });
+      const res = await client.getTrending({ limit: 10 });
       expect(res.videos).toEqual([]);
+      expect(res.category).toBeNull();
+      expect(trendingUrl().searchParams.get('limit')).toBe('10');
+    });
+
+    it('maps timeframe to the days parameter the server understands', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ videos: [], category: null }));
+      await client.getTrending({ timeframe: 'week' });
+      const url = trendingUrl();
+      // Regression: earlier versions sent `timeframe`, which the server ignores.
+      expect(url.searchParams.has('timeframe')).toBe(false);
+      expect(url.searchParams.get('days')).toBe('7');
+    });
+
+    it.each([
+      ['day', '1'],
+      ['month', '30'],
+    ] as const)('maps timeframe=%s to days=%s', async (timeframe, days) => {
+      mockFetch.mockResolvedValueOnce(ok({ videos: [], category: null }));
+      await client.getTrending({ timeframe });
+      expect(trendingUrl().searchParams.get('days')).toBe(days);
+    });
+
+    it('passes days, since and category straight through', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ videos: [], category: 'retro' }));
+      await client.getTrending({ days: 14, category: 'retro' });
+      let url = trendingUrl();
+      expect(url.searchParams.get('days')).toBe('14');
+      expect(url.searchParams.get('category')).toBe('retro');
+
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValueOnce(ok({ videos: [], category: null }));
+      await client.getTrending({ since: 1710000000 });
+      url = trendingUrl();
+      expect(url.searchParams.get('since')).toBe('1710000000');
+      expect(url.searchParams.has('days')).toBe(false);
+    });
+
+    it('sends no window parameters by default', async () => {
+      mockFetch.mockResolvedValueOnce(ok({ videos: [], category: null }));
+      await client.getTrending();
+      expect(mockFetch).toHaveBeenCalledWith(`${baseUrl}/api/trending`, expect.anything());
+    });
+
+    it('rejects conflicting window options before calling the server', async () => {
+      await expect(client.getTrending({ timeframe: 'day', days: 3 })).rejects.toThrow(TypeError);
+      await expect(client.getTrending({ days: 3, since: 1 })).rejects.toThrow(TypeError);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -168,11 +288,11 @@ describe('BoTTubeClient', () => {
     });
 
     it('supports comment types and replies', async () => {
-      const body = { ok: true, comment_id: 2, agent_name: 'bot', content: 'How?', comment_type: 'question', video_id: 'v1' };
+      const body = { ok: true, comment_id: 2, agent_name: 'bot', content: 'Pacing drags at 0:04', comment_type: 'critique', video_id: 'v1' };
       mockFetch.mockResolvedValueOnce(ok(body));
 
-      const res = await client.comment('v1', 'How?', 'question', 1);
-      expect(res.comment_type).toBe('question');
+      const res = await client.comment('v1', 'Pacing drags at 0:04', 'critique', 1);
+      expect(res.comment_type).toBe('critique');
     });
 
     it('throws on validation error', async () => {
@@ -261,9 +381,14 @@ describe('BoTTubeClient', () => {
 
   describe('health', () => {
     it('checks API health', async () => {
-      mockFetch.mockResolvedValueOnce(ok({ status: 'healthy', timestamp: 123 }));
+      // Real /health shape - there is no `status`/`timestamp`.
+      const body = { ok: true, service: 'bottube', version: '1.2.0', uptime_s: 42, videos: 3, agents: 2, humans: 1 };
+      mockFetch.mockResolvedValueOnce(ok(body));
       const res = await client.health();
-      expect(res.status).toBe('healthy');
+      expect(res.ok).toBe(true);
+      expect(res.service).toBe('bottube');
+      expect(res.videos).toBe(3);
+      expect(mockFetch).toHaveBeenCalledWith(`${baseUrl}/health`, expect.anything());
     });
   });
 
