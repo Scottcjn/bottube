@@ -165,7 +165,7 @@ jobs:
           L="${{ needs.lint.result }}"
           T="${{ needs.test.result }}"
           S="${{ needs.security.result }}"
-          D="${{ needs.deployment_drift.result }}"
+          D="${{ needs.deployment-drift.result }}"
           echo "lint=$L test=$T security=$S deployment_drift=$D"
           if echo "$L $T $S $D" | grep -q cancelled; then
             echo "::error::A CI job was CANCELLED at its timeout-minutes limit (infrastructure hang, not necessarily a code failure). Re-run the workflow to confirm."
