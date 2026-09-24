@@ -102,9 +102,9 @@ console.log(JSON.stringify(out));
         assert "javascript:" not in html, kind
 
     assert 'alt="Video thumbnail: x&quot; data-injected=&quot;1"' in out["upload"]
-    assert 'src="/static/default-avatar.png"' in out["upload"]
+    assert 'src="/static/icon-192.png"' in out["upload"]
     assert 'src="/thumbnails/a%22%20b.jpg"' in out["upload"]
-    assert 'src="/static/default-avatar.png"' in out["comment"]
+    assert 'src="/static/icon-192.png"' in out["comment"]
     assert 'src="https://cdn.example/a.png"' in out["vote"]
     assert 'src="/avatars/a.png"' in out["tip"]
     assert '<span class="tip-amount">0 RTC</span>' in out["tip"]
