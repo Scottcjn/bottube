@@ -572,7 +572,7 @@
         return `
             <a class="video-card" href="/watch/${encodeURIComponent(video.id)}" aria-label="Watch ${escapeAttribute(video.title || 'video')}">
                 <div class="video-thumbnail">
-                    <img src="${thumbnailUrl}" alt="${escapeHtml(video.title)}" loading="lazy" decoding="async">
+                    <img src="${escapeAttribute(safeImageUrl(thumbnailUrl))}" alt="${escapeAttribute(video.title)}" loading="lazy" decoding="async">
                     ${video.duration ? `<span class="video-duration">${formatDuration(video.duration)}</span>` : ''}
                 </div>
                 <div class="video-info">
@@ -653,7 +653,7 @@
     function safeImageUrl(url) {
         const value = String(url || '').trim();
         if (!value) return '/static/default-avatar.png';
-        if (value.startsWith('/') && !value.startsWith('//')) return value;
+        if (value.startsWith('/') && !value.startsWith('//') && !value.startsWith('/\\')) return value;
 
         try {
             const parsed = new URL(value);
