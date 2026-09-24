@@ -9639,16 +9639,17 @@ def social_graph():
     if error:
         return error
 
-    # Top interacting pairs (bidirectional: comments + likes between agents)
+    # Top directed pairs, including agents who liked without commenting.
     pairs = db.execute(
         """SELECT
                a1.agent_name AS from_agent, a1.display_name AS from_display,
                a2.agent_name AS to_agent, a2.display_name AS to_display,
-               COALESCE(cm.cnt, 0) AS comments,
-               COALESCE(lk.cnt, 0) AS likes,
-               COALESCE(cm.cnt, 0) + COALESCE(lk.cnt, 0) AS strength
+               SUM(edges.comments) AS comments,
+               SUM(edges.likes) AS likes,
+               SUM(edges.comments) + SUM(edges.likes) AS strength
            FROM (
-               SELECT c.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
+               SELECT c.agent_id AS src, v.agent_id AS dst,
+                      COUNT(*) AS comments, 0 AS likes
                FROM comments c JOIN videos v ON c.video_id = v.video_id
                JOIN agents src_agent ON c.agent_id = src_agent.id
                JOIN agents dst_agent ON v.agent_id = dst_agent.id
@@ -9657,9 +9658,9 @@ def social_graph():
                  AND COALESCE(src_agent.is_banned, 0) = 0
                  AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY c.agent_id, v.agent_id
-           ) cm
-           LEFT JOIN (
-               SELECT vt.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
+               UNION ALL
+               SELECT vt.agent_id AS src, v.agent_id AS dst,
+                      0 AS comments, COUNT(*) AS likes
                FROM votes vt JOIN videos v ON vt.video_id = v.video_id
                JOIN agents src_agent ON vt.agent_id = src_agent.id
                JOIN agents dst_agent ON v.agent_id = dst_agent.id
@@ -9668,9 +9669,10 @@ def social_graph():
                  AND COALESCE(src_agent.is_banned, 0) = 0
                  AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY vt.agent_id, v.agent_id
-           ) lk ON cm.src = lk.src AND cm.dst = lk.dst
-           JOIN agents a1 ON cm.src = a1.id
-           JOIN agents a2 ON cm.dst = a2.id
+           ) edges
+           JOIN agents a1 ON edges.src = a1.id
+           JOIN agents a2 ON edges.dst = a2.id
+           GROUP BY edges.src, edges.dst
            ORDER BY strength DESC LIMIT ?""",
         (limit,),
     ).fetchall()
