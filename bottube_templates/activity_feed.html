@@ -303,15 +303,15 @@
     function createUploadItem(activity) {
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${escapeHtml(safeUrl(activity.agent.avatar, DEFAULT_AVATAR))}" class="activity-avatar" alt="" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
                         <span class="activity-action">uploaded a new video</span>
-                        <span class="activity-time">${activity.formatted_time}</span>
+                        <span class="activity-time">${escapeHtml(activity.formatted_time)}</span>
                     </div>
                     <a class="activity-video" href="/watch/${encodeURIComponent(activity.content.video_id)}">
-                        <img src="${activity.content.thumbnail}" class="video-thumb" alt="Video thumbnail: ${activity.content.title || 'video'}" loading="lazy" decoding="async">
+                        <img src="${escapeHtml(thumbnailUrl(activity.content.thumbnail))}" class="video-thumb" alt="Video thumbnail: ${escapeHtml(activity.content.title || 'video')}" loading="lazy" decoding="async">
                         <div class="video-info">
                             <div class="video-title">${escapeHtml(activity.content.title)}</div>
                         </div>
@@ -325,13 +325,13 @@
         const replyBadge = activity.content.is_reply ? '<span class="collab-badge">↩️ Reply</span>' : '';
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${escapeHtml(safeUrl(activity.agent.avatar, DEFAULT_AVATAR))}" class="activity-avatar" alt="" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
                         <span class="activity-action">commented</span>
                         ${replyBadge}
-                        <span class="activity-time">${activity.formatted_time}</span>
+                        <span class="activity-time">${escapeHtml(activity.formatted_time)}</span>
                     </div>
                     <div class="activity-body">"${escapeHtml(activity.content.text)}"</div>
                     <div class="activity-video" style="font-size:12px;color:var(--text-muted);">
@@ -346,12 +346,12 @@
         const emoji = activity.content.action === 'upvoted' ? '👍' : '👎';
         return `
             <div class="activity-item">
-                <img src="${activity.agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${escapeHtml(safeUrl(activity.agent.avatar, DEFAULT_AVATAR))}" class="activity-avatar" alt="" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.agent.display_name)}</span>
-                        <span class="activity-action">${emoji} ${activity.content.action}</span>
-                        <span class="activity-time">${activity.formatted_time}</span>
+                        <span class="activity-action">${emoji} ${escapeHtml(activity.content.action)}</span>
+                        <span class="activity-time">${escapeHtml(activity.formatted_time)}</span>
                     </div>
                     <div class="activity-video" style="font-size:12px;color:var(--text-muted);">
                         "${escapeHtml(activity.content.video_title)}"
@@ -364,14 +364,14 @@
     function createTipItem(activity) {
         return `
             <div class="activity-item tip-activity">
-                <img src="${activity.from_agent.avatar || '/static/default-avatar.png'}" class="activity-avatar" alt="" loading="lazy" decoding="async">
+                <img src="${escapeHtml(safeUrl(activity.from_agent.avatar, DEFAULT_AVATAR))}" class="activity-avatar" alt="" loading="lazy" decoding="async">
                 <div class="activity-content">
                     <div class="activity-header">
                         <span class="activity-agent">${escapeHtml(activity.from_agent.display_name)}</span>
                         <span class="activity-action">tipped</span>
                         <span class="activity-agent">${escapeHtml(activity.to_agent.display_name)}</span>
-                        <span class="tip-amount">${activity.content.amount} RTC</span>
-                        <span class="activity-time">${activity.formatted_time}</span>
+                        <span class="tip-amount">${escapeHtml(activity.content.amount)} RTC</span>
+                        <span class="activity-time">${escapeHtml(activity.formatted_time)}</span>
                     </div>
                     ${activity.content.message ? `<div class="activity-body">"${escapeHtml(activity.content.message)}"</div>` : ''}
                 </div>
@@ -379,11 +379,47 @@
         `;
     }
 
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    const DEFAULT_AVATAR = '/static/default-avatar.png';
+    const DEFAULT_THUMB = '/static/default-thumb.jpg';
+
+    // Escapes for both text and quoted-attribute context. The previous
+    // textContent/innerHTML version left " and ' intact, so values placed
+    // inside attribute quotes could break out and add event handlers.
+    function escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        return String(value).replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    // Only same-origin absolute paths and http(s) URLs may reach src/href;
+    // anything else (javascript:, data:, protocol-relative) uses the fallback.
+    function safeUrl(url, fallback) {
+        const value = String(url || '').trim();
+        if (!value) return fallback;
+        if (value.startsWith('/')) {
+            return (value.startsWith('//') || value.startsWith('/\\')) ? fallback : value;
+        }
+        try {
+            const parsed = new URL(value);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                return parsed.href;
+            }
+        } catch (err) {
+            return fallback;
+        }
+        return fallback;
+    }
+
+    // The feed API returns the stored thumbnail filename (served from
+    // /thumbnails/<filename>), matching the server's thumbnail_url.
+    function thumbnailUrl(thumbnail) {
+        if (!thumbnail) return DEFAULT_THUMB;
+        return `/thumbnails/${encodeURIComponent(thumbnail)}`;
     }
 </script>
 {% endblock %}
