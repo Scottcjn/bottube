@@ -68,13 +68,18 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip --timeout 30
-        pip install --timeout 30 pytest pytest-cov
+        pip install --timeout 30 -r requirements-ci.txt
         if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
       timeout-minutes: 8
 
+    # Fail closed: a failing test fails this job. Known pre-existing failures
+    # are quarantined one node ID at a time in tests/ci_quarantine.py as
+    # strict xfails (tracked in the issue linked there); a quarantined test
+    # that starts passing also fails the job, so the list can only shrink.
+    # --timeout turns a hung test into a failure instead of eating the step.
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=. --cov-report=xml || true
+        pytest tests/ -v --timeout=120 --cov=. --cov-report=xml
       timeout-minutes: 10
 
     - name: Upload coverage

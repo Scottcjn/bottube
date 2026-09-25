@@ -135,6 +135,16 @@ def pi_health():
     })
 
 
+def _optional_str_field(data, name):
+    """Return ``data[name]`` stripped, ``""`` if absent/null, or ``None`` if it is not a string."""
+    value = data.get(name)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return None
+    return value.strip()
+
+
 @pi_pay_bp.route("/pi/approve", methods=["POST"])
 def pi_approve():
     """Server-side approval leg: re-verify the payment against Pi and our product table, then call Pi /approve."""
@@ -145,7 +155,9 @@ def pi_approve():
         data = {}
     if not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
-    payment_id = (data.get("payment_id") or "").strip()
+    payment_id = _optional_str_field(data, "payment_id")
+    if payment_id is None:
+        return jsonify({"error": "payment_id must be a string"}), 400
     if not payment_id:
         return jsonify({"error": "payment_id required"}), 400
     try:
@@ -194,8 +206,10 @@ def pi_complete():
         data = {}
     if not isinstance(data, dict):
         return jsonify({"error": "JSON body must be an object"}), 400
-    payment_id = (data.get("payment_id") or "").strip()
-    txid = (data.get("txid") or "").strip()
+    payment_id = _optional_str_field(data, "payment_id")
+    txid = _optional_str_field(data, "txid")
+    if payment_id is None or txid is None:
+        return jsonify({"error": "payment_id and txid must be strings"}), 400
     if not payment_id or not txid:
         return jsonify({"error": "payment_id and txid required"}), 400
 

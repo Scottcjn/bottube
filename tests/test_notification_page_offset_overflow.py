@@ -30,4 +30,4 @@ def test_web_notifications_reject_page_beyond_sqlite_range(app, client, register
     )
 
     assert response.status_code == 400
-    assert response.get_json() == {"error": "page out of range"}
+    assert response.get_json() == {"error": "page must be <= 10000", "param": "page"}
