@@ -22374,12 +22374,18 @@ def _ue_record_for_video(video_id, video_row=None):
         return {"ok": False, "error": "numpy missing"}
 
     if video_row is None:
-        db = get_db()
-        video_row = db.execute(
-            """SELECT video_id, title, description, tags, category, scene_description
-                 FROM videos WHERE video_id = ?""",
-            (video_id,),
-        ).fetchone()
+        # Own connection, not get_db(): this also runs on the post-upload
+        # background thread (_ue_record_for_video_async), which has no app context.
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            video_row = conn.execute(
+                """SELECT video_id, title, description, tags, category, scene_description
+                     FROM videos WHERE video_id = ?""",
+                (video_id,),
+            ).fetchone()
+        finally:
+            conn.close()
         if not video_row:
             return {"ok": False, "error": "not_found"}
 
