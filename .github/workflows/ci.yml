@@ -147,13 +147,9 @@ jobs:
         bandit -r . -x ./tests,./python-sdk/tests -q
       timeout-minutes: 5
 
-    # High-severity AND high-confidence findings only (-lll -iii).
-    # ADVISORY for now: two pre-existing B324 findings (hashlib.md5 used for
-    # avatar colours in bottube_server.py, which only need
-    # usedforsecurity=False) would fail it. Once those are fixed, delete the
-    # continue-on-error line below to make this step a hard gate.
+    # High-severity AND high-confidence findings only (-lll -iii); this step
+    # is a hard gate.
     - name: Bandit high severity / high confidence
-      continue-on-error: true
       run: |
         bandit -r . -x ./tests,./python-sdk/tests -lll -iii
       timeout-minutes: 5

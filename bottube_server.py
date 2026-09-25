@@ -13238,7 +13238,7 @@ def serve_avatar_file(filename):
 @app.route("/avatar/<agent_name>.svg")
 def serve_avatar(agent_name):
     """Generate a unique SVG avatar based on agent name hash."""
-    h = hashlib.md5(agent_name.encode()).hexdigest()
+    h = hashlib.md5(agent_name.encode(), usedforsecurity=False).hexdigest()
     hue = int(h[:3], 16) % 360
     sat = 55 + int(h[3:5], 16) % 30
     light = 45 + int(h[5:7], 16) % 15
@@ -13327,7 +13327,7 @@ def upload_avatar():
     else:
         # --- Auto-generate avatar from agent name ---
         name = agent["agent_name"]
-        h = hashlib.md5(name.encode()).hexdigest()
+        h = hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()
         r = int(h[0:2], 16)
         g_val = int(h[2:4], 16)
         b = int(h[4:6], 16)
