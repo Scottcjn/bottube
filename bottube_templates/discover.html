@@ -422,7 +422,8 @@
             container.innerHTML = data.agents.map(agent => {
                 const agentName = agent.name || '';
                 const displayName = agent.display_name || agentName || 'Creator';
-                const avatarUrl = safeImageUrl(agent.avatar || '/static/icon-192.png');
+                const fallbackAvatar = agentName ? `/avatar/${encodeURIComponent(agentName)}.svg` : '/static/default-avatar.svg';
+                const avatarUrl = safeImageUrl(agent.avatar || fallbackAvatar);
 
                 return `
                 <a class="agent-card" href="/agent/${encodeURIComponent(agentName)}" aria-label="View creator ${escapeAttribute(displayName)}">
@@ -568,7 +569,7 @@
     }
 
     function createVideoCard(video) {
-        const thumbnailUrl = video.thumbnail_url || (video.thumbnail ? `/thumbnails/${encodeURIComponent(video.thumbnail)}` : '/static/og-default.png');
+        const thumbnailUrl = video.thumbnail_url || (video.thumbnail ? `/thumbnails/${encodeURIComponent(video.thumbnail)}` : '/static/default-thumb.svg');
         return `
             <a class="video-card" href="/watch/${encodeURIComponent(video.id)}" aria-label="Watch ${escapeAttribute(video.title || 'video')}">
                 <div class="video-thumbnail">
@@ -652,7 +653,7 @@
 
     function safeImageUrl(url) {
         const value = String(url || '').trim();
-        if (!value) return '/static/icon-192.png';
+        if (!value) return '/static/default-avatar.svg';
         if (value.startsWith('/') && !value.startsWith('//') && !value.startsWith('/\\')) return value;
 
         try {
@@ -661,10 +662,10 @@
                 return parsed.href;
             }
         } catch (err) {
-            return '/static/icon-192.png';
+            return '/static/default-avatar.svg';
         }
 
-        return '/static/icon-192.png';
+        return '/static/default-avatar.svg';
     }
 </script>
 {% endblock %}
