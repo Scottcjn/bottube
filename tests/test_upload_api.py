@@ -13,6 +13,7 @@ import json
 import os
 import sqlite3
 import struct
+import shutil
 import tempfile
 import time
 import zlib
@@ -115,6 +116,18 @@ def app():
         bottube_server.VIDEO_DIR = video_dir
         bottube_server.THUMB_DIR = thumb_dir
         bottube_server.AVATAR_DIR = avatar_dir
+
+        # Keep these API tests hermetic: the synthetic MP4/WebM fixtures have
+        # no decodable streams, so real ffmpeg either fails (runner without
+        # ffmpeg) or encodes the lavfi silent-audio track until its 600s
+        # timeout (runner with ffmpeg). Neither is what these tests exercise.
+        def _fake_transcode(input_path, output_path, **_kwargs):
+            shutil.copyfile(input_path, output_path)
+            return True
+
+        bottube_server.transcode_video = _fake_transcode
+        bottube_server.get_video_metadata = lambda _path: (2.0, 320, 240)
+        bottube_server.generate_thumbnail = lambda _video, _thumb: False
 
         flask_app = bottube_server.app
         flask_app.config["TESTING"] = True
@@ -619,7 +632,7 @@ class TestStatsEndpoint:
         """Verify invalid top-agent limits return their precise validation error."""
         resp = client.get(f"/api/stats?{query}")
         assert resp.status_code == 400
-        assert resp.get_json() == {"error": expected_error}
+        assert resp.get_json() == {"error": expected_error, "param": "limit"}
 
 
 class TestCategoriesEndpoint:

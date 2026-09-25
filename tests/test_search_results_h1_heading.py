@@ -83,9 +83,11 @@ class TestSearchResultsH1Heading(unittest.TestCase):
         )
         self.assertIsNotNone(match, "search-results-heading <h1> not found")
         inner = match.group(1)
-        self.assertIn(
-            "{{ query }}",
+        # Any filter chain is fine (#1518 added ``| e`` for XSS escaping);
+        # the heading just has to keep rendering the query.
+        self.assertRegex(
             inner,
+            r"\{\{\s*query\b[^}]*\}\}",
             "Heading text must still render the search query; do not remove "
             "the {{ query }} placeholder.",
         )

@@ -1,9 +1,21 @@
 import re
-from news_routes import generate_rss_feed
 
-def test_rss_channel_logo_url_resolves():
+from flask import Flask
+
+import news_routes
+
+
+def test_rss_channel_logo_url_resolves(monkeypatch):
     """Regression: RSS channel image must point to deployed hyphenated asset."""
-    feed = generate_rss_feed(items=[])
+    monkeypatch.setattr(news_routes, "_get_news_videos", lambda limit=20: [])
+    monkeypatch.setattr(news_routes, "_get_weather_videos", lambda limit=10: [])
+    app = Flask(__name__)
+    app.register_blueprint(news_routes.news_bp)
+
+    resp = app.test_client().get("/news/rss")
+    assert resp.status_code == 200
+    feed = resp.get_data(as_text=True)
+
     match = re.search(r"<url>(https://bottube\.ai/static/[^<]+)</url>", feed)
     assert match, "RSS feed missing <image><url>"
     url = match.group(1)
