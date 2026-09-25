@@ -1,0 +1,28 @@
+[package]
+name = "bottube-client"
+version = "0.1.0"
+edition = "2024"
+description = "Async Rust client for listing, searching, and uploading BoTTube videos"
+license = "MIT"
+repository = "https://github.com/arthurianresolve/bottube-client"
+readme = "README.md"
+keywords = ["bottube", "video", "api", "client", "rustchain"]
+categories = ["api-bindings", "multimedia::video"]
+include = ["src/**", "examples/**", "tests/**", "README.md", "LICENSE", "Cargo.toml", "Cargo.lock"]
+
+[dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "query", "multipart", "stream", "rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
