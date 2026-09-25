@@ -15707,7 +15707,9 @@ def notification_settings_save():
     """Save notification preferences from browser form."""
     if not g.user:
         return jsonify({"error": "Login required"}), 401
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     db = get_db()
     allowed = {
         "comments": "email_notify_comments",
@@ -15716,6 +15718,9 @@ def notification_settings_save():
         "tips": "email_notify_tips",
         "subscriptions": "email_notify_subscriptions",
     }
+    for key in allowed:
+        if key in data and not isinstance(data[key], bool):
+            return jsonify({"error": f"{key} must be a boolean"}), 400
     for key, col in allowed.items():
         if key in data:
             val = 1 if data[key] else 0
