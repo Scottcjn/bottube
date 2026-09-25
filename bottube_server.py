@@ -13736,9 +13736,21 @@ def watch(video_id):
     except Exception:
         prov_meta = {}
 
+    # Only advertise a captions <track> when a caption record actually
+    # exists for this video; otherwise the browser requests a URL that
+    # always 404s (closes #2303).
+    try:
+        has_captions = bool(db.execute(
+            "SELECT 1 FROM video_captions WHERE video_id = ? AND language = 'en' AND format = 'vtt' LIMIT 1",
+            (video_id,),
+        ).fetchone())
+    except Exception:
+        has_captions = False
+
     return render_template(
         "watch.html",
         video=video,
+        has_captions=has_captions,
         creator_badges=creator_badges,
         comments=comments,
         related=related,
