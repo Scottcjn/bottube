@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
 import subprocess
 import textwrap
 import uuid
@@ -65,30 +64,36 @@ class FFmpegTitleCardProvider(GenerationProvider):
         output_dir.mkdir(parents=True, exist_ok=True)
         out_path = output_dir / f"titlecard_{uuid.uuid4().hex[:8]}.mp4"
 
+        # The prompt is untrusted: hand it to drawtext via textfile= (read
+        # verbatim, expansion=none) and run ffmpeg from an argv list with no
+        # shell, so no quoting/escaping of user text is needed anywhere.
+        # ffmpeg runs in output_dir so the textfile= value is a bare
+        # [a-z0-9_.] name that needs no filtergraph escaping either.
         lines = textwrap.wrap(req.prompt, width=35)
-        display_text = "\\n".join(lines[:8])
-        safe_text = display_text.replace("'", "'\\''").replace(":", "\\:")
+        text_path = out_path.with_suffix(".txt")
+        text_path.write_text("\n".join(lines[:8]), encoding="utf-8")
 
         duration = min(req.duration, 30)
         ar = req.aspect_ratio or "1:1"
         w, h = {"16:9": (1280, 720), "9:16": (720, 1280)}.get(ar, (720, 720))
 
-        cmd = (
-            f'{FFMPEG} -y -f lavfi -i '
-            f'"color=c=#1a0a2e:size={w}x{h}:duration={duration}:rate=24" '
-            f'-vf "'
-            f"drawtext=text='{safe_text}'"
-            f":fontcolor=white:fontsize=28:x=(w-text_w)/2:y=(h-text_h)/2"
-            f":font=monospace:line_spacing=8,"
-            f"drawtext=text='bottube.ai'"
-            f":fontcolor=#ffffff40:fontsize=16:x=w-text_w-20:y=h-30"
-            f'" -c:v libx264 -preset ultrafast -pix_fmt yuv420p '
-            f'{shlex.quote(str(out_path))}'
-        )
+        cmd = [
+            FFMPEG, "-y", "-f", "lavfi",
+            "-i", f"color=c=#1a0a2e:size={w}x{h}:duration={duration}:rate=24",
+            "-vf", (
+                f"drawtext=textfile='{text_path.name}':expansion=none"
+                ":fontcolor=white:fontsize=28:x=(w-text_w)/2:y=(h-text_h)/2"
+                ":font=monospace:line_spacing=8,"
+                "drawtext=text='bottube.ai'"
+                ":fontcolor=#ffffff40:fontsize=16:x=w-text_w-20:y=h-30"
+            ),
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            str(out_path.resolve()),
+        ]
 
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=30
+                cmd, cwd=str(output_dir), capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 return False, f"ffmpeg error: {result.stderr[:200]}"
@@ -99,6 +104,8 @@ class FFmpegTitleCardProvider(GenerationProvider):
             return False, "ffmpeg timeout"
         except Exception as e:
             return False, f"ffmpeg error: {e}"
+        finally:
+            text_path.unlink(missing_ok=True)
 
     def get_status(self, external_id: str) -> Tuple[str, float]:
         """Report job status; submit() runs synchronously, so this just checks the output file exists."""
