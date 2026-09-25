@@ -13739,8 +13739,8 @@ def watch(video_id):
         if CAPTIONS_ENABLED:
             has_captions = bool(
                 db.execute(
-                    "SELECT 1 FROM video_captions WHERE video_id = ? LIMIT 1",
-                    (video_id,),
+                    "SELECT 1 FROM video_captions WHERE video_id = ? AND language = ? AND format = ? LIMIT 1",
+                    (video_id, "en", "vtt"),
                 ).fetchone()
             )
     except Exception:
