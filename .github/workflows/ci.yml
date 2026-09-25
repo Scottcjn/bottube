@@ -22,11 +22,11 @@ jobs:
     # silently waiting (the default is 360 minutes).
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       timeout-minutes: 3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
       timeout-minutes: 5
@@ -35,7 +35,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip --timeout 30
         pip install --timeout 30 flake8 pylint
-        if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
       timeout-minutes: 8
 
     - name: Lint with flake8
@@ -46,21 +45,24 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
       timeout-minutes: 5
 
-    - name: Lint with pylint
+    # Advisory only: reports pylint errors (E/F) in the job log and shows the
+    # step as failed, but does not fail the lint job. flake8 above is the gate.
+    - name: Lint with pylint (advisory, non-blocking)
       continue-on-error: true
       run: |
-        pylint bottube_server.py --disable=C,R,W || true
+        pylint bottube_server.py --disable=C,R,W
       timeout-minutes: 5
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The suite takes ~8 min locally without coverage; leave headroom.
+    timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       timeout-minutes: 3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
       timeout-minutes: 5
@@ -69,7 +71,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip --timeout 30
         pip install --timeout 30 -r requirements-ci.txt
-        if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
       timeout-minutes: 8
 
     # Fail closed: a failing test fails this job. Known pre-existing failures
@@ -80,10 +81,10 @@ jobs:
     - name: Run tests
       run: |
         pytest tests/ -v --timeout=120 --cov=. --cov-report=xml
-      timeout-minutes: 10
+      timeout-minutes: 18
 
     - name: Upload coverage
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v7
       if: always()
       timeout-minutes: 5
 
@@ -97,11 +98,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       timeout-minutes: 3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
       timeout-minutes: 5
@@ -124,11 +125,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       timeout-minutes: 3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
       timeout-minutes: 5
@@ -136,20 +137,34 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip --timeout 30
-        pip install --timeout 30 bandit safety
-        if [ -f requirements.txt ]; then pip install --timeout 30 -r requirements.txt; fi
+        pip install --timeout 30 bandit pip-audit
       timeout-minutes: 8
 
-    - name: Run Bandit security linter
+    # Full report of every severity, for reading in the log. Never blocks.
+    - name: Bandit full report (advisory, non-blocking)
       continue-on-error: true
       run: |
-        bandit -r . -x ./tests || true
+        bandit -r . -x ./tests,./python-sdk/tests -q
       timeout-minutes: 5
 
-    - name: Check dependencies for vulnerabilities
+    # High-severity AND high-confidence findings only (-lll -iii).
+    # ADVISORY for now: two pre-existing B324 findings (hashlib.md5 used for
+    # avatar colours in bottube_server.py, which only need
+    # usedforsecurity=False) would fail it. Once those are fixed, delete the
+    # continue-on-error line below to make this step a hard gate.
+    - name: Bandit high severity / high confidence
       continue-on-error: true
       run: |
-        safety check || true
+        bandit -r . -x ./tests,./python-sdk/tests -lll -iii
+      timeout-minutes: 5
+
+    # pip-audit replaces the deprecated `safety check`. Audits the pinned
+    # CI/runtime dependency list. Advisory: a new upstream CVE should not
+    # block unrelated PRs, but the step shows as failed in the log.
+    - name: Audit dependencies with pip-audit (advisory, non-blocking)
+      continue-on-error: true
+      run: |
+        pip-audit -r requirements-ci.txt
       timeout-minutes: 5
 
   # Outcome report: tells the contributor *why* a check is red.
