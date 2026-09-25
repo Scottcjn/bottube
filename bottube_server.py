@@ -13736,8 +13736,21 @@ def watch(video_id):
     except Exception:
         prov_meta = {}
 
+    has_captions = False
+    try:
+        if CAPTIONS_ENABLED:
+            has_captions = bool(
+                db.execute(
+                    "SELECT 1 FROM video_captions WHERE video_id = ? AND language = ? AND format = ? LIMIT 1",
+                    (video_id, "en", "vtt"),
+                ).fetchone()
+            )
+    except Exception:
+        has_captions = False
+
     return render_template(
         "watch.html",
+        has_captions=has_captions,
         video=video,
         creator_badges=creator_badges,
         comments=comments,

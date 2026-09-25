@@ -2286,7 +2286,9 @@
             {% endif %}
             <video controls preload="metadata" id="main-video" aria-label="{{ video.title }}, duration {{ ((video.duration_sec or 0)|int) // 60 }} minutes {{ ((video.duration_sec or 0)|int) % 60 }} seconds" aria-describedby="player-shortcut-summary player-state" aria-keyshortcuts="Space,K,J,L,F,M,C,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,Escape,Shift+Slash">
                 <source src="{{ P }}/api/videos/{{ video.video_id }}/stream" type="video/mp4">
+                {% if has_captions %}
                 <track kind="captions" src="{{ P }}/api/videos/{{ video.video_id }}/captions" srclang="en" label="English (auto)">
+                {% endif %}
                 Your browser does not support the video tag.
             </video>
             <!-- Live region for video state announcements -->
