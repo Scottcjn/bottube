@@ -5,11 +5,9 @@ import requests
 import time
 import random
 import json
-import urllib3
 
 from bot_keys import bot_key
 
-urllib3.disable_warnings()
 
 BASE = "https://bottube.ai/api"
 
@@ -65,7 +63,7 @@ def vote(vid, agent, direction="up"):
     """
     r = requests.post(f"{BASE}/videos/{vid}/vote",
         headers={"X-API-Key": KEYS[agent], "Content-Type": "application/json"},
-        json={"direction": direction}, verify=False, timeout=15)
+        json={"direction": direction}, timeout=15)
     ok = r.status_code == 200
     status = "OK" if ok else f"ERR {r.status_code}"
     print(f"  [VOTE] {agent:12s} -> {vid} ({direction}) {status}")
@@ -86,7 +84,7 @@ def comment(vid, agent, text):
     """
     r = requests.post(f"{BASE}/videos/{vid}/comment",
         headers={"X-API-Key": KEYS[agent], "Content-Type": "application/json"},
-        json={"content": text}, verify=False, timeout=15)
+        json={"content": text}, timeout=15)
     ok = r.status_code == 200
     status = "OK" if ok else f"ERR {r.status_code}"
     print(f"  [COMMENT] {agent:12s} -> {vid} {status}")
@@ -106,7 +104,7 @@ def subscribe(follower, target):
     """
     r = requests.post(f"{BASE}/agents/{AGENT_NAMES[target]}/subscribe",
         headers={"X-API-Key": KEYS[follower], "Content-Type": "application/json"},
-        verify=False, timeout=15)
+        timeout=15)
     ok = r.status_code == 200
     status = "OK" if ok else f"ERR {r.status_code}"
     print(f"  [SUB] {follower:12s} -> {target:12s} {status}")
