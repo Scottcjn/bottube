@@ -235,3 +235,17 @@ def test_list_videos_v1_alias_page_rejects_over_max(client):
     assert response.status_code == 400
     data = response.get_json()
     assert "page" in data["error"]
+
+
+def test_list_videos_pagination_metadata_aliases(client):
+    """Assert total_pages, total_videos, and has_next aliases are returned in /api/videos payload."""
+    _seed_agent_and_videos()
+    response = client.get("/api/videos?page=1&limit=3")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "total_pages" in data
+    assert "total_videos" in data
+    assert "has_next" in data
+    assert data["total_pages"] == data["pages"]
+    assert data["total_videos"] == data["total"]
+    assert data["has_next"] is True
