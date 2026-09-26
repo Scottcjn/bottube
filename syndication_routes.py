@@ -63,9 +63,9 @@ def get_generator() -> ReportGenerator:
 
 def _is_admin_request() -> bool:
     """Check if request has admin key authentication."""
-    from bottube_server import ADMIN_KEY
+    from bottube_server import ADMIN_KEY, _secret_equals
     admin_key = request.headers.get("X-Admin-Key", "")
-    return bool(ADMIN_KEY and admin_key == ADMIN_KEY)
+    return _secret_equals(admin_key, ADMIN_KEY)
 
 
 def _json_object_body():

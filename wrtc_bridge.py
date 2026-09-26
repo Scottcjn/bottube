@@ -8,6 +8,7 @@ Withdraw rtc_balance → send wRTC to user's Solana wallet.
 Blueprint pattern matches paypal_packages.py / usdc_blueprint.py.
 """
 
+import hmac
 import json
 import os
 import subprocess
@@ -144,7 +145,13 @@ def _json_object_body():
 def _is_admin():
     """Check if request has valid admin key."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    return key and key == ADMIN_KEY
+    if not key or not ADMIN_KEY:
+        return False
+    # Constant-time compare on UTF-8 bytes (compare_digest raises on non-ASCII str).
+    try:
+        return hmac.compare_digest(key.encode("utf-8"), ADMIN_KEY.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
 
 
 def _award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""):

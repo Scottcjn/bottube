@@ -652,9 +652,16 @@ def _admin_key_ok(provided, expected) -> bool:
     Compares UTF-8 bytes: hmac.compare_digest raises TypeError on non-ASCII
     str, which would turn a junk key into an HTTP 500.
     """
+    if not isinstance(provided, str) or not isinstance(expected, str):
+        return False
     if not provided or not expected:
         return False
-    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = expected.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
 
 
 @scraper_bp.route("/scraper-dashboard")

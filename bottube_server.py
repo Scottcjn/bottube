@@ -1655,13 +1655,20 @@ def _secret_equals(provided, expected) -> bool:
     hmac.compare_digest raises TypeError for str arguments containing
     non-ASCII characters -- request headers are latin-1 decoded and JSON can
     carry any code point, so comparing raw str turned a junk X-Admin-Key or
-    csrf_token into an HTTP 500 instead of a 401/403.
+    csrf_token into an HTTP 500 instead of a 401/403. A JSON string can also
+    hold an unpaired surrogate ("\\ud800"), which UTF-8 cannot encode; that is
+    treated as a mismatch rather than raising.
     """
     if not isinstance(provided, str) or not isinstance(expected, str):
         return False
     if not provided or not expected:
         return False
-    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = expected.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
 
 
 def _verify_csrf():
