@@ -12884,11 +12884,6 @@ def tip_agent(agent_name):
 @app.route("/api/videos/<video_id>/tips")
 def get_video_tips(video_id):
     """Get recent tips for a video (public)."""
-    db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
-    if not v:
-        return jsonify({"error": "Video not found"}), 404
-    _sync_pending_tips(db)
     page, error = _parse_positive_int_query("page", 1)
     if error:
         return error
@@ -12896,6 +12891,11 @@ def get_video_tips(video_id):
     if error:
         return error
     offset = (page - 1) * per_page
+    db = get_db()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+    _sync_pending_tips(db)
     # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
     # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
     # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
