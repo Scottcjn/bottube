@@ -7,7 +7,11 @@ backticks in a prompt executed on the host.
 """
 
 import os
+import shutil
 import subprocess
+from pathlib import Path
+
+import pytest
 
 from generation.models import GenerationRequest
 from generation.providers import ffmpeg_titlecard
@@ -50,4 +54,30 @@ def test_shell_metacharacters_in_prompt_are_not_executed(tmp_path, monkeypatch):
     # The prompt is handed to drawtext verbatim via textfile=.
     assert " ".join(text.split()) == prompt
     # The temporary text file is cleaned up.
+    assert list((tmp_path / "out").glob("*.txt")) == []
+
+
+def test_unwritable_output_dir_returns_error_not_exception(tmp_path, monkeypatch):
+    def fail_write(self, *args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(ffmpeg_titlecard.Path, "write_text", fail_write)
+
+    ok, msg = FFmpegTitleCardProvider().submit(GenerationRequest(prompt="hello"), tmp_path / "out")
+
+    assert ok is False
+    assert "No space left on device" in msg
+
+
+@pytest.mark.skipif(shutil.which(ffmpeg_titlecard.FFMPEG) is None, reason="ffmpeg not installed")
+def test_renders_a_real_title_card(tmp_path):
+    """Catches filtergraph syntax slips that the argv-only test can't see."""
+    prompt = "it's 10:30, 100% done; $(not a command) `nor this` \\ back\\slash"
+
+    ok, result = FFmpegTitleCardProvider().submit(
+        GenerationRequest(prompt=prompt, duration=1), tmp_path / "out"
+    )
+
+    assert ok is True, result
+    assert Path(result).stat().st_size > 1000
     assert list((tmp_path / "out").glob("*.txt")) == []
