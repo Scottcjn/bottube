@@ -230,7 +230,6 @@ QUARANTINED = {
     'tests/test_user_route_aliases_1362_1371.py::test_me_redirects_anonymous_to_login': _R['R36'],
     'tests/test_user_route_aliases_1362_1371.py::test_settings_redirects_anonymous_to_login': _R['R36'],
     'tests/test_user_route_aliases_1362_1371.py::test_wallet_redirects_anonymous_to_login': _R['R36'],
-    'tests/test_video_metadata_update_validation.py::test_update_video_allows_clearing_description_and_tags': _R['R37'],
     'tests/test_video_tips_api.py::test_video_tips_rejects_invalid_pagination_before_lookup': _R['R38'],
     'tests/test_wrtc_bridge_validation.py::test_bridge_landing_handles_user_with_null_sol_address': _R['R11'],
     'tests/test_wrtc_bridge_validation.py::test_bridge_landing_passes_template_context_for_anonymous_user': _R['R11'],

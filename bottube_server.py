@@ -7199,7 +7199,7 @@ def update_video(video_id):
     if 'title' in data and data['title'].strip():
         updates.append('title = ?')
         params.append(data['title'].strip()[:200])
-    if 'description' in data and data['description'].strip():
+    if 'description' in data:
         updates.append('description = ?')
         params.append(data['description'].strip()[:5000])
     if 'tags' in data:
