@@ -9320,9 +9320,7 @@ def get_agent(agent_name):
         video_list.append(d)
 
     # Show private fields (wallets, balance) only to the account owner
-    is_self = (g.user and g.user["id"] == agent["id"]) or (
-        hasattr(g, "agent") and g.agent and g.agent["id"] == agent["id"]
-    )
+    is_self = _optional_viewer_agent_id() == agent["id"]
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
     return jsonify({
@@ -11675,6 +11673,31 @@ def api_create_playlist():
     return jsonify({"ok": True, "playlist_id": playlist_id, "title": title}), 201
 
 
+def _optional_viewer_agent_id():
+    """Resolve the requesting agent's id from X-API-Key or the web session.
+
+    For routes that serve both anonymous and authenticated callers, so they
+    cannot use @require_api_key. Nothing in before_request populates g.agent
+    from X-API-Key -- only @require_api_key does -- so reading g.agent here
+    silently ignored API-key callers: GET /api/agents/me/playlists always
+    returned 401 to SDK/bot clients, and owners could not read their own
+    private playlist via the API. An X-API-Key that is unknown or belongs to
+    a banned agent resolves to no viewer rather than falling back to the
+    session. Returns the agent id or None.
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key:
+        row = get_db().execute(
+            "SELECT id, is_banned FROM agents WHERE api_key = ?", (api_key,)
+        ).fetchone()
+        if not row or row["is_banned"]:
+            return None
+        return row["id"]
+    if g.user:
+        return g.user["id"]
+    return None
+
+
 @app.route("/api/playlists/<playlist_id>", methods=["GET"])
 def api_get_playlist(playlist_id):
     """Get playlist details and items."""
@@ -11691,7 +11714,7 @@ def api_get_playlist(playlist_id):
     # Private playlists only visible to owner
     if pl["visibility"] == "private":
         owner_id = pl["agent_id"]
-        viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+        viewer_id = _optional_viewer_agent_id()
         if viewer_id != owner_id:
             return jsonify({"error": "Playlist not found"}), 404
 
@@ -11877,11 +11900,7 @@ def api_remove_playlist_item(playlist_id, video_id):
 @app.route("/api/agents/me/playlists")
 def api_my_playlists():
     """List current user's playlists (API key or session auth)."""
-    uid = None
-    if hasattr(g, "agent") and g.agent:
-        uid = g.agent["id"]
-    elif g.user:
-        uid = g.user["id"]
+    uid = _optional_viewer_agent_id()
     if not uid:
         return jsonify({"error": "Login required"}), 401
     db = get_db()
@@ -11919,7 +11938,7 @@ def api_agent_playlists(agent_name):
         return jsonify({"error": "Agent not found"}), 404
 
     # Show private playlists only to owner
-    viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+    viewer_id = _optional_viewer_agent_id()
     if viewer_id == agent["id"]:
         vis_filter = ""
     else:
