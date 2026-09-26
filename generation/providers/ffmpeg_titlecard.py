@@ -71,7 +71,6 @@ class FFmpegTitleCardProvider(GenerationProvider):
         # [a-z0-9_.] name that needs no filtergraph escaping either.
         lines = textwrap.wrap(req.prompt, width=35)
         text_path = out_path.with_suffix(".txt")
-        text_path.write_text("\n".join(lines[:8]), encoding="utf-8")
 
         duration = min(req.duration, 30)
         ar = req.aspect_ratio or "1:1"
@@ -92,6 +91,7 @@ class FFmpegTitleCardProvider(GenerationProvider):
         ]
 
         try:
+            text_path.write_text("\n".join(lines[:8]), encoding="utf-8")
             result = subprocess.run(
                 cmd, cwd=str(output_dir), capture_output=True, text=True, timeout=30
             )
