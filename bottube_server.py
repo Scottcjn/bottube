@@ -32,6 +32,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import feed_cowatch as _feed_cowatch
 from flask import (
     Flask,
     Response,
@@ -10078,31 +10079,12 @@ def _feed_cowatch_scores(db, anchor_video_ids):
     """Co-view counts per video keyed by IP address.
 
     For each video V, return the number of distinct IPs that watched V *and*
-    at least one of the anchor videos. Counts use the existing `views` table
-    (already deduped to one row per (video_id, ip, ~30min window)) with the
-    `idx_views_ip_video` leads with ip_address so the v2 side of the self-join
-    is an indexed lookup instead of a full scan of the views table.
+    at least one of the anchor videos. IPs that have viewed an implausible
+    number of distinct videos (the bot fleet on this host, crawlers, big
+    NATs) are ignored; see feed_cowatch.py for why and for the knobs.
     """
-    if not anchor_video_ids:
-        return {}
-    placeholders = ",".join("?" for _ in anchor_video_ids)
     try:
-        rows = db.execute(
-            f"""SELECT v2.video_id AS vid,
-                       COUNT(DISTINCT v1.ip_address) AS cnt
-                  FROM views v1
-                  JOIN views v2
-                    ON v1.ip_address = v2.ip_address
-                   AND v1.video_id != v2.video_id
-                 WHERE v1.video_id IN ({placeholders})
-                   AND v1.ip_address IS NOT NULL
-                   AND v1.ip_address != ''
-                 GROUP BY v2.video_id
-                 ORDER BY cnt DESC
-                 LIMIT 400""",
-            anchor_video_ids,
-        ).fetchall()
-        return {r["vid"]: int(r["cnt"]) for r in rows}
+        return _feed_cowatch.cowatch_scores(db, anchor_video_ids)
     except Exception:
         return {}
 
