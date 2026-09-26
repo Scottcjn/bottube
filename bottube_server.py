@@ -7441,6 +7441,9 @@ def list_videos():
         "per_page": per_page,
         "total": total,
         "pages": pages,
+        "total_pages": pages,
+        "total_videos": total,
+        "has_next": page < pages if pages else False,
     })
     return _add_video_list_cache_headers(response, etag=etag, latest_ts=latest_ts)
 
