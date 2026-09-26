@@ -2089,6 +2089,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_video ON views(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_dedup ON views(video_id, ip_address, created_at);
+CREATE INDEX IF NOT EXISTS idx_views_ip_video ON views(ip_address, video_id);
 CREATE INDEX IF NOT EXISTS idx_earnings_agent ON earnings(agent_id);
 CREATE INDEX IF NOT EXISTS idx_reward_holds_agent ON reward_holds(agent_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_moderation_holds_target ON moderation_holds(target_type, status, created_at DESC);
@@ -7198,7 +7199,7 @@ def update_video(video_id):
     if 'title' in data and data['title'].strip():
         updates.append('title = ?')
         params.append(data['title'].strip()[:200])
-    if 'description' in data and data['description'].strip():
+    if 'description' in data:
         updates.append('description = ?')
         params.append(data['description'].strip()[:5000])
     if 'tags' in data:
@@ -10079,8 +10080,8 @@ def _feed_cowatch_scores(db, anchor_video_ids):
     For each video V, return the number of distinct IPs that watched V *and*
     at least one of the anchor videos. Counts use the existing `views` table
     (already deduped to one row per (video_id, ip, ~30min window)) with the
-    `idx_views_dedup` composite index covering ip_address + video_id, so the
-    self-join is a single index probe per anchor.
+    `idx_views_ip_video` leads with ip_address so the v2 side of the self-join
+    is an indexed lookup instead of a full scan of the views table.
     """
     if not anchor_video_ids:
         return {}
@@ -13238,7 +13239,7 @@ def serve_avatar_file(filename):
 @app.route("/avatar/<agent_name>.svg")
 def serve_avatar(agent_name):
     """Generate a unique SVG avatar based on agent name hash."""
-    h = hashlib.md5(agent_name.encode()).hexdigest()
+    h = hashlib.md5(agent_name.encode(), usedforsecurity=False).hexdigest()
     hue = int(h[:3], 16) % 360
     sat = 55 + int(h[3:5], 16) % 30
     light = 45 + int(h[5:7], 16) % 15
@@ -13327,7 +13328,7 @@ def upload_avatar():
     else:
         # --- Auto-generate avatar from agent name ---
         name = agent["agent_name"]
-        h = hashlib.md5(name.encode()).hexdigest()
+        h = hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()
         r = int(h[0:2], 16)
         g_val = int(h[2:4], 16)
         b = int(h[4:6], 16)
@@ -15707,7 +15708,9 @@ def notification_settings_save():
     """Save notification preferences from browser form."""
     if not g.user:
         return jsonify({"error": "Login required"}), 401
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     db = get_db()
     allowed = {
         "comments": "email_notify_comments",
@@ -15716,6 +15719,9 @@ def notification_settings_save():
         "tips": "email_notify_tips",
         "subscriptions": "email_notify_subscriptions",
     }
+    for key in allowed:
+        if key in data and not isinstance(data[key], bool):
+            return jsonify({"error": f"{key} must be a boolean"}), 400
     for key, col in allowed.items():
         if key in data:
             val = 1 if data[key] else 0
@@ -22374,12 +22380,18 @@ def _ue_record_for_video(video_id, video_row=None):
         return {"ok": False, "error": "numpy missing"}
 
     if video_row is None:
-        db = get_db()
-        video_row = db.execute(
-            """SELECT video_id, title, description, tags, category, scene_description
-                 FROM videos WHERE video_id = ?""",
-            (video_id,),
-        ).fetchone()
+        # Own connection, not get_db(): this also runs on the post-upload
+        # background thread (_ue_record_for_video_async), which has no app context.
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            video_row = conn.execute(
+                """SELECT video_id, title, description, tags, category, scene_description
+                     FROM videos WHERE video_id = ?""",
+                (video_id,),
+            ).fetchone()
+        finally:
+            conn.close()
         if not video_row:
             return {"ok": False, "error": "not_found"}
 
