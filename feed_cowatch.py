@@ -25,15 +25,18 @@ Environment:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
+
+log = logging.getLogger(__name__)
 
 HOT_IP_TTL_SECONDS = 600
 COWATCH_LIMIT = 400
 
 _cache_lock = threading.Lock()
-_cache = {"ts": 0.0, "key": None, "ips": frozenset()}
+_cache = {"ts": 0.0, "key": None, "ips": frozenset(), "refreshing": False}
 
 
 def _max_ip_videos() -> int:
@@ -51,20 +54,25 @@ def _static_excluded_ips() -> frozenset:
 def hot_ips(db, now=None) -> frozenset:
     """IPs excluded from co-watch: static list plus any IP over the threshold.
 
-    Cached for HOT_IP_TTL_SECONDS. If the refresh query fails, the last good
-    set is kept (an empty set on first failure just means old behaviour).
+    Cached for HOT_IP_TTL_SECONDS. Only one thread refreshes at a time; the
+    others keep serving the previous set meanwhile. A failed refresh is cached
+    too (keeping the last good set), so a broken query is retried once per TTL
+    rather than on every feed request.
     """
     now = time.time() if now is None else now
     threshold = _max_ip_videos()
     static = _static_excluded_ips()
     key = (threshold, static)
     with _cache_lock:
-        if _cache["key"] == key and now - _cache["ts"] < HOT_IP_TTL_SECONDS:
+        fresh = _cache["key"] == key and now - _cache["ts"] < HOT_IP_TTL_SECONDS
+        if fresh or (_cache["refreshing"] and _cache["key"] == key):
             return _cache["ips"]
-        previous = _cache["ips"]
-    dynamic = frozenset()
-    if threshold > 0:
-        try:
+        _cache["refreshing"] = True
+        previous = _cache["ips"] if _cache["key"] == key else static
+    ips = previous
+    try:
+        dynamic = frozenset()
+        if threshold > 0:
             rows = db.execute(
                 """SELECT ip_address FROM views
                     WHERE ip_address IS NOT NULL AND ip_address != ''
@@ -73,28 +81,23 @@ def hot_ips(db, now=None) -> frozenset:
                 (threshold,),
             ).fetchall()
             dynamic = frozenset(r[0] for r in rows)
-        except Exception:
-            return previous | static
-    ips = dynamic | static
-    with _cache_lock:
-        _cache.update(ts=now, key=key, ips=ips)
+        ips = dynamic | static
+    except Exception as exc:
+        log.warning("co-watch hot-IP refresh failed, keeping previous set: %s", exc)
+        ips = previous | static
+    finally:
+        with _cache_lock:
+            _cache.update(ts=now, key=key, ips=ips, refreshing=False)
     return ips
 
 
 def reset_cache() -> None:
     """Forget the cached hot-IP set (tests, or after a config change)."""
     with _cache_lock:
-        _cache.update(ts=0.0, key=None, ips=frozenset())
+        _cache.update(ts=0.0, key=None, ips=frozenset(), refreshing=False)
 
 
-def cowatch_scores(db, anchor_video_ids) -> dict:
-    """Map video_id -> number of distinct (non-hot) IPs that watched it and an anchor."""
-    if not anchor_video_ids:
-        return {}
-    excluded = json.dumps(sorted(hot_ips(db)))
-    placeholders = ",".join("?" for _ in anchor_video_ids)
-    rows = db.execute(
-        f"""SELECT v2.video_id AS vid,
+COWATCH_SQL = """SELECT v2.video_id AS vid,
                    COUNT(DISTINCT v1.ip_address) AS cnt
               FROM views v1
               JOIN views v2
@@ -106,7 +109,17 @@ def cowatch_scores(db, anchor_video_ids) -> dict:
                AND v1.ip_address NOT IN (SELECT value FROM json_each(?))
              GROUP BY v2.video_id
              ORDER BY cnt DESC
-             LIMIT {COWATCH_LIMIT}""",
+             LIMIT {limit}"""
+
+
+def cowatch_scores(db, anchor_video_ids) -> dict:
+    """Map video_id -> number of distinct (non-hot) IPs that watched it and an anchor."""
+    if not anchor_video_ids:
+        return {}
+    excluded = json.dumps(sorted(hot_ips(db)))
+    placeholders = ",".join("?" for _ in anchor_video_ids)
+    rows = db.execute(
+        COWATCH_SQL.format(placeholders=placeholders, limit=COWATCH_LIMIT),
         [*anchor_video_ids, excluded],
     ).fetchall()
     return {r[0]: int(r[1]) for r in rows}

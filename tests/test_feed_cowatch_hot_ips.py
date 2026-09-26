@@ -95,17 +95,63 @@ def test_empty_anchor_list_returns_empty():
 
 
 def test_exclusion_keeps_indexed_plan():
+    """Plans the module's real query, so the SQL under test can't drift."""
     db = _db()
-    excluded = '["%s"]' % HOT
-    plan = [r[3] for r in db.execute(
-        """EXPLAIN QUERY PLAN
-           SELECT v2.video_id, COUNT(DISTINCT v1.ip_address)
-             FROM views v1 JOIN views v2
-               ON v1.ip_address = v2.ip_address AND v1.video_id != v2.video_id
-            WHERE v1.video_id IN (?) AND v1.ip_address IS NOT NULL AND v1.ip_address != ''
-              AND v1.ip_address NOT IN (SELECT value FROM json_each(?))
-            GROUP BY v2.video_id""",
-        ("anchor", excluded),
-    )]
+    sql = feed_cowatch.COWATCH_SQL.format(placeholders="?", limit=feed_cowatch.COWATCH_LIMIT)
+    plan = [r[3] for r in db.execute("EXPLAIN QUERY PLAN " + sql, ("anchor", '["%s"]' % HOT))]
     assert any("SEARCH v2 USING COVERING INDEX idx_views_ip_video" in p for p in plan), plan
     assert not any(p.startswith("SCAN v2") for p in plan), plan
+
+
+class _CountingBroken:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, *a, **k):
+        self.calls += 1
+        raise sqlite3.OperationalError("no such table: json_each")
+
+
+def test_failed_refresh_is_cached_until_ttl():
+    broken = _CountingBroken()
+    feed_cowatch.hot_ips(broken, now=0.0)
+    feed_cowatch.hot_ips(broken, now=1.0)
+    feed_cowatch.hot_ips(broken, now=feed_cowatch.HOT_IP_TTL_SECONDS - 1)
+    assert broken.calls == 1
+    feed_cowatch.hot_ips(broken, now=feed_cowatch.HOT_IP_TTL_SECONDS + 1)
+    assert broken.calls == 2
+
+
+def test_config_change_forces_refresh(monkeypatch):
+    db = _db()
+    assert HOT in feed_cowatch.hot_ips(db, now=0.0)
+    monkeypatch.setenv("BOTTUBE_COWATCH_MAX_IP_VIDEOS", "1000")
+    assert HOT not in feed_cowatch.hot_ips(db, now=1.0)  # within TTL, but the key changed
+
+
+def test_only_one_thread_refreshes_at_a_time():
+    import threading
+
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    class Slow:
+        def execute(self, *a, **k):
+            calls.append(1)
+            started.set()
+            release.wait(5)
+
+            class R:
+                def fetchall(self):
+                    return [(HOT,)]
+            return R()
+
+    feed_cowatch.hot_ips(_db(), now=0.0)  # warm cache
+    t = threading.Thread(target=feed_cowatch.hot_ips, args=(Slow(),), kwargs={"now": 10_000.0})
+    t.start()
+    assert started.wait(5)
+    # A second caller during the refresh gets the stale set without querying.
+    assert HOT in feed_cowatch.hot_ips(Slow(), now=10_000.5)
+    release.set()
+    t.join(5)
+    assert len(calls) == 1

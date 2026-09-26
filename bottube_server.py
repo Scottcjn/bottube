@@ -10085,7 +10085,8 @@ def _feed_cowatch_scores(db, anchor_video_ids):
     """
     try:
         return _feed_cowatch.cowatch_scores(db, anchor_video_ids)
-    except Exception:
+    except Exception as exc:
+        app.logger.warning("co-watch scoring failed, feed falls back to no co-watch: %s", exc)
         return {}
 
 
