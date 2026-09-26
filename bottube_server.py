@@ -1648,6 +1648,22 @@ def set_security_headers(response):
     return response
 
 
+def _secret_equals(provided, expected) -> bool:
+    """Constant-time comparison of a caller-supplied secret against the real one.
+
+    Fails closed on empty or non-string values. Compares UTF-8 bytes because
+    hmac.compare_digest raises TypeError for str arguments containing
+    non-ASCII characters -- request headers are latin-1 decoded and JSON can
+    carry any code point, so comparing raw str turned a junk X-Admin-Key or
+    csrf_token into an HTTP 500 instead of a 401/403.
+    """
+    if not isinstance(provided, str) or not isinstance(expected, str):
+        return False
+    if not provided or not expected:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
 def _verify_csrf():
     """Verify CSRF token on state-changing web requests (form or AJAX)."""
     token = (
@@ -1659,7 +1675,7 @@ def _verify_csrf():
         if isinstance(data, dict):
             token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
-    if not expected or not token or not secrets.compare_digest(token, expected):
+    if not _secret_equals(token, expected):
         # Return JSON for AJAX/API requests so JS can handle the error
         ct = request.headers.get("Content-Type", "")
         if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
@@ -16858,7 +16874,7 @@ def _require_admin():
         provided = request.args.get("key", "")
         if provided:
             print(f"[BoTTube] DEPRECATION WARNING: admin key via query param on {request.path} -- use X-Admin-Key header")
-    if not provided or provided != ADMIN_KEY:
+    if not _secret_equals(provided, ADMIN_KEY):
         return jsonify({"error": "Forbidden"}), 403
     return None
 
@@ -18676,7 +18692,7 @@ def report_comment(comment_id):
 def admin_reports():
     """Admin view of pending reports (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if not ADMIN_KEY or admin_key != ADMIN_KEY:
+    if not _secret_equals(admin_key, ADMIN_KEY):
         return jsonify({"error": "Unauthorized"}), 401
 
     status_filter = request.args.get("status", "pending")
@@ -18983,7 +18999,7 @@ def admin_resolve_moderation_hold(hold_id):
 def admin_resolve_report(report_id):
     """Resolve a report (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if not ADMIN_KEY or admin_key != ADMIN_KEY:
+    if not _secret_equals(admin_key, ADMIN_KEY):
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
@@ -21707,7 +21723,7 @@ def _ts_admin_ok():
     """Check if the current request has admin privileges for trust-and-safety endpoints. Returns: True if admin."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
     expected = ADMIN_KEY
-    return bool(expected) and hmac.compare_digest(key, expected)
+    return _secret_equals(key, expected)
 
 
 @app.route("/admin/blocklist/add", methods=["POST"])

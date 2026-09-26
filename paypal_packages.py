@@ -21,6 +21,7 @@ Environment:
 
 from __future__ import annotations
 
+import hmac
 import os
 import secrets
 import time
@@ -796,7 +797,9 @@ def store_stats():
     admin_key = request.headers.get("X-Admin-Key", "")
     expected_key = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 
-    if not admin_key or admin_key != expected_key:
+    if not admin_key or not expected_key or not hmac.compare_digest(
+        admin_key.encode("utf-8"), expected_key.encode("utf-8")
+    ):
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
