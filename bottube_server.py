@@ -10159,11 +10159,18 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         M = _EMB_CACHE.get("matrix")
         ids = _EMB_CACHE.get("ids", [])
         loaded = _EMB_CACHE.get("loaded_at", 0)
-    if M is None or not ids or (time.time() - loaded > 600):
+    if M is None or not ids:
+        # Nothing cached yet (cold start) — this request has to pay for the
+        # warm-up, there is no stale data to fall back to.
         _ue_cache_warm()
         with _EMB_CACHE_LOCK:
             M = _EMB_CACHE.get("matrix")
             ids = _EMB_CACHE.get("ids", [])
+    elif time.time() - loaded > 600:
+        # Cache is stale but usable — refresh it in the background and
+        # answer this request with the stale-but-fast data. Blocking here
+        # was turning every 10th-minute request into a ~15s stall.
+        _ue_cache_warm_async()
     if M is None or not ids or len(ids) < 5:
         return None
 
@@ -10201,7 +10208,8 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         Vmat = _UV_CACHE.get("matrix")
         Vids = _UV_CACHE.get("ids", [])
         v_loaded = _UV_CACHE.get("loaded_at", 0)
-    if (Vmat is None or not Vids) or (time.time() - v_loaded > 600):
+    if Vmat is None or not Vids:
+        # Cold start — nothing to fall back to, warm synchronously.
         try:
             _uv_cache_warm()
         except Exception:
@@ -10209,6 +10217,12 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         with _UV_CACHE_LOCK:
             Vmat = _UV_CACHE.get("matrix")
             Vids = _UV_CACHE.get("ids", [])
+    elif time.time() - v_loaded > 600:
+        # Stale but usable — refresh in the background, serve stale now.
+        try:
+            _uv_cache_warm_async()
+        except Exception:
+            pass
     visual_sim = None
     visual_index = {}
     if Vmat is not None and Vids:
@@ -21718,6 +21732,7 @@ EMBEDDING_API_URL = (
 # In-memory cache for fast cosine similarity at query time.
 _EMB_CACHE = {"matrix": None, "ids": [], "loaded_at": 0.0}
 _EMB_CACHE_LOCK = _eng_Lock()
+_EMB_CACHE_WARMING = False
 
 # Free-tier Gemini embedContent quota is 100 requests/min/project. We
 # enforce a global ~80 RPM ceiling with a leaky-bucket gap of 0.75s
@@ -21767,6 +21782,7 @@ VISUAL_CAPTION_MAX_LEN = 600
 
 _UV_CACHE = {"matrix": None, "ids": [], "loaded_at": 0.0}
 _UV_CACHE_LOCK = _eng_Lock()
+_UV_CACHE_WARMING = False
 
 # Vision quota is independent of the text embedContent quota but still
 # rate-limited; 4 s gap = 15 RPM, matches free-tier ceiling.
@@ -21999,6 +22015,29 @@ def _uv_cache_warm():
     with _UV_CACHE_LOCK:
         _UV_CACHE.update({"matrix": M, "ids": ids, "loaded_at": time.time()})
     return True
+
+
+def _uv_cache_warm_async():
+    """Kick off a background refresh of the visual embedding cache.
+
+    Callers keep serving the (possibly stale) in-memory cache while this
+    runs, instead of blocking the request thread on the disk read below.
+    """
+    global _UV_CACHE_WARMING
+    with _UV_CACHE_LOCK:
+        if _UV_CACHE_WARMING:
+            return
+        _UV_CACHE_WARMING = True
+
+    def _run():
+        global _UV_CACHE_WARMING
+        try:
+            _uv_cache_warm()
+        finally:
+            with _UV_CACHE_LOCK:
+                _UV_CACHE_WARMING = False
+
+    threading.Thread(target=_run, daemon=True, name="uv-cache-warm").start()
 
 
 def _parse_admin_media_batch_request(
@@ -22469,6 +22508,29 @@ def _ue_cache_warm():
     with _EMB_CACHE_LOCK:
         _EMB_CACHE.update({"matrix": M, "ids": ids, "loaded_at": time.time()})
     return True
+
+
+def _ue_cache_warm_async():
+    """Kick off a background refresh of the text embedding cache.
+
+    Callers keep serving the (possibly stale) in-memory cache while this
+    runs, instead of blocking the request thread on the disk read below.
+    """
+    global _EMB_CACHE_WARMING
+    with _EMB_CACHE_LOCK:
+        if _EMB_CACHE_WARMING:
+            return
+        _EMB_CACHE_WARMING = True
+
+    def _run():
+        global _EMB_CACHE_WARMING
+        try:
+            _ue_cache_warm()
+        finally:
+            with _EMB_CACHE_LOCK:
+                _EMB_CACHE_WARMING = False
+
+    threading.Thread(target=_run, daemon=True, name="ue-cache-warm").start()
 
 
 def _ue_top_k_for_video(video_id, k=10, exclude_self=True):
