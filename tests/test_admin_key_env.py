@@ -23,13 +23,35 @@ def test_trust_safety_gate_uses_ephemeral_admin_key(server_module):
     When neither BOTTUBE_ADMIN_KEY nor RC_ADMIN_KEY is set in the
     environment, bottube_server generates a random ephemeral admin key
     on import. The trust-safety admin routes (/admin/blocklist/add)
-    must accept that key via the X-Admin-Key header so that even an
-    operator who forgot to set the env var can still hit the admin
-    surface using the key logged at startup.
+    must accept that key via the X-Admin-Key header (the key itself is
+    never logged -- see test_ephemeral_admin_key_is_never_printed).
     """
     client = server_module.app.test_client()
     response = client.post('/admin/blocklist/add', headers={'X-Admin-Key': server_module.ADMIN_KEY}, json={})
     assert response.status_code != 401
+
+
+def test_ephemeral_admin_key_is_never_printed(monkeypatch, tmp_path, capsys):
+    """The generated fallback admin key must not reach stdout/stderr.
+
+    Process output goes to journald / gunicorn logs, whose readers are a
+    wider audience than the admin secret.
+    """
+    monkeypatch.setenv("BOTTUBE_AUTH_DB_PATH", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("BOTTUBE_DB_PATH", str(tmp_path / "bottube.db"))
+    monkeypatch.delenv("BOTTUBE_ADMIN_KEY", raising=False)
+    monkeypatch.delenv("RC_ADMIN_KEY", raising=False)
+    sys.modules.pop("bottube_server", None)
+    capsys.readouterr()
+    try:
+        module = importlib.import_module("bottube_server")
+        captured = capsys.readouterr()
+        assert len(module.ADMIN_KEY) == 64
+        assert module.ADMIN_KEY not in captured.out
+        assert module.ADMIN_KEY not in captured.err
+        assert "BOTTUBE_ADMIN_KEY not set" in captured.out
+    finally:
+        sys.modules.pop("bottube_server", None)
 
 
 def test_trust_safety_gate_accepts_bottube_admin_key(monkeypatch, tmp_path):

@@ -16038,8 +16038,14 @@ def giveaway_leaderboard_api():
 
 ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 if not ADMIN_KEY:
+    # Fail closed with an unguessable per-process key. Never print or log it:
+    # stdout lands in journald / gunicorn logs, which have a wider audience
+    # than the admin secret, and under gunicorn every worker generates its own
+    # key anyway, so a logged value would not reliably work. Set
+    # BOTTUBE_ADMIN_KEY to use the admin surface.
     ADMIN_KEY = secrets.token_hex(32)
-    print(f"[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set. Generated ephemeral key: {ADMIN_KEY}")
+    print("[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set; admin endpoints are "
+          "locked until it is configured.")
 
 
 @app.route("/api/admin/visitors")
