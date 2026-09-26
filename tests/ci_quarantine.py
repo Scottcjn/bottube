@@ -84,7 +84,6 @@ QUARANTINED = {
     'tests/test_analytics_dashboard.py::TestAnalyticsDashboardIntegration::test_full_analytics_flow': _R['R08'],
     'tests/test_analytics_dashboard.py::TestAnalyticsPageAccess::test_analytics_page_accessible_when_logged_in': _R['R09'],
     'tests/test_analytics_dashboard.py::TestAnalyticsPageAccess::test_analytics_page_requires_login': _R['R09'],
-    'tests/test_aria_labels.py::TestAriaLabelCoverage::test_submit_buttons_have_action_labels': _R['R10'],
     'tests/test_banano_amount_validation.py::test_ban_withdraw_rejects_invalid_amounts_without_writes[-1]': _R['R11'],
     'tests/test_banano_amount_validation.py::test_ban_withdraw_rejects_invalid_amounts_without_writes[0]': _R['R11'],
     'tests/test_banano_amount_validation.py::test_ban_withdraw_rejects_invalid_amounts_without_writes[Infinity]': _R['R11'],
