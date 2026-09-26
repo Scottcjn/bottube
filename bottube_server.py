@@ -1648,6 +1648,29 @@ def set_security_headers(response):
     return response
 
 
+def _secret_equals(provided, expected) -> bool:
+    """Constant-time comparison of a caller-supplied secret against the real one.
+
+    Fails closed on empty or non-string values. Compares UTF-8 bytes because
+    hmac.compare_digest raises TypeError for str arguments containing
+    non-ASCII characters -- request headers are latin-1 decoded and JSON can
+    carry any code point, so comparing raw str turned a junk X-Admin-Key or
+    csrf_token into an HTTP 500 instead of a 401/403. A JSON string can also
+    hold an unpaired surrogate ("\\ud800"), which UTF-8 cannot encode; that is
+    treated as a mismatch rather than raising.
+    """
+    if not isinstance(provided, str) or not isinstance(expected, str):
+        return False
+    if not provided or not expected:
+        return False
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = expected.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
+
+
 def _verify_csrf():
     """Verify CSRF token on state-changing web requests (form or AJAX)."""
     token = (
@@ -1659,7 +1682,7 @@ def _verify_csrf():
         if isinstance(data, dict):
             token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
-    if not expected or not token or not secrets.compare_digest(token, expected):
+    if not _secret_equals(token, expected):
         # Return JSON for AJAX/API requests so JS can handle the error
         ct = request.headers.get("Content-Type", "")
         if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
@@ -9320,9 +9343,7 @@ def get_agent(agent_name):
         video_list.append(d)
 
     # Show private fields (wallets, balance) only to the account owner
-    is_self = (g.user and g.user["id"] == agent["id"]) or (
-        hasattr(g, "agent") and g.agent and g.agent["id"] == agent["id"]
-    )
+    is_self = _optional_viewer_agent_id() == agent["id"]
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
     return jsonify({
@@ -11675,6 +11696,31 @@ def api_create_playlist():
     return jsonify({"ok": True, "playlist_id": playlist_id, "title": title}), 201
 
 
+def _optional_viewer_agent_id():
+    """Resolve the requesting agent's id from X-API-Key or the web session.
+
+    For routes that serve both anonymous and authenticated callers, so they
+    cannot use @require_api_key. Nothing in before_request populates g.agent
+    from X-API-Key -- only @require_api_key does -- so reading g.agent here
+    silently ignored API-key callers: GET /api/agents/me/playlists always
+    returned 401 to SDK/bot clients, and owners could not read their own
+    private playlist via the API. An X-API-Key that is unknown or belongs to
+    a banned agent resolves to no viewer rather than falling back to the
+    session. Returns the agent id or None.
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key:
+        row = get_db().execute(
+            "SELECT id, is_banned FROM agents WHERE api_key = ?", (api_key,)
+        ).fetchone()
+        if not row or row["is_banned"]:
+            return None
+        return row["id"]
+    if g.user:
+        return g.user["id"]
+    return None
+
+
 @app.route("/api/playlists/<playlist_id>", methods=["GET"])
 def api_get_playlist(playlist_id):
     """Get playlist details and items."""
@@ -11691,7 +11737,7 @@ def api_get_playlist(playlist_id):
     # Private playlists only visible to owner
     if pl["visibility"] == "private":
         owner_id = pl["agent_id"]
-        viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+        viewer_id = _optional_viewer_agent_id()
         if viewer_id != owner_id:
             return jsonify({"error": "Playlist not found"}), 404
 
@@ -11877,11 +11923,7 @@ def api_remove_playlist_item(playlist_id, video_id):
 @app.route("/api/agents/me/playlists")
 def api_my_playlists():
     """List current user's playlists (API key or session auth)."""
-    uid = None
-    if hasattr(g, "agent") and g.agent:
-        uid = g.agent["id"]
-    elif g.user:
-        uid = g.user["id"]
+    uid = _optional_viewer_agent_id()
     if not uid:
         return jsonify({"error": "Login required"}), 401
     db = get_db()
@@ -11919,7 +11961,7 @@ def api_agent_playlists(agent_name):
         return jsonify({"error": "Agent not found"}), 404
 
     # Show private playlists only to owner
-    viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+    viewer_id = _optional_viewer_agent_id()
     if viewer_id == agent["id"]:
         vis_filter = ""
     else:
@@ -16019,8 +16061,14 @@ def giveaway_leaderboard_api():
 
 ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 if not ADMIN_KEY:
+    # Fail closed with an unguessable per-process key. Never print or log it:
+    # stdout lands in journald / gunicorn logs, which have a wider audience
+    # than the admin secret, and under gunicorn every worker generates its own
+    # key anyway, so a logged value would not reliably work. Set
+    # BOTTUBE_ADMIN_KEY to use the admin surface.
     ADMIN_KEY = secrets.token_hex(32)
-    print(f"[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set. Generated ephemeral key: {ADMIN_KEY}")
+    print("[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set; admin endpoints are "
+          "locked until it is configured.")
 
 
 @app.route("/api/admin/visitors")
@@ -16833,7 +16881,7 @@ def _require_admin():
         provided = request.args.get("key", "")
         if provided:
             print(f"[BoTTube] DEPRECATION WARNING: admin key via query param on {request.path} -- use X-Admin-Key header")
-    if not provided or provided != ADMIN_KEY:
+    if not _secret_equals(provided, ADMIN_KEY):
         return jsonify({"error": "Forbidden"}), 403
     return None
 
@@ -18651,7 +18699,7 @@ def report_comment(comment_id):
 def admin_reports():
     """Admin view of pending reports (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if not ADMIN_KEY or admin_key != ADMIN_KEY:
+    if not _secret_equals(admin_key, ADMIN_KEY):
         return jsonify({"error": "Unauthorized"}), 401
 
     status_filter = request.args.get("status", "pending")
@@ -18958,7 +19006,7 @@ def admin_resolve_moderation_hold(hold_id):
 def admin_resolve_report(report_id):
     """Resolve a report (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if not ADMIN_KEY or admin_key != ADMIN_KEY:
+    if not _secret_equals(admin_key, ADMIN_KEY):
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
@@ -21682,7 +21730,7 @@ def _ts_admin_ok():
     """Check if the current request has admin privileges for trust-and-safety endpoints. Returns: True if admin."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
     expected = ADMIN_KEY
-    return bool(expected) and hmac.compare_digest(key, expected)
+    return _secret_equals(key, expected)
 
 
 @app.route("/admin/blocklist/add", methods=["POST"])
