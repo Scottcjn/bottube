@@ -33,10 +33,11 @@ import time
 log = logging.getLogger(__name__)
 
 HOT_IP_TTL_SECONDS = 600
+FAILED_RETRY_SECONDS = 60
 COWATCH_LIMIT = 400
 
 _cache_lock = threading.Lock()
-_cache = {"ts": 0.0, "key": None, "ips": frozenset(), "refreshing": False}
+_cache = {"ts": 0.0, "key": None, "ips": frozenset(), "ok": True, "refreshing": False, "gen": 0}
 
 
 def _max_ip_videos() -> int:
@@ -54,22 +55,31 @@ def _static_excluded_ips() -> frozenset:
 def hot_ips(db, now=None) -> frozenset:
     """IPs excluded from co-watch: static list plus any IP over the threshold.
 
-    Cached for HOT_IP_TTL_SECONDS. Only one thread refreshes at a time; the
-    others keep serving the previous set meanwhile. A failed refresh is cached
-    too (keeping the last good set), so a broken query is retried once per TTL
-    rather than on every feed request.
+    Cached for HOT_IP_TTL_SECONDS. Only one thread refreshes at a time (also
+    on a cold cache or right after a config change); the others keep serving
+    the previous set meanwhile. A failed refresh keeps the last good set and
+    is retried after FAILED_RETRY_SECONDS, not on every feed request.
     """
     now = time.time() if now is None else now
     threshold = _max_ip_videos()
     static = _static_excluded_ips()
     key = (threshold, static)
     with _cache_lock:
-        fresh = _cache["key"] == key and now - _cache["ts"] < HOT_IP_TTL_SECONDS
-        if fresh or (_cache["refreshing"] and _cache["key"] == key):
-            return _cache["ips"]
+        if _cache["key"] == key:
+            ttl = HOT_IP_TTL_SECONDS if _cache["ok"] else FAILED_RETRY_SECONDS
+            if now - _cache["ts"] < ttl or _cache["refreshing"]:
+                return _cache["ips"]
+            previous = _cache["ips"]
+        else:
+            # New or changed config: claim the key right away so concurrent
+            # callers wait on this refresh (serving the static list) instead
+            # of each running the scan.
+            previous = static
+            _cache.update(key=key, ips=static, ts=float("-inf"), ok=True)
+        _cache["gen"] += 1
+        my_gen = _cache["gen"]
         _cache["refreshing"] = True
-        previous = _cache["ips"] if _cache["key"] == key else static
-    ips = previous
+    ips, ok = previous, False
     try:
         dynamic = frozenset()
         if threshold > 0:
@@ -81,20 +91,24 @@ def hot_ips(db, now=None) -> frozenset:
                 (threshold,),
             ).fetchall()
             dynamic = frozenset(r[0] for r in rows)
-        ips = dynamic | static
+        ips, ok = dynamic | static, True
     except Exception as exc:
-        log.warning("co-watch hot-IP refresh failed, keeping previous set: %s", exc)
+        log.warning("co-watch hot-IP refresh failed, keeping previous set for %ss: %s",
+                    FAILED_RETRY_SECONDS, exc)
         ips = previous | static
     finally:
         with _cache_lock:
-            _cache.update(ts=now, key=key, ips=ips, refreshing=False)
+            # Only the newest refresh may publish; an older one (e.g. started
+            # under a config that has since changed) is discarded.
+            if _cache["gen"] == my_gen:
+                _cache.update(ts=now, key=key, ips=ips, ok=ok, refreshing=False)
     return ips
 
 
 def reset_cache() -> None:
     """Forget the cached hot-IP set (tests, or after a config change)."""
     with _cache_lock:
-        _cache.update(ts=0.0, key=None, ips=frozenset(), refreshing=False)
+        _cache.update(ts=0.0, key=None, ips=frozenset(), ok=True, refreshing=False, gen=0)
 
 
 COWATCH_SQL = """SELECT v2.video_id AS vid,

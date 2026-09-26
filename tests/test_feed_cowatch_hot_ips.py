@@ -112,14 +112,24 @@ class _CountingBroken:
         raise sqlite3.OperationalError("no such table: json_each")
 
 
-def test_failed_refresh_is_cached_until_ttl():
+def test_failed_refresh_is_retried_after_short_backoff():
     broken = _CountingBroken()
+    retry = feed_cowatch.FAILED_RETRY_SECONDS
     feed_cowatch.hot_ips(broken, now=0.0)
     feed_cowatch.hot_ips(broken, now=1.0)
-    feed_cowatch.hot_ips(broken, now=feed_cowatch.HOT_IP_TTL_SECONDS - 1)
+    feed_cowatch.hot_ips(broken, now=retry - 1)
     assert broken.calls == 1
-    feed_cowatch.hot_ips(broken, now=feed_cowatch.HOT_IP_TTL_SECONDS + 1)
+    feed_cowatch.hot_ips(broken, now=retry + 1)
     assert broken.calls == 2
+
+
+def test_recovery_after_failure_uses_full_ttl():
+    feed_cowatch.hot_ips(_CountingBroken(), now=0.0)
+    db = _db()
+    assert HOT in feed_cowatch.hot_ips(db, now=feed_cowatch.FAILED_RETRY_SECONDS + 1)
+    broken = _CountingBroken()
+    feed_cowatch.hot_ips(broken, now=feed_cowatch.FAILED_RETRY_SECONDS + 100)
+    assert broken.calls == 0  # healthy result is cached for the full TTL
 
 
 def test_config_change_forces_refresh(monkeypatch):
@@ -154,4 +164,53 @@ def test_only_one_thread_refreshes_at_a_time():
     assert HOT in feed_cowatch.hot_ips(Slow(), now=10_000.5)
     release.set()
     t.join(5)
+    assert not t.is_alive()
     assert len(calls) == 1
+
+
+def _slow_db(calls, started, release):
+    class Slow:
+        def execute(self, *a, **k):
+            calls.append(1)
+            started.set()
+            release.wait(5)
+
+            class R:
+                def fetchall(self):
+                    return [(HOT,)]
+            return R()
+    return Slow()
+
+
+def test_cold_cache_has_a_single_refresher():
+    import threading
+
+    started, release, calls = threading.Event(), threading.Event(), []
+    t = threading.Thread(target=feed_cowatch.hot_ips,
+                         args=(_slow_db(calls, started, release),), kwargs={"now": 0.0})
+    t.start()
+    assert started.wait(5)
+    # Cold cache: a concurrent caller gets the static list, without a second scan.
+    assert feed_cowatch.hot_ips(_slow_db(calls, started, release), now=0.1) == frozenset()
+    release.set()
+    t.join(5)
+    assert not t.is_alive()
+    assert len(calls) == 1
+    assert HOT in feed_cowatch.hot_ips(_db(), now=0.2)
+
+
+def test_stale_refresh_from_old_config_is_discarded(monkeypatch):
+    import threading
+
+    started, release, calls = threading.Event(), threading.Event(), []
+    t = threading.Thread(target=feed_cowatch.hot_ips,
+                         args=(_slow_db(calls, started, release),), kwargs={"now": 0.0})
+    t.start()
+    assert started.wait(5)
+    monkeypatch.setenv("BOTTUBE_COWATCH_MAX_IP_VIDEOS", "1000")  # config changes mid-refresh
+    assert HOT not in feed_cowatch.hot_ips(_db(), now=0.1)       # new-config refresh publishes
+    release.set()
+    t.join(5)
+    assert not t.is_alive()
+    # The old-config refresh finished later but must not overwrite the new result.
+    assert HOT not in feed_cowatch.hot_ips(_db(), now=0.2)
