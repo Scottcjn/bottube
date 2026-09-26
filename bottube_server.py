@@ -2089,6 +2089,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_video ON views(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_dedup ON views(video_id, ip_address, created_at);
+CREATE INDEX IF NOT EXISTS idx_views_ip_video ON views(ip_address, video_id);
 CREATE INDEX IF NOT EXISTS idx_earnings_agent ON earnings(agent_id);
 CREATE INDEX IF NOT EXISTS idx_reward_holds_agent ON reward_holds(agent_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_moderation_holds_target ON moderation_holds(target_type, status, created_at DESC);
@@ -10079,8 +10080,8 @@ def _feed_cowatch_scores(db, anchor_video_ids):
     For each video V, return the number of distinct IPs that watched V *and*
     at least one of the anchor videos. Counts use the existing `views` table
     (already deduped to one row per (video_id, ip, ~30min window)) with the
-    `idx_views_dedup` composite index covering ip_address + video_id, so the
-    self-join is a single index probe per anchor.
+    `idx_views_ip_video` leads with ip_address so the v2 side of the self-join
+    is an indexed lookup instead of a full scan of the views table.
     """
     if not anchor_video_ids:
         return {}
