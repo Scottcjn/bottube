@@ -8625,11 +8625,17 @@ def web_vote_comment(comment_id):
 def _apply_comment_vote(db, comment_id, author_id, voter_id, vote_val, existing):
     """Shared logic for applying a comment vote (API and web).
 
-    The ``existing`` snapshot MUST come from a read inside the same write
-    transaction the caller opened (see fix for #2145). The caller is
-    responsible for re-deriving the authoritative state from
-    ``comment_votes`` on a losing race (IntegrityError).
+    The ``existing`` snapshot normally comes from a read inside the same
+    write transaction the caller opened (see fix for #2145). Re-read a missing
+    snapshot before mutating counters so direct/helper callers also recover
+    when their earlier "no vote" observation became stale.
     """
+    if existing is None:
+        existing = db.execute(
+            "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (voter_id, comment_id),
+        ).fetchone()
+
     if vote_val == 0:
         if existing:
             if existing["vote"] == 1:
