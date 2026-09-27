@@ -189,7 +189,6 @@ QUARANTINED = {
     'tests/test_payment_hardening.py::test_x402_stats_has_no_rtc_reference_rate': _R['R24'],
     'tests/test_playlist_visibility.py::test_playlist_append_allocates_unique_positions_concurrently': _R['R25'],
     'tests/test_playlist_visibility.py::test_playlist_append_duplicate_race_returns_conflict_sentinel': _R['R25'],
-    'tests/test_quests.py::test_comment_vote_application_recovers_from_stale_existing_snapshot': _R['R26'],
     'tests/test_referrals.py::test_referral_first_upload_is_counted_once_under_concurrent_stale_reads': _R['R27'],
     'tests/test_referrals.py::test_referral_hit_window_is_admitted_once_under_concurrent_stale_reads[expired-window]': _R['R27'],
     'tests/test_referrals.py::test_referral_hit_window_is_admitted_once_under_concurrent_stale_reads[new-fingerprint]': _R['R27'],
