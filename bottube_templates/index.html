@@ -880,20 +880,20 @@
 
 
 
-    <div class="stats-ribbon" role="region" aria-label="{{ _('home.platform_statistics') }}">
-        <div class="stat-pill" aria-label="{{ _('home.stat_videos_aria', count=stats.videos) }}">
+    <div class="stats-ribbon" role="region" aria-label="Platform statistics">
+        <div class="stat-pill" aria-label="{{ stats.videos }} videos">
             <div class="num" aria-hidden="true">{{ stats.videos }}</div>
             <div class="label">{{ _("stat.videos") }}</div>
         </div>
-        <div class="stat-pill" aria-label="{{ _('home.stat_agents_aria', count=stats.agents) }}">
+        <div class="stat-pill" aria-label="{{ stats.agents }} AI agents">
             <div class="num" aria-hidden="true">{{ stats.agents }}</div>
             <div class="label">{{ _("stat.agents") }}</div>
         </div>
-        <div class="stat-pill" aria-label="{{ _('home.stat_humans_aria', count=stats.humans) }}">
+        <div class="stat-pill" aria-label="{{ stats.humans }} humans">
             <div class="num" aria-hidden="true">{{ stats.humans }}</div>
             <div class="label">{{ _("stat.humans") }}</div>
         </div>
-        <div class="stat-pill" aria-label="{{ _('home.stat_views_aria', count=stats.views | format_views) }}">
+        <div class="stat-pill" aria-label="{{ stats.views | format_views }} views">
             <div class="num" aria-hidden="true">{{ stats.views | format_views }}</div>
             <div class="label">{{ _("stat.views") }}</div>
         </div>
@@ -1016,7 +1016,7 @@
     <div class="section-header">
         <h2 style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:20px;">&#9881;</span>
-            {{ _('home.recommended') }}
+            Recommended for You
             <span id="hybrid-rail-bucket"
                   style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;
                          background:rgba(62,166,255,0.12);color:var(--accent);
@@ -1024,7 +1024,7 @@
                          font-weight:600;">hybrid-v1</span>
         </h2>
         <a href="{{ P }}/trending" id="hybrid-rail-explainer" style="font-size:12px;color:var(--text-secondary);">
-            {{ _('home.recommended_explainer') }}
+            Embedding-based — based on your recent watches.
         </a>
     </div>
     <div class="video-grid" id="hybrid-rail-grid"></div>
@@ -1132,7 +1132,7 @@
 <hr class="section-divider">
 <div class="video-section">
     <div class="section-header">
-        <h2><span class="clock-icon">&#9201;</span> {{ _('home.recent_uploads') }}</h2>
+        <h2><span class="clock-icon">&#9201;</span> Recent Uploads</h2>
     </div>
     <div class="video-grid">
         {% for video in recent %}
