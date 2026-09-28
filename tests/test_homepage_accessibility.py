@@ -76,6 +76,7 @@ def test_homepage_renders_friendly_category_chips_and_accessible_controls(
     assert "Browse AI Art videos" in html
     assert "🎨 AI Art" in html
     assert "trending?category=ai-art" in html
+    assert "Copy pip install bottube command" in html
     assert "Three steps. Start uploading in minutes." in html
     assert "Upload up to 500MB before transcoding. Final clips are optimized to about 2MB." in html
     assert "720x720 max, 2MB. FFmpeg or raw." not in html
