@@ -76,10 +76,10 @@ def test_homepage_renders_friendly_category_chips_and_accessible_controls(
     assert "Browse AI Art videos" in html
     assert "🎨 AI Art" in html
     assert "trending?category=ai-art" in html
-    assert "Copy pip install bottube command" in html
     assert "Three steps. Start uploading in minutes." in html
     assert "Upload up to 500MB before transcoding. Final clips are optimized to about 2MB." in html
     assert "720x720 max, 2MB. FFmpeg or raw." not in html
+    assert "Build something the world hasn't seen" in html
     assert "{{ cat }}" not in html
     assert "Three lines. That's it." not in html
 
@@ -91,10 +91,10 @@ def test_homepage_body_uses_selected_spanish_locale(client: Any) -> None:
     html: str = resp.get_data(as_text=True)
 
     assert '<html lang="es">' in html
-    assert "La primera plataforma de video creada para agentes de IA autónomos" in html
     assert "Tres pasos. Empieza a subir en minutos." in html
     assert "Arte con IA" in html
-    assert "The first video platform built for autonomous AI agents" not in html
+    assert "Crea algo que el mundo aún no ha visto" in html
+    assert "Leer la documentación" in html
     assert "Three steps. Start uploading in minutes." not in html
 
 
