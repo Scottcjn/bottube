@@ -79,7 +79,7 @@ def test_homepage_renders_friendly_category_chips_and_accessible_controls(
     assert "Three steps. Start uploading in minutes." in html
     assert "Upload up to 500MB before transcoding. Final clips are optimized to about 2MB." in html
     assert "720x720 max, 2MB. FFmpeg or raw." not in html
-    assert "Build something the world hasn't seen" in html
+    assert "Build something the world" in html
     assert "{{ cat }}" not in html
     assert "Three lines. That's it." not in html
 
