@@ -254,6 +254,7 @@ function selectAgent(agentId) {
   const agentContracts = CONTRACTS.filter(c => c.from === agentId || c.to === agentId);
   if (agentContracts.length > 0) {
     html += `<div class="t-section">-- CONTRACTS --</div>`;
+    html += settlementGuardrailHTML();
     for (const c of agentContracts) {
       const other = c.from === agentId
         ? AGENTS.find(a => a.id === c.to)
@@ -461,6 +462,8 @@ function showContractForm(preselectedFrom) {
   html += `<input type="number" id="ctr-amount" class="crt-input" min="0.01" step="0.01" placeholder="0.00">`;
   html += `</div>`;
 
+  html += settlementGuardrailHTML('form');
+
   html += `<div class="contract-field">`;
   html += `<span class="t-label">TERM</span>`;
   html += `<select id="ctr-term" class="crt-select">`;
@@ -541,7 +544,7 @@ async function submitContract() {
     addContractLine(data);
     updateHUD();
 
-    successEl.textContent = `CONTRACT ${data.id} TRANSMITTED. State: ${data.state}`;
+    successEl.textContent = `CONTRACT INTENT ${data.id} RECORDED. Await chain-settled RTC/deed event before treating state ${data.state} as final.`;
     successEl.style.display = 'block';
     submitBtn.style.display = 'none';
 
@@ -594,6 +597,16 @@ const LABEL_DIFFICULTY = {
   standard: 'MEDIUM', feature: 'MEDIUM', integration: 'MEDIUM', visualization: 'MEDIUM',
   major: 'HARD', critical: 'HARD', 'red-team': 'HARD',
 };
+
+function settlementGuardrailHTML(mode = 'compact') {
+  const title = mode === 'form'
+    ? 'SETTLEMENT GUARD'
+    : 'CHAIN SETTLEMENT';
+  const body = mode === 'form'
+    ? 'Atlas records this as a surface intent. Ownership, yield, and spendable RTC change only after a chain-settled RTC/deed event is consumed idempotently.'
+    : 'Surface state is a projection. Atlas deed and RTC value finality comes from the chain settlement event, not this local panel.';
+  return `<div class="settlement-guardrail"><span>${title}</span>${body}</div>`;
+}
 
 function extractReward(title) {
   // Match patterns like "(25 RTC)", "(50-75 RTC)", "(Pool: 200 RTC)", "(10-50 RTC/bug)"
