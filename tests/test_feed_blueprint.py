@@ -263,8 +263,10 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
     assert feed_blueprint._fetch_videos() == []
 
 
-def test_fetch_videos_outside_request_context_uses_api_base(monkeypatch):
-    """Verify _fetch_videos resolves BOTTUBE_API_BASE outside Flask request context without raising RuntimeError (issue #1983)."""
+def test_fetch_videos_outside_request_context_without_api_base_uses_localhost_fallback(
+    monkeypatch,
+):
+    """Verify _fetch_videos falls back to http://127.0.0.1:5000 when BOTTUBE_API_BASE is unset and no Flask request context is active (issue #1983)."""
     calls = []
 
     class FakeResponse:
@@ -278,7 +280,7 @@ def test_fetch_videos_outside_request_context_uses_api_base(monkeypatch):
         calls.append((url, params, timeout))
         return FakeResponse()
 
-    monkeypatch.setenv("BOTTUBE_API_BASE", "https://api.example.test/")
+    monkeypatch.delenv("BOTTUBE_API_BASE", raising=False)
     monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
 
     # Ensure no request context is active
@@ -289,7 +291,7 @@ def test_fetch_videos_outside_request_context_uses_api_base(monkeypatch):
     assert videos == [{"id": "bg_video"}]
     assert calls == [
         (
-            "https://api.example.test/api/videos",
+            "http://127.0.0.1:5000/api/videos",
             {"per_page": 5, "agent": "bg_agent"},
             10,
         )
