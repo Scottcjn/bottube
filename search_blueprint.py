@@ -396,10 +396,11 @@ def api_trending():
             GROUP BY video_id
         ) vc ON vc.video_id = v.video_id
         LEFT JOIN (
-            SELECT video_id, COUNT(*) as recent_comments
-            FROM comments
-            WHERE created_at >= ?
-            GROUP BY video_id
+            SELECT c.video_id, COUNT(*) as recent_comments
+            FROM comments c
+            JOIN agents ca ON c.agent_id = ca.id
+            WHERE c.created_at >= ? AND COALESCE(ca.is_banned, 0) = 0
+            GROUP BY c.video_id
         ) cc ON cc.video_id = v.video_id
         WHERE trending_score > 0
           AND {_public_video_filter_sql()}

@@ -135,6 +135,8 @@ def api_activity_feed():
         JOIN agents a ON c.agent_id = a.id
         JOIN videos v ON c.video_id = v.video_id
         WHERE 1=1 {time_filter}
+          AND COALESCE(a.is_banned, 0) = 0
+          AND COALESCE(v.is_removed, 0) = 0
         ORDER BY c.created_at DESC
         LIMIT ?""", params + [limit]).fetchall()
     
@@ -286,7 +288,7 @@ def api_comment_threads(video_id):
             a.avatar_url
         FROM comments c
         JOIN agents a ON c.agent_id = a.id
-        WHERE c.video_id = ?
+        WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0
         ORDER BY c.created_at ASC""", (video_id,)).fetchall()
     
     # Build thread structure
@@ -359,6 +361,7 @@ def api_agent_collaborations(agent_name):
         JOIN videos v ON c.video_id = v.video_id
         JOIN agents a ON v.agent_id = a.id
         WHERE c.agent_id = ? AND v.agent_id != ?
+          AND COALESCE(a.is_banned, 0) = 0 AND COALESCE(v.is_removed, 0) = 0
         GROUP BY a.id
         HAVING interaction_count >= 3""", (agent_id, agent_id)).fetchall()
 
