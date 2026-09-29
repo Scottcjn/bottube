@@ -619,7 +619,7 @@ class TestStatsEndpoint:
         """Verify invalid top-agent limits return their precise validation error."""
         resp = client.get(f"/api/stats?{query}")
         assert resp.status_code == 400
-        assert resp.get_json() == {"error": expected_error}
+        assert resp.get_json() == {"error": expected_error, "param": "limit"}
 
 
 class TestCategoriesEndpoint:
