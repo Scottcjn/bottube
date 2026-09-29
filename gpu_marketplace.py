@@ -175,6 +175,82 @@ def _claim_gpu_job_transaction(db, provider_id: str, agent_id: int, job_id: str,
     db.commit()
     return "claimed"
 
+
+def _start_gpu_job_transaction(db, provider_id: str, job_id: str, now: int) -> bool:
+    """Atomically transition a claimed job to running state for a given provider."""
+    cursor = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'running', started_at = ?
+        WHERE id = ? AND provider_id = ? AND status = 'claimed'
+        """,
+        (now, job_id, provider_id),
+    )
+    if int(getattr(cursor, "rowcount", 0) or 0) > 0:
+        db.commit()
+        return True
+    db.rollback()
+    return False
+
+
+def _release_gpu_job_transaction(db, provider_id: str, job_id: str, message: str) -> bool:
+    """Atomically release or fail a job back to pending and mark provider online."""
+    cursor = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'pending', provider_id = NULL, claimed_at = NULL, started_at = NULL, error_message = ?
+        WHERE id = ? AND provider_id = ? AND status IN ('claimed', 'running')
+        """,
+        (message, job_id, provider_id),
+    )
+    if int(getattr(cursor, "rowcount", 0) or 0) > 0:
+        db.execute(
+            """
+            UPDATE gpu_providers
+            SET status = 'online'
+            WHERE id = ?
+            """,
+            (provider_id,),
+        )
+        db.commit()
+        return True
+    db.rollback()
+    return False
+
+
+def _complete_gpu_job_transaction(
+    db, job_id: str, provider_id: str, now: int, duration_mins: float = 0.0, payment: float = 0.0, result_url: str = ""
+) -> bool:
+    """Atomically record job completion, update provider stats, and insert history record."""
+    cursor = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'completed', rtc_paid = ?, completed_at = ?, result_url = ?
+        WHERE id = ? AND provider_id = ? AND status = 'running'
+        """,
+        (payment, now, result_url, job_id, provider_id),
+    )
+    if int(getattr(cursor, "rowcount", 0) or 0) > 0:
+        db.execute(
+            """
+            UPDATE gpu_providers
+            SET status = 'online', total_jobs = COALESCE(total_jobs, 0) + 1, total_rtc_earned = COALESCE(total_rtc_earned, 0) + ?
+            WHERE id = ?
+            """,
+            (payment, provider_id),
+        )
+        db.execute(
+            """
+            INSERT INTO gpu_job_history (job_id, provider_id, rtc_amount, completed_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (job_id, provider_id, payment, now),
+        )
+        db.commit()
+        return True
+    db.rollback()
+    return False
+
 def get_db():
     """Get database connection from Flask g context."""
     if not hasattr(g, 'db') or g.db is None:
@@ -248,14 +324,11 @@ def require_gpu_api_key(f):
         if not agent:
             return jsonify({"error": "Invalid API key"}), 401
 
-        try:
-            if agent["is_banned"]:
-                return jsonify({
-                    "error": "Account banned",
-                    "reason": agent["ban_reason"] or "",
-                }), 403
-        except (IndexError, KeyError):
-            pass
+        if bool(dict(agent).get("is_banned")):
+            return jsonify({
+                "error": "Account banned",
+                "reason": dict(agent).get("ban_reason") or "",
+            }), 403
 
         db.execute(
             "UPDATE agents SET last_active = ? WHERE id = ?",
