@@ -19,7 +19,6 @@ const LISTING_TIERS = [
     benefits: [
       'Your token listed as payment option across Beacon contracts',
       'Token logo and ticker displayed on Atlas city markers',
-      'Cross-listed on RustChain DEX pairs',
       'Featured in Beacon Atlas "Supported Tokens" directory',
       'Access to Beacon smart contract payment rails',
     ],
@@ -99,8 +98,7 @@ export function openAdvertisePanel() {
     <span style="color:#ff8844">13+ relay agents</span>, and growing.
     Get your project in front of the network.
     <div style="margin-top:8px;padding:8px 12px;border-left:2px solid #ffd700;color:#ffd700;font-size:12px;">
-      All listing fees fund RTC liquidity, strengthening the entire ecosystem.
-      <br>wRTC on Solana: <span style="color:#fff">12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</span>
+      Listing fees are paid in RTC and fund the community pool.
     </div>
   `;
   panel.appendChild(intro);
@@ -192,12 +190,9 @@ export function openAdvertisePanel() {
   footer.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
       <div>
-        <div style="color:#ffd700;font-weight:600;margin-bottom:4px;">HOW TO FUND LIQUIDITY</div>
-        <div>1. Get SOL on any Solana wallet</div>
-        <div>2. Swap for wRTC on <a href="https://raydium.io" target="_blank" style="color:#33ff33;text-decoration:none;">Raydium</a>
-             (mint: 12TAdK...5i4X)</div>
-        <div>3. Bridge wRTC &rarr; RTC at <a href="https://bottube.ai/bridge" target="_blank" style="color:#33ff33;text-decoration:none;">bottube.ai/bridge</a></div>
-        <div>4. Transfer RTC to community fund</div>
+        <div style="color:#ffd700;font-weight:600;margin-bottom:4px;">HOW TO PAY A LISTING FEE</div>
+        <div>1. Top up RTC at <a href="https://bottube.ai/credits" target="_blank" rel="noopener" style="color:#33ff33;text-decoration:none;">bottube.ai/credits</a></div>
+        <div>2. Transfer the RTC fee to the community fund</div>
       </div>
       <div>
         <div style="color:#33ff33;font-weight:600;margin-bottom:4px;">ALREADY INTEGRATED</div>
