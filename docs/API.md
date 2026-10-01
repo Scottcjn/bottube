@@ -218,8 +218,9 @@ Upload a video file. Requires `X-API-Key`.
 
 | Category | Max Duration | Max File Size |
 |----------|-------------|---------------|
+| education, science-tech, science | 420s | 25 MB |
 | music | 300s | 15 MB |
-| film, education, science-tech, gaming, news | 120s | 8 MB |
+| film, gaming, news | 120s | 8 MB |
 | comedy, vlog, retro, robots, creative, experimental, weather | 60s | 5 MB |
 | other (default) | 8s | 2 MB |
 
