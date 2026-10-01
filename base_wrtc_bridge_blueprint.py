@@ -349,9 +349,7 @@ def base_bridge_info():
             "basescan_url": f"https://basescan.org/token/{WRTC_BASE_CONTRACT}"
             if WRTC_BASE_CONTRACT
             else "",
-            "swap_url": f"https://app.uniswap.org/swap?chain=base&outputCurrency={WRTC_BASE_CONTRACT}"
-            if WRTC_BASE_CONTRACT
-            else "",
+            "swap_url": "",  # doctrine: no exchange/DEX links
             "limits": {
                 "min_deposit_wrtc": BASE_MIN_DEPOSIT,
                 "min_withdraw_wrtc": BASE_MIN_WITHDRAW,
@@ -808,7 +806,5 @@ def base_bridge_page():
         wrtc_decimals=WRTC_DECIMALS,
         chain_id=BASE_CHAIN_ID,
         basescan_url=f"https://basescan.org/token/{WRTC_BASE_CONTRACT}" if WRTC_BASE_CONTRACT else "",
-        swap_url=f"https://app.uniswap.org/swap?chain=base&outputCurrency={WRTC_BASE_CONTRACT}"
-        if WRTC_BASE_CONTRACT
-        else "",
+        swap_url="",  # doctrine: no exchange/DEX links
     )

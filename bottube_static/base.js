@@ -277,10 +277,6 @@
 
       if (href.indexOf("/bridge/wrtc") !== -1) {
         window.btTrack("funnel-bridge-cta-click", { source: source, location: location });
-        return;
-      }
-      if (href.indexOf("raydium.io/swap") !== -1) {
-        window.btTrack("funnel-swap-cta-click", { source: source, location: location });
       }
     }, true);
   }
