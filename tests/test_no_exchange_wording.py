@@ -3,8 +3,9 @@
 
 RTC on BoTTube is a prepaid service credit: it is topped up at /credits and
 spent on the platform. Pages, shipped JS and token metadata must not link to,
-name, or track clicks towards any exchange/DEX, and must not print the wRTC
-mint as a "buy this" hint.
+name, or track clicks towards any exchange/DEX, must not print the wRTC
+mint as a "buy this" hint, and must not offer a token listing or ask anyone
+to provide liquidity.
 """
 
 import time
@@ -15,7 +16,11 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 # Lower-case needles. "12tadkxx" is the head of the Solana wRTC mint.
-FORBIDDEN = ("raydium", "uniswap", "birdeye", "geckoterminal", "buy wrtc", "/otc")
+FORBIDDEN = (
+    "raydium", "uniswap", "birdeye", "geckoterminal", "buy wrtc", "/otc",
+    # No listing tier and no liquidity requirement is offered or asked for.
+    "liquidity", "token listing",
+)
 MINT_HEAD = "12tadkxx"
 
 SHIPPED_DIRS = ("bottube_templates", "bottube_static", "static")
@@ -48,6 +53,17 @@ def test_shipped_files_name_no_exchange():
             if needle in text:
                 offenders.append(f"{path.relative_to(ROOT)}: {needle!r}")
     assert not offenders, "exchange wording in shipped files:\n  " + "\n  ".join(offenders)
+
+
+def test_beacon_atlas_get_listed_panel_has_no_token_tier():
+    source = (ROOT / "bottube_static" / "beacon_atlas" / "advertise.js").read_text(encoding="utf-8")
+    assert source.count("    id: '") == 1
+    assert "id: 'agent'" in source
+    assert "id: 'crypto'" not in source
+    assert "list your token" not in source.lower()
+    # The card template reads tier.fee; the old field name must not come back.
+    assert "tier.fee" in source and "fee: '" in source
+    assert "minLiquidity" not in source
 
 
 def test_services_gateway_points_at_credits_not_otc():

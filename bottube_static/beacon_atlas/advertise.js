@@ -1,31 +1,10 @@
 // SPDX-License-Identifier: MIT
 // ============================================================
 // BEACON ATLAS - Advertise / Get Listed Panel
-// Two tiers: Crypto Payment Listing & Agent Integration
+// One tier: Agent Integration
 // ============================================================
 
 const LISTING_TIERS = [
-  {
-    id: 'crypto',
-    title: 'LIST YOUR TOKEN',
-    subtitle: 'Become a Beacon Payment Option',
-    icon: '\u26A1', // ⚡
-    color: '#ffd700',
-    requirements: [
-      'Bridge minimum 500 RTC liquidity via bottube.ai/bridge',
-      'Provide token contract address and chain details',
-      'Maintain active liquidity pool for 90 days',
-    ],
-    benefits: [
-      'Your token listed as payment option across Beacon contracts',
-      'Token logo and ticker displayed on Atlas city markers',
-      'Featured in Beacon Atlas "Supported Tokens" directory',
-      'Access to Beacon smart contract payment rails',
-    ],
-    cta: 'Apply for Token Listing',
-    contact: 'scott@elyanlabs.ai',
-    minLiquidity: '500 RTC',
-  },
   {
     id: 'agent',
     title: 'INTEGRATE YOUR AGENT',
@@ -33,7 +12,7 @@ const LISTING_TIERS = [
     icon: '\u{1F916}', // 🤖
     color: '#33ff33',
     requirements: [
-      'Donate minimum 200 RTC liquidity to community fund',
+      'Contribute a 200 RTC listing fee to the community fund',
       'Implement beacon_skill heartbeat protocol',
       'Provide working API endpoint or webhook URL',
     ],
@@ -47,7 +26,7 @@ const LISTING_TIERS = [
     ],
     cta: 'Apply for Integration',
     contact: 'scott@elyanlabs.ai',
-    minLiquidity: '200 RTC',
+    fee: '200 RTC',
   },
 ];
 
@@ -60,7 +39,7 @@ export function openAdvertisePanel() {
   panel.id = 'advertise-panel';
   panel.style.cssText = `
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 860px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+    width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
     background: rgba(0, 8, 0, 0.96); border: 1px solid #33ff33;
     border-radius: 4px; z-index: 9999; font-family: 'IBM Plex Mono', monospace;
     box-shadow: 0 0 40px rgba(51, 255, 51, 0.15), inset 0 0 60px rgba(0, 0, 0, 0.5);
@@ -106,7 +85,7 @@ export function openAdvertisePanel() {
   // Tier cards
   const grid = document.createElement('div');
   grid.style.cssText = `
-    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    display: grid; grid-template-columns: 1fr; gap: 16px;
     padding: 12px 20px 20px;
   `;
 
@@ -159,9 +138,9 @@ export function openAdvertisePanel() {
 
       <div style="text-align:center;padding-top:8px;border-top:1px solid ${tier.color}22;">
         <div style="color:${tier.color};font-size:18px;font-weight:600;margin-bottom:4px;">
-          ${tier.minLiquidity}
+          ${tier.fee}
         </div>
-        <div style="color:#88ff88;font-size:10px;margin-bottom:10px;">minimum liquidity</div>
+        <div style="color:#88ff88;font-size:10px;margin-bottom:10px;">listing fee</div>
         <a href="mailto:${tier.contact}?subject=${encodeURIComponent(tier.cta + ' - Beacon Atlas')}"
            style="
              display:inline-block;padding:8px 20px;
