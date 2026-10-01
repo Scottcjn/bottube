@@ -154,6 +154,7 @@ def get_registry() -> ProviderRegistry:
         from generation.providers.stability import StabilityProvider
         from generation.providers.fal_ai import FalAIProvider
         from generation.providers.replicate import ReplicateProvider
+        from generation.providers.modelrunner import ModelRunnerProvider
         from generation.providers.ffmpeg_titlecard import FFmpegTitleCardProvider
 
         reg.register(ComfyUILTXProvider())
@@ -162,6 +163,7 @@ def get_registry() -> ProviderRegistry:
         reg.register(StabilityProvider())
         reg.register(FalAIProvider())
         reg.register(ReplicateProvider())
+        reg.register(ModelRunnerProvider())
         reg.register(FFmpegTitleCardProvider())
 
         _registry = reg
