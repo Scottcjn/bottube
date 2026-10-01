@@ -31,6 +31,10 @@ log = logging.getLogger("bottube.rtc_services")
 
 rtc_services_bp = Blueprint("rtc_services", __name__)
 
+# Single source of truth for the RTC/USD reference (holder-scaled; $0.15 since
+# passing 1,500 wallet holders). An internal accounting unit, not a price.
+RTC_USD = 0.15
+
 # ---------------------------------------------------------------------------
 # Service Catalog
 # ---------------------------------------------------------------------------
@@ -212,13 +216,13 @@ def init_app(app, db_path):
                 "name": svc["name"],
                 "description": svc.get("description", ""),
                 "price_rtc": svc["price_rtc"],
-                "price_usd_approx": round(svc["price_rtc"] * 0.10, 2),
+                "price_usd_approx": round(svc["price_rtc"] * RTC_USD, 2),
                 "ttl_hours": round(svc["token_ttl_sec"] / 3600, 1),
                 "uses": svc.get("uses_total", 1),
             })
         return jsonify({
             "services": services,
-            "rtc_reference_rate": 0.10,
+            "rtc_reference_rate": RTC_USD,
             "currency": "USD",
             "note": "Pay with RTC. Need RTC? Buy from miners at /otc",
         })
@@ -501,7 +505,7 @@ a { color: #e8a838; }
 <p>Pay with RTC — the token earned by real hardware operators.</p>
 """
         for key, svc in SERVICE_CATALOG.items():
-            usd = round(svc["price_rtc"] * 0.10, 2)
+            usd = round(svc["price_rtc"] * RTC_USD, 2)
             html += f"""
 <div class="card">
     <h3>{svc['name']}</h3>
