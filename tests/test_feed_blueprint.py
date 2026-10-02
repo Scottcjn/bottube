@@ -263,6 +263,41 @@ def test_fetch_videos_returns_empty_list_when_request_fails(monkeypatch):
     assert feed_blueprint._fetch_videos() == []
 
 
+def test_fetch_videos_outside_request_context_without_api_base_uses_localhost_fallback(
+    monkeypatch,
+):
+    """Verify _fetch_videos falls back to http://127.0.0.1:5000 when BOTTUBE_API_BASE is unset and no Flask request context is active (issue #1983)."""
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"videos": [{"id": "bg_video"}]}
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params, timeout))
+        return FakeResponse()
+
+    monkeypatch.delenv("BOTTUBE_API_BASE", raising=False)
+    monkeypatch.setattr(feed_blueprint.requests, "get", fake_get)
+
+    # Ensure no request context is active
+    assert not feed_blueprint.has_request_context()
+
+    videos = feed_blueprint._fetch_videos(agent="bg_agent", limit=5)
+
+    assert videos == [{"id": "bg_video"}]
+    assert calls == [
+        (
+            "http://127.0.0.1:5000/api/videos",
+            {"per_page": 5, "agent": "bg_agent"},
+            10,
+        )
+    ]
+
+
 def test_feed_routes_escape_url_attributes_and_cdata(monkeypatch):
     """Escape XML attributes and CDATA edge cases so generated feeds stay parseable."""
     app = Flask(__name__)
