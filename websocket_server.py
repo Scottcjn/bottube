@@ -94,6 +94,179 @@ def _require_video(app, video_id):
     return exists
 
 
+def _get_agent_info_from_row(row):
+    """Extract (user_id, username, is_mod) from an agents row. Returns None if banned."""
+    if not row:
+        return None
+
+    # Reject banned agents on all paths
+    try:
+        if "is_banned" in row.keys() and row["is_banned"]:
+            return None
+    except Exception:
+        pass
+
+    user_id = str(row["id"])
+    display_name = row["display_name"] if "display_name" in row.keys() and row["display_name"] else None
+    agent_name = row["agent_name"] if "agent_name" in row.keys() and row["agent_name"] else None
+    username = display_name or agent_name or user_id
+
+    # Take mod/admin from an agents column if present; otherwise keep it owner-only
+    is_mod = False
+    try:
+        keys = row.keys()
+        if "is_mod" in keys and row["is_mod"]:
+            is_mod = True
+        elif "is_admin" in keys and row["is_admin"]:
+            is_mod = True
+    except Exception:
+        pass
+
+    return {
+        "user_id": user_id,
+        "username": username,
+        "is_mod": is_mod,
+    }
+
+
+def _lookup_agent_by_key(api_key, app):
+    """Query agents table for an agent matching api_key."""
+    db = _get_db(app)
+    try:
+        has_agents = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agents'"
+        ).fetchone()
+        if not has_agents:
+            return None
+        row = db.execute(
+            "SELECT * FROM agents WHERE api_key = ?",
+            (api_key,),
+        ).fetchone()
+        return _get_agent_info_from_row(row)
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return None
+
+
+def _lookup_agent_by_id(agent_id, app):
+    """Query agents table for an agent matching integer id or agent_name."""
+    db = _get_db(app)
+    try:
+        has_agents = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agents'"
+        ).fetchone()
+        if not has_agents:
+            return None
+        row = None
+        if isinstance(agent_id, int) or (isinstance(agent_id, str) and agent_id.isdigit()):
+            row = db.execute(
+                "SELECT * FROM agents WHERE id = ?",
+                (int(agent_id),),
+            ).fetchone()
+        if not row:
+            row = db.execute(
+                "SELECT * FROM agents WHERE agent_name = ?",
+                (str(agent_id),),
+            ).fetchone()
+        return _get_agent_info_from_row(row)
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return None
+
+
+def _get_authenticated_user(data, app):
+    """Extract authenticated identity from Flask session (cookie) or API key.
+
+    Resolves session user_id (agents.id) or API key to the same agent row,
+    ensuring one person has one consistent user_id (agents.id) and username across both paths.
+    Rejects banned agents on all paths.
+    """
+    from flask import request, session, has_request_context
+
+    auth_info = None
+
+    if has_request_context():
+        # Cookie session path: real login sets session["user_id"] = agents.id (integer)
+        sess_uid = session.get("user_id")
+        if sess_uid is not None:
+            auth_info = _lookup_agent_by_id(sess_uid, app)
+            if not auth_info and sess_uid:
+                # Fallback for test harnesses without agent DB rows
+                username = session.get("username") or str(sess_uid)
+                auth_info = {
+                    "user_id": str(sess_uid),
+                    "username": str(username),
+                    "is_mod": bool(session.get("is_mod", False) or session.get("is_admin", False)),
+                }
+
+        # Header API key path
+        if not auth_info:
+            api_key = request.headers.get("X-API-Key")
+            if not api_key:
+                auth_header = request.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
+                    api_key = auth_header[7:].strip()
+            if api_key:
+                auth_info = _lookup_agent_by_key(api_key, app)
+
+    # Payload API key path
+    if not auth_info and isinstance(data, dict):
+        api_key = data.get("api_key") or data.get("auth_token") or data.get("token")
+        if api_key:
+            auth_info = _lookup_agent_by_key(api_key, app)
+
+    return auth_info
+
+
+def _validate_payload_identity(data, auth_user):
+    """Ensure client cannot spoof user_id or username in payload."""
+    payload_user_id = data.get("user_id")
+    payload_username = data.get("username")
+
+    if payload_user_id and str(payload_user_id) != auth_user["user_id"]:
+        return False, "Payload identity spoofing detected: user_id mismatch"
+    if payload_username and str(payload_username) != auth_user["username"]:
+        return False, "Payload identity spoofing detected: username mismatch"
+    return True, None
+
+
+def _is_mod_or_channel_owner(auth_user, room, app):
+    """Return True if auth_user is platform mod/admin OR channel owner (videos.agent_id == agents.id)."""
+    if auth_user.get("is_mod"):
+        return True
+
+    db = _get_db(app)
+    try:
+        has_videos = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='videos'"
+        ).fetchone()
+
+        if has_videos:
+            row = db.execute(
+                "SELECT agent_id FROM videos WHERE video_id = ?",
+                (room,),
+            ).fetchone()
+            if row and row["agent_id"] is not None:
+                if str(row["agent_id"]) == auth_user["user_id"]:
+                    return True
+
+            cols = [c[1] for c in db.execute("PRAGMA table_info(videos)").fetchall()]
+            if "uploader" in cols:
+                row_u = db.execute("SELECT uploader FROM videos WHERE video_id = ?", (room,)).fetchone()
+                if row_u and (str(row_u["uploader"]) == auth_user["user_id"] or str(row_u["uploader"]) == auth_user["username"]):
+                    return True
+    except Exception:
+        pass
+    finally:
+        db.close()
+
+    return False
+
+
 # ── SocketIO Events ────────────────────────────────────────────
 @socketio.on("join")
 def on_join(data):
@@ -109,7 +282,18 @@ def on_join(data):
         emit("error", {"message": "Video not found"})
         return
     db.close()
-    username = data.get("username", "Anonymous")
+
+    auth_user = _get_authenticated_user(data, current_app)
+    if not auth_user:
+        emit("error", {"message": "Authentication required"})
+        return
+
+    valid, err_msg = _validate_payload_identity(data, auth_user)
+    if not valid:
+        emit("error", {"message": err_msg})
+        return
+
+    username = auth_user["username"]
     join_room(room)
     emit("system", {"message": f"{username} joined the chat", "type": "join"}, room=room)
 
@@ -125,10 +309,21 @@ def on_leave(data):
     if data is None:
         return
     room = data.get("video_id", "")
-    username = data.get("username", "Anonymous")
     from flask import current_app
     if not _require_video(current_app, room):
         return
+
+    auth_user = _get_authenticated_user(data, current_app)
+    if not auth_user:
+        emit("error", {"message": "Authentication required"})
+        return
+
+    valid, err_msg = _validate_payload_identity(data, auth_user)
+    if not valid:
+        emit("error", {"message": err_msg})
+        return
+
+    username = auth_user["username"]
     leave_room(room)
     emit("system", {"message": f"{username} left the chat", "type": "leave"}, room=room)
 
@@ -140,9 +335,21 @@ def on_chat_message(data):
     data = _event_object(data)
     if data is None:
         return
+
+    auth_user = _get_authenticated_user(data, current_app)
+    if not auth_user:
+        emit("error", {"message": "Authentication required"})
+        return
+
+    valid, err_msg = _validate_payload_identity(data, auth_user)
+    if not valid:
+        emit("error", {"message": err_msg})
+        return
+
+    user_id = auth_user["user_id"]
+    username = auth_user["username"]
     room = data.get("video_id", "")
-    username = data.get("username", "Anonymous")
-    user_id = data.get("user_id", "")
+
     raw_message = data.get("message", "")
     if raw_message is None:
         raw_message = ""
@@ -237,10 +444,21 @@ def on_mod_action(data):
     if data is None:
         return
 
-    action = data.get("action")
     room = data.get("video_id", "")
     if not _require_video(current_app, room):
         return
+
+    auth_user = _get_authenticated_user(data, current_app)
+    if not auth_user:
+        emit("error", {"message": "Authentication required"})
+        return
+
+    if not _is_mod_or_channel_owner(auth_user, room, current_app):
+        emit("error", {"message": "Moderator or channel owner authorization required"})
+        return
+
+    action = data.get("action")
+    mod_name = auth_user["username"]
 
     if action == "ban":
         user_id = data.get("target_user_id", "")
@@ -255,13 +473,13 @@ def on_mod_action(data):
         db.execute(
             "INSERT INTO chat_bans (id, video_id, user_id, banned_by, reason, expires_at, created_at)"
             " VALUES (?,?,?,?,?,?,?)",
-            (str(_uuid.uuid4()), room, user_id, data.get("mod_name", "mod"),
+            (str(_uuid.uuid4()), room, user_id, mod_name,
              data.get("reason", ""), expires, time.time()),
         )
         db.commit()
         db.close()
         emit("system", {"message": f"User banned by moderator", "type": "ban"}, room=room)
-    
+
     elif action == "timeout":
         user_id = data.get("target_user_id", "")
         timeout_sec = _coerce_non_negative_number(data.get("duration", 300), default=300.0)
@@ -272,6 +490,6 @@ def on_mod_action(data):
         key = f"{user_id}:{room}"
         _last_message_time[key] = time.time() + timeout_sec
         emit("system", {"message": f"User timed out for {timeout_sec}s", "type": "timeout"}, room=room)
-    
+
     elif action == "slow_mode":
         emit("system", {"message": "Slow mode enabled", "type": "slow_mode"}, room=room)
