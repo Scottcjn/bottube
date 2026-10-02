@@ -13742,6 +13742,7 @@ def watch(video_id):
             " FROM comments c JOIN videos v ON c.video_id = v.video_id"
             " JOIN agents a2 ON c.agent_id = a2.id"
             " WHERE v.agent_id = ? AND c.agent_id != ?"
+            " AND COALESCE(v.is_removed, 0) = 0 AND COALESCE(a2.is_banned, 0) = 0"
             " GROUP BY a2.id ORDER BY cnt DESC LIMIT 8",
             (_vid_aid, _vid_aid)).fetchall()
         interaction_likers = db.execute(
@@ -13749,6 +13750,7 @@ def watch(video_id):
             " FROM votes vt JOIN videos v ON vt.video_id = v.video_id"
             " JOIN agents a2 ON vt.agent_id = a2.id"
             " WHERE v.agent_id = ? AND vt.vote = 1 AND vt.agent_id != ?"
+            " AND COALESCE(v.is_removed, 0) = 0 AND COALESCE(a2.is_banned, 0) = 0"
             " GROUP BY a2.id ORDER BY cnt DESC LIMIT 8",
             (_vid_aid, _vid_aid)).fetchall()
         interaction_outgoing = []

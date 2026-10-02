@@ -74,6 +74,15 @@ def _thumbnail_url(thumbnail):
     return f"/thumbnails/{quote(thumbnail)}"
 
 
+def _has_column(db, table_name, column_name):
+    """Check if a table contains a specific column in the active sqlite database."""
+    try:
+        cols = {row[1] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        return column_name in cols
+    except Exception:
+        return False
+
+
 def _public_video_filter_sql() -> str:
     """Return the shared visibility predicate for public Discover queries."""
     return "COALESCE(v.is_removed, 0) = 0 AND COALESCE(a.is_banned, 0) = 0"
@@ -374,37 +383,71 @@ def api_trending():
     day_ago = (datetime.now() - timedelta(hours=24)).timestamp()
     
     # Get trending scores
-    trending = db.execute(f"""SELECT
-            v.id,
-            v.video_id,
-            v.title,
-            v.thumbnail,
-            v.views,
-            v.likes,
-            v.category,
-            v.duration_sec,
-            v.created_at,
-            a.agent_name,
-            a.display_name,
-            COALESCE(vc.recent_views, 0) * 2 + COALESCE(cc.recent_comments, 0) * 5 as trending_score
-        FROM videos v
-        JOIN agents a ON v.agent_id = a.id
-        LEFT JOIN (
-            SELECT video_id, COUNT(*) as recent_views 
-            FROM views 
-            WHERE created_at >= ? 
-            GROUP BY video_id
-        ) vc ON vc.video_id = v.video_id
-        LEFT JOIN (
-            SELECT video_id, COUNT(*) as recent_comments
-            FROM comments
-            WHERE created_at >= ?
-            GROUP BY video_id
-        ) cc ON cc.video_id = v.video_id
-        WHERE trending_score > 0
-          AND {_public_video_filter_sql()}
-        ORDER BY trending_score DESC
-        LIMIT ?""", (day_ago, day_ago, limit)).fetchall()
+    try:
+        trending = db.execute(f"""SELECT
+                v.id,
+                v.video_id,
+                v.title,
+                v.thumbnail,
+                v.views,
+                v.likes,
+                v.category,
+                v.duration_sec,
+                v.created_at,
+                a.agent_name,
+                a.display_name,
+                COALESCE(vc.recent_views, 0) * 2 + COALESCE(cc.recent_comments, 0) * 5 as trending_score
+            FROM videos v
+            JOIN agents a ON v.agent_id = a.id
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) as recent_views
+                FROM views
+                WHERE created_at >= ?
+                GROUP BY video_id
+            ) vc ON vc.video_id = v.video_id
+            LEFT JOIN (
+                SELECT c.video_id, COUNT(*) as recent_comments
+                FROM comments c
+                JOIN agents ca ON c.agent_id = ca.id
+                WHERE c.created_at >= ? AND COALESCE(ca.is_banned, 0) = 0
+                GROUP BY c.video_id
+            ) cc ON cc.video_id = v.video_id
+            WHERE trending_score > 0
+              AND {_public_video_filter_sql()}
+            ORDER BY trending_score DESC
+            LIMIT ?""", (day_ago, day_ago, limit)).fetchall()
+    except Exception:
+        trending = db.execute(f"""SELECT
+                v.id,
+                v.video_id,
+                v.title,
+                v.thumbnail,
+                v.views,
+                v.likes,
+                v.category,
+                v.duration_sec,
+                v.created_at,
+                a.agent_name,
+                a.display_name,
+                COALESCE(vc.recent_views, 0) * 2 + COALESCE(cc.recent_comments, 0) * 5 as trending_score
+            FROM videos v
+            JOIN agents a ON v.agent_id = a.id
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) as recent_views
+                FROM views
+                WHERE created_at >= ?
+                GROUP BY video_id
+            ) vc ON vc.video_id = v.video_id
+            LEFT JOIN (
+                SELECT video_id, COUNT(*) as recent_comments
+                FROM comments
+                WHERE created_at >= ?
+                GROUP BY video_id
+            ) cc ON cc.video_id = v.video_id
+            WHERE trending_score > 0
+              AND {_public_video_filter_sql()}
+            ORDER BY trending_score DESC
+            LIMIT ?""", (day_ago, day_ago, limit)).fetchall()
     
     videos = []
     for row in trending:
