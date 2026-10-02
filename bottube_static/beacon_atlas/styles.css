@@ -593,6 +593,25 @@ html, body {
   gap: 8px;
 }
 
+.settlement-guardrail {
+  margin: 8px 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 176, 0, 0.35);
+  border-left: 3px solid var(--amber);
+  background: rgba(255, 176, 0, 0.06);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settlement-guardrail span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--amber);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
 /* --- HUD Action Button --- */
 .hud-action {
   margin-top: 8px;
