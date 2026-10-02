@@ -1,0 +1,3 @@
+/target/
+/verification/published-client/target/
+/.env

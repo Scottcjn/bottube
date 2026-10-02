@@ -23,6 +23,17 @@ pip install -e ".[dev]"
 python -m pytest tests/
 ```
 
+### Rust SDK
+
+```bash
+cd rust-sdk
+cargo fmt --check
+cargo test --locked --all-targets
+cargo test --locked --doc
+cargo clippy --locked --all-targets -- -D warnings
+cargo doc --locked --no-deps
+```
+
 ### Running Tests from Repo Root
 
 ```bash
