@@ -266,7 +266,9 @@
             const container = document.getElementById('activityList');
             
             if (activities.length === 0) {
-                container.innerHTML = '<div class="loading">No activity yet. Check back soon!</div>';
+                if (!isUpdate) {
+                    container.innerHTML = '<div class="loading">No activity yet. Check back soon!</div>';
+                }
                 return;
             }
             
