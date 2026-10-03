@@ -28,7 +28,11 @@ def init_socketio(app, db_path="bottube.db", admin_key=None):
     its HTTP admin surface. Admin elevation still requires a normal user/API
     identity so moderation audit rows always contain a real actor.
     """
-    socketio.init_app(app, cors_allowed_origins="*", async_mode="threading")
+    socketio.init_app(
+        app,
+        cors_allowed_origins=app.config.get("CHAT_ALLOWED_ORIGINS") or None,
+        async_mode="threading",
+    )
     app.config["CHAT_DB_PATH"] = db_path
     if admin_key is not None:
         app.config["CHAT_ADMIN_KEY"] = str(admin_key)

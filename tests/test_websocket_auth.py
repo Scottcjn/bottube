@@ -4,9 +4,12 @@ These cases pin the authorization contract required before init_socketio() is
 wired into production. They exercise server-derived identity rather than
 trusting event payload fields.
 """
+from contextlib import closing
+import json
 import sqlite3
 
 from flask import Flask
+import pytest
 
 import websocket_server
 
@@ -17,7 +20,7 @@ def _db(path):
     return conn
 
 
-def _make_app(tmp_path):
+def _make_app(tmp_path, allowed_origins=None):
     db_path = tmp_path / "chat.db"
     conn = _db(db_path)
     conn.executescript(
@@ -68,6 +71,7 @@ def _make_app(tmp_path):
     app = Flask(__name__)
     app.secret_key = "test-secret"
     app.testing = True
+    app.config["CHAT_ALLOWED_ORIGINS"] = allowed_origins
     websocket_server._socket_identities.clear()
     websocket_server._last_message_time.clear()
     websocket_server.init_socketio(
@@ -212,3 +216,80 @@ def test_browser_session_auth_binds_existing_agent(tmp_path):
             and packet["args"][0]["username"] == "alice"
             for packet in received
         )
+
+
+@pytest.mark.parametrize("allowed_origins", [None, "", []])
+def test_polling_rejects_cross_origin_session_by_default(tmp_path, allowed_origins):
+    app, db_path = _make_app(tmp_path, allowed_origins)
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+        response = client.get(
+            "/socket.io/?EIO=4&transport=polling",
+            headers={"Origin": "https://untrusted.example"},
+        )
+    assert response.status_code == 400
+    with closing(_db(db_path)) as db:
+        count = db.execute("SELECT COUNT(*) FROM chat_messages").fetchone()[0]
+        assert count == 0
+
+
+def test_polling_rejects_origin_outside_configured_allowlist(tmp_path):
+    app, _ = _make_app(tmp_path, ["https://trusted.example"])
+    response = app.test_client().get(
+        "/socket.io/?EIO=4&transport=polling",
+        headers={"Origin": "https://untrusted.example"},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "allowed_origins, origin, use_api_key",
+    [
+        (None, "http://localhost", False),
+        (None, None, True),
+        (["https://trusted.example"], "https://trusted.example", False),
+        ("https://trusted.example", "https://trusted.example", False),
+    ],
+)
+def test_allowed_polling_client_authenticates_and_writes(
+    tmp_path, allowed_origins, origin, use_api_key
+):
+    app, db_path = _make_app(tmp_path, allowed_origins)
+    headers = {"Origin": origin} if origin else {}
+    if use_api_key:
+        headers["X-API-Key"] = "alice-key"
+    with app.test_client() as client:
+        if not use_api_key:
+            with client.session_transaction() as session:
+                session["user_id"] = 1
+        # Exercise Engine.IO's HTTP origin check, which socketio.test_client
+        # bypasses when it dispatches directly to Socket.IO handlers.
+        path = "/socket.io/?EIO=4&transport=polling"
+        response = client.get(path, headers=headers)
+        assert response.status_code == 200
+        sid = json.loads(response.get_data(as_text=True)[1:])["sid"]
+        path += "&sid=" + sid
+        try:
+            assert client.post(path, data="40", headers=headers).status_code == 200
+            response = client.get(path, headers=headers)
+            packets = response.get_data(as_text=True).split("\x1e")
+            assert any(
+                packet.startswith('42["authenticated",') for packet in packets
+            )
+            message = [
+                "chat_message", {"video_id": "video-a", "message": "hello"}
+            ]
+            assert client.post(
+                path, data="421" + json.dumps(message), headers=headers
+            ).status_code == 200
+            response = client.get(path, headers=headers)
+            packets = response.get_data(as_text=True).split("\x1e")
+            assert "431[]" in packets  # Handler completed before reading SQLite.
+        finally:
+            client.post(path, data="41", headers=headers)
+    with closing(_db(db_path)) as db:
+        row = db.execute(
+            "SELECT user_id, username, message FROM chat_messages"
+        ).fetchone()
+        assert dict(row) == {"user_id": 1, "username": "alice", "message": "hello"}

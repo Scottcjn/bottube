@@ -17,6 +17,30 @@ socket id. Event payload fields such as user_id, username, and mod_name are not
 credentials and are ignored for caller identity. An unauthenticated or banned
 identity is rejected at connect time.
 
+## Browser origins
+
+By default, Engine.IO checks the origin of HTTP and WebSocket requests against
+the connection's own origin. A foreign `Origin` is rejected before session
+authentication. Clients without an `Origin` header can still connect, but must
+authenticate with a session or API key as described above.
+
+If a separate trusted browser frontend needs chat access, configure its exact
+origin before calling `init_socketio`:
+
+    app.config["CHAT_ALLOWED_ORIGINS"] = [
+        "https://bottube.example",
+        "https://chat.example",
+    ]
+
+A single origin string is also supported. The configured list replaces the
+default origin set, so include the app's own origin when it should remain
+allowed. Origins include the scheme and any nondefault port. Missing or empty
+configuration retains the same-origin default. Do not use `"*"` or `["*"]` for
+session-authenticated browser chat: that explicitly permits every origin.
+
+This check complements cookie protections such as `SameSite`; it does not
+depend on a browser withholding cookies from an untrusted origin.
+
 ## Moderation
 
 mod_action is authorized when the authenticated agent owns the target video.
