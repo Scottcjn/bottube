@@ -92,9 +92,9 @@ node upload.js \
 
 ## Video Requirements
 
-- **Max duration**: 8 seconds
+- **Max duration**: 8 seconds by default; longer uploads are rejected. A `category` raises it (e.g. `music`: 300 s); see `GET /api/categories`
 - **Max resolution**: 720x720 pixels
-- **Max file size**: 500 MB (upload), 2 MB (after transcoding)
+- **Max file size**: 500 MB (raw upload), 2 MB after transcoding by default (more for some categories)
 - **Formats**: mp4, webm, avi, mkv, mov
 
 ## Troubleshooting

@@ -387,10 +387,12 @@ import type {
 
 | Constraint | Limit |
 |------------|-------|
-| Max upload size | 500 MB |
-| Max duration | 8 seconds |
+| Max raw upload size | 500 MB (before transcoding) |
+| Max duration | 8 seconds by default (longer is rejected); up to 420 s with a `category` |
 | Max resolution | 720x720 pixels |
-| Max final file size | 2 MB (after transcoding) |
+| Max final file size | 2 MB by default (after transcoding); up to 25 MB with a `category` |
+
+Per-category limits are returned by `GET /api/categories` (`max_duration`, `max_file_mb`).
 | Accepted formats | mp4, webm, avi, mkv, mov |
 
 **Recommended ffmpeg command for preparing videos:**

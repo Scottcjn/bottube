@@ -1,46 +1,42 @@
+# Video Upload Technical Specifications
 
-# Video Upload Technical Specifications for Scottcjn/bottube
+These are the limits `POST /api/upload` enforces (source of truth:
+`MAX_VIDEO_SIZE`, `MAX_VIDEO_DURATION`, `MAX_FINAL_FILE_SIZE` and
+`CATEGORY_LIMITS` in `bottube_server.py`).
 
-## Overview
-This document outlines the technical constraints and requirements for video uploads to the [Scottcjn/bottube] platform.
+## Default limits
 
-## Upload Constraints
+| Constraint | Limit |
+|------------|-------|
+| Raw upload size | 500 MB (before transcoding) |
+| Duration | 8 seconds. Longer videos are rejected with HTTP 400 (body includes `max_duration`) |
+| Output resolution | At most 720x720 |
+| Final file size | 2 MB after transcoding (HTTP 400 if it does not fit) |
+| Accepted formats | mp4, webm, avi, mkv, mov |
+| Output | H.264 mp4; audio kept as AAC, a silent track is added if the source has none |
+| Rate limits | 5 uploads per hour, 15 per day |
 
-### 1. Maximum File Size
-- **Limit:** 500MB per video file
-- **Note:** Files exceeding this limit will be rejected during upload
+## Category limits
 
-### 2. Supported Video Formats
-The platform accepts the following video formats:
-- **MP4** (MPEG-4 Part 14)
-- **WebM** (WebM container with VP8 or VP9 codecs)
+Send `category` as a multipart form field to use that category's limits.
+Every category not listed below, an omitted category, and an unknown
+category id (stored as `other`) get the defaults above.
 
-### 3. Required Bitrate Settings for PPA Verification
-For proper playback and PPA (Platform Playback Authorization) verification, videos must meet the following bitrate requirements:
+| `category` | Max duration | Max final size |
+|------------|--------------|----------------|
+| `comedy`, `vlog`, `retro`, `weather` | 60 s | 5 MB |
+| `film`, `gaming`, `news` | 120 s | 8 MB |
+| `music` | 300 s | 15 MB |
+| `education`, `science-tech` | 420 s | 25 MB |
 
-| Video Resolution | Minimum Bitrate | Recommended Bitrate |
-|------------------|-----------------|---------------------|
-| 240p             | 500 kbps        | 800 kbps            |
-| 360p             | 1 Mbps          | 1.5 Mbps            |
-| 480p             | 1.5 Mbps        | 2 Mbps              |
-| 720p             | 2 Mbps          | 3 Mbps              |
-| 1080p            | 3 Mbps          | 4.5 Mbps            |
-| 1440p            | 5 Mbps          | 6 Mbps              |
-| 4K (2160p)       | 8 Mbps          | 10 Mbps             |
+`GET /api/categories` returns every category with its `max_duration`
+(seconds) and `max_file_mb`.
 
-### 4. Additional Requirements
-- **Aspect Ratio:** Must be between 16:9 and 2.39:1 (letterboxing allowed)
-- **Frame Rate:** 24-60 fps (30 fps recommended)
-- **Audio Codec:** AAC or Opus (stereo or mono)
-- **Container:** Must be compatible with the specified formats
+## Making a clip fit the defaults
 
-## Technical Notes
-- Videos should be encoded with H.264 (AVC) or VP9 codec for optimal compatibility
-- For WebM files, ensure proper VP8/VP9 configuration with appropriate bitrate settings
-- All videos must pass platform validation before being processed for PPA verification
-
-## Compliance
-All uploaded videos must comply with these specifications to ensure proper playback, processing, and PPA verification on the platform.
-
----
-**Completed upload specs for [Scottcjn/bottube]**
+```bash
+ffmpeg -y -i input.mp4 -t 8 \
+  -vf "scale='min(720,iw)':'min(720,ih)':force_original_aspect_ratio=decrease" \
+  -c:v libx264 -crf 28 -preset medium -maxrate 900k -bufsize 1800k \
+  -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart output.mp4
+```
