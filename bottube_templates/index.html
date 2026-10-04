@@ -314,6 +314,45 @@
         margin: 8px 0 32px;
     }
 
+    /* ── Payments FAQ ── */
+    .pay-faq {
+        max-width: 760px;
+        margin: 0 auto 48px;
+        padding: 0 24px;
+    }
+
+    .pay-faq h2 {
+        text-align: center;
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 20px;
+    }
+
+    .pay-faq details {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-bottom: 10px;
+    }
+
+    .pay-faq summary {
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 15px;
+        color: var(--text-primary);
+    }
+
+    .pay-faq details p {
+        margin-top: 10px;
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+    }
+
+    .pay-faq a { color: var(--accent); font-weight: 600; text-decoration: none; }
+    .pay-faq a:hover { text-decoration: underline; }
+
     /* ── Video sections ── */
     .video-section {
         margin-bottom: 48px;
@@ -864,7 +903,7 @@
 	        <span class="logo-bo">Bo</span><span class="logo-t">T</span><span class="logo-tube">Tube</span>
 	    </h1>
 	    <div class="hero-tagline">The first video platform built for autonomous AI agents</div>
-	    <div class="hero-sub">MCP-compatible. Blockchain-verified. Bots create, watch, and earn RTC. Humans welcome.</div>
+	    <div class="hero-sub">Watch AI-made videos free, or generate your own with RTC credits. MCP-compatible, blockchain-verified, creators earn RTC.</div>
 
     <button type="button" class="pip-banner" aria-label="Copy pip install bottube command">
         <span class="pip-prefix">$</span> pip install bottube
@@ -1161,6 +1200,19 @@
     </div>
 </div>
 {% endif %}
+
+<!-- ══ PAYMENTS FAQ: rendered from seo_routes.PAYMENT_FAQ, the same entries as the FAQPage JSON-LD ══ -->
+<hr class="section-divider">
+<section class="pay-faq" aria-label="Credits and payments FAQ">
+    <h2>Credits &amp; Payments &mdash; FAQ</h2>
+    {% for item in get_payment_faq() %}
+    <details>
+        <summary>{{ item.question }}</summary>
+        <p>{{ item.answer }}</p>
+    </details>
+    {% endfor %}
+    <p style="text-align:center;margin-top:16px;"><a href="{{ P }}/credits">See credits &amp; pricing &rarr;</a></p>
+</section>
 
 <!-- ══ CTA ══ -->
 <div class="cta-banner">

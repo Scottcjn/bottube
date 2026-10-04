@@ -136,3 +136,140 @@ def test_logged_in_watch_and_dashboard_render_no_exchange_wording(app, client):
     dashboard_html = dashboard.get_data(as_text=True)
     _assert_clean(dashboard_html, "/dashboard")
     assert "Need more credits for tipping?" in dashboard_html
+
+
+# --- Homepage copy left behind by wording removals --------------------------
+# Cutting a phrase out of a sentence once left the hero reading "generate your
+# own ." and left a payments FAQ answer that no longer matched its FAQPage
+# JSON-LD. These checks render the homepage and read it the way a visitor and
+# a search engine do.
+
+import json
+import re
+from html import unescape
+from html.parser import HTMLParser
+
+
+class _HomeParser(HTMLParser):
+    """Collects the hero sub-line, visible payments FAQ pairs and JSON-LD blocks."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.hero_sub = None
+        self.faq = []  # [(question, answer)]
+        self.jsonld = []
+        self._stack = []  # what we are currently capturing
+        self._buf = []
+        self._in_pay_faq = 0
+        self._question = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        classes = (attrs.get("class") or "").split()
+        if tag == "section" and "pay-faq" in classes:
+            self._in_pay_faq += 1
+        elif self._in_pay_faq and tag == "section":
+            self._in_pay_faq += 1
+        capture = None
+        if tag == "div" and "hero-sub" in classes and self.hero_sub is None:
+            capture = "hero"
+        elif tag == "script" and attrs.get("type") == "application/ld+json":
+            capture = "jsonld"
+        elif self._in_pay_faq and tag == "summary":
+            capture = "question"
+        elif self._in_pay_faq and tag == "p" and self._question is not None:
+            capture = "answer"
+        if capture:
+            self._stack.append((tag, capture))
+            self._buf = []
+
+    def handle_endtag(self, tag):
+        if tag == "section" and self._in_pay_faq:
+            self._in_pay_faq -= 1
+        if not self._stack or self._stack[-1][0] != tag:
+            return
+        _, capture = self._stack.pop()
+        text = "".join(self._buf)
+        if capture == "jsonld":
+            self.jsonld.append(text)
+            return
+        text = re.sub(r"\s+", " ", text).strip()
+        if capture == "hero":
+            self.hero_sub = text
+        elif capture == "question":
+            self._question = text
+        elif capture == "answer":
+            self.faq.append((self._question, text))
+            self._question = None
+
+    def handle_data(self, data):
+        if self._stack:
+            self._buf.append(data)
+
+
+def _parse_home(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    parser = _HomeParser()
+    parser.feed(html)
+    return html, parser
+
+
+def _faq_answers_from_jsonld(blocks):
+    """Map question -> set of answer texts across every FAQPage block."""
+    answers = {}
+    for raw in blocks:
+        data = json.loads(raw)
+        for node in data if isinstance(data, list) else [data]:
+            if node.get("@type") != "FAQPage":
+                continue
+            for entry in node.get("mainEntity", []):
+                text = re.sub(r"\s+", " ", unescape(entry["acceptedAnswer"]["text"])).strip()
+                answers.setdefault(entry["name"].strip(), set()).add(text)
+    return answers
+
+
+# A sentence must not end on a word that needs something after it.
+_DANGLING_TAIL = re.compile(
+    r"\b(or|and|with|via|your own|of|to|for|the|a|an|by|on)\s*[.!?]$", re.IGNORECASE
+)
+
+
+def test_home_hero_sub_is_complete_sentences(client):
+    html, home = _parse_home(client)
+    hero = home.hero_sub
+    assert hero, "homepage has no .hero-sub line"
+    # Punctuation glued to a space is the mark of a phrase cut out of a sentence.
+    assert not re.search(r"\s[.,;:!?]", hero), f"hero has a dangling fragment: {hero!r}"
+    assert "  " not in hero and hero.endswith((".", "!", "?")), hero
+    for sentence in re.split(r"(?<=[.!?])\s+", hero):
+        assert len(sentence.split()) >= 3, f"hero sentence too short to be whole: {sentence!r}"
+        assert not _DANGLING_TAIL.search(sentence), f"hero sentence ends mid-thought: {sentence!r}"
+    _assert_clean(html, "/")
+
+
+def test_home_payments_faq_matches_its_jsonld(client):
+    _, home = _parse_home(client)
+    assert home.faq, "homepage renders no payments FAQ entries"
+    answers = _faq_answers_from_jsonld(home.jsonld)
+    for question, visible in home.faq:
+        assert question in answers, f"visible FAQ question has no FAQPage JSON-LD entry: {question!r}"
+        assert answers[question] == {visible}, (
+            f"FAQ {question!r}: visible answer and JSON-LD answer differ\n"
+            f"  visible: {visible!r}\n  json-ld: {sorted(answers[question])!r}"
+        )
+        assert not re.search(r"\s[.,;:!?]", visible), f"dangling fragment in FAQ answer: {visible!r}"
+
+
+def test_payments_faq_names_a_working_payment_method():
+    from seo_routes import PAYMENT_FAQ
+
+    question, answer = next((q, a) for q, a in PAYMENT_FAQ if "cryptocurrenc" in q.lower())
+    lowered = answer.lower()
+    # The answer must say how to pay today, not just that something exists.
+    assert "card" in lowered and "credits page" in lowered
+    # The crypto checkout gateway is not configured; no coin may read as accepted.
+    assert "coming soon" in lowered
+    for needle in FORBIDDEN + ("exchange", "trade", "trading", "dex", "swap"):
+        assert not re.search(r"\b" + re.escape(needle) + r"\b", lowered), needle

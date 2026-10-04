@@ -16526,7 +16526,7 @@ def api_activity_alias():
 # ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
 # ---------------------------------------------------------------------------
-from seo_routes import seo_bp, get_organization_jsonld, get_website_jsonld, get_faqpage_jsonld
+from seo_routes import seo_bp, get_organization_jsonld, get_website_jsonld, get_faqpage_jsonld, get_payment_faq
 app.register_blueprint(seo_bp)
 
 # ---------------------------------------------------------------------------
@@ -19146,6 +19146,7 @@ app.jinja_env.globals["build_breadcrumb_jsonld"] = build_breadcrumb_jsonld
 app.jinja_env.globals["get_organization_jsonld"] = get_organization_jsonld
 app.jinja_env.globals["get_website_jsonld"] = get_website_jsonld
 app.jinja_env.globals["get_faqpage_jsonld"] = get_faqpage_jsonld
+app.jinja_env.globals["get_payment_faq"] = get_payment_faq
 app.jinja_env.globals["json_dumps"] = lambda x: Markup(safe_jsonld(x))
 
 def jsonld_safe(value):
