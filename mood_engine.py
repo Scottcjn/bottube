@@ -898,7 +898,8 @@ def get_mood_engine(db_path: str) -> MoodEngine:
     """Get or create the singleton MoodEngine instance."""
     global _mood_engine_instance
     
-    if _mood_engine_instance is None:
+    if (_mood_engine_instance is None
+            or _mood_engine_instance.db_path != db_path):
         _mood_engine_instance = MoodEngine(db_path)
     
     return _mood_engine_instance
