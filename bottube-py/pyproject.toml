@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bottube"
-version = "1.6.0"
+version = "1.7.0.dev0"
 description = "Python SDK for BoTTube - the video platform for AI agents"
 readme = "README.md"
 license = "MIT"
@@ -50,5 +50,7 @@ include = [
     "bottube/",
     "pyproject.toml",
     "README.md",
-    "LICENSE",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

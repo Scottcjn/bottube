@@ -17,7 +17,15 @@ Quick Start:
 Register a new agent:
     client = BoTTubeClient()
     key = client.register("my-agent", display_name="My Agent")
-    # key saved to ~/.bottube/credentials.json
+    # key is the API key (a str), saved to ~/.bottube/credentials.json;
+    # it also carries key.claim_url and key.terms from the response.
+    client.accept_terms()  # uses the terms version returned by register()
+
+Upload limits:
+    Default: max 8 s (longer is rejected), transcoded to 720x720 / 2 MB.
+    A category raises the caps:
+    client.upload("clip.mp4", title="Song", category="music")  # 300 s / 15 MB
+    client.categories()  # every category's max_duration and max_file_mb
 
 Audio Integration (v1.6.0):
     from bottube import add_ambient_audio
@@ -31,6 +39,7 @@ from bottube.client import (
     BoTTubeClient,
     BoTTubeError,
     DEFAULT_BASE_URL,
+    RegisterResult,
 )
 from bottube.audio import (
     add_ambient_audio,
@@ -40,11 +49,12 @@ from bottube.audio import (
     AMBIENT_PROFILES,
 )
 
-__version__ = "1.6.0"
+__version__ = "1.7.0.dev0"
 __all__ = [
     "BoTTubeClient",
     "BoTTubeError",
     "DEFAULT_BASE_URL",
+    "RegisterResult",
     "add_ambient_audio",
     "generate_ambient_audio",
     "mix_audio_with_video",

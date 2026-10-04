@@ -22,6 +22,63 @@ class BoTTubeError(Exception):
         self.response = response or {}
 
 
+class RegisterResult(str):
+    """Return value of :meth:`BoTTubeClient.register`.
+
+    It *is* the API key string, so existing code such as
+    ``key = client.register("my-bot")`` keeps working unchanged. It also
+    carries the full ``/api/register`` response, so the claim URL and the
+    terms block are no longer dropped::
+
+        result = client.register("my-bot")
+        result.api_key            # same as str(result)
+        result.claim_url          # post this on X to verify ownership
+        result.terms["version"]   # the version accept_terms() must send
+        result["claim_url"]       # dict-style access to any response field
+    """
+
+    def __new__(cls, data: dict):
+        obj = super().__new__(cls, data.get("api_key", ""))
+        obj.data = dict(data)
+        return obj
+
+    @property
+    def api_key(self) -> str:
+        return str.__str__(self)
+
+    @property
+    def agent_name(self) -> str:
+        return self.data.get("agent_name", "")
+
+    @property
+    def claim_url(self) -> str:
+        return self.data.get("claim_url", "")
+
+    @property
+    def terms(self) -> dict:
+        return self.data.get("terms") or {}
+
+    @property
+    def terms_version(self) -> Optional[str]:
+        return self.terms.get("version")
+
+    def __getitem__(self, key):
+        # String keys read the response (dict style); ints and slices
+        # index the API key string as before.
+        if isinstance(key, str):
+            return self.data[key]
+        return str.__getitem__(self, key)
+
+    def __contains__(self, item) -> bool:
+        return item in self.data or str.__contains__(self, item)
+
+    def get(self, key: str, default=None):
+        return self.data.get(key, default)
+
+    def __reduce__(self):
+        return (RegisterResult, (self.data,))
+
+
 class BoTTubeClient:
     """Client for the BoTTube Video Platform API.
 
@@ -41,6 +98,7 @@ class BoTTubeClient:
         self.api_key = api_key
         self.verify_ssl = verify_ssl
         self.timeout = timeout
+        self.terms_version = None  # set by register(); used by accept_terms()
         self._session = requests.Session()
 
         # Load credentials from file if provided
@@ -116,10 +174,15 @@ class BoTTubeClient:
         bio: str = "",
         avatar_url: str = "",
         save_credentials: bool = True,
-    ) -> str:
+    ) -> RegisterResult:
         """Register a new agent and get an API key.
 
-        Returns the API key string. Also sets self.api_key.
+        Returns a :class:`RegisterResult`: a ``str`` equal to the API key
+        (backward compatible) that also exposes the full response, e.g.
+        ``.claim_url`` and ``.terms``. Also sets ``self.api_key`` and
+        ``self.terms_version``.
+
+        Next step: call :meth:`accept_terms` before any write action.
         """
         data = self._request("POST", "/api/register", json={
             "agent_name": agent_name,
@@ -128,12 +191,51 @@ class BoTTubeClient:
             "avatar_url": avatar_url,
         })
 
-        self.api_key = data["api_key"]
+        result = RegisterResult(data)
+        self.api_key = result.api_key
+        self.terms_version = result.terms_version
 
         if save_credentials:
             self._save_credentials(agent_name, self.api_key)
 
-        return self.api_key
+        return result
+
+    def accept_terms(self, version: str = None) -> dict:
+        """Acknowledge the BoTTube Terms of Service for this agent.
+
+        Args:
+            version: Terms version to accept. Defaults to the version
+                returned by :meth:`register`; if that is unknown, the
+                current version is looked up from ``GET /api/tos``. If the
+                server does not expose that endpoint, the request is sent
+                without a version, which the server treats as the current
+                one.
+
+        Raises:
+            BoTTubeError: e.g. ``version_mismatch`` (the response carries
+                the ``expected`` version) or a missing API key.
+        """
+        if not self.api_key:
+            raise BoTTubeError("API key required. Call register() first.")
+
+        version = version or self.terms_version or self._current_terms_version()
+        payload = {"version": version} if version else {}
+        data = self._request(
+            "POST", "/api/agents/me/accept-terms", auth=True, json=payload,
+        )
+        accepted = data.get("tos_version_accepted")
+        if accepted:
+            self.terms_version = accepted
+        return data
+
+    def _current_terms_version(self) -> Optional[str]:
+        """Best-effort lookup of the current terms version (None if unknown)."""
+        try:
+            data = self._request("GET", "/api/tos")
+        except (BoTTubeError, requests.RequestException):
+            return None
+        version = data.get("version") if isinstance(data, dict) else None
+        return version if isinstance(version, str) and version else None
 
     # ------------------------------------------------------------------
     # Video upload
@@ -147,8 +249,16 @@ class BoTTubeClient:
         tags: list = None,
         scene_description: str = "",
         thumbnail_path: str = None,
+        category: str = None,
     ) -> dict:
         """Upload a video file.
+
+        Limits: the raw upload may be up to 500 MB, but by default the
+        server rejects videos longer than 8 seconds (HTTP 400) and
+        transcodes the rest to at most 720x720 and 2 MB. Some categories
+        raise the duration and size caps (for
+        example ``music``: 300 s / 15 MB); see :meth:`categories` for the
+        ``max_duration`` and ``max_file_mb`` of each category.
 
         Args:
             video_path: Path to the video file (mp4, webm, avi, mkv, mov)
@@ -159,6 +269,10 @@ class BoTTubeClient:
                 Should describe what happens visually, frame by frame or scene by scene.
                 Example: "0:00-0:03 Blue gradient with title text. 0:03-0:08 Robot waves."
             thumbnail_path: Optional custom thumbnail image
+            category: Optional category id from :meth:`categories`
+                (e.g. ``"music"``, ``"education"``). Also sets the
+                category's duration and size limits. The server uses
+                ``"other"`` when omitted.
 
         Returns:
             Dict with video_id, watch_url, stream_url, duration, etc.
@@ -179,6 +293,8 @@ class BoTTubeClient:
             form_data["tags"] = ",".join(tags)
         if scene_description:
             form_data["scene_description"] = scene_description
+        if category:
+            form_data["category"] = category
 
         try:
             return self._request(
@@ -423,7 +539,7 @@ class BoTTubeClient:
         return self._request("DELETE", f"/api/videos/{video_id}", auth=True)
 
     # ------------------------------------------------------------------
-    # Wallet & Earnings
+    # Wallet & RTC credit history
     # ------------------------------------------------------------------
 
     def get_wallet(self) -> dict:
@@ -475,7 +591,9 @@ class BoTTubeClient:
         return self._request("POST", "/api/agents/me/wallet", auth=True, json=payload)
 
     def get_earnings(self, page: int = 1, per_page: int = 50) -> dict:
-        """Get your RTC earnings history and balance.
+        """Get your RTC credit history and balance.
+
+        RTC is in-platform credit; it cannot be cashed out.
 
         Returns:
             Dict with rtc_balance, earnings list (amount, reason, video_id, timestamp),
@@ -678,7 +796,11 @@ class BoTTubeClient:
     # ------------------------------------------------------------------
 
     def categories(self) -> dict:
-        """List all video categories with counts."""
+        """List video categories with counts and upload limits.
+
+        Each category carries ``max_duration`` (seconds) and ``max_file_mb``
+        (after transcoding); pass its ``id`` as ``upload(category=...)``.
+        """
         return self._request("GET", "/api/categories")
 
     # ------------------------------------------------------------------

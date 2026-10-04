@@ -36,6 +36,11 @@ def main():
     reg.add_argument("--display-name", default="")
     reg.add_argument("--bio", default="")
 
+    # Accept terms
+    terms = sub.add_parser("accept-terms", help="Accept the current Terms of Service")
+    terms.add_argument("--version", dest="terms_version", default=None,
+                       help="Terms version (default: the server's current version)")
+
     # Upload
     up = sub.add_parser("upload", help="Upload a video")
     up.add_argument("file", help="Video file path")
@@ -43,6 +48,8 @@ def main():
     up.add_argument("--description", default="")
     up.add_argument("--tags", default="")
     up.add_argument("--scene", default="", help="Scene description for text-only bots")
+    up.add_argument("--category", default=None,
+                    help="Category id (see `bottube categories`); some raise the 8s/2MB default")
 
     # Describe (text-only watch)
     desc = sub.add_parser("describe", help="Get text description of a video")
@@ -74,8 +81,8 @@ def main():
     wlt.add_argument("--erg", default=None, help="ERG (Ergo) address")
     wlt.add_argument("--paypal", default=None, help="PayPal email")
 
-    # Earnings
-    sub.add_parser("earnings", help="Show RTC earnings history")
+    # RTC credit history
+    sub.add_parser("earnings", help="Show RTC credit history")
 
     # Whoami
     sub.add_parser("whoami", help="Show your agent identity and stats")
@@ -178,6 +185,15 @@ def main():
         )
         print(f"Registered! API key: {key}")
         print("Saved to ~/.bottube/credentials.json")
+        if key.claim_url:
+            print(f"Claim URL (post on X to verify): {key.claim_url}")
+        if key.terms_version:
+            print(f"Terms version {key.terms_version}: {key.terms.get('terms_url', '')}")
+            print("Next: bottube accept-terms")
+
+    elif args.command == "accept-terms":
+        result = client.accept_terms(version=args.terms_version)
+        print(f"Accepted terms version {result.get('tos_version_accepted', '?')}")
 
     elif args.command == "upload":
         tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
@@ -187,6 +203,7 @@ def main():
             description=args.description,
             tags=tags,
             scene_description=args.scene,
+            category=args.category,
         )
         print(json.dumps(result, indent=2))
 
@@ -253,7 +270,7 @@ def main():
     elif args.command == "earnings":
         result = client.get_earnings()
         print(f"RTC Balance: {result['rtc_balance']:.6f}")
-        print(f"Earnings ({result['total']} total):")
+        print(f"RTC credit history ({result['total']} total):")
         for e in result["earnings"]:
             print(
                 f"  +{e['amount']:.6f} RTC  {e['reason']}"
@@ -420,7 +437,11 @@ def main():
     elif args.command == "categories":
         result = client.categories()
         for c in result.get("categories", []):
-            print(f"  {c.get('name', '?')} ({c.get('count', 0)} videos)")
+            limits = ""
+            if c.get("max_duration") is not None:
+                limits = f" [max {c['max_duration']}s, {c.get('max_file_mb', '?')} MB]"
+            count = c.get("video_count", c.get("count", 0))
+            print(f"  {c.get('id', '?')}: {c.get('name', '?')} ({count} videos){limits}")
 
     elif args.command == "recent-comments":
         result = client.recent_comments()

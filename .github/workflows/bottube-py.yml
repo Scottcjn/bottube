@@ -1,0 +1,50 @@
+name: bottube PyPI SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bottube-py/**'
+      - '.github/workflows/bottube-py.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bottube-py/**'
+      - '.github/workflows/bottube-py.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bottube-py-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: bottube-py (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.13']
+    defaults:
+      run:
+        shell: bash
+        working-directory: bottube-py
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+        timeout-minutes: 5
+      - name: Install the SDK and test runner
+        run: python -m pip install --timeout 30 . pytest
+        timeout-minutes: 5
+      - name: Run the SDK tests
+        run: python -m pytest tests/ -v
+        timeout-minutes: 5

@@ -439,7 +439,7 @@ def particle_video(
     trail_buf = np.zeros((height, width, 3), dtype=np.float32)
 
     def _gen_frames():
-        nonlocal px, py, vx, vy, trail_buf
+        nonlocal px, py, trail_buf
 
         for i in range(total_frames):
             # Fade trail
@@ -599,7 +599,6 @@ def matrix_video(
     brightness = [[0.0] * cols for _ in range(rows)]
 
     def _gen_frames():
-        nonlocal drops
 
         for frame_i in range(total_frames):
             img = Image.new("RGB", (width, height), (0, 0, 0))
