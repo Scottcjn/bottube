@@ -43,8 +43,8 @@ async def test_live_round_trip(run_server):
             return await super().handle_async_request(request)
 
     srv = run_server(Settings(upstream_url="https://bottube.ai", host_header="bottube.ai",
-                              transports={"api": Counting(), "legacy": Counting()}))
-    async with streamable_http_client(srv.url + "/mcp") as (read, write):
+                              transports={"api": Counting()}))
+    async with streamable_http_client(srv.url + "/mcp/v1") as (read, write):
         async with ClientSession(read, write) as s:
             init = await s.initialize()
             say("initialize -> protocol %s, server %s %s" % (init.protocol_version, init.server_info.name,
@@ -74,11 +74,6 @@ async def test_live_round_trip(run_server):
             assert 1 <= feed["count"] <= 3
             agent = await call("get_agent", {"agent_name": doc["metadata"]["agent"], "per_page": 3})
             assert agent["agent"]["profile_url"].startswith("https://bottube.ai/agent/")
-
-    r = httpx.post(srv.url + "/mcp", json={"tool": "feed.get", "args": {"per_page": 1}}, timeout=30)
-    legacy = r.json()
-    say("legacy POST {tool: feed.get} -> HTTP %d, keys %s" % (r.status_code, sorted(legacy)))
-    assert r.status_code == 200 and legacy.get("ok") is True and legacy.get("tool") == "feed.get"
 
     say("upstream requests made: %d" % len(upstream_requests))
     for u in upstream_requests:

@@ -13,7 +13,7 @@ from jsonschema import FormatChecker, validate
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from bottube_mcp.app import MAX_LEGACY_RESPONSE_BYTES, Settings, client_ip, is_mcp_message
+from bottube_mcp.app import Settings, client_ip
 from bottube_mcp.upstream import MAX_BODY_BYTES, Unavailable, Upstream
 
 VIDEO = {
@@ -24,7 +24,6 @@ VIDEO = {
     "thumbnail_url": "/thumbnails/abcDEF12345.jpg", "url": "/api/videos/abcDEF12345/stream",
     "watch_url": "/watch/abcDEF12345", "api_key": "MUST-NOT-LEAK",
 }
-LEGACY_DESCRIPTOR = {"schema_version": "1.0", "name": "bottube", "tools": [{"name": "feed.get"}]}
 TOOL_NAMES = {"search", "fetch", "list_feed", "get_video", "list_comments", "get_agent"}
 BANNED = re.compile(r"(?i)\bexchange\b|\bprice\b|liquidity|\bearn|cash[ -]?out|withdraw")
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -66,23 +65,6 @@ class FakeBoTTube:
                 "has_more": True})
         return httpx.Response(404, json={"error": "Video not found"})
 
-    def legacy(self, request: httpx.Request) -> httpx.Response:
-        self.calls.append(request)
-        if request.method == "HEAD":
-            return httpx.Response(200, headers={"content-type": "application/json", "content-length": "321",
-                                                "etag": '"legacy-head"', "x-legacy": "1"})
-        if request.method == "GET":
-            return httpx.Response(200, json=LEGACY_DESCRIPTOR, headers={"x-legacy": "1"})
-        try:
-            body = json.loads(request.content or b"{}")
-        except ValueError:
-            body = None
-        return httpx.Response(200, json={"ok": True, "tool": body.get("tool") or body.get("method"),
-                                         "method": request.method, "result": {"echo": body}}
-                              if isinstance(body, dict) else {"ok": True, "method": request.method},
-                              headers={"x-legacy": "1"})
-
-
 @pytest.fixture
 def fake():
     return FakeBoTTube()
@@ -90,12 +72,11 @@ def fake():
 
 @pytest.fixture
 def server(run_server, fake):
-    return run_server(Settings(transports={"api": httpx.MockTransport(fake.api),
-                                           "legacy": httpx.MockTransport(fake.legacy)}))
+    return run_server(Settings(transports={"api": httpx.MockTransport(fake.api)}))
 
 
 async def _session_call(url, fn):
-    async with streamable_http_client(url + "/mcp") as (read, write):
+    async with streamable_http_client(url + "/mcp/v1") as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
             return await fn(s)
@@ -106,7 +87,7 @@ def rpc(server, method, params=None, *, headers=None, rid=1):
          "MCP-Protocol-Version": "2025-06-18"}
     h.update(headers or {})
     body = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}
-    return httpx.post(server.url + "/mcp", json=body, headers=h, timeout=10)
+    return httpx.post(server.url + "/mcp/v1", json=body, headers=h, timeout=10)
 
 
 # --------------------------------------------------------------------------- protocol
@@ -271,7 +252,7 @@ def test_upstream_timeout_is_tool_error(run_server):
     def slow(request):
         raise httpx.ReadTimeout("slow", request=request)
 
-    srv = run_server(Settings(transports={"api": httpx.MockTransport(slow), "legacy": httpx.MockTransport(slow)}))
+    srv = run_server(Settings(transports={"api": httpx.MockTransport(slow)}))
     r = rpc(srv, "tools/call", {"name": "search", "arguments": {"query": "x"}})
     res = r.json()["result"]
     assert res["isError"] is True and res["structuredContent"]["error"]["code"] == "upstream_unavailable"
@@ -297,96 +278,18 @@ def test_garbage_forwarded_header_falls_back_to_peer(server, fake):
     assert call.headers["x-forwarded-for"] == "127.0.0.1"
 
 
-# --------------------------------------------------------------------------- legacy compatibility
+# --------------------------------------------------------------------------- transport boundaries
 
-def test_legacy_tool_post_is_proxied_unchanged(server, fake):
-    r = httpx.post(server.url + "/mcp", json={"tool": "feed.get", "args": {"per_page": 1}},
-                   headers={"X-Forwarded-For": "198.51.100.7"}, timeout=10)
-    assert r.status_code == 200 and r.headers["x-legacy"] == "1"
-    echo = r.json()["result"]["echo"]
-    assert r.json()["ok"] is True and r.json()["tool"] == "feed.get"
-    assert echo["tool"] == "feed.get" and echo["args"] == {"per_page": 1} and echo.get("method", "POST") == "POST"
-    call = fake.calls[-1]
-    assert call.url.path == "/mcp" and call.headers["x-forwarded-for"] == "198.51.100.7"
-    assert call.headers["host"] == "bottube.ai"
+def test_sse_get_is_rejected(server):
+    r = httpx.get(server.url + "/mcp/v1", headers={"Accept": "text/event-stream"}, timeout=10)
+    assert r.status_code == 405 and r.headers["allow"] == "POST"
+    assert r.headers["content-type"].startswith("application/json")
 
 
-def test_jsonrpc_field_always_routes_to_mcp(server, fake):
-    r = httpx.post(server.url + "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "video.get",
-                                              "params": {"video_id": "abcDEF12345"}}, timeout=10)
-    assert "x-legacy" not in r.headers
-    assert "error" in r.json()
-
-
-def test_browser_get_goes_to_legacy(server):
-    r = httpx.get(server.url + "/mcp", headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}, timeout=10)
-    assert r.status_code == 200 and r.json() == LEGACY_DESCRIPTOR and r.headers["x-legacy"] == "1"
-    r = httpx.get(server.url + "/mcp", timeout=10)
-    assert r.json() == LEGACY_DESCRIPTOR
-
-
-def test_sse_get_goes_to_mcp(server):
-    r = httpx.get(server.url + "/mcp", headers={"Accept": "text/event-stream"}, timeout=10)
-    assert "x-legacy" not in r.headers
-    assert r.status_code == 405  # stateless server: no standalone SSE stream
-
-
-@pytest.mark.parametrize("method", ["OPTIONS", "DELETE", "PUT", "PATCH"])
-def test_non_mcp_methods_go_to_legacy(server, method):
-    r = httpx.request(method, server.url + "/mcp", content=b"unchanged", timeout=10)
-    assert r.status_code == 200 and r.headers["x-legacy"] == "1"
-    assert r.json()["method"] == method
-
-
-def test_classifier():
-    assert is_mcp_message(b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
-    assert is_mcp_message(b'{"jsonrpc":"2.0","method":"notifications/initialized"}')
-    assert is_mcp_message(b'[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]')
-    assert not is_mcp_message(b'{"tool":"feed.get","args":{}}')
-    assert not is_mcp_message(b'{"method":"feed.get","params":{}}')
-    assert is_mcp_message(b'{"jsonrpc":"2.0","method":"feed.get"}')
-    assert not is_mcp_message(b'not json')
-    assert not is_mcp_message(b'[]')
-    assert not is_mcp_message(b'[{"jsonrpc":"2.0","method":"tools/list"}, {"tool":"x"}]')
-
-
-def test_non_json_content_type_with_jsonrpc_field_is_legacy(server):
-    r = httpx.post(server.url + "/mcp", content=b'{"jsonrpc":"2.0","method":"tools/list"}',
-                   headers={"Content-Type": "text/plain"}, timeout=10)
-    assert r.status_code == 200 and r.headers["x-legacy"] == "1"
-
-
-def test_malformed_jsonrpc_returns_protocol_error(server):
-    r = httpx.post(server.url + "/mcp", json={"jsonrpc": "2.0", "id": 7, "method": []}, timeout=10)
-    assert r.status_code in (200, 400)
-    body = r.json()
-    assert body["jsonrpc"] == "2.0" and body["id"] in (7, None) and "error" in body
-
-
-def test_legacy_head_preserves_representation_metadata(server):
-    r = httpx.head(server.url + "/mcp", timeout=10)
-    assert r.status_code == 200 and r.content == b""
-    assert r.headers["content-length"] == "321" and r.headers["etag"] == '"legacy-head"'
-
-
-def test_legacy_forwards_conditional_range_and_raw_encoding(run_server):
-    original = b"compressed legacy response"
-    encoded = gzip.compress(original)
-
-    def legacy(request: httpx.Request) -> httpx.Response:
-        assert request.headers["accept-encoding"] == "identity"
-        assert request.headers["if-none-match"] == '"old"'
-        assert request.headers["range"] == "bytes=0-8"
-        return httpx.Response(206, stream=ChunkStream([encoded]), headers={
-            "content-encoding": "gzip", "content-length": str(len(encoded)), "content-range": "bytes 0-8/26"
-        })
-
-    srv = run_server(Settings(transports={"api": httpx.MockTransport(legacy),
-                                          "legacy": httpx.MockTransport(legacy)}))
-    r = httpx.get(srv.url + "/mcp", headers={"If-None-Match": '"old"', "Range": "bytes=0-8"}, timeout=10)
-    assert r.status_code == 206 and r.content == original
-    assert r.headers["content-encoding"] == "gzip"
-    assert r.headers["content-length"] == str(len(encoded))
+@pytest.mark.parametrize("path", ["/", "/mcp", "/healthz", "/.well-known/mcp/server-card.json"])
+def test_every_other_path_is_json_404(server, path):
+    r = httpx.get(server.url + path, timeout=10)
+    assert r.status_code == 404 and r.json() == {"error": "not found"}
 
 
 def test_xff_is_trusted_only_from_ipv4_loopback():
@@ -407,19 +310,6 @@ class ChunkStream(httpx.AsyncByteStream):
             yield chunk
 
 
-def test_legacy_size_limit_stops_stream_early(run_server):
-    stream = ChunkStream([b"a" * MAX_LEGACY_RESPONSE_BYTES, b"b", b"must-not-be-read"])
-
-    def response(_request):
-        return httpx.Response(200, stream=stream)
-
-    srv = run_server(Settings(transports={"api": httpx.MockTransport(response),
-                                          "legacy": httpx.MockTransport(response)}))
-    r = httpx.get(srv.url + "/mcp", timeout=10)
-    assert r.status_code == 502 and r.json()["error"] == "upstream response too large"
-    assert stream.read == 2
-
-
 @pytest.mark.anyio
 async def test_upstream_size_limit_is_enforced_during_streaming():
     stream = ChunkStream([b"a" * MAX_BODY_BYTES, b"b", b"must-not-be-read"])
@@ -436,20 +326,40 @@ async def test_upstream_size_limit_is_enforced_during_streaming():
     assert stream.read == 2
 
 
+@pytest.mark.anyio
+async def test_genuinely_gzip_compressed_upstream_is_decoded_once():
+    payload = json.dumps({"videos": [VIDEO], "total": 1}).encode()
+    compressed = gzip.compress(payload)
+
+    def response(_request):
+        return httpx.Response(
+            200,
+            stream=ChunkStream([compressed[:9], compressed[9:]]),
+            headers={"Content-Type": "application/json", "Content-Encoding": "gzip"},
+        )
+
+    upstream = Upstream(transport=httpx.MockTransport(response))
+    try:
+        body = await upstream.get_json("/compressed")
+    finally:
+        await upstream.aclose()
+    assert body == {"videos": [VIDEO], "total": 1}
+
+
 def test_body_limit(server):
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list",
                        "params": {"padding": "x" * (1024 * 1024)}}).encode()
-    r = httpx.post(server.url + "/mcp", content=body,
+    r = httpx.post(server.url + "/mcp/v1", content=body,
                    headers={"Content-Type": "application/json"}, timeout=10)
     assert r.status_code == 413
 
 
 def test_foreign_host_rejected(server):
-    r = httpx.post(server.url + "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    r = httpx.post(server.url + "/mcp/v1", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
                    headers={"Host": "evil.example", "Accept": "application/json, text/event-stream"}, timeout=10)
     assert r.status_code == 421
-    r = httpx.get(server.url + "/healthz", headers={"Host": "bottube.ai"}, timeout=10)
-    assert r.status_code == 200 and r.json()["ok"] is True
+    r = httpx.get(server.url + "/mcp/server-card", headers={"Host": "bottube.ai"}, timeout=10)
+    assert r.status_code == 200
 
 
 # --------------------------------------------------------------------------- discovery + copy
@@ -461,23 +371,18 @@ def test_server_card(server):
     assert r.headers["content-type"].split(";", 1)[0] == "application/json"
     assert card["name"] == "ai.bottube/bottube"
     assert card["description"] and card["version"] == "0.1.0"
-    assert card["remotes"] == [{"type": "streamable-http", "url": "https://bottube.ai/mcp"}]
-    assert card["transport"] == {"type": "streamable-http", "endpoint": "https://bottube.ai/mcp"}
+    assert card["remotes"] == [{"type": "streamable-http", "url": "https://bottube.ai/mcp/v1"}]
+    assert card["transport"] == {"type": "streamable-http", "endpoint": "https://bottube.ai/mcp/v1"}
     assert {t["name"] for t in card["tools"]} == TOOL_NAMES
     assert all(t.get("description") and "inputSchema" in t for t in card["tools"])
     assert card["authentication"]["required"] is False
-
-    # The compatibility route serves the same generated card.
-    old = httpx.get(server.url + "/.well-known/mcp/server-card.json", timeout=10)
-    assert old.status_code == 200 and old.json() == card
-
 
 def test_server_json_matches_registry_schema():
     manifest = json.loads((REPO_ROOT / "bottube_mcp/server.json").read_text(encoding="utf-8"))
     schema = json.loads((REPO_ROOT.parent / "ref/server.schema.json").read_text(encoding="utf-8"))
     validate(instance=manifest, schema=schema, format_checker=FormatChecker())
     assert manifest["name"] == "ai.bottube/bottube"
-    assert manifest["remotes"] == [{"type": "streamable-http", "url": "https://bottube.ai/mcp"}]
+    assert manifest["remotes"] == [{"type": "streamable-http", "url": "https://bottube.ai/mcp/v1"}]
     assert manifest["repository"]["subfolder"] == "bottube_mcp"
 
 
@@ -499,15 +404,15 @@ def test_ai_catalog_shape():
     assert all(set(entry) == {"identifier", "type", "url"} for entry in catalog["entries"])
 
 
-def test_nginx_mcp_routes_preserve_live_policy_and_fallback():
+def test_nginx_mcp_routes_leave_legacy_route_to_flask():
     config = (REPO_ROOT / "deploy/nginx-bottube-mcp.conf").read_text(encoding="utf-8")
-    assert "location = /mcp {" in config and "location /mcp" not in config
-    assert "error_page 502 503 504 = @bottube_mcp_legacy;" in config
-    assert "location @bottube_mcp_legacy {" in config
-    assert "proxy_pass http://127.0.0.1:8097;" in config
-    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 4
-    assert config.count("client_max_body_size 550M;") == 4
-    assert config.count("proxy_read_timeout 300s;") == 4
+    assert "location = /mcp/v1 {" in config
+    assert "location = /mcp {" not in config and "@bottube_mcp_legacy" not in config
+    assert "error_page" not in config and "/.well-known/mcp/server-card.json" not in config
+    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 2
+    assert config.count("client_max_body_size 1m;") == 3
+    assert config.count("proxy_read_timeout 60s;") == 2
+    assert config.count("proxy_send_timeout 60s;") == 2
     assert 'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;' in config
 
 
@@ -539,7 +444,7 @@ async def test_unified_client_auto_mode(server):
     """mcp.Client in its default "auto" mode (newest protocol it can negotiate, else the initialize handshake)."""
     from mcp.client.client import Client
 
-    async with Client(server.url + "/mcp") as c:
+    async with Client(server.url + "/mcp/v1") as c:
         names = {t.name for t in (await c.list_tools()).tools}
         res = await c.call_tool("get_video", {"video_id": "abcDEF12345"})
     assert names == TOOL_NAMES

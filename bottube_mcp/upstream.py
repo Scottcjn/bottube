@@ -14,7 +14,7 @@ import httpx
 
 from . import __version__
 
-USER_AGENT = "bottube-mcp/%s (+https://bottube.ai/mcp)" % __version__
+USER_AGENT = "bottube-mcp/%s (+https://bottube.ai/mcp/v1)" % __version__
 MAX_BODY_BYTES = 4 * 1024 * 1024  # largest upstream body we will parse
 
 
@@ -125,9 +125,16 @@ class Upstream:
                     if size > MAX_BODY_BYTES:
                         raise Unavailable("BoTTube API response too large")
                     chunks.append(chunk)
+                # aiter_bytes() has already decoded Content-Encoding.  Never attach
+                # that representation header to the decoded body: doing so makes a
+                # reconstructed Response attempt to decode the payload a second time.
+                decoded_headers = [
+                    (name, value) for name, value in streamed.headers.multi_items()
+                    if name.lower() not in {"content-encoding", "content-length"}
+                ]
                 resp = httpx.Response(
                     streamed.status_code,
-                    headers=streamed.headers,
+                    headers=decoded_headers,
                     content=b"".join(chunks),
                     request=streamed.request,
                 )

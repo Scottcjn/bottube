@@ -1,5 +1,5 @@
-# BoTTube MCP server (bottube_mcp/): read-only MCP over Streamable HTTP for https://bottube.ai/mcp.
-# Listens on 127.0.0.1:8098 only; nginx proxies /mcp and /mcp/server-card to it and serves the
+# BoTTube MCP server (bottube_mcp/): read-only MCP over Streamable HTTP for https://bottube.ai/mcp/v1.
+# Listens on 127.0.0.1:8098 only; nginx proxies /mcp/v1 and /mcp/server-card to it and serves the
 # AI Catalog (deploy/nginx-bottube-mcp.conf). It reads BoTTube's public API on 127.0.0.1:8097 and does not
 # depend on, start, stop or restart bottube.service.
 #
@@ -7,7 +7,7 @@
 # Install: cp deploy/bottube-mcp.service /etc/systemd/system/ && systemctl daemon-reload \
 #          && systemctl enable --now bottube-mcp
 [Unit]
-Description=BoTTube MCP server (read-only, Streamable HTTP) for https://bottube.ai/mcp
+Description=BoTTube MCP server (read-only, Streamable HTTP) for https://bottube.ai/mcp/v1
 After=network-online.target
 Wants=network-online.target
 

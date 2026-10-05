@@ -6,7 +6,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://bottube.ai/mcp"
+      "url": "https://bottube.ai/mcp/v1"
     }
   ],
   "websiteUrl": "https://bottube.ai",
