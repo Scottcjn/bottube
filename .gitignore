@@ -48,6 +48,7 @@ package-lock.json
 
 # System
 *.service
+!deploy/bottube-mcp.service
 visitor_log.jsonl
 download_cache.json
 downloads/

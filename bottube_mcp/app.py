@@ -4,11 +4,8 @@ nginx sends `location = /mcp` and `/mcp/server-card` here. For /mcp:
 
   * A JSON-RPC 2.0 POST goes to the official MCP SDK's Streamable HTTP app (stateless mode,
     JSON responses, so no session affinity is needed behind nginx).
-  * A GET asking only for text/event-stream, and DELETE, get 405: a stateless server has no
-    standalone SSE stream and no sessions (the spec allows 405 for both).
-  * OPTIONS is answered here (CORS preflight, same {"ok": true} body as before).
-  * Everything else -- the legacy `{tool, args}` / `{method, params}` POST format, a plain
-    browser GET, HEAD -- is proxied unchanged to the old Flask handler at
+  * A GET accepting text/event-stream gets 405 (stateless server, no standalone SSE stream).
+  * Everything else -- all non-JSON-RPC POSTs and every other HTTP method -- is proxied to Flask at
     http://127.0.0.1:8097/mcp, so existing callers keep getting the old responses.
 
 The real client IP (from nginx's X-Real-IP / X-Forwarded-For, trusted only from loopback)
@@ -40,14 +37,13 @@ from .upstream import USER_AGENT, Upstream
 log = logging.getLogger("bottube_mcp")
 
 MAX_POST_BYTES = 1024 * 1024
-LEGACY_TOOL_NAMES = frozenset({"feed.get", "video.get", "video.similar", "video.provenance", "video.keyframes"})
-TRUSTED_PROXIES = frozenset({"127.0.0.1", "::1"})
+MAX_LEGACY_REQUEST_BYTES = 550 * 1024 * 1024
+MAX_LEGACY_RESPONSE_BYTES = 4 * 1024 * 1024
+TRUSTED_PROXY = "127.0.0.1"
 HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "trailers",
-    "transfer-encoding", "upgrade", "content-length", "host",
+    "transfer-encoding", "upgrade", "host",
 })
-LEGACY_FORWARD_HEADERS = ("content-type", "accept", "accept-language", "user-agent", "cookie", "origin",
-                          "referer", "x-api-key", "authorization")
 CORS_HEADERS = [
     (b"access-control-allow-origin", b"*"),
     (b"access-control-expose-headers", b"Mcp-Session-Id, MCP-Protocol-Version, Retry-After"),
@@ -96,30 +92,35 @@ def _valid_ip(raw: str) -> str | None:
 
 
 def client_ip(scope: Scope) -> str:
-    """The TCP peer, unless the peer is local nginx: then X-Real-IP, else the first X-Forwarded-For hop."""
+    """Trust nginx's overwritten XFF only for an IPv4-loopback TCP peer."""
     peer = (scope.get("client") or ("", 0))[0] or ""
-    if peer in TRUSTED_PROXIES:
-        for raw in (_header(scope, b"x-real-ip"), _header(scope, b"x-forwarded-for").split(",")[0]):
-            ip = _valid_ip(raw)
-            if ip:
-                return ip
+    if peer == TRUSTED_PROXY:
+        ip = _valid_ip(_header(scope, b"x-forwarded-for"))
+        if ip:
+            return ip
     return _valid_ip(peer) or "127.0.0.1"
 
 
 def is_mcp_message(body: bytes) -> bool:
-    """JSON-RPC 2.0 request/notification/response (or a batch of them) that is not a legacy tool call."""
+    """Whether a JSON object (or every item in a non-empty batch) has a jsonrpc field."""
     try:
         data = json.loads(body)
     except (ValueError, UnicodeDecodeError):
         return False
     items = data if isinstance(data, list) and data else [data]
-    for item in items:
-        if not isinstance(item, dict) or item.get("jsonrpc") != "2.0":
-            return False
-        # A legacy client that adds "jsonrpc": "2.0" to {method: "feed.get"} still gets the legacy handler.
-        if item.get("method") in LEGACY_TOOL_NAMES:
-            return False
-    return True
+    return bool(items) and all(isinstance(item, dict) and "jsonrpc" in item for item in items)
+
+
+def _is_json_content_type(scope: Scope) -> bool:
+    return _header(scope, b"content-type").partition(";")[0].strip().lower() == "application/json"
+
+
+def _connection_tokens(headers: list[tuple[bytes, bytes]]) -> set[str]:
+    tokens: set[str] = set()
+    for name, value in headers:
+        if name.lower() == b"connection":
+            tokens.update(token.strip().lower() for token in value.decode("latin-1").split(",") if token.strip())
+    return tokens
 
 
 async def _send_simple(send: Send, status: int, body: bytes, headers: list[tuple[bytes, bytes]]) -> None:
@@ -131,6 +132,28 @@ async def _send_simple(send: Send, status: int, body: bytes, headers: list[tuple
 async def _json_error(send: Send, status: int, message: str) -> None:
     body = json.dumps({"ok": False, "error": message}).encode()
     await _send_simple(send, status, body, [(b"content-type", b"application/json")] + CORS_HEADERS)
+
+
+async def _invalid_jsonrpc(send: Send, body: bytes) -> bool:
+    """Return a JSON-RPC Invalid Request response for shapes known to crash some SDK versions."""
+    data = json.loads(body)
+    items = data if isinstance(data, list) else [data]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        method = item.get("method")
+        if "method" in item and not isinstance(method, str):
+            request_id = item.get("id")
+            if not isinstance(request_id, (str, int, float)) or isinstance(request_id, bool):
+                request_id = None
+            payload = json.dumps({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32600, "message": "Invalid Request"},
+            }).encode()
+            await _send_simple(send, 400, payload, [(b"content-type", b"application/json")] + CORS_HEADERS)
+            return True
+    return False
 
 
 async def read_body(receive: Receive, limit: int) -> bytes | None:
@@ -175,34 +198,35 @@ class McpEndpoint:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         method = scope["method"]
         ip = client_ip(scope)
-        if method == "OPTIONS":
-            await _send_simple(send, 200, b'{"ok": true}', [
-                (b"content-type", b"application/json"),
-                (b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"),
-                (b"access-control-allow-headers",
-                 b"Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID"),
-                (b"access-control-max-age", b"600"),
-            ] + CORS_HEADERS)
-            return
         if method == "POST":
-            body = await read_body(receive, MAX_POST_BYTES)
+            body = await read_body(receive, MAX_LEGACY_REQUEST_BYTES)
             if body is None:
                 await _json_error(send, 413, "request body too large")
                 return
-            if is_mcp_message(body):
+            if _is_json_content_type(scope) and is_mcp_message(body):
+                if len(body) > MAX_POST_BYTES:
+                    await _json_error(send, 413, "request body too large")
+                    return
+                if await _invalid_jsonrpc(send, body):
+                    return
                 await self._to_mcp(scope, replay_receive(body, receive), send, ip)
             else:
                 await self._to_legacy(scope, body, send, ip)
             return
         accept = _header(scope, b"accept").lower()
-        if (method == "GET" and "text/event-stream" in accept and "text/html" not in accept) or method == "DELETE":
-            # Stateless server: no standalone SSE stream and no sessions to delete. The spec allows 405 for both.
-            await _send_simple(send, 405, json.dumps({
-                "jsonrpc": "2.0", "id": None,
-                "error": {"code": -32000, "message": "Method not allowed: this server is stateless; use POST"},
-            }).encode(), [(b"content-type", b"application/json"), (b"allow", b"GET, POST, OPTIONS")] + CORS_HEADERS)
+        if method == "GET" and "text/event-stream" in accept:
+            # Stateless server: no standalone server-to-client SSE stream (MCP spec allows 405 here).
+            # Answer directly instead of handing the request to the SDK, which can hold it open.
+            body405 = b'{"error":"SSE stream not offered; use POST (stateless MCP)"}'
+            await send({"type": "http.response.start", "status": 405,
+                        "headers": [(b"allow", b"POST"), (b"content-type", b"application/json"),
+                                    (b"content-length", str(len(body405)).encode())]})
+            await send({"type": "http.response.body", "body": body405})
             return
-        body = await read_body(receive, MAX_POST_BYTES) or b""
+        body = await read_body(receive, MAX_LEGACY_REQUEST_BYTES)
+        if body is None:
+            await _json_error(send, 413, "request body too large")
+            return
         await self._to_legacy(scope, body, send, ip)
 
     async def _to_mcp(self, scope: Scope, receive: Receive, send: Send, ip: str) -> None:
@@ -220,31 +244,64 @@ class McpEndpoint:
         await self.mcp_app(inner, receive, _send)
 
     async def _to_legacy(self, scope: Scope, body: bytes, send: Send, ip: str) -> None:
-        fwd = {}
-        for name in LEGACY_FORWARD_HEADERS:
-            v = _header(scope, name.encode())
-            if v:
-                fwd[name] = v
-        fwd.update({
-            "host": self.settings.host_header,
-            "x-forwarded-for": ip,
-            "x-real-ip": ip,
-            "x-forwarded-proto": "https",
-        })
+        incoming = list(scope.get("headers") or [])
+        connection_tokens = _connection_tokens(incoming)
+        fwd: list[tuple[str, str]] = []
+        for raw_name, raw_value in incoming:
+            name = raw_name.decode("latin-1").lower()
+            if name not in HOP_BY_HOP and name not in connection_tokens and name not in {
+                "x-forwarded-for", "x-real-ip", "x-forwarded-proto", "content-length", "accept-encoding"
+            }:
+                fwd.append((name, raw_value.decode("latin-1")))
+        fwd.extend([
+            ("host", self.settings.host_header),
+            ("x-forwarded-for", ip),
+            ("x-real-ip", ip),
+            ("x-forwarded-proto", "https"),
+            ("accept-encoding", "identity"),
+        ])
         qs = scope.get("query_string", b"").decode("latin-1")
         url = "/mcp" + ("?" + qs if qs else "")
         try:
-            resp = await self.legacy.request(scope["method"], url, content=body or None, headers=fwd)
+            request = self.legacy.build_request(scope["method"], url, content=body, headers=fwd)
+            resp = await self.legacy.send(request, stream=True)
+            try:
+                chunks: list[bytes] = []
+                size = 0
+                decoded_response = resp.is_stream_consumed
+                if decoded_response:
+                    # MockTransport may provide an already-decoded, in-memory response.
+                    chunks.append(resp.content)
+                    size = len(resp.content)
+                else:
+                    async for chunk in resp.aiter_raw():
+                        size += len(chunk)
+                        if size > MAX_LEGACY_RESPONSE_BYTES:
+                            await _json_error(send, 502, "upstream response too large")
+                            return
+                        chunks.append(chunk)
+                if size > MAX_LEGACY_RESPONSE_BYTES:
+                    await _json_error(send, 502, "upstream response too large")
+                    return
+                payload = b"".join(chunks)
+            finally:
+                await resp.aclose()
         except httpx.HTTPError as exc:
             log.warning("legacy /mcp proxy failed: %r", exc)
             await _json_error(send, 502, "upstream unavailable")
             return
-        out = [(k.lower().encode("latin-1"), v.encode("latin-1"))
-               for k, v in resp.headers.multi_items() if k.lower() not in HOP_BY_HOP]
-        payload = b"" if scope["method"] == "HEAD" else resp.content
+        response_headers = [(k.encode("latin-1"), v.encode("latin-1")) for k, v in resp.headers.multi_items()]
+        connection_tokens = _connection_tokens(response_headers)
+        out = [(k.lower(), v) for k, v in response_headers
+               if k.decode("latin-1").lower() not in HOP_BY_HOP
+               and k.decode("latin-1").lower() not in connection_tokens
+               and not (decoded_response and scope["method"] != "HEAD"
+                        and k.decode("latin-1").lower() in {"content-encoding", "content-length"})]
+        if decoded_response and scope["method"] != "HEAD":
+            out.append((b"content-length", str(len(payload)).encode()))
         await send({"type": "http.response.start", "status": resp.status_code,
-                    "headers": out + [(b"content-length", str(len(resp.content)).encode())]})
-        await send({"type": "http.response.body", "body": payload})
+                    "headers": out})
+        await send({"type": "http.response.body", "body": b"" if scope["method"] == "HEAD" else payload})
 
 
 # --------------------------------------------------------------------------- host check
@@ -295,6 +352,7 @@ def create_app(settings: Settings | None = None) -> Starlette:
     legacy = httpx.AsyncClient(base_url=settings.upstream_url.rstrip("/"),
                                timeout=httpx.Timeout(settings.legacy_timeout, connect=3.0),
                                follow_redirects=False, transport=settings.transports.get("legacy"),
+                               trust_env=False,
                                headers={"user-agent": USER_AGENT})
     mcp = build_server(upstream)
     # Host checking is done once, by HostCheck, for every route; the SDK's own check is off.

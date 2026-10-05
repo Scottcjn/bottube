@@ -1,0 +1,62 @@
+# BoTTube MCP server (bottube_mcp/): read-only MCP over Streamable HTTP for https://bottube.ai/mcp.
+# Listens on 127.0.0.1:8098 only; nginx proxies /mcp and /mcp/server-card to it and serves the
+# AI Catalog (deploy/nginx-bottube-mcp.conf). It reads BoTTube's public API on 127.0.0.1:8097 and does not
+# depend on, start, stop or restart bottube.service.
+#
+# Layout: /opt/bottube-mcp/venv (pinned bottube_mcp/requirements.txt), /opt/bottube-mcp/app/bottube_mcp.
+# Install: cp deploy/bottube-mcp.service /etc/systemd/system/ && systemctl daemon-reload \
+#          && systemctl enable --now bottube-mcp
+[Unit]
+Description=BoTTube MCP server (read-only, Streamable HTTP) for https://bottube.ai/mcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bottube-mcp
+Group=bottube-mcp
+WorkingDirectory=/opt/bottube-mcp/app
+Environment=PYTHONPATH=/opt/bottube-mcp/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=BOTTUBE_MCP_HOST=127.0.0.1
+Environment=BOTTUBE_MCP_PORT=8098
+Environment=BOTTUBE_MCP_UPSTREAM=http://127.0.0.1:8097
+ExecStart=/opt/bottube-mcp/venv/bin/python -m bottube_mcp
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+# Hardening: unprivileged, read-only filesystem, loopback networking only.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+PrivateMounts=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+MemoryMax=300M
+TasksMax=64
+UMask=0077
+ReadOnlyPaths=/opt/bottube-mcp
+
+[Install]
+WantedBy=multi-user.target

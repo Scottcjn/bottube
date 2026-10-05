@@ -91,6 +91,7 @@ class Upstream:
             base_url=self.base_url,
             timeout=httpx.Timeout(timeout, connect=3.0),
             follow_redirects=False,
+            trust_env=False,
             transport=transport,
             limits=httpx.Limits(max_connections=32, max_keepalive_connections=8),
         )
@@ -114,13 +115,26 @@ class Upstream:
                    accept: str) -> httpx.Response:
         clean = {k: str(v) for k, v in (params or {}).items() if v is not None and v != ""}
         try:
-            resp = await self._client.get(path, params=clean, headers=self._headers(client_ip, accept))
+            async with self._client.stream(
+                "GET", path, params=clean, headers=self._headers(client_ip, accept)
+            ) as streamed:
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in streamed.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_BODY_BYTES:
+                        raise Unavailable("BoTTube API response too large")
+                    chunks.append(chunk)
+                resp = httpx.Response(
+                    streamed.status_code,
+                    headers=streamed.headers,
+                    content=b"".join(chunks),
+                    request=streamed.request,
+                )
         except httpx.TimeoutException as exc:
             raise Unavailable("BoTTube API timed out") from exc
         except httpx.HTTPError as exc:
             raise Unavailable("BoTTube API unreachable") from exc
-        if len(resp.content) > MAX_BODY_BYTES:
-            raise Unavailable("BoTTube API response too large")
         return resp
 
     @staticmethod
