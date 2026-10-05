@@ -449,3 +449,29 @@ async def test_unified_client_auto_mode(server):
         res = await c.call_tool("get_video", {"video_id": "abcDEF12345"})
     assert names == TOOL_NAMES
     assert res.is_error is False and res.structured_content["id"] == "abcDEF12345"
+
+
+def test_saturated_endpoint_rejects_with_503():
+    import asyncio
+    from bottube_mcp.app import McpEndpoint
+    async def slow_app(scope, receive, send):
+        await asyncio.sleep(0.2)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+    ep = McpEndpoint(slow_app, concurrency=1)
+    async def call():
+        sent = []
+        async def receive():
+            return {"type": "http.request", "body": b"{}", "more_body": False}
+        async def send(m):
+            sent.append(m)
+        await ep({"type": "http", "method": "POST", "headers": [], "path": "/mcp/v1"}, receive, send)
+        start = [m for m in sent if m["type"] == "http.response.start"][0]
+        return start["status"], dict(start["headers"])
+    async def main():
+        return await asyncio.gather(call(), call())
+    results = asyncio.run(main())
+    statuses = sorted(r[0] for r in results)
+    assert statuses == [200, 503]
+    busy = [r[1] for r in results if r[0] == 503][0]
+    assert busy[b"retry-after"] == b"2"

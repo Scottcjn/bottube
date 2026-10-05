@@ -78,11 +78,14 @@ def client_ip(scope: Scope) -> str:
     return _valid_ip(peer) or TRUSTED_PROXY
 
 
-async def _send_json(send: Send, status: int, payload: dict[str, Any], *, allow: bytes | None = None) -> None:
+async def _send_json(send: Send, status: int, payload: dict[str, Any], *, allow: bytes | None = None,
+                     retry_after: int | None = None) -> None:
     body = json.dumps(payload, separators=(",", ":")).encode()
     headers = [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]
     if allow is not None:
         headers.append((b"allow", allow))
+    if retry_after is not None:
+        headers.append((b"retry-after", str(retry_after).encode()))
     await send({"type": "http.response.start", "status": status, "headers": headers + CORS_HEADERS})
     await send({"type": "http.response.body", "body": body})
 
@@ -127,6 +130,11 @@ class McpEndpoint:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["method"] == "GET" and "text/event-stream" in _header(scope, b"accept").lower():
             await _send_json(send, 405, {"error": "SSE stream not offered; use POST"}, allow=b"POST")
+            return
+        # Bounded admission: reject immediately when saturated instead of queueing without limit.
+        # (Single-threaded event loop: no await between this check and the acquire below.)
+        if self.semaphore.locked():
+            await _send_json(send, 503, {"error": "server busy, retry shortly", "retry_after": 2}, retry_after=2)
             return
         async with self.semaphore:
             await self._bounded_call(scope, receive, send)
