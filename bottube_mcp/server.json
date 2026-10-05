@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "ai.bottube/bottube",
+  "description": "Read-only tools to search videos and read feeds, details, comments, and creator profiles.",
+  "version": "0.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://bottube.ai/mcp"
+    }
+  ],
+  "websiteUrl": "https://bottube.ai",
+  "repository": {
+    "url": "https://github.com/Scottcjn/bottube",
+    "source": "github",
+    "subfolder": "bottube_mcp"
+  }
+}

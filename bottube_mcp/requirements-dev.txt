@@ -1,0 +1,5 @@
+# Test-only dependencies, installed after requirements.txt (pip cannot mix hashed and unhashed files).
+# Same pins as the repo's requirements-ci.txt.
+pytest==9.1.1
+pytest-timeout==2.4.0
+jsonschema==4.26.0
