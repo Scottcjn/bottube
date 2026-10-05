@@ -1,0 +1,53 @@
+name: bottube-mcp
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "bottube_mcp/**"
+      - "deploy/bottube-mcp.service"
+      - "deploy/nginx-bottube-mcp.conf"
+      - "deploy/ai-catalog.json"
+      - ".github/workflows/bottube-mcp.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "bottube_mcp/**"
+      - "deploy/bottube-mcp.service"
+      - "deploy/nginx-bottube-mcp.conf"
+      - "deploy/ai-catalog.json"
+      - ".github/workflows/bottube-mcp.yml"
+
+concurrency:
+  group: bottube-mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is production (Ubuntu 22.04 on BoTTube node 2).
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+        timeout-minutes: 3
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+        timeout-minutes: 5
+      - name: Install pinned requirements (hash-checked)
+        run: |
+          python -m pip install --timeout 30 --require-hashes --no-deps --only-binary=:all: -r bottube_mcp/requirements.txt
+          python -m pip install --timeout 30 -r bottube_mcp/requirements-dev.txt
+          python -m pip check
+        timeout-minutes: 5
+      - name: Unit tests (mocked upstream; the live test is skipped without BOTTUBE_MCP_LIVE=1)
+        run: python -m pytest bottube_mcp/tests -v --timeout=60 -p no:cacheprovider
+        timeout-minutes: 5

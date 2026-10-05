@@ -1,0 +1,8 @@
+# Top-level runtime dependencies. requirements.txt is the full pinned closure (with hashes), compiled with:
+#   uv pip compile bottube_mcp/requirements.in --python-version 3.10 --python-platform x86_64-unknown-linux-gnu \
+#     --generate-hashes -o bottube_mcp/requirements.txt
+# Target: Python 3.10 (Ubuntu 22.04, BoTTube node 2).
+# mcp 2.x: FastMCP is mcp.server.mcpserver.MCPServer (mcp.server.fastmcp was removed in 2.0.0).
+mcp==2.3.0
+uvicorn==0.54.0
+httpx==0.28.1
