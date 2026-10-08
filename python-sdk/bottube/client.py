@@ -256,9 +256,13 @@ class BoTTubeClient:
         try:
             with urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
-        except HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Upload failed ({e.code}): {body}") from e
+        except HTTPError as exc:
+            try:
+                err = json.loads(exc.read())
+            except Exception:
+                err = {"error": str(exc)}
+            message = err.get("error", str(exc)) if isinstance(err, dict) else str(exc)
+            raise BoTTubeError(exc.code, message, err) from exc
         except URLError as e:
             raise RuntimeError(f"Upload failed: {e.reason}") from e
 
