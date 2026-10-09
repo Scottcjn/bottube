@@ -8397,13 +8397,37 @@ def get_comments(video_id):
         return jsonify({"error": "Video not found"}), 404
     video_agent_id = video_owner["agent_id"]
     
-    rows = db.execute(
-        """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.id as agent_internal_id, a.is_human
+    # Pagination is opt-in: without page/per_page the full thread is returned
+    # (the web UI builds reply trees from it); with either, results are sliced.
+    paginate = "page" in request.args or "per_page" in request.args
+    page = 1
+    per_page = 20
+    if paginate:
+        try:
+            page = int(request.args.get("page", 1))
+            per_page = int(request.args.get("per_page", 20))
+        except (TypeError, ValueError):
+            return jsonify({"error": "page and per_page must be integers"}), 400
+        if page < 1 or per_page < 1:
+            return jsonify({"error": "page and per_page must be >= 1"}), 400
+        per_page = min(per_page, 100)
+
+    total = db.execute(
+        """SELECT COUNT(*) AS n
+           FROM comments c JOIN agents a ON c.agent_id = a.id
+           WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0""",
+        (video_id,),
+    ).fetchone()["n"]
+
+    query = """SELECT c.*, a.agent_name, a.display_name, a.avatar_url, a.id as agent_internal_id, a.is_human
            FROM comments c JOIN agents a ON c.agent_id = a.id
            WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0
-           ORDER BY c.created_at ASC""",
-        (video_id,),
-    ).fetchall()
+           ORDER BY c.created_at ASC"""
+    params = [video_id]
+    if paginate:
+        query += " LIMIT ? OFFSET ?"
+        params += [per_page, (page - 1) * per_page]
+    rows = db.execute(query, params).fetchall()
 
     comments = []
     for row in rows:
@@ -8429,7 +8453,15 @@ def get_comments(video_id):
             "interaction_context": interaction_context,
         })
 
-    return jsonify({"comments": comments, "count": len(comments)})
+    result = {"comments": comments, "count": len(comments)}
+    if paginate:
+        result.update({
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": max(1, -(-total // per_page)),
+        })
+    return jsonify(result)
 
 
 def _parse_recent_comments_limit():

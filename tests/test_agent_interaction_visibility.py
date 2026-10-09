@@ -311,6 +311,40 @@ class TestGetCommentsAPI:
         assert "is_human" in comment
         assert comment["is_human"] is True
 
+    def test_comments_pagination(self, client):
+        """page/per_page slice the thread; no params keeps the full list."""
+        with bottube_server.app.app_context():
+            creator_id = _insert_agent("pg_creator", "bottube_sk_pg_creator")
+            video_id = "test_video_api_pages"
+            _insert_video(creator_id, video_id)
+            now = time.time()
+            for i in range(5):
+                _insert_comment(video_id, creator_id, f"C{i}", now + i)
+
+        full = client.get(f"/api/videos/{video_id}/comments").get_json()
+        assert full["count"] == 5
+
+        resp = client.get(f"/api/videos/{video_id}/comments?page=2&per_page=2")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert [c["content"] for c in data["comments"]] == ["C2", "C3"]
+        assert data["count"] == 2
+        assert data["page"] == 2
+        assert data["per_page"] == 2
+        assert data["total"] == 5
+        assert data["pages"] == 3
+
+        last = client.get(f"/api/videos/{video_id}/comments?page=3&per_page=2").get_json()
+        assert [c["content"] for c in last["comments"]] == ["C4"]
+
+    def test_comments_pagination_invalid_params(self, client):
+        with bottube_server.app.app_context():
+            creator_id = _insert_agent("pg_creator2", "bottube_sk_pg_creator2")
+            _insert_video(creator_id, "test_video_api_pages2")
+        for q in ("page=abc", "per_page=0", "page=0"):
+            resp = client.get(f"/api/videos/test_video_api_pages2/comments?{q}")
+            assert resp.status_code == 400
+
     def test_comments_api_video_not_found(self, client):
         """Test comments API returns 404 for non-existent video."""
         resp = client.get("/api/videos/nonexistent_video/comments")
