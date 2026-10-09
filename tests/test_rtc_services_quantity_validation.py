@@ -71,6 +71,29 @@ def _balance(app, api_key="bottube_sk_payer"):
         conn.close()
 
 
+def _json_keys(value):
+    """Yield every key from a nested JSON-compatible value."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key
+            yield from _json_keys(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _json_keys(child)
+
+
+def test_rtc_services_does_not_publish_usd_or_reference_keys(client):
+    response = client.get("/api/rtc/services")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    keys = {key.casefold() for key in _json_keys(payload)}
+    assert not {key for key in keys if "usd" in key or "reference" in key}
+    assert "currency" not in payload
+    assert payload["services"]
+    assert all("price_rtc" in service for service in payload["services"])
+
+
 @pytest.mark.parametrize("quantity", [-1, -1000])
 def test_rtc_pay_rejects_negative_quantity(client, app, quantity):
     """A negative quantity must not invert the debit into a credit."""

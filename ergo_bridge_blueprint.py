@@ -14,7 +14,6 @@ Exchange rate: market-based or fixed by admin.
 """
 
 from flask import Blueprint, request, jsonify, g, session
-import hashlib
 import hmac
 import math
 import json
@@ -36,7 +35,7 @@ log = logging.getLogger("ergo_bridge")
 # Platform ERG wallet address (mainnet)
 ERGO_PLATFORM_ADDRESS = os.environ.get("ERGO_PLATFORM_ADDRESS", "")
 
-# Exchange rate: 1 ERG = X RTC (default based on ERG ~$0.80, RTC ~$0.15 reference)
+# Product conversion: one ERG deposit buys this many on-platform RTC credits.
 ERG_TO_RTC_RATE = float(os.environ.get("ERG_TO_RTC_RATE", "8.0"))
 
 # Fees
@@ -639,8 +638,6 @@ def ergo_rate():
     return jsonify({
         "erg_to_rtc": ERG_TO_RTC_RATE,
         "rtc_to_erg": round(1.0 / ERG_TO_RTC_RATE, 6) if ERG_TO_RTC_RATE > 0 else 0,
-        "erg_price_usd_approx": 0.80,
-        "rtc_price_usd_approx": 0.15,
     })
 
 
