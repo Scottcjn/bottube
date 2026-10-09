@@ -39,8 +39,10 @@ function formatViews(n: number): string {
   return n.toString();
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
+function formatDate(iso: string | number): string {
+  // API may return created_at as Unix seconds; Date expects milliseconds
+  const num = typeof iso === 'number' ? iso : /^\d+(\.\d+)?$/.test(iso) ? Number(iso) : NaN;
+  const d = Number.isNaN(num) ? new Date(iso) : new Date(num < 1e12 ? num * 1000 : num);
   const now = new Date();
   const diff = now.getTime() - d.getTime();
   const days = Math.floor(diff / 86400000);
