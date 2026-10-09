@@ -115,6 +115,14 @@ def _counts_and_balance(db_path):
         }
 
 
+def test_ergo_rate_does_not_publish_usd_or_reference_keys(client):
+    response = client.get("/api/ergo/rate")
+
+    assert response.status_code == 200
+    keys = {key.casefold() for key in response.get_json()}
+    assert not {key for key in keys if "usd" in key or "reference" in key}
+
+
 def test_ergo_deposit_rejects_non_object_json(client):
     """A JSON array body to /deposit must 400 without creating a deposit row or touching balance."""
     before = _counts_and_balance(client.db_path)

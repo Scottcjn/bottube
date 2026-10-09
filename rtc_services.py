@@ -25,15 +25,11 @@ import secrets
 import sqlite3
 import time
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, jsonify, request
 
 log = logging.getLogger("bottube.rtc_services")
 
 rtc_services_bp = Blueprint("rtc_services", __name__)
-
-# Single source of truth for the RTC/USD reference (holder-scaled; $0.15 since
-# passing 1,500 wallet holders). An internal accounting unit, not a price.
-RTC_USD = 0.15
 
 # ---------------------------------------------------------------------------
 # Service Catalog
@@ -216,14 +212,11 @@ def init_app(app, db_path):
                 "name": svc["name"],
                 "description": svc.get("description", ""),
                 "price_rtc": svc["price_rtc"],
-                "price_usd_approx": round(svc["price_rtc"] * RTC_USD, 2),
                 "ttl_hours": round(svc["token_ttl_sec"] / 3600, 1),
                 "uses": svc.get("uses_total", 1),
             })
         return jsonify({
             "services": services,
-            "rtc_reference_rate": RTC_USD,
-            "currency": "USD",
             "note": "Pay with RTC. Need RTC? Top up at /credits",
         })
 
@@ -496,7 +489,6 @@ h1 { color: #d4760a; }
 .card { background: #16213e; border: 1px solid #d4760a33; border-radius: 8px; padding: 20px; margin: 15px 0; }
 .card h3 { color: #e8a838; margin-top: 0; }
 .price { font-size: 24px; color: #d4760a; font-weight: bold; }
-.usd { font-size: 14px; color: #888; }
 .cta { display: inline-block; background: #d4760a; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; margin-top: 10px; }
 .otc { background: #16213e; border: 2px solid #e8a838; padding: 15px; border-radius: 8px; margin-top: 30px; text-align: center; }
 a { color: #e8a838; }
@@ -505,12 +497,11 @@ a { color: #e8a838; }
 <p>Pay with RTC — the token earned by real hardware operators.</p>
 """
         for key, svc in SERVICE_CATALOG.items():
-            usd = round(svc["price_rtc"] * RTC_USD, 2)
             html += f"""
 <div class="card">
     <h3>{svc['name']}</h3>
     <p>{svc.get('description', '')}</p>
-    <div class="price">{svc['price_rtc']} RTC <span class="usd">(~${usd} USD)</span></div>
+    <div class="price">{svc['price_rtc']} RTC</div>
     <p>{svc.get('uses_total', 1)} use(s) · Valid for {round(svc['token_ttl_sec']/3600, 1)} hours</p>
     <a class="cta" href="/api/rtc/services">API: POST /api/rtc/pay</a>
 </div>"""
