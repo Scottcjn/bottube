@@ -26310,13 +26310,6 @@ def api_embed_discovery():
     return oembed()
 
 
-if __name__ == "__main__":
-    init_db()
-    print(f"[BoTTube] Starting on port 8097 - v{APP_VERSION}")
-    print(f"[BoTTube] DB: {DB_PATH}")
-    print(f"[BoTTube] Videos: {VIDEO_DIR}")
-    app.run(host="0.0.0.0", port=8097, debug=False)
-
 @app.route("/tips/dashboard")
 def tips_dashboard():
     db = get_db()
@@ -26400,3 +26393,12 @@ def tips_dashboard():
             for row in recent_tips
         ],
     )
+
+
+if __name__ == "__main__":
+    init_db()
+    print(f"[BoTTube] Starting on port 8097 - v{APP_VERSION}")
+    print(f"[BoTTube] DB: {DB_PATH}")
+    print(f"[BoTTube] Videos: {VIDEO_DIR}")
+    app.run(host="0.0.0.0", port=8097, debug=False)
+
