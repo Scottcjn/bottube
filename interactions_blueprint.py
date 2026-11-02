@@ -119,24 +119,46 @@ def api_activity_feed():
         LIMIT ?""", params + [limit]).fetchall()
     
     # Get recent comments
-    comments = db.execute(f"""SELECT 
-            'comment' as type,
-            c.id as ref_id,
-            SUBSTR(c.content, 1, 100) as content,
-            a.id as agent_id,
-            a.agent_name,
-            a.display_name,
-            a.avatar_url,
-            c.created_at,
-            v.video_id,
-            v.title as video_title,
-            c.parent_id
-        FROM comments c
-        JOIN agents a ON c.agent_id = a.id
-        JOIN videos v ON c.video_id = v.video_id
-        WHERE 1=1 {time_filter}
-        ORDER BY c.created_at DESC
-        LIMIT ?""", params + [limit]).fetchall()
+    try:
+        comments = db.execute(f"""SELECT
+                'comment' as type,
+                c.id as ref_id,
+                SUBSTR(c.content, 1, 100) as content,
+                a.id as agent_id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url,
+                c.created_at,
+                v.video_id,
+                v.title as video_title,
+                c.parent_id
+            FROM comments c
+            JOIN agents a ON c.agent_id = a.id
+            JOIN videos v ON c.video_id = v.video_id
+            WHERE 1=1 {time_filter}
+              AND COALESCE(a.is_banned, 0) = 0
+              AND COALESCE(v.is_removed, 0) = 0
+            ORDER BY c.created_at DESC
+            LIMIT ?""", params + [limit]).fetchall()
+    except Exception:
+        comments = db.execute(f"""SELECT
+                'comment' as type,
+                c.id as ref_id,
+                SUBSTR(c.content, 1, 100) as content,
+                a.id as agent_id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url,
+                c.created_at,
+                v.video_id,
+                v.title as video_title,
+                c.parent_id
+            FROM comments c
+            JOIN agents a ON c.agent_id = a.id
+            JOIN videos v ON c.video_id = v.video_id
+            WHERE 1=1 {time_filter}
+            ORDER BY c.created_at DESC
+            LIMIT ?""", params + [limit]).fetchall()
     
     # Get recent votes
     votes = db.execute(f"""SELECT 
@@ -274,20 +296,36 @@ def api_comment_threads(video_id):
     db = get_db()
     
     # Get all comments for this video
-    comments = db.execute("""SELECT 
-            c.id,
-            c.content,
-            c.parent_id,
-            c.likes,
-            c.created_at,
-            a.id as agent_id,
-            a.agent_name,
-            a.display_name,
-            a.avatar_url
-        FROM comments c
-        JOIN agents a ON c.agent_id = a.id
-        WHERE c.video_id = ?
-        ORDER BY c.created_at ASC""", (video_id,)).fetchall()
+    try:
+        comments = db.execute("""SELECT
+                c.id,
+                c.content,
+                c.parent_id,
+                c.likes,
+                c.created_at,
+                a.id as agent_id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url
+            FROM comments c
+            JOIN agents a ON c.agent_id = a.id
+            WHERE c.video_id = ? AND COALESCE(a.is_banned, 0) = 0
+            ORDER BY c.created_at ASC""", (video_id,)).fetchall()
+    except Exception:
+        comments = db.execute("""SELECT
+                c.id,
+                c.content,
+                c.parent_id,
+                c.likes,
+                c.created_at,
+                a.id as agent_id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url
+            FROM comments c
+            JOIN agents a ON c.agent_id = a.id
+            WHERE c.video_id = ?
+            ORDER BY c.created_at ASC""", (video_id,)).fetchall()
     
     # Build thread structure
     comment_map = {}
@@ -349,18 +387,33 @@ def api_agent_collaborations(agent_name):
     # own qualifying threshold (>= 3 comments on the partner's videos, >= 2
     # confirmed tips to the partner); the per-source rows are then merged per
     # partner so a partner that qualifies through both sources is listed once.
-    comment_rows = db.execute("""SELECT
-            a.id,
-            a.agent_name,
-            a.display_name,
-            a.avatar_url,
-            COUNT(*) as interaction_count
-        FROM comments c
-        JOIN videos v ON c.video_id = v.video_id
-        JOIN agents a ON v.agent_id = a.id
-        WHERE c.agent_id = ? AND v.agent_id != ?
-        GROUP BY a.id
-        HAVING interaction_count >= 3""", (agent_id, agent_id)).fetchall()
+    try:
+        comment_rows = db.execute("""SELECT
+                a.id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url,
+                COUNT(*) as interaction_count
+            FROM comments c
+            JOIN videos v ON c.video_id = v.video_id
+            JOIN agents a ON v.agent_id = a.id
+            WHERE c.agent_id = ? AND v.agent_id != ?
+              AND COALESCE(a.is_banned, 0) = 0 AND COALESCE(v.is_removed, 0) = 0
+            GROUP BY a.id
+            HAVING interaction_count >= 3""", (agent_id, agent_id)).fetchall()
+    except Exception:
+        comment_rows = db.execute("""SELECT
+                a.id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url,
+                COUNT(*) as interaction_count
+            FROM comments c
+            JOIN videos v ON c.video_id = v.video_id
+            JOIN agents a ON v.agent_id = a.id
+            WHERE c.agent_id = ? AND v.agent_id != ?
+            GROUP BY a.id
+            HAVING interaction_count >= 3""", (agent_id, agent_id)).fetchall()
 
     tip_rows = db.execute("""SELECT
             a.id,
