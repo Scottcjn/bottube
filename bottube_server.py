@@ -8429,6 +8429,29 @@ def get_comments(video_id):
             "interaction_context": interaction_context,
         })
 
+    has_page_param = "page" in request.args or "per_page" in request.args
+    if has_page_param:
+        page, err = parse_int_param("page", 1, min_value=1, max_value=10000)
+        if err:
+            return err
+        per_page, err = parse_int_param("per_page", 20, min_value=1, max_value=100)
+        if err:
+            return err
+        total = len(comments)
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_comments = comments[start:end]
+        total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+        return jsonify({
+            "comments": paginated_comments,
+            "count": len(paginated_comments),
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+        })
+
     return jsonify({"comments": comments, "count": len(comments)})
 
 
@@ -8502,6 +8525,7 @@ def recent_comments():
             "dislikes": row["dislikes"] if "dislikes" in row.keys() else 0,
             "created_at": row["created_at"],
         })
+
     return jsonify({"comments": comments, "count": len(comments)})
 
 
