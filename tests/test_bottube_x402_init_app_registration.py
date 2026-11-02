@@ -22,6 +22,8 @@ silently regressed.
 # and breaks subsequent imports of real flask).
 # Use: `pytest tests/test_bottube_x402_init_app_registration.py`
 
+import sqlite3
+
 import bottube_x402
 from flask import Flask
 
@@ -115,3 +117,72 @@ def test_bottube_x402_coinbase_wallet_requires_api_key(tmp_path):
     body = resp.get_json()
     assert body is not None
     assert "error" in body
+
+
+def _wallet_app(tmp_path):
+    with sqlite3.connect(tmp_path / "bottube.db") as conn:
+        conn.execute(
+            "CREATE TABLE agents (id INTEGER PRIMARY KEY, agent_name TEXT, "
+            "display_name TEXT, api_key TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO agents (id, agent_name, display_name, api_key) "
+            "VALUES (1, 'tester', 'Tester', 'secret')"
+        )
+    return _fresh_app(tmp_path)
+
+
+def test_bottube_x402_coinbase_wallet_rejects_malformed_json(tmp_path, monkeypatch):
+    app = _wallet_app(tmp_path)
+    client = app.test_client()
+    headers = {"Authorization": "Bearer secret"}
+    wallet_calls = []
+
+    def create_wallet():
+        wallet_calls.append(True)
+        return "0x" + "ab" * 20, {}
+
+    monkeypatch.setattr(bottube_x402, "X402_AVAILABLE", True)
+    monkeypatch.setattr(bottube_x402, "has_cdp_credentials", lambda: True, raising=False)
+    monkeypatch.setattr(bottube_x402, "create_agentkit_wallet", create_wallet, raising=False)
+    cases = [
+        ("not-object", "JSON body must be an object"),
+        (["not", "object"], "JSON body must be an object"),
+    ]
+    for value in (["0x123"], {"address": "0x123"}, 1, True, 0, False, [], {}):
+        cases.append(({"coinbase_address": value}, "coinbase_address must be a string"))
+    for payload, expected_error in cases:
+        resp = client.post("/api/agents/me/coinbase-wallet", json=payload, headers=headers)
+        assert resp.status_code == 400
+        assert resp.get_json() == {"error": expected_error}
+    assert wallet_calls == []
+    with sqlite3.connect(tmp_path / "bottube.db") as conn:
+        assert conn.execute(
+            "SELECT coinbase_address, coinbase_wallet_created FROM agents WHERE id=1"
+        ).fetchone() == (None, 0)
+
+
+def test_bottube_x402_coinbase_wallet_preserves_string_linking_and_auto_creation(tmp_path, monkeypatch):
+    app = _wallet_app(tmp_path)
+    client = app.test_client()
+    headers = {"X-API-Key": "secret"}
+    manual_address = "0x" + "ab" * 20
+    resp = client.post(
+        "/api/agents/me/coinbase-wallet",
+        json={"coinbase_address": manual_address}, headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["method"] == "manual_link"
+    assert resp.get_json()["coinbase_address"] == manual_address
+
+    auto_address = "0x" + "cd" * 20
+    monkeypatch.setattr(bottube_x402, "X402_AVAILABLE", True)
+    monkeypatch.setattr(bottube_x402, "has_cdp_credentials", lambda: True, raising=False)
+    monkeypatch.setattr(
+        bottube_x402, "create_agentkit_wallet", lambda: (auto_address, {}), raising=False,
+    )
+    for payload in ({}, {"coinbase_address": None}, {"coinbase_address": ""}):
+        resp = client.post("/api/agents/me/coinbase-wallet", json=payload, headers=headers)
+        assert resp.status_code == 200
+        assert resp.get_json()["method"] == "agentkit"
+        assert resp.get_json()["coinbase_address"] == auto_address

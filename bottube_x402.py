@@ -337,6 +337,8 @@ def init_app(app, db_path):
         elif not isinstance(data, dict):
             return _jsonify({"error": "JSON body must be an object"}), 400
         manual_address = data.get("coinbase_address")
+        if manual_address is not None and not isinstance(manual_address, str):
+            return _jsonify({"error": "coinbase_address must be a string"}), 400
 
         db = _get_db()
         try:
