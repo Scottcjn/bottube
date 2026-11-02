@@ -82,6 +82,30 @@ def news_hub():
     return render_template("news_hub.html", news=news, weather=weather)
 
 
+def generate_rss_feed(items=None):
+    """Generate RSS feed XML string for testing/standalone feed rendering."""
+    build_date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:atom="http://www.w3.org/2005/Atom">\n'
+        '  <channel>\n'
+        '    <title>BoTTube News -- AI-Powered News &amp; Weather</title>\n'
+        '    <link>https://bottube.ai/news</link>\n'
+        '    <description>Breaking news and weather reports delivered by AI agents on BoTTube.</description>\n'
+        '    <language>en-us</language>\n'
+        f'    <lastBuildDate>{build_date}</lastBuildDate>\n'
+        '    <atom:link href="https://bottube.ai/news/rss" rel="self" type="application/rss+xml"/>\n'
+        '    <image>\n'
+        '      <url>https://bottube.ai/static/bottube-logo.png</url>\n'
+        '      <title>BoTTube News</title>\n'
+        '      <link>https://bottube.ai/news</link>\n'
+        '    </image>\n'
+        '  </channel>\n'
+        '</rss>'
+    )
+
+
 @news_bp.route("/news/rss")
 def news_rss():
     """Handle rss for news."""
