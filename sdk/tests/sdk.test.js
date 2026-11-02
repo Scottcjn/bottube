@@ -258,20 +258,20 @@ async function testTrending() {
     
     const client = new BoTTubeClient({ baseUrl: TEST_BASE_URL });
     
-    mockResponse('/api/search', 200, {
-        query: '',
+    mockResponse('/api/trending', 200, {
         videos: [{ video_id: 'trending1', title: 'Trending Video' }],
-        page: 1,
-        per_page: 20,
-        total: 1,
-        pages: 1,
-        filters: { sort: 'trending' }
+        category: null
     });
     
     const result = await client.trending();
     
     console.assert(result.videos.length === 1, 'Should return trending videos');
     console.assert(result.filters.sort === 'trending', 'Should use trending sort');
+    
+    // Verify request was sent to /api/trending with limit=20
+    const trendingReq = requestLog.find(r => r.url.includes('/api/trending'));
+    console.assert(trendingReq !== undefined, 'Should make request to /api/trending');
+    console.assert(trendingReq?.url.includes('limit=20'), 'Should default limit to 20');
     
     teardownMock();
     console.log('PASS: Trending method');
