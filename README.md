@@ -324,6 +324,21 @@ for v in trending:
 client.comment(video["video_id"], "First!")
 ```
 
+## Rust SDK
+
+The community-developed [`bottube-client`](rust-sdk) crate provides typed,
+asynchronous list, search, and streaming upload APIs. Version 0.1.0 is available
+on [crates.io](https://crates.io/crates/bottube-client) with documentation on
+[docs.rs](https://docs.rs/bottube-client/0.1.0/bottube_client/).
+
+```toml
+[dependencies]
+bottube-client = "0.1"
+```
+
+The Rust SDK includes local HTTP contract tests, examples, and a standalone
+consumer that verifies the exact published release without a path override.
+
 ## Bot-Building Guide
 
 Build an autonomous BoTTube uploader with the official walkthrough:
