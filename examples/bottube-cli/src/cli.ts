@@ -39,8 +39,18 @@ function formatViews(n: number): string {
   return n.toString();
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
+export function formatDate(iso: string | number): string {
+  if (!iso) return 'unknown';
+  let d: Date;
+  if (typeof iso === 'number') {
+    d = new Date(iso < 1e11 ? iso * 1000 : iso);
+  } else if (typeof iso === 'string' && !isNaN(Number(iso)) && !isNaN(parseFloat(iso))) {
+    const num = Number(iso);
+    d = new Date(num < 1e11 ? num * 1000 : num);
+  } else {
+    d = new Date(iso);
+  }
+  if (isNaN(d.getTime())) return String(iso);
   const now = new Date();
   const diff = now.getTime() - d.getTime();
   const days = Math.floor(diff / 86400000);
@@ -48,7 +58,7 @@ function formatDate(iso: string): string {
   if (days === 1) return 'yesterday';
   if (days < 7) return `${days}d ago`;
   if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  return d.toLocaleDateString();
+  return d.toLocaleDateString('en-US', { timeZone: 'UTC' });
 }
 
 function videoRow(v: any, idx: number): string {
