@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Validation tests for SocketIO chat handlers."""
 
+from contextlib import contextmanager
 import importlib
 import sqlite3
 import sys
 import types
 
-from flask import Flask
+from flask import Flask, request
 
 
 def _init_chat_db(db_path):
@@ -32,8 +33,12 @@ def _init_chat_db(db_path):
                 tip_amount REAL,
                 created_at REAL
             );
-            CREATE TABLE videos (video_id TEXT PRIMARY KEY, is_removed INTEGER DEFAULT 0);
-            INSERT INTO videos (video_id) VALUES ('video-1');
+            CREATE TABLE videos (
+                video_id TEXT PRIMARY KEY,
+                agent_id INTEGER NOT NULL,
+                is_removed INTEGER DEFAULT 0
+            );
+            INSERT INTO videos (video_id, agent_id) VALUES ('video-1', 1);
             """
         )
 
@@ -69,17 +74,33 @@ def _load_websocket_server(monkeypatch):
     return module, events
 
 
+@contextmanager
+def _authenticated_request(app, websocket_server):
+    """Supply the trusted socket identity required by handler validation."""
+    with app.test_request_context():
+        request.sid = "validation-socket"
+        websocket_server._socket_identities[request.sid] = {
+            "id": 1,
+            "username": "alice",
+        }
+        try:
+            yield
+        finally:
+            websocket_server._socket_identities.pop(request.sid, None)
+
+
 def test_chat_message_rejects_non_string_message(monkeypatch):
     websocket_server, events = _load_websocket_server(monkeypatch)
 
-    websocket_server.on_chat_message(
-        {
-            "video_id": "video-1",
-            "username": "alice",
-            "user_id": "user-1",
-            "message": 123,
-        }
-    )
+    with _authenticated_request(Flask(__name__), websocket_server):
+        websocket_server.on_chat_message(
+            {
+                "video_id": "video-1",
+                "username": "alice",
+                "user_id": "user-1",
+                "message": 123,
+            }
+        )
 
     assert events == [
         (("error", {"message": "Message must be 1-500 characters"}), {})
@@ -95,7 +116,7 @@ def test_chat_message_accepts_valid_string_message(monkeypatch, tmp_path):
     app.config["CHAT_DB_PATH"] = str(db_path)
     websocket_server._last_message_time.clear()
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_chat_message(
             {
                 "video_id": "video-1",
@@ -118,7 +139,8 @@ def test_chat_message_accepts_valid_string_message(monkeypatch, tmp_path):
 def test_chat_message_rejects_non_object_event(monkeypatch):
     websocket_server, events = _load_websocket_server(monkeypatch)
 
-    websocket_server.on_chat_message(["not", "an", "object"])
+    with _authenticated_request(Flask(__name__), websocket_server):
+        websocket_server.on_chat_message(["not", "an", "object"])
 
     assert events == [(("error", {"message": "Event data must be an object"}), {})]
 
@@ -134,7 +156,7 @@ def test_chat_message_rejects_malformed_numeric_fields_without_insert(
     app.config["CHAT_DB_PATH"] = str(db_path)
     websocket_server._last_message_time.clear()
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_chat_message(
             {
                 "video_id": "video-1",
@@ -189,12 +211,12 @@ def test_mod_action_rejects_malformed_ban_duration_without_insert(
     app = Flask(__name__)
     app.config["CHAT_DB_PATH"] = str(db_path)
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_mod_action(
             {
                 "action": "ban",
                 "video_id": "video-1",
-                "target_user_id": "user-1",
+                "target_user_id": 2,
                 "duration": "later",
             }
         )
@@ -214,12 +236,12 @@ def test_mod_action_rejects_malformed_timeout_duration(monkeypatch, tmp_path):
     app.config["CHAT_DB_PATH"] = str(db_path)
     websocket_server._last_message_time.clear()
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_mod_action(
             {
                 "action": "timeout",
                 "video_id": "video-1",
-                "target_user_id": "user-1",
+                "target_user_id": 2,
                 "duration": "later",
             }
         )
@@ -238,7 +260,7 @@ def test_leave_rejects_missing_video_without_room_action(monkeypatch, tmp_path):
     app = Flask(__name__)
     app.config["CHAT_DB_PATH"] = str(db_path)
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_leave({"video_id": "ghost-video", "username": "alice"})
 
     assert events == [(("error", {"message": "Video not found"}), {})]
@@ -252,7 +274,7 @@ def test_leave_accepts_existing_video(monkeypatch, tmp_path):
     app = Flask(__name__)
     app.config["CHAT_DB_PATH"] = str(db_path)
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_leave({"video_id": "video-1", "username": "alice"})
 
     assert events == [
@@ -268,7 +290,7 @@ def test_mod_action_ban_rejects_missing_video_without_insert(monkeypatch, tmp_pa
     app = Flask(__name__)
     app.config["CHAT_DB_PATH"] = str(db_path)
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_mod_action(
             {
                 "action": "ban",
@@ -291,12 +313,12 @@ def test_mod_action_ban_accepts_existing_video(monkeypatch, tmp_path):
     app = Flask(__name__)
     app.config["CHAT_DB_PATH"] = str(db_path)
 
-    with app.app_context():
+    with _authenticated_request(app, websocket_server):
         websocket_server.on_mod_action(
             {
                 "action": "ban",
                 "video_id": "video-1",
-                "target_user_id": "user-1",
+                "target_user_id": 2,
                 "mod_name": "mod",
                 "reason": "spam",
             }
