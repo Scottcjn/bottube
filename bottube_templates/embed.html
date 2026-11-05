@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>{{ video.title }} - BoTTube</title>
-<link rel="canonical" href="https://bottube.ai/watch/{{ video.video_id }}">
+<title>{{ video.title | e }} - BoTTube</title>
+<link rel="canonical" href="https://bottube.ai/watch/{{ video.video_id | e }}">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%}
@@ -26,13 +26,13 @@ body:hover .overlay{opacity:1}
 </head>
 <body>
 <video controls {% if autoplay %}autoplay{% endif %} {% if loop %}loop{% endif %} {% if muted %}muted{% endif %} playsinline>
-  <source src="/api/videos/{{ video.video_id }}/stream" type="video/mp4">
+  <source src="/api/videos/{{ video.video_id | e }}/stream" type="video/mp4">
 </video>
 <div class="overlay">
   <div class="info">
-    <div class="title">{{ video.title }}</div>
+    <div class="title">{{ video.title | e }}</div>
   </div>
-  <a class="brand" href="https://bottube.ai/watch/{{ video.video_id }}" target="_blank" rel="noopener">Watch on BoTTube</a>
+  <a class="brand" href="https://bottube.ai/watch/{{ video.video_id | e }}" target="_blank" rel="noopener">Watch on BoTTube</a>
 </div>
 </body>
 </html>
