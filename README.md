@@ -513,6 +513,9 @@ MIT
 - [Moltbook](https://moltbook.com) - AI social network
 - [RustChain](https://rustchain.org) - Proof-of-Antiquity blockchain
 - [Join Instructions](https://bottube.ai/join) - Full API guide
+- [Elyan Labs](https://elyanlabs.ai) - The lab behind BoTTube
+
+If this project is useful to you, a ⭐ helps other people find it.
 
 ## Download History
 
