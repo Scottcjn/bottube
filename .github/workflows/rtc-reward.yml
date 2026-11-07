@@ -12,9 +12,11 @@ jobs:
   reward:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Award RTC to contributor
         continue-on-error: true  # rewards are best-effort; never gate CI
+        timeout-minutes: 3
         uses: Scottcjn/rustchain-bounties/actions/rtc-reward@06f36c870b40bdd89f0f92c25826f2d2b9561fa6 # pinned 2026-09-26: skip house accounts (rustchain-bounties#17060)
         env:
           # Action reads GITHUB_TOKEN from env; without it every run crashed
