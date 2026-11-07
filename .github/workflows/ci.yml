@@ -285,27 +285,30 @@ jobs:
     steps:
       - name: Distinguish timeout from failure
         timeout-minutes: 1
+        env:
+          LK: ${{ needs.lint.outputs.failure_kind }}
+          TK: ${{ needs.test.outputs.failure_kind }}
+          SK: ${{ needs.security.outputs.failure_kind }}
+          DK: ${{ needs.deployment-drift.outputs.failure_kind }}
         run: |
           L="${{ needs.lint.result }}"
           T="${{ needs.test.result }}"
           S="${{ needs.security.result }}"
           D="${{ needs.deployment-drift.result }}"
-          LK="${{ needs.lint.outputs.failure_kind }}"
-          TK="${{ needs.test.outputs.failure_kind }}"
-          SK="${{ needs.security.outputs.failure_kind }}"
-          DK="${{ needs.deployment-drift.outputs.failure_kind }}"
-          echo "results: lint=$L($LK) test=$T($TK) security=$S($SK) deployment_drift=$D($DK)"
-          {
-            echo "### BoTTube CI Outcome Summary"
-            echo "| Job | Job Result | Attribution |"
-            echo "|---|---|---|"
-            echo "| lint | \`$L\` | \`${LK:-job_cancelled_or_not_acquired}\` |"
-            echo "| test | \`$T\` | \`${TK:-job_cancelled_or_not_acquired}\` |"
-            echo "| security | \`$S\` | \`${SK:-job_cancelled_or_not_acquired}\` |"
-            echo "| deployment-drift | \`$D\` | \`${DK:-job_cancelled_or_not_acquired}\` |"
-          } >> "$GITHUB_STEP_SUMMARY" || true
-          if echo "$L $T $S $D" | grep -q cancelled || echo "$LK $TK $SK $DK" | grep -q step_timeout_or_infra; then
-            echo "::error::A CI job or step TIMED OUT / hit a runner or package-index infrastructure stall (not a contributor code failure). Re-run the workflow to confirm."
+          echo "results: lint=$L(${LK:-}) test=$T(${TK:-}) security=$S(${SK:-}) deployment_drift=$D(${DK:-})"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "### BoTTube CI Outcome Summary"
+              echo "| Job | Job Result | Attribution |"
+              echo "|---|---|---|"
+              echo "| lint | \`$L\` | \`${LK:-job_cancelled_or_not_acquired}\` |"
+              echo "| test | \`$T\` | \`${TK:-job_cancelled_or_not_acquired}\` |"
+              echo "| security | \`$S\` | \`${SK:-job_cancelled_or_not_acquired}\` |"
+              echo "| deployment-drift | \`$D\` | \`${DK:-job_cancelled_or_not_acquired}\` |"
+            } >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          if echo "$L $T $S $D" | grep -q cancelled || echo "${LK:-} ${TK:-} ${SK:-} ${DK:-}" | grep -q step_timeout_or_infra; then
+            echo "::error::A CI job was CANCELLED or a CI step TIMED OUT / hit a runner or package-index infrastructure stall (not a contributor code failure). Re-run the workflow to confirm."
             exit 1
           elif echo "$L $T $S $D" | grep -qE 'failure|error'; then
             echo "::error::A CI job FAILED on a code/test check step. Inspect the failing job's logs above."
