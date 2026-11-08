@@ -90,7 +90,7 @@ def app():
     # We need to set up the environment before importing bottube_server
     server_path = Path(__file__).resolve().parent.parent
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         os.environ["BOTTUBE_BASE_DIR"] = tmpdir
         db_path = Path(tmpdir) / "bottube.db"
         video_dir = Path(tmpdir) / "videos"
