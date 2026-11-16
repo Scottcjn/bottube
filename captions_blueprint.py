@@ -502,23 +502,31 @@ def _fts_query(raw_query: str) -> str:
 def find_caption_video_ids(query: str, limit: int = 200) -> list[str]:
     """Search indexed caption text and return distinct matching video ids."""
     fts_query = _fts_query(query)
+    db = None
     try:
-        with _connect_db() as db:
-            if not fts_query or not _table_exists(db, "video_captions_fts"):
-                return []
-            rows = db.execute(
-                """
-                SELECT DISTINCT video_id
-                FROM video_captions_fts
-                WHERE caption_data MATCH ?
-                LIMIT ?
-                """,
-                (fts_query, max(1, min(limit, 500))),
-            ).fetchall()
-            return [row["video_id"] for row in rows]
+        db = _connect_db()
+        if not fts_query or not _table_exists(db, "video_captions_fts"):
+            return []
+        rows = db.execute(
+            """
+            SELECT DISTINCT video_id
+            FROM video_captions_fts
+            WHERE caption_data MATCH ?
+            LIMIT ?
+            """,
+            (fts_query, max(1, min(limit, 500))),
+        ).fetchall()
+        return [row["video_id"] for row in rows]
     except sqlite3.Error as exc:
         log.warning("Caption search failed: %s", exc)
         return []
+    finally:
+        # sqlite3.Connection's context manager commits/rolls back but does not
+        # close the connection. This function opens a short-lived reader for
+        # each search, so close it explicitly before temporary test databases
+        # or other callers attempt cleanup.
+        if db is not None:
+            db.close()
 
 
 def _parse_caption_limit(default: int = 50, max_value: int = 500) -> int:
