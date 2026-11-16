@@ -78,6 +78,47 @@ def test_successful_json_response_is_unchanged(call_api):
         assert call_api() == {"ok": True}
 
 
+@pytest.mark.parametrize(
+    ("body", "expected_detail"),
+    [
+        (b'{"error": "Rate limit exceeded", "retry_after": 60}',
+         {"error": "Rate limit exceeded", "retry_after": 60}),
+        (b'["upstream unavailable"]', ["upstream unavailable"]),
+        (b"<html>Bad Gateway</html>", None),
+    ],
+)
+def test_streaming_upload_http_error_preserves_sdk_error_contract(
+    tmp_path, body, expected_detail
+):
+    client = BoTTubeClient(base_url="https://example.test")
+    video = tmp_path / "large-video.mp4"
+    video.write_bytes(b"video fixture")
+    original = HTTPError(
+        "https://example.test/api/upload", 429, "Too Many Requests", {},
+        BytesIO(body),
+    )
+
+    with patch(
+        "bottube.client.os.path.getsize", return_value=100 * 1024 * 1024 + 1
+    ), patch("bottube.client.urlopen", side_effect=original):
+        with pytest.raises(BoTTubeError) as caught:
+            client.upload(str(video), title="Streaming error regression")
+
+    error = caught.value
+    assert error.status_code == 429
+    assert error.__cause__ is original
+    if expected_detail is None:
+        assert error.error == str(original)
+        assert error.detail == {"error": str(original)}
+    else:
+        assert error.detail == expected_detail
+        assert error.error == (
+            expected_detail.get("error", str(original))
+            if isinstance(expected_detail, dict)
+            else str(original)
+        )
+
+
 def test_malformed_successful_response_still_raises_decode_error(call_api):
     with patch("bottube.client.urlopen", return_value=BytesIO(b"not JSON")):
         with pytest.raises(json.JSONDecodeError):

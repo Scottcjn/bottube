@@ -85,14 +85,18 @@ def _make_minimal_webm() -> bytes:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     """Create a test Flask app with an in-memory database."""
     # We need to set up the environment before importing bottube_server
     server_path = Path(__file__).resolve().parent.parent
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["BOTTUBE_BASE_DIR"] = tmpdir
         db_path = Path(tmpdir) / "bottube.db"
+        monkeypatch.setenv("BOTTUBE_BASE_DIR", tmpdir)
+        # Several blueprints resolve the canonical database path during import.
+        # Point those modules at this fixture's database and restore the prior
+        # environment after the temporary directory has been cleaned up.
+        monkeypatch.setenv("BOTTUBE_DB_PATH", str(db_path))
         video_dir = Path(tmpdir) / "videos"
         thumb_dir = Path(tmpdir) / "thumbnails"
         avatar_dir = Path(tmpdir) / "avatars"
@@ -128,6 +132,24 @@ def app():
         bottube_server.transcode_video = _fake_transcode
         bottube_server.get_video_metadata = lambda _path: (2.0, 320, 240)
         bottube_server.generate_thumbnail = lambda _video, _thumb: False
+        # These API tests do not exercise post-upload background jobs. Keep
+        # their temporary database isolated from daemon workers that can
+        # outlive this fixture. The embedding worker is covered separately in
+        # tests/test_embedding_async_app_context.py.
+        def _noop_background(*_args, **_kwargs):
+            return None
+
+        for name in (
+            "_renditions_process_video_async",
+            "_ue_record_for_video_async",
+            "_ue_cache_warm_async",
+            "_uv_cache_warm_async",
+            "generate_captions_async",
+            "_ping_indexnow",
+            "ping_google_indexing",
+            "_notify_subscribers_new_video",
+        ):
+            monkeypatch.setattr(bottube_server, name, _noop_background)
 
         flask_app = bottube_server.app
         flask_app.config["TESTING"] = True
