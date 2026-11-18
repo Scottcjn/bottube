@@ -34,8 +34,8 @@ def test_bridge_is_served_only_by_the_wrtc_blueprint(app):
 def test_bridge_page_renders_the_contract_address_block(client):
     """The copy-to-clipboard contract address must not be empty.
 
-    Note the mint also appears once as a hardcoded Raydium swap link, so a
-    bare `WRTC_MINT in html` check passes even with the stub -- assert on the
+    Note the mint used to appear once more as a hardcoded swap link, so a
+    bare `WRTC_MINT in html` check could pass even with the stub -- assert on the
     interpolated block instead.
     """
     response = client.get("/bridge")

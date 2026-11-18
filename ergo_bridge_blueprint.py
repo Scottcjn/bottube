@@ -36,7 +36,7 @@ log = logging.getLogger("ergo_bridge")
 # Platform ERG wallet address (mainnet)
 ERGO_PLATFORM_ADDRESS = os.environ.get("ERGO_PLATFORM_ADDRESS", "")
 
-# Exchange rate: 1 ERG = X RTC (default based on ERG ~$0.80, RTC ~$0.10)
+# Exchange rate: 1 ERG = X RTC (default based on ERG ~$0.80, RTC ~$0.15 reference)
 ERG_TO_RTC_RATE = float(os.environ.get("ERG_TO_RTC_RATE", "8.0"))
 
 # Fees
@@ -54,9 +54,16 @@ ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 
 def _admin_ok(provided):
     """Constant-time admin check; fails closed when BOTTUBE_ADMIN_KEY is unset."""
-    if not ADMIN_KEY:
+    if not ADMIN_KEY or not isinstance(provided, str) or not provided:
         return False
-    return hmac.compare_digest(provided or "", ADMIN_KEY)
+    # Compare UTF-8 bytes: hmac.compare_digest raises TypeError on str with
+    # non-ASCII characters, which turned a junk X-Admin-Key into an HTTP 500.
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = ADMIN_KEY.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
 
 # Confirmation threshold (blocks)
 REQUIRED_CONFIRMATIONS = 3
@@ -633,7 +640,7 @@ def ergo_rate():
         "erg_to_rtc": ERG_TO_RTC_RATE,
         "rtc_to_erg": round(1.0 / ERG_TO_RTC_RATE, 6) if ERG_TO_RTC_RATE > 0 else 0,
         "erg_price_usd_approx": 0.80,
-        "rtc_price_usd_approx": 0.10,
+        "rtc_price_usd_approx": 0.15,
     })
 
 

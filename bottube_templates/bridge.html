@@ -336,16 +336,10 @@
             </div>
         </div>
 
-        <!-- Buy wRTC -->
+        <!-- Token contract -->
         <div class="bridge-card" style="text-align:center;">
-            <h2 style="justify-content:center;"><span class="icon">&#128176;</span> Buy wRTC on Raydium</h2>
-            <p style="color:var(--text-secondary);margin-bottom:16px;">
-                Swap SOL for wRTC on Raydium DEX, then deposit here to tip creators.
-            </p>
-            <a id="wrtc-buy-btn" href="{{ swap_url }}" target="_blank" rel="noopener noreferrer" class="btn-primary btn-buy">
-                Swap SOL &#8594; wRTC on Raydium
-            </a>
-            <div style="margin-top:16px;">
+            <h2 style="justify-content:center;"><span class="icon">&#128176;</span> wRTC Token Contract</h2>
+            <div>
                 <label style="font-size:12px;color:var(--text-muted);">Token Contract</label>
                 <div class="copy-row" style="max-width:500px;margin:6px auto 0;">
                     <span class="addr">{{ wrtc_mint }}</span>
@@ -431,9 +425,7 @@
                 <tr>
                     <td style="color:var(--text-muted);">Explorer</td>
                     <td>
-                        <a href="https://solscan.io/token/{{ wrtc_mint }}" target="_blank" rel="noopener noreferrer">Solscan</a> &middot;
-                        <a href="https://birdeye.so/token/{{ wrtc_mint }}?chain=solana" target="_blank" rel="noopener noreferrer">Birdeye</a> &middot;
-                        <a href="https://www.geckoterminal.com/solana/tokens/{{ wrtc_mint }}" target="_blank" rel="noopener noreferrer">GeckoTerminal</a>
+                        <a href="https://solscan.io/token/{{ wrtc_mint }}" target="_blank" rel="noopener noreferrer">Solscan</a>
                     </td>
                 </tr>
             </table>
@@ -653,8 +645,6 @@
                 <a href="/api/base-bridge/info" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Bridge API Info</a>
                 <span style="color:var(--text-muted);">|</span>
                 <a href="https://basescan.org" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">BaseScan Explorer</a>
-                <span style="color:var(--text-muted);">|</span>
-                <a href="https://app.uniswap.org" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Swap on Uniswap</a>
             </div>
         </div>
     </div>
@@ -677,9 +667,6 @@
             </a>
             <a href="https://github.com/Scottcjn/Rustchain" target="_blank" rel="noopener noreferrer" class="rustchain-link rl-github">
                 <span class="rl-icon">&#128187;</span> GitHub
-            </a>
-            <a href="https://raydium.io/swap/?inputMint=sol&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X" target="_blank" rel="noopener noreferrer" class="rustchain-link rl-swap">
-                <span class="rl-icon">&#128176;</span> Buy wRTC
             </a>
             <a href="https://50.28.86.131/explorer" target="_blank" rel="noopener noreferrer" class="rustchain-link rl-explorer">
                 <span class="rl-icon">&#128270;</span> Block Explorer
@@ -965,9 +952,6 @@ document.addEventListener("DOMContentLoaded", () => {
     else if (path.includes("/bridge/ltc")) chain = "ltc";
     else if (path.includes("/bridge/doge")) chain = "doge";
     trackFunnel("funnel-bridge-view", {chain});
-
-    const buyBtn = document.getElementById("wrtc-buy-btn");
-    if (buyBtn) buyBtn.addEventListener("click", () => trackFunnel("funnel-wrtc-buy-click"));
 
     loadBridgeStats();
     {% if current_user %}

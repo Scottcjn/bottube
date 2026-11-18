@@ -21,6 +21,7 @@ Environment:
 
 from __future__ import annotations
 
+import hmac
 import os
 import secrets
 import time
@@ -56,33 +57,33 @@ CANCEL_URL = f"{BASE_URL}/store?cancelled=1"
 PACKAGES = {
     "starter": {
         "name": "Starter Pack",
-        "description": "5 AI video generations + 250 RTC credits",
+        "description": "5 AI video generations + 33 RTC credits",
         "price_usd": 5.00,
-        "rtc_credits": 250,
+        "rtc_credits": 33,
         "video_generations": 5,
         "gpu_minutes": 10,
     },
     "creator": {
         "name": "Creator Pack",
-        "description": "20 AI video generations + 1000 RTC credits",
+        "description": "20 AI video generations + 100 RTC credits",
         "price_usd": 15.00,
-        "rtc_credits": 1000,
+        "rtc_credits": 100,
         "video_generations": 20,
         "gpu_minutes": 45,
     },
     "studio": {
         "name": "Studio Pack",
-        "description": "100 AI video generations + 5000 RTC credits",
+        "description": "100 AI video generations + 333 RTC credits",
         "price_usd": 50.00,
-        "rtc_credits": 5000,
+        "rtc_credits": 333,
         "video_generations": 100,
         "gpu_minutes": 200,
     },
     "enterprise": {
         "name": "Enterprise Pack",
-        "description": "500 AI video generations + 25000 RTC credits",
+        "description": "500 AI video generations + 1333 RTC credits",
         "price_usd": 200.00,
-        "rtc_credits": 25000,
+        "rtc_credits": 1333,
         "video_generations": 500,
         "gpu_minutes": 1000,
     },
@@ -796,7 +797,9 @@ def store_stats():
     admin_key = request.headers.get("X-Admin-Key", "")
     expected_key = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 
-    if not admin_key or admin_key != expected_key:
+    if not admin_key or not expected_key or not hmac.compare_digest(
+        admin_key.encode("utf-8"), expected_key.encode("utf-8")
+    ):
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()

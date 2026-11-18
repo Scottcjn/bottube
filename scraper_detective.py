@@ -646,6 +646,24 @@ def bt_proof():
     return "", 204
 
 
+def _admin_key_ok(provided, expected) -> bool:
+    """Constant-time admin key check; fails closed on empty values.
+
+    Compares UTF-8 bytes: hmac.compare_digest raises TypeError on non-ASCII
+    str, which would turn a junk key into an HTTP 500.
+    """
+    if not isinstance(provided, str) or not isinstance(expected, str):
+        return False
+    if not provided or not expected:
+        return False
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = expected.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
+
+
 @scraper_bp.route("/scraper-dashboard")
 def scraper_dashboard():
     """Self-contained scraper detective dashboard. Requires admin key."""
@@ -654,7 +672,7 @@ def scraper_dashboard():
     except ImportError:
         ADMIN_KEY = ""
     provided = request.args.get("key", "")
-    if not provided or not ADMIN_KEY or provided != ADMIN_KEY:
+    if not _admin_key_ok(provided, ADMIN_KEY):
         return "Forbidden — append ?key=YOUR_ADMIN_KEY", 403
     return Response(_DASHBOARD_HTML, content_type="text/html")
 
@@ -667,7 +685,7 @@ def admin_scrapers_api():
     except ImportError:
         ADMIN_KEY = ""
     provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or not ADMIN_KEY or provided != ADMIN_KEY:
+    if not _admin_key_ok(provided, ADMIN_KEY):
         return jsonify({"error": "Forbidden"}), 403
     return jsonify({
         "timestamp": time.time(),
@@ -694,7 +712,7 @@ def admin_block_ip():
     except ImportError:
         ADMIN_KEY = ""
     provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or not ADMIN_KEY or provided != ADMIN_KEY:
+    if not _admin_key_ok(provided, ADMIN_KEY):
         return jsonify({"error": "Forbidden"}), 403
     data, err = _json_object_body()
     if err:
@@ -714,7 +732,7 @@ def admin_unblock_ip():
     except ImportError:
         ADMIN_KEY = ""
     provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or not ADMIN_KEY or provided != ADMIN_KEY:
+    if not _admin_key_ok(provided, ADMIN_KEY):
         return jsonify({"error": "Forbidden"}), 403
     data, err = _json_object_body()
     if err:

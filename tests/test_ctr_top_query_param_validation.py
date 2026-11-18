@@ -36,7 +36,10 @@ def test_ctr_top_rejects_invalid_query_values(client, monkeypatch):
         resp = client.get(f"/api/ctr/top?{query}")
 
         assert resp.status_code == 400
-        assert resp.get_json() == {"error": expected_error}
+        assert resp.get_json() == {
+            "error": expected_error,
+            "param": query.split("=", 1)[0],
+        }
 
     assert tracker.calls == []
 

@@ -345,52 +345,64 @@ def api_agent_collaborations(agent_name):
     
     agent_id = agent['id']
     
-    # Find agents this agent frequently interacts with
-    # Count comments on each other's videos
-    collabs = db.execute("""SELECT 
+    # Find agents this agent frequently interacts with. Each source keeps its
+    # own qualifying threshold (>= 3 comments on the partner's videos, >= 2
+    # confirmed tips to the partner); the per-source rows are then merged per
+    # partner so a partner that qualifies through both sources is listed once.
+    comment_rows = db.execute("""SELECT
             a.id,
             a.agent_name,
             a.display_name,
             a.avatar_url,
-            COUNT(*) as interaction_count,
-            'comments' as interaction_type
+            COUNT(*) as interaction_count
         FROM comments c
         JOIN videos v ON c.video_id = v.video_id
         JOIN agents a ON v.agent_id = a.id
         WHERE c.agent_id = ? AND v.agent_id != ?
         GROUP BY a.id
-        HAVING interaction_count >= 3
-        
-        UNION ALL
-        
-        SELECT 
+        HAVING interaction_count >= 3""", (agent_id, agent_id)).fetchall()
+
+    tip_rows = db.execute("""SELECT
             a.id,
             a.agent_name,
             a.display_name,
             a.avatar_url,
-            COUNT(*) as interaction_count,
-            'tips' as interaction_type
+            COUNT(*) as interaction_count
         FROM tips t
         JOIN agents a ON t.to_agent_id = a.id
         WHERE t.from_agent_id = ? AND t.to_agent_id != ?
             AND COALESCE(t.status, 'confirmed') = 'confirmed'
         GROUP BY a.id
-        HAVING interaction_count >= 2
-        
-        ORDER BY interaction_count DESC
-        LIMIT 10""", (agent_id, agent_id, agent_id, agent_id)).fetchall()
-    
+        HAVING interaction_count >= 2""", (agent_id, agent_id)).fetchall()
+
+    merged = {}
+    for source, rows in (("comments", comment_rows), ("tips", tip_rows)):
+        for row in rows:
+            entry = merged.setdefault(row['id'], {"row": row, "breakdown": {}})
+            entry["breakdown"][source] = row['interaction_count']
+
+    ranked = sorted(
+        merged.values(),
+        key=lambda e: (-sum(e["breakdown"].values()), e["row"]['agent_name']),
+    )[:10]
+
     # Calculate collaboration badges
     partners = []
-    for row in collabs:
-        badge = None
-        if row['interaction_count'] >= 10:
+    for entry in ranked:
+        row = entry["row"]
+        breakdown = entry["breakdown"]
+        interaction_count = sum(breakdown.values())
+        if interaction_count >= 10:
             badge = "🤝 Close Collaborator"
-        elif row['interaction_count'] >= 5:
+        elif interaction_count >= 5:
             badge = "💬 Frequent Interactor"
         else:
             badge = "👋 Regular Visitor"
-        
+
+        # Single-source partners keep the original "comments"/"tips" value;
+        # partners that qualify through both sources are reported as "mixed".
+        interaction_type = next(iter(breakdown)) if len(breakdown) == 1 else "mixed"
+
         partners.append({
             "agent": {
                 "id": row['id'],
@@ -398,11 +410,12 @@ def api_agent_collaborations(agent_name):
                 "display_name": row['display_name'] or row['agent_name'],
                 "avatar": row['avatar_url']
             },
-            "interaction_count": row['interaction_count'],
-            "interaction_type": row['interaction_type'],
+            "interaction_count": interaction_count,
+            "interaction_type": interaction_type,
+            "interaction_breakdown": breakdown,
             "badge": badge
         })
-    
+
     return jsonify({
         "agent": agent_name,
         "collaboration_partners": partners,

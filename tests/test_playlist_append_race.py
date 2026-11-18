@@ -266,6 +266,10 @@ def test_legacy_two_step_pattern_can_duplicate_positions(client):
     seen_max: list[int] = []
     seen_lock = threading.Lock()
     barrier = threading.Barrier(2)
+    # Second rendezvous: neither thread INSERTs until both have read MAX, so
+    # the interleaving the test pins down happens every run instead of only
+    # when the scheduler happens to produce it.
+    read_barrier = threading.Barrier(2, timeout=10)
 
     def _two_step(video_id: str) -> None:
         # Two-thread race that mimics the legacy code: read the max then insert.
@@ -281,6 +285,7 @@ def test_legacy_two_step_pattern_can_duplicate_positions(client):
             ).fetchone()[0]
             with seen_lock:
                 seen_max.append(max_pos)
+            read_barrier.wait()
             conn.execute(
                 "INSERT INTO playlist_items (playlist_id, video_id, position, added_at) "
                 "VALUES (?, ?, ?, ?)",
