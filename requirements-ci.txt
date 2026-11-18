@@ -13,4 +13,4 @@ requests==2.34.2
 PyYAML==6.0.3
 numpy==2.4.6
 PyNaCl==1.6.2
-pillow==12.3.0
+pillow==13.0.0
