@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 import json
+import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -14,7 +16,11 @@ import x402_payment
 
 
 @pytest.fixture(autouse=True)
-def clear_payment_cache():
+def clear_payment_cache(tmp_path, monkeypatch):
+    # Consumed payments are now recorded durably in SQLite, so every test gets
+    # its own empty replay store (otherwise rows would leak between tests and
+    # into the checkout's bottube.db).
+    monkeypatch.setattr(x402_payment, "_REPLAY_DB_PATH", tmp_path / "x402.db")
     x402_payment._payment_cache.clear()
     yield
     x402_payment._payment_cache.clear()
@@ -214,3 +220,192 @@ def test_verify_payment_detects_receipt_and_transfer_amount_mismatch(monkeypatch
     assert verified is False
     assert reason == "amount_mismatch"
     assert payment is None
+
+
+# -- Durable replay lock --
+
+FP_SEARCH = "GET:/x402/api/search?q=retro"
+FP_VIDEOS = "GET:/x402/api/videos"
+
+
+def _receipt(tx_hash):
+    return json.dumps(
+        {
+            "tx_hash": tx_hash,
+            "network": "base",
+            "recipient": x402_payment.USDC_RECEIVING_ADDRESS,
+            "amount": "0.000100",
+        }
+    )
+
+
+def _fake_chain(monkeypatch, calls=None, err=None):
+    def fake_verify(tx_hash_arg, network, recipient):
+        if calls is not None:
+            calls.append(tx_hash_arg)
+        if err:
+            return None, err
+        return (
+            {
+                "tx_hash": tx_hash_arg,
+                "network": network,
+                "recipient": recipient,
+                "amount_raw": 100,
+                "amount_usdc": 0.0001,
+                "block_number": 123,
+            },
+            None,
+        )
+
+    monkeypatch.setattr(x402_payment, "_verify_evm_usdc_transfer", fake_verify)
+
+
+def _verify(tx_hash, fingerprint):
+    return x402_payment._verify_payment(
+        _receipt(tx_hash), 0.0001, request_fingerprint=fingerprint
+    )
+
+
+def _stored_rows():
+    with sqlite3.connect(x402_payment._replay_db_path()) as conn:
+        return conn.execute(
+            "SELECT tx_hash, network, fingerprint, amount_raw "
+            "FROM x402_consumed_payments ORDER BY tx_hash"
+        ).fetchall()
+
+
+def test_replay_after_cache_ttl_eviction_is_rejected(monkeypatch):
+    tx_hash = "0x" + ("44" * 32)
+    _fake_chain(monkeypatch)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+
+    # Age the in-memory entry past CACHE_TTL and let cleanup evict it.
+    x402_payment._payment_cache[tx_hash]["time"] -= x402_payment.CACHE_TTL + 1
+    x402_payment._cleanup_payment_cache()
+    assert tx_hash not in x402_payment._payment_cache
+
+    assert _verify(tx_hash, FP_VIDEOS) == (False, "payment_already_consumed", None)
+    assert _stored_rows() == [(tx_hash, "base", FP_SEARCH, 100)]
+
+
+def test_replay_from_another_worker_is_rejected(monkeypatch):
+    tx_hash = "0x" + ("55" * 32)
+    calls = []
+    _fake_chain(monkeypatch, calls)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+
+    # A different gunicorn worker (or a restarted one) has an empty cache.
+    x402_payment._payment_cache.clear()
+
+    assert _verify(tx_hash, FP_VIDEOS) == (False, "payment_already_consumed", None)
+    assert calls == [tx_hash]  # rejected from the store, no second RPC
+
+
+def test_same_fingerprint_retry_still_ok_without_cache(monkeypatch):
+    tx_hash = "0x" + ("66" * 32)
+    calls = []
+    _fake_chain(monkeypatch, calls)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+    x402_payment._payment_cache.clear()
+
+    verified, reason, payment = _verify(tx_hash, FP_SEARCH)
+    assert (verified, reason) == (True, "cached")
+    assert payment["tx_hash"] == tx_hash
+    assert payment["network"] == "base"
+    assert payment["amount_raw"] == 100
+    assert calls == [tx_hash]
+    assert len(_stored_rows()) == 1
+
+
+def test_recased_tx_hash_is_the_same_payment(monkeypatch):
+    tx_hash = "0x" + ("ab" * 32)
+    _fake_chain(monkeypatch)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+    x402_payment._payment_cache.clear()
+
+    recased = "0x" + ("AB" * 32)
+    assert _verify(recased, FP_VIDEOS) == (False, "payment_already_consumed", None)
+    assert len(_stored_rows()) == 1
+
+
+def test_failed_verification_is_never_recorded(monkeypatch):
+    tx_hash = "0x" + ("77" * 32)
+    _fake_chain(monkeypatch, err="tx_not_found")
+
+    assert _verify(tx_hash, FP_SEARCH) == (False, "tx_not_found", None)
+    assert _stored_rows() == []
+    assert tx_hash not in x402_payment._payment_cache
+
+    # Once the transfer is really there, the same hash can still be used.
+    _fake_chain(monkeypatch)
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+
+
+def test_replay_store_failure_fails_closed(monkeypatch, tmp_path):
+    tx_hash = "0x" + ("88" * 32)
+    _fake_chain(monkeypatch)
+    monkeypatch.setattr(
+        x402_payment, "_REPLAY_DB_PATH", tmp_path / "missing-dir" / "x402.db"
+    )
+
+    assert _verify(tx_hash, FP_SEARCH) == (False, "replay_store_unavailable", None)
+    assert tx_hash not in x402_payment._payment_cache
+
+
+def test_concurrent_claims_have_exactly_one_winner():
+    tx_hash = "0x" + ("99" * 32)
+    workers = 16
+    barrier = threading.Barrier(workers)
+    results = [None] * workers
+
+    def claim(i):
+        barrier.wait()
+        results[i] = x402_payment._claim_payment(
+            tx_hash, "base", f"GET:/x402/api/videos?page={i}", 100
+        )
+
+    threads = [threading.Thread(target=claim, args=(i,)) for i in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert results.count(True) == 1
+    assert results.count(False) == workers - 1
+    rows = _stored_rows()
+    assert len(rows) == 1
+    assert rows[0][2] == f"GET:/x402/api/videos?page={results.index(True)}"
+
+
+def test_concurrent_verify_of_one_payment_serves_one_endpoint(monkeypatch):
+    tx_hash = "0x" + ("aa" * 32)
+    _fake_chain(monkeypatch)
+    # Every thread behaves like a separate worker: no shared fast path.
+    monkeypatch.setattr(x402_payment, "_payment_cache", {})
+    workers = 12
+    barrier = threading.Barrier(workers)
+    results = [None] * workers
+
+    def run(i):
+        barrier.wait()
+        results[i] = x402_payment._verify_payment(
+            _receipt(tx_hash),
+            0.0001,
+            request_fingerprint=f"GET:/x402/api/videos?page={i}",
+        )
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(1 for r in results if r[0]) == 1
+    assert all(
+        r == (False, "payment_already_consumed", None) for r in results if not r[0]
+    )
+    assert len(_stored_rows()) == 1

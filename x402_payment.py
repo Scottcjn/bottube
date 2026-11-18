@@ -20,7 +20,10 @@ import json
 import math
 import os
 import re
+import sqlite3
+import sys
 import time
+from pathlib import Path
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from functools import wraps
 
@@ -78,8 +81,24 @@ PRICING = {
     "agent_profile":    0.0002,
 }
 
+# In-memory fast path only. It is per gunicorn worker and is evicted after
+# CACHE_TTL, so it must never be the only record of a consumed payment: the
+# durable record is the x402_consumed_payments table (see _claim_payment).
 _payment_cache = {}
 CACHE_TTL = 3600
+
+# Durable replay lock. Rows are never evicted: an on-chain payment pays once.
+_REPLAY_DB_PATH = None  # explicit override (tests); see _replay_db_path()
+_REPLAY_DB_TIMEOUT = 5.0
+_REPLAY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS x402_consumed_payments (
+    tx_hash     TEXT PRIMARY KEY,
+    network     TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    amount_raw  INTEGER NOT NULL,
+    created_at  REAL NOT NULL
+)
+"""
 
 
 def _normalize_network(network):
@@ -108,6 +127,93 @@ def _cleanup_payment_cache(now=None):
     ]
     for tx_hash in expired:
         _payment_cache.pop(tx_hash, None)
+
+
+def _replay_db_path():
+    """Return the SQLite file that holds consumed x402 payments.
+
+    Order: explicit override, X402_REPLAY_DB env, the server's DB_PATH (so all
+    gunicorn workers share one file), then bottube.db under BOTTUBE_BASE_DIR.
+    """
+    if _REPLAY_DB_PATH:
+        return str(_REPLAY_DB_PATH)
+    env_path = os.environ.get("X402_REPLAY_DB", "").strip()
+    if env_path:
+        return env_path
+    server = sys.modules.get("bottube_server")
+    server_db = getattr(server, "DB_PATH", None)
+    if server_db:
+        return str(server_db)
+    base_dir = os.environ.get(
+        "BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent)
+    )
+    return str(Path(base_dir) / "bottube.db")
+
+
+def _replay_db():
+    """Open a short-lived connection to the replay store, creating the table.
+
+    A dedicated connection (not Flask's g.db) keeps the claim independent of
+    the request's own transaction and usable outside an app context.
+    """
+    conn = sqlite3.connect(_replay_db_path(), timeout=_REPLAY_DB_TIMEOUT)
+    try:
+        conn.execute(_REPLAY_SCHEMA)
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
+def _lookup_consumed_payment(tx_hash):
+    """Return the durable record for tx_hash as a dict, or None if unclaimed."""
+    conn = _replay_db()
+    try:
+        row = conn.execute(
+            "SELECT network, fingerprint, amount_raw, created_at "
+            "FROM x402_consumed_payments WHERE tx_hash = ?",
+            (tx_hash,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {
+        "tx_hash": tx_hash,
+        "network": row[0],
+        "fingerprint": row[1],
+        "amount_raw": int(row[2]),
+        "created_at": float(row[3]),
+    }
+
+
+def _claim_payment(tx_hash, network, fingerprint, amount_raw):
+    """Atomically claim tx_hash for fingerprint in the durable store.
+
+    Returns True if this call claimed it, or if it was already claimed by the
+    same request fingerprint (an idempotent retry). Returns False if another
+    request fingerprint owns it. The single INSERT against the PRIMARY KEY is
+    what makes this safe across threads, workers and restarts.
+    """
+    conn = _replay_db()
+    try:
+        with conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO x402_consumed_payments "
+                "(tx_hash, network, fingerprint, amount_raw, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (tx_hash, network, fingerprint, int(amount_raw), time.time()),
+            )
+            if cur.rowcount == 1:
+                return True
+            row = conn.execute(
+                "SELECT fingerprint FROM x402_consumed_payments "
+                "WHERE tx_hash = ?",
+                (tx_hash,),
+            ).fetchone()
+        return row is not None and row[0] == fingerprint
+    finally:
+        conn.close()
 
 
 def _parse_positive_int_query(name, default, max_value=None):
@@ -315,7 +421,9 @@ def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
     try:
         _cleanup_payment_cache()
         receipt = _parse_payment_receipt(payment_data)
-        tx_hash = receipt["tx_hash"]
+        # Hex case does not change which transaction this is; normalise so a
+        # re-cased hash cannot be claimed as a second payment.
+        tx_hash = receipt["tx_hash"].lower()
         network = receipt["network"]
 
         if network not in _supported_networks():
@@ -339,6 +447,29 @@ def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
                 return True, "cached", cached
             return False, "payment_already_consumed", None
 
+        # Cache miss (other worker, restart, or TTL eviction): the durable
+        # store decides. A store failure rejects the payment (fail closed).
+        try:
+            consumed = _lookup_consumed_payment(tx_hash)
+        except sqlite3.Error:
+            return False, "replay_store_unavailable", None
+        if consumed:
+            if consumed["fingerprint"] != request_fingerprint:
+                return False, "payment_already_consumed", None
+            if consumed["amount_raw"] < expected_raw:
+                return False, "insufficient_amount", None
+            payment = {
+                "tx_hash": tx_hash,
+                "network": consumed["network"],
+                "recipient": configured_recipient,
+                "fingerprint": request_fingerprint,
+                "time": time.time(),
+                "amount_raw": consumed["amount_raw"],
+                "amount": consumed["amount_raw"] / float(10 ** USDC_DECIMALS),
+            }
+            _payment_cache[tx_hash] = payment
+            return True, "cached", payment
+
         transfer, err = _verify_evm_usdc_transfer(tx_hash, network, configured_recipient)
         if err:
             return False, err, None
@@ -356,6 +487,16 @@ def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
             "amount_raw": int(transfer["amount_raw"]),
             "amount": transfer["amount_usdc"],
         }
+        # Claim durably BEFORE reporting success; only a verified transfer
+        # reaches this point, so failed verifications are never recorded.
+        try:
+            claimed = _claim_payment(
+                tx_hash, network, request_fingerprint, payment["amount_raw"]
+            )
+        except sqlite3.Error:
+            return False, "replay_store_unavailable", None
+        if not claimed:
+            return False, "payment_already_consumed", None
         _payment_cache[tx_hash] = payment
         print(
             "[x402] Payment verified: %s... (%.6f %s on %s)"
