@@ -409,3 +409,73 @@ def test_concurrent_verify_of_one_payment_serves_one_endpoint(monkeypatch):
         r == (False, "payment_already_consumed", None) for r in results if not r[0]
     )
     assert len(_stored_rows()) == 1
+
+
+# -- Same-request retry window (CACHE_TTL) --
+
+
+def _clock(monkeypatch, start=1_000_000.0):
+    now = {"t": start}
+    monkeypatch.setattr(x402_payment.time, "time", lambda: now["t"])
+    return now
+
+
+def test_same_fingerprint_retry_within_ttl_ok(monkeypatch):
+    tx_hash = "0x" + ("b1" * 32)
+    _fake_chain(monkeypatch)
+    now = _clock(monkeypatch)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+
+    now["t"] += x402_payment.CACHE_TTL - 1
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "cached")  # fast path
+    x402_payment._payment_cache.clear()
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "cached")  # durable path
+
+
+@pytest.mark.parametrize("clear_cache", [False, True])
+def test_same_fingerprint_retry_after_ttl_rejected(monkeypatch, clear_cache):
+    tx_hash = "0x" + ("b2" * 32)
+    calls = []
+    _fake_chain(monkeypatch, calls)
+    now = _clock(monkeypatch)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+
+    now["t"] += x402_payment.CACHE_TTL
+    if clear_cache:
+        x402_payment._payment_cache.clear()
+    assert _verify(tx_hash, FP_SEARCH) == (False, "payment_already_consumed", None)
+    # Still rejected much later, and the row is kept forever.
+    now["t"] += 30 * 86400
+    assert _verify(tx_hash, FP_SEARCH) == (False, "payment_already_consumed", None)
+    assert calls == [tx_hash]
+    assert _stored_rows() == [(tx_hash, "base", FP_SEARCH, 100)]
+
+
+def test_cache_refill_does_not_restart_retry_window(monkeypatch):
+    tx_hash = "0x" + ("b3" * 32)
+    _fake_chain(monkeypatch)
+    now = _clock(monkeypatch)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+    now["t"] += x402_payment.CACHE_TTL - 10
+    x402_payment._payment_cache.clear()
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "cached")  # refills cache
+
+    now["t"] += 20  # past TTL since payment, only 20s since the refill
+    assert _verify(tx_hash, FP_SEARCH) == (False, "payment_already_consumed", None)
+
+
+@pytest.mark.parametrize("elapsed", [0, 1800, 3600, 30 * 86400])
+@pytest.mark.parametrize("clear_cache", [False, True])
+def test_different_fingerprint_rejected_always(monkeypatch, elapsed, clear_cache):
+    tx_hash = "0x" + ("b4" * 32)
+    _fake_chain(monkeypatch)
+    now = _clock(monkeypatch)
+
+    assert _verify(tx_hash, FP_SEARCH)[0:2] == (True, "verified")
+    now["t"] += elapsed
+    if clear_cache:
+        x402_payment._payment_cache.clear()
+    assert _verify(tx_hash, FP_VIDEOS) == (False, "payment_already_consumed", None)

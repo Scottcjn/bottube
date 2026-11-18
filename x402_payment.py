@@ -187,12 +187,23 @@ def _lookup_consumed_payment(tx_hash):
     }
 
 
+def _within_retry_window(consumed_at, now=None):
+    """True while a same-request retry of a consumed payment is still honoured.
+
+    The durable row lives forever (the payment can never pay for anything
+    else), but it only covers retries of its own request for CACHE_TTL seconds.
+    """
+    now = time.time() if now is None else now
+    return now - float(consumed_at) < CACHE_TTL
+
+
 def _claim_payment(tx_hash, network, fingerprint, amount_raw):
     """Atomically claim tx_hash for fingerprint in the durable store.
 
     Returns True if this call claimed it, or if it was already claimed by the
-    same request fingerprint (an idempotent retry). Returns False if another
-    request fingerprint owns it. The single INSERT against the PRIMARY KEY is
+    same request fingerprint less than CACHE_TTL seconds ago (an idempotent
+    retry). Returns False if another request fingerprint owns it or the retry
+    window has passed. The single INSERT against the PRIMARY KEY is
     what makes this safe across threads, workers and restarts.
     """
     conn = _replay_db()
@@ -207,11 +218,15 @@ def _claim_payment(tx_hash, network, fingerprint, amount_raw):
             if cur.rowcount == 1:
                 return True
             row = conn.execute(
-                "SELECT fingerprint FROM x402_consumed_payments "
+                "SELECT fingerprint, created_at FROM x402_consumed_payments "
                 "WHERE tx_hash = ?",
                 (tx_hash,),
             ).fetchone()
-        return row is not None and row[0] == fingerprint
+        return (
+            row is not None
+            and row[0] == fingerprint
+            and _within_retry_window(row[1])
+        )
     finally:
         conn.close()
 
@@ -443,7 +458,10 @@ def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
 
         cached = _payment_cache.get(tx_hash)
         if cached:
-            if cached["fingerprint"] == request_fingerprint:
+            if (
+                cached["fingerprint"] == request_fingerprint
+                and _within_retry_window(cached["time"])
+            ):
                 return True, "cached", cached
             return False, "payment_already_consumed", None
 
@@ -454,7 +472,10 @@ def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
         except sqlite3.Error:
             return False, "replay_store_unavailable", None
         if consumed:
-            if consumed["fingerprint"] != request_fingerprint:
+            if (
+                consumed["fingerprint"] != request_fingerprint
+                or not _within_retry_window(consumed["created_at"])
+            ):
                 return False, "payment_already_consumed", None
             if consumed["amount_raw"] < expected_raw:
                 return False, "insufficient_amount", None
@@ -463,7 +484,9 @@ def _verify_payment(payment_data, expected_amount, *, request_fingerprint):
                 "network": consumed["network"],
                 "recipient": configured_recipient,
                 "fingerprint": request_fingerprint,
-                "time": time.time(),
+                # Original consumption time, so the retry window is not
+                # restarted by a cache refill.
+                "time": consumed["created_at"],
                 "amount_raw": consumed["amount_raw"],
                 "amount": consumed["amount_raw"] / float(10 ** USDC_DECIMALS),
             }
