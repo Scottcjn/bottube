@@ -91,6 +91,12 @@ def app():
                 del sys.modules[mod_name]
             if "captions_blueprint" in mod_name:
                 del sys.modules[mod_name]
+            # translation_routes does `from bottube_server import get_db` at
+            # import time. If it stays cached, the freshly imported server
+            # registers a blueprint whose get_db belongs to the previous
+            # module (and the previous test's deleted temp database).
+            if "translation_routes" in mod_name:
+                del sys.modules[mod_name]
 
         sys.path.insert(0, str(server_path))
         
