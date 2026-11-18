@@ -215,6 +215,61 @@ def _seed_interaction_data():
     _insert_subscription(alice_id, carol_id, t + 37)
 
 
+def test_social_graph_ranks_like_only_pairs_before_applying_limit(client):
+    alice = _insert_agent("alice", 1)
+    bob = _insert_agent("bob", 2)
+    carol = _insert_agent("carol", 3)
+    for index in range(3):
+        video_id = f"likeonly{index:03}"
+        _insert_video(video_id, alice, 10 + index)
+        _insert_vote(video_id, bob, 1, 20 + index)
+    _insert_comment("likeonly000", carol, "one comment", 30)
+
+    response = client.get("/api/social/graph?limit=1")
+    assert response.status_code == 200
+    assert response.get_json()["top_pairs"] == [{
+        "from": "bob", "from_display": "Bob", "to": "alice",
+        "to_display": "Alice", "comments": 0, "likes": 3, "strength": 3,
+    }]
+
+
+def test_social_graph_combines_counts_without_multiplying_rows(client):
+    alice = _insert_agent("alice", 1)
+    bob = _insert_agent("bob", 2)
+    _insert_video("mixedpair01", alice, 10)
+    _insert_video("mixedpair02", alice, 11)
+    for index in range(3):
+        _insert_comment("mixedpair01", bob, "comment", 20 + index)
+    _insert_vote("mixedpair01", bob, 1, 30)
+    _insert_vote("mixedpair02", bob, 1, 31)
+
+    response = client.get("/api/social/graph")
+    assert response.status_code == 200
+    pair, = response.get_json()["top_pairs"]
+    assert (pair["comments"], pair["likes"], pair["strength"]) == (3, 2, 5)
+
+
+@pytest.mark.parametrize("excluded", ["self", "downvote", "removed", "banned_liker", "banned_owner"])
+def test_social_graph_like_only_pairs_keep_visibility_filters(client, excluded):
+    alice = _insert_agent("alice", 1)
+    bob = _insert_agent("bob", 2)
+    _insert_video("filtered001", alice, 10)
+    _insert_vote("filtered001", alice if excluded == "self" else bob,
+                 -1 if excluded == "downvote" else 1, 20)
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        if excluded == "removed":
+            db.execute("UPDATE videos SET is_removed = 1 WHERE video_id = ?", ("filtered001",))
+        elif excluded in ("banned_liker", "banned_owner"):
+            db.execute("UPDATE agents SET is_banned = 1 WHERE id = ?",
+                       (bob if excluded == "banned_liker" else alice,))
+        db.commit()
+
+    response = client.get("/api/social/graph")
+    assert response.status_code == 200
+    assert response.get_json()["top_pairs"] == []
+
+
 def test_social_graph_has_expected_keys_and_limit(client):
     """`/api/social/graph` should shape its response, not just return 200.
 
@@ -258,7 +313,7 @@ def test_social_graph_rejects_invalid_limit(client, query, expected_error):
     resp = client.get(f"/api/social/graph?{query}")
 
     assert resp.status_code == 400
-    assert resp.get_json() == {"error": expected_error}
+    assert resp.get_json() == {"error": expected_error, "param": "limit"}
 
 
 def test_agent_interactions_shape_not_found_and_limit(client):
@@ -325,7 +380,7 @@ def test_agent_interactions_rejects_invalid_limit(client, query, expected_error)
     resp = client.get(f"/api/agents/alice/interactions?{query}")
 
     assert resp.status_code == 400
-    assert resp.get_json() == {"error": expected_error}
+    assert resp.get_json() == {"error": expected_error, "param": "limit"}
 
 
 def test_agent_profile_does_not_run_discarded_interaction_aggregates(client, monkeypatch):

@@ -79,14 +79,14 @@ def test_tip_leaderboard_rejects_malformed_limit(client):
     response = client.get("/api/tips/leaderboard?limit=abc")
 
     assert response.status_code == 400
-    assert response.get_json() == {"error": "limit must be an integer"}
+    assert response.get_json() == {"error": "limit must be an integer", "param": "limit"}
 
 
 def test_tipper_leaderboard_rejects_malformed_limit(client):
     response = client.get("/api/tips/tippers?limit=abc")
 
     assert response.status_code == 400
-    assert response.get_json() == {"error": "limit must be an integer"}
+    assert response.get_json() == {"error": "limit must be an integer", "param": "limit"}
 
 
 def test_tip_leaderboards_preserve_numeric_limit_bounds(client):

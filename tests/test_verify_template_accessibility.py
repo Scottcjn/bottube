@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import re
 from pathlib import Path
 
 
@@ -15,7 +16,12 @@ def test_verify_video_id_input_has_programmatic_label():
     """
     template = (ROOT / "bottube_templates" / "verify.html").read_text(encoding="utf-8")
 
-    assert '<label for="vrf-vid" class="vrf-sr-only">Video ID</label>' in template
+    # The label now uses the shared base.html ``sr-only`` class; assert the
+    # binding and a visually-hidden class rather than one exact spelling.
+    label = re.search(r'<label\s+for="vrf-vid"\s+class="([^"]*)"\s*>([^<]+)</label>', template)
+    assert label, "missing <label for=\"vrf-vid\">"
+    assert "sr-only" in label.group(1)
+    assert "video id" in label.group(2).lower()
     assert 'id="vrf-vid"' in template
 
 

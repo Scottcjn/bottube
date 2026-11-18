@@ -419,12 +419,59 @@ def get_website_jsonld():
     }
 
 
+# Payments FAQ: the single source for both the visible homepage section and
+# the matching FAQPage JSON-LD entries, so the two can never say different
+# things. Answers are plain text (no markup) and name only payment methods that
+# work today: card checkout through Stripe on /credits and BoTTube credit codes.
+# The crypto checkout gateway is not configured yet (/credits shows it as
+# "coming soon"), so no coin is described as accepted. RTC credits are spent
+# on BoTTube; there is no way to cash them out, and no exchange is named.
+PAYMENT_FAQ = (
+    (
+        "What cryptocurrencies does BoTTube accept?",
+        "None yet: crypto checkout for RTC credits (BTC, ETH, SOL and LTC) is "
+        "coming soon. Today you buy RTC credits on the BoTTube Credits page with "
+        "a card through Stripe checkout, or redeem a BoTTube credit code.",
+    ),
+    (
+        "How do RTC credits work?",
+        "RTC (RustChain Token) is the credit used across BoTTube. You top up RTC "
+        "credits on the Credits page, or earn RTC when your videos get views, and "
+        "spend it on AI video, image, and audio generation. Pricing is "
+        "pay-per-generation, with no subscription. RTC credits are for spending "
+        "on BoTTube and cannot be cashed out.",
+    ),
+    (
+        "Do I need a credit card to use BoTTube?",
+        "No. Joining, watching and uploading are free. To buy RTC generation "
+        "credits today you pay by card through Stripe or redeem a BoTTube credit "
+        "code; crypto checkout is coming soon.",
+    ),
+)
+
+
+def get_payment_faq():
+    """Payments FAQ entries for the visible homepage section."""
+    return [{"question": q, "answer": a} for q, a in PAYMENT_FAQ]
+
+
 def get_faqpage_jsonld():
-    """FAQPage schema — chunkable Q&A for AI Overviews (AEO)."""
+    """FAQPage schema — chunkable Q&A for AI Overviews (AEO).
+
+    The payments entries come from PAYMENT_FAQ, the same tuples the homepage
+    renders as visible text, so search engines see exactly what visitors see.
+    """
     return {
         "@context": "https://schema.org",
         "@type": "FAQPage",
         "mainEntity": [
+            {
+                "@type": "Question",
+                "name": question,
+                "acceptedAnswer": {"@type": "Answer", "text": answer},
+            }
+            for question, answer in PAYMENT_FAQ
+        ] + [
             {
                 "@type": "Question",
                 "name": "What is BoTTube?",

@@ -43,10 +43,9 @@ def _wrtc_bridge_disabled_guard():
 WRTC_MINT = "12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X"
 WRTC_DECIMALS = 6
 WRTC_RESERVE_WALLET = "3n7RJanhRghRzW2PBg1UbkV9syiod8iUMugTvLzwTRkW"
-WRTC_BUY_URL = (
-    "https://raydium.io/swap/?inputMint=sol&outputMint="
-    "12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X"
-)
+# Doctrine: official surfaces carry no exchange/DEX links. The name is kept (empty)
+# so the info payload and template kwargs keep their shape.
+WRTC_BUY_URL = ""
 
 SOLANA_RPC_URL = os.environ.get("BOTTUBE_SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 WRTC_WITHDRAW_FEE = float(os.environ.get("BOTTUBE_WRTC_WITHDRAW_FEE", "0.05"))

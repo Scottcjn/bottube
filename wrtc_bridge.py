@@ -8,6 +8,7 @@ Withdraw rtc_balance → send wRTC to user's Solana wallet.
 Blueprint pattern matches paypal_packages.py / usdc_blueprint.py.
 """
 
+import hmac
 import json
 import os
 import subprocess
@@ -25,11 +26,9 @@ SOLANA_RPC = os.environ.get("SOLANA_RPC", "https://api.mainnet-beta.solana.com")
 WRTC_MINT = "12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X"
 WRTC_DECIMALS = 6
 RESERVE_WALLET = "3n7RJanhRghRzW2PBg1UbkV9syiod8iUMugTvLzwTRkW"
-RAYDIUM_SWAP_URL = (
-    "https://raydium.io/swap/"
-    "?inputMint=sol"
-    "&outputMint=12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X"
-)
+# Doctrine: official surfaces carry no exchange/DEX links. "swap_url" stays in the
+# info payload (empty) so its shape is unchanged.
+SWAP_URL = ""
 
 MIN_DEPOSIT = 1.0        # Minimum 1 wRTC deposit
 MIN_WITHDRAW = 10.0      # Minimum 10 wRTC withdrawal
@@ -144,7 +143,13 @@ def _json_object_body():
 def _is_admin():
     """Check if request has valid admin key."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    return key and key == ADMIN_KEY
+    if not key or not ADMIN_KEY:
+        return False
+    # Constant-time compare on UTF-8 bytes (compare_digest raises on non-ASCII str).
+    try:
+        return hmac.compare_digest(key.encode("utf-8"), ADMIN_KEY.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
 
 
 def _award_rtc(db, agent_id: int, amount: float, reason: str, video_id: str = ""):
@@ -407,7 +412,7 @@ def bridge_info():
         },
         "reserve_wallet": RESERVE_WALLET,
         "reserve_balance_wrtc": balance,
-        "swap_url": RAYDIUM_SWAP_URL,
+        "swap_url": SWAP_URL,
         "fees": {
             "deposit_fee": 0,
             "withdraw_fee": WITHDRAW_FEE,

@@ -471,7 +471,7 @@ class SyndicationTracker:
                     SUM(successful_items) as successful_items,
                     SUM(failed_items) as failed_items
                 FROM syndication_runs
-                WHERE DATE(datetime(started_at, 'unixepoch')) = ?
+                WHERE DATE(datetime(started_at, 'unixepoch', 'localtime')) = ?
                 """,
                 (date_str,)
             ).fetchone()
@@ -484,7 +484,7 @@ class SyndicationTracker:
                        SUM(CASE WHEN si.status = 'success' THEN 1 ELSE 0 END) as successful
                 FROM syndication_items si
                 JOIN syndication_runs sr ON si.run_id = sr.id
-                WHERE DATE(datetime(sr.started_at, 'unixepoch')) = ?
+                WHERE DATE(datetime(sr.started_at, 'unixepoch', 'localtime')) = ?
                 GROUP BY si.target_platform
                 """,
                 (date_str,)

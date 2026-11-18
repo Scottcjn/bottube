@@ -32,6 +32,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import feed_cowatch as _feed_cowatch
 from flask import (
     Flask,
     Response,
@@ -1647,6 +1648,29 @@ def set_security_headers(response):
     return response
 
 
+def _secret_equals(provided, expected) -> bool:
+    """Constant-time comparison of a caller-supplied secret against the real one.
+
+    Fails closed on empty or non-string values. Compares UTF-8 bytes because
+    hmac.compare_digest raises TypeError for str arguments containing
+    non-ASCII characters -- request headers are latin-1 decoded and JSON can
+    carry any code point, so comparing raw str turned a junk X-Admin-Key or
+    csrf_token into an HTTP 500 instead of a 401/403. A JSON string can also
+    hold an unpaired surrogate ("\\ud800"), which UTF-8 cannot encode; that is
+    treated as a mismatch rather than raising.
+    """
+    if not isinstance(provided, str) or not isinstance(expected, str):
+        return False
+    if not provided or not expected:
+        return False
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = expected.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
+
+
 def _verify_csrf():
     """Verify CSRF token on state-changing web requests (form or AJAX)."""
     token = (
@@ -1658,7 +1682,7 @@ def _verify_csrf():
         if isinstance(data, dict):
             token = data.get("csrf_token", "")
     expected = session.get("csrf_token", "")
-    if not expected or not token or not secrets.compare_digest(token, expected):
+    if not _secret_equals(token, expected):
         # Return JSON for AJAX/API requests so JS can handle the error
         ct = request.headers.get("Content-Type", "")
         if request.is_json or "application/json" in ct or request.headers.get("X-CSRF-Token"):
@@ -2089,6 +2113,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_video ON views(video_id);
 CREATE INDEX IF NOT EXISTS idx_views_dedup ON views(video_id, ip_address, created_at);
+CREATE INDEX IF NOT EXISTS idx_views_ip_video ON views(ip_address, video_id);
 CREATE INDEX IF NOT EXISTS idx_earnings_agent ON earnings(agent_id);
 CREATE INDEX IF NOT EXISTS idx_reward_holds_agent ON reward_holds(agent_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_moderation_holds_target ON moderation_holds(target_type, status, created_at DESC);
@@ -7198,7 +7223,7 @@ def update_video(video_id):
     if 'title' in data and data['title'].strip():
         updates.append('title = ?')
         params.append(data['title'].strip()[:200])
-    if 'description' in data and data['description'].strip():
+    if 'description' in data:
         updates.append('description = ?')
         params.append(data['description'].strip()[:5000])
     if 'tags' in data:
@@ -7439,6 +7464,9 @@ def list_videos():
         "per_page": per_page,
         "total": total,
         "pages": pages,
+        "total_pages": pages,
+        "total_videos": total,
+        "has_next": page < pages if pages else False,
     })
     return _add_video_list_cache_headers(response, etag=etag, latest_ts=latest_ts)
 
@@ -8401,6 +8429,29 @@ def get_comments(video_id):
             "interaction_context": interaction_context,
         })
 
+    has_page_param = "page" in request.args or "per_page" in request.args
+    if has_page_param:
+        page, err = parse_int_param("page", 1, min_value=1, max_value=10000)
+        if err:
+            return err
+        per_page, err = parse_int_param("per_page", 20, min_value=1, max_value=100)
+        if err:
+            return err
+        total = len(comments)
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_comments = comments[start:end]
+        total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+        return jsonify({
+            "comments": paginated_comments,
+            "count": len(paginated_comments),
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+        })
+
     return jsonify({"comments": comments, "count": len(comments)})
 
 
@@ -8474,6 +8525,7 @@ def recent_comments():
             "dislikes": row["dislikes"] if "dislikes" in row.keys() else 0,
             "created_at": row["created_at"],
         })
+
     return jsonify({"comments": comments, "count": len(comments)})
 
 
@@ -8625,11 +8677,17 @@ def web_vote_comment(comment_id):
 def _apply_comment_vote(db, comment_id, author_id, voter_id, vote_val, existing):
     """Shared logic for applying a comment vote (API and web).
 
-    The ``existing`` snapshot MUST come from a read inside the same write
-    transaction the caller opened (see fix for #2145). The caller is
-    responsible for re-deriving the authoritative state from
-    ``comment_votes`` on a losing race (IntegrityError).
+    The ``existing`` snapshot normally comes from a read inside the same
+    write transaction the caller opened (see fix for #2145). Re-read a missing
+    snapshot before mutating counters so direct/helper callers also recover
+    when their earlier "no vote" observation became stale.
     """
+    if existing is None:
+        existing = db.execute(
+            "SELECT vote FROM comment_votes WHERE agent_id = ? AND comment_id = ?",
+            (voter_id, comment_id),
+        ).fetchone()
+
     if vote_val == 0:
         if existing:
             if existing["vote"] == 1:
@@ -9315,9 +9373,7 @@ def get_agent(agent_name):
         video_list.append(d)
 
     # Show private fields (wallets, balance) only to the account owner
-    is_self = (g.user and g.user["id"] == agent["id"]) or (
-        hasattr(g, "agent") and g.agent and g.agent["id"] == agent["id"]
-    )
+    is_self = _optional_viewer_agent_id() == agent["id"]
     agent_badges = _list_agent_badges(db, int(agent["id"]))
 
     return jsonify({
@@ -9639,16 +9695,17 @@ def social_graph():
     if error:
         return error
 
-    # Top interacting pairs (bidirectional: comments + likes between agents)
+    # Top directed pairs, including agents who liked without commenting.
     pairs = db.execute(
         """SELECT
                a1.agent_name AS from_agent, a1.display_name AS from_display,
                a2.agent_name AS to_agent, a2.display_name AS to_display,
-               COALESCE(cm.cnt, 0) AS comments,
-               COALESCE(lk.cnt, 0) AS likes,
-               COALESCE(cm.cnt, 0) + COALESCE(lk.cnt, 0) AS strength
+               SUM(edges.comments) AS comments,
+               SUM(edges.likes) AS likes,
+               SUM(edges.comments) + SUM(edges.likes) AS strength
            FROM (
-               SELECT c.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
+               SELECT c.agent_id AS src, v.agent_id AS dst,
+                      COUNT(*) AS comments, 0 AS likes
                FROM comments c JOIN videos v ON c.video_id = v.video_id
                JOIN agents src_agent ON c.agent_id = src_agent.id
                JOIN agents dst_agent ON v.agent_id = dst_agent.id
@@ -9657,9 +9714,9 @@ def social_graph():
                  AND COALESCE(src_agent.is_banned, 0) = 0
                  AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY c.agent_id, v.agent_id
-           ) cm
-           LEFT JOIN (
-               SELECT vt.agent_id AS src, v.agent_id AS dst, COUNT(*) AS cnt
+               UNION ALL
+               SELECT vt.agent_id AS src, v.agent_id AS dst,
+                      0 AS comments, COUNT(*) AS likes
                FROM votes vt JOIN videos v ON vt.video_id = v.video_id
                JOIN agents src_agent ON vt.agent_id = src_agent.id
                JOIN agents dst_agent ON v.agent_id = dst_agent.id
@@ -9668,9 +9725,10 @@ def social_graph():
                  AND COALESCE(src_agent.is_banned, 0) = 0
                  AND COALESCE(dst_agent.is_banned, 0) = 0
                GROUP BY vt.agent_id, v.agent_id
-           ) lk ON cm.src = lk.src AND cm.dst = lk.dst
-           JOIN agents a1 ON cm.src = a1.id
-           JOIN agents a2 ON cm.dst = a2.id
+           ) edges
+           JOIN agents a1 ON edges.src = a1.id
+           JOIN agents a2 ON edges.dst = a2.id
+           GROUP BY edges.src, edges.dst
            ORDER BY strength DESC LIMIT ?""",
         (limit,),
     ).fetchall()
@@ -10075,32 +10133,14 @@ def _feed_cowatch_scores(db, anchor_video_ids):
     """Co-view counts per video keyed by IP address.
 
     For each video V, return the number of distinct IPs that watched V *and*
-    at least one of the anchor videos. Counts use the existing `views` table
-    (already deduped to one row per (video_id, ip, ~30min window)) with the
-    `idx_views_dedup` composite index covering ip_address + video_id, so the
-    self-join is a single index probe per anchor.
+    at least one of the anchor videos. IPs that have viewed an implausible
+    number of distinct videos (the bot fleet on this host, crawlers, big
+    NATs) are ignored; see feed_cowatch.py for why and for the knobs.
     """
-    if not anchor_video_ids:
-        return {}
-    placeholders = ",".join("?" for _ in anchor_video_ids)
     try:
-        rows = db.execute(
-            f"""SELECT v2.video_id AS vid,
-                       COUNT(DISTINCT v1.ip_address) AS cnt
-                  FROM views v1
-                  JOIN views v2
-                    ON v1.ip_address = v2.ip_address
-                   AND v1.video_id != v2.video_id
-                 WHERE v1.video_id IN ({placeholders})
-                   AND v1.ip_address IS NOT NULL
-                   AND v1.ip_address != ''
-                 GROUP BY v2.video_id
-                 ORDER BY cnt DESC
-                 LIMIT 400""",
-            anchor_video_ids,
-        ).fetchall()
-        return {r["vid"]: int(r["cnt"]) for r in rows}
-    except Exception:
+        return _feed_cowatch.cowatch_scores(db, anchor_video_ids)
+    except Exception as exc:
+        app.logger.warning("co-watch scoring failed, feed falls back to no co-watch: %s", exc)
         return {}
 
 
@@ -10159,11 +10199,18 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         M = _EMB_CACHE.get("matrix")
         ids = _EMB_CACHE.get("ids", [])
         loaded = _EMB_CACHE.get("loaded_at", 0)
-    if M is None or not ids or (time.time() - loaded > 600):
+    if M is None or not ids:
+        # Nothing cached yet (cold start) — this request has to pay for the
+        # warm-up, there is no stale data to fall back to.
         _ue_cache_warm()
         with _EMB_CACHE_LOCK:
             M = _EMB_CACHE.get("matrix")
             ids = _EMB_CACHE.get("ids", [])
+    elif time.time() - loaded > 600:
+        # Cache is stale but usable — refresh it in the background and
+        # answer this request with the stale-but-fast data. Blocking here
+        # was turning every 10th-minute request into a ~15s stall.
+        _ue_cache_warm_async()
     if M is None or not ids or len(ids) < 5:
         return None
 
@@ -10201,7 +10248,8 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         Vmat = _UV_CACHE.get("matrix")
         Vids = _UV_CACHE.get("ids", [])
         v_loaded = _UV_CACHE.get("loaded_at", 0)
-    if (Vmat is None or not Vids) or (time.time() - v_loaded > 600):
+    if Vmat is None or not Vids:
+        # Cold start — nothing to fall back to, warm synchronously.
         try:
             _uv_cache_warm()
         except Exception:
@@ -10209,6 +10257,12 @@ def _feed_hybrid_v1(db, viewer_agent_id=None, viewer_ip="", per_page=20,
         with _UV_CACHE_LOCK:
             Vmat = _UV_CACHE.get("matrix")
             Vids = _UV_CACHE.get("ids", [])
+    elif time.time() - v_loaded > 600:
+        # Stale but usable — refresh in the background, serve stale now.
+        try:
+            _uv_cache_warm_async()
+        except Exception:
+            pass
     visual_sim = None
     visual_index = {}
     if Vmat is not None and Vids:
@@ -11672,6 +11726,31 @@ def api_create_playlist():
     return jsonify({"ok": True, "playlist_id": playlist_id, "title": title}), 201
 
 
+def _optional_viewer_agent_id():
+    """Resolve the requesting agent's id from X-API-Key or the web session.
+
+    For routes that serve both anonymous and authenticated callers, so they
+    cannot use @require_api_key. Nothing in before_request populates g.agent
+    from X-API-Key -- only @require_api_key does -- so reading g.agent here
+    silently ignored API-key callers: GET /api/agents/me/playlists always
+    returned 401 to SDK/bot clients, and owners could not read their own
+    private playlist via the API. An X-API-Key that is unknown or belongs to
+    a banned agent resolves to no viewer rather than falling back to the
+    session. Returns the agent id or None.
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key:
+        row = get_db().execute(
+            "SELECT id, is_banned FROM agents WHERE api_key = ?", (api_key,)
+        ).fetchone()
+        if not row or row["is_banned"]:
+            return None
+        return row["id"]
+    if g.user:
+        return g.user["id"]
+    return None
+
+
 @app.route("/api/playlists/<playlist_id>", methods=["GET"])
 def api_get_playlist(playlist_id):
     """Get playlist details and items."""
@@ -11688,7 +11767,7 @@ def api_get_playlist(playlist_id):
     # Private playlists only visible to owner
     if pl["visibility"] == "private":
         owner_id = pl["agent_id"]
-        viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+        viewer_id = _optional_viewer_agent_id()
         if viewer_id != owner_id:
             return jsonify({"error": "Playlist not found"}), 404
 
@@ -11874,11 +11953,7 @@ def api_remove_playlist_item(playlist_id, video_id):
 @app.route("/api/agents/me/playlists")
 def api_my_playlists():
     """List current user's playlists (API key or session auth)."""
-    uid = None
-    if hasattr(g, "agent") and g.agent:
-        uid = g.agent["id"]
-    elif g.user:
-        uid = g.user["id"]
+    uid = _optional_viewer_agent_id()
     if not uid:
         return jsonify({"error": "Login required"}), 401
     db = get_db()
@@ -11916,7 +11991,7 @@ def api_agent_playlists(agent_name):
         return jsonify({"error": "Agent not found"}), 404
 
     # Show private playlists only to owner
-    viewer_id = g.agent["id"] if hasattr(g, "agent") and g.agent else (g.user["id"] if g.user else None)
+    viewer_id = _optional_viewer_agent_id()
     if viewer_id == agent["id"]:
         vis_filter = ""
     else:
@@ -12895,11 +12970,6 @@ def tip_agent(agent_name):
 @app.route("/api/videos/<video_id>/tips")
 def get_video_tips(video_id):
     """Get recent tips for a video (public)."""
-    db = get_db()
-    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
-    if not v:
-        return jsonify({"error": "Video not found"}), 404
-    _sync_pending_tips(db)
     page, error = _parse_positive_int_query("page", 1)
     if error:
         return error
@@ -12907,6 +12977,11 @@ def get_video_tips(video_id):
     if error:
         return error
     offset = (page - 1) * per_page
+    db = get_db()
+    v = db.execute("SELECT 1 FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+    if not v:
+        return jsonify({"error": "Video not found"}), 404
+    _sync_pending_tips(db)
     # An astronomically large ?page makes offset exceed SQLite's signed 64-bit
     # INTEGER range, which raises OperationalError on "LIMIT ? OFFSET ?" and
     # surfaces as an HTTP 500. Reject such pages with a clean 400 instead.
@@ -13236,7 +13311,7 @@ def serve_avatar_file(filename):
 @app.route("/avatar/<agent_name>.svg")
 def serve_avatar(agent_name):
     """Generate a unique SVG avatar based on agent name hash."""
-    h = hashlib.md5(agent_name.encode()).hexdigest()
+    h = hashlib.md5(agent_name.encode(), usedforsecurity=False).hexdigest()
     hue = int(h[:3], 16) % 360
     sat = 55 + int(h[3:5], 16) % 30
     light = 45 + int(h[5:7], 16) % 15
@@ -13325,7 +13400,7 @@ def upload_avatar():
     else:
         # --- Auto-generate avatar from agent name ---
         name = agent["agent_name"]
-        h = hashlib.md5(name.encode()).hexdigest()
+        h = hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()
         r = int(h[0:2], 16)
         g_val = int(h[2:4], 16)
         b = int(h[4:6], 16)
@@ -13734,9 +13809,21 @@ def watch(video_id):
     except Exception:
         prov_meta = {}
 
+    # Only advertise a captions <track> when a caption record actually
+    # exists for this video; otherwise the browser requests a URL that
+    # always 404s (closes #2303).
+    try:
+        has_captions = bool(db.execute(
+            "SELECT 1 FROM video_captions WHERE video_id = ? AND language = 'en' AND format = 'vtt' LIMIT 1",
+            (video_id,),
+        ).fetchone())
+    except Exception:
+        has_captions = False
+
     return render_template(
         "watch.html",
         video=video,
+        has_captions=has_captions,
         creator_badges=creator_badges,
         comments=comments,
         related=related,
@@ -15693,7 +15780,9 @@ def notification_settings_save():
     """Save notification preferences from browser form."""
     if not g.user:
         return jsonify({"error": "Login required"}), 401
-    data = request.get_json(silent=True) or {}
+    data, error = _json_object_body()
+    if error:
+        return error
     db = get_db()
     allowed = {
         "comments": "email_notify_comments",
@@ -15702,6 +15791,9 @@ def notification_settings_save():
         "tips": "email_notify_tips",
         "subscriptions": "email_notify_subscriptions",
     }
+    for key in allowed:
+        if key in data and not isinstance(data[key], bool):
+            return jsonify({"error": f"{key} must be a boolean"}), 400
     for key, col in allowed.items():
         if key in data:
             val = 1 if data[key] else 0
@@ -15999,8 +16091,14 @@ def giveaway_leaderboard_api():
 
 ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 if not ADMIN_KEY:
+    # Fail closed with an unguessable per-process key. Never print or log it:
+    # stdout lands in journald / gunicorn logs, which have a wider audience
+    # than the admin secret, and under gunicorn every worker generates its own
+    # key anyway, so a logged value would not reliably work. Set
+    # BOTTUBE_ADMIN_KEY to use the admin surface.
     ADMIN_KEY = secrets.token_hex(32)
-    print(f"[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set. Generated ephemeral key: {ADMIN_KEY}")
+    print("[BoTTube] WARNING: BOTTUBE_ADMIN_KEY not set; admin endpoints are "
+          "locked until it is configured.")
 
 
 @app.route("/api/admin/visitors")
@@ -16452,7 +16550,7 @@ def api_activity_alias():
 # ---------------------------------------------------------------------------
 # SEO & Crawler Routes (robots.txt, sitemap.xml)
 # ---------------------------------------------------------------------------
-from seo_routes import seo_bp, get_organization_jsonld, get_website_jsonld, get_faqpage_jsonld
+from seo_routes import seo_bp, get_organization_jsonld, get_website_jsonld, get_faqpage_jsonld, get_payment_faq
 app.register_blueprint(seo_bp)
 
 # ---------------------------------------------------------------------------
@@ -16813,7 +16911,7 @@ def _require_admin():
         provided = request.args.get("key", "")
         if provided:
             print(f"[BoTTube] DEPRECATION WARNING: admin key via query param on {request.path} -- use X-Admin-Key header")
-    if not provided or provided != ADMIN_KEY:
+    if not _secret_equals(provided, ADMIN_KEY):
         return jsonify({"error": "Forbidden"}), 403
     return None
 
@@ -18631,7 +18729,7 @@ def report_comment(comment_id):
 def admin_reports():
     """Admin view of pending reports (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if not ADMIN_KEY or admin_key != ADMIN_KEY:
+    if not _secret_equals(admin_key, ADMIN_KEY):
         return jsonify({"error": "Unauthorized"}), 401
 
     status_filter = request.args.get("status", "pending")
@@ -18938,7 +19036,7 @@ def admin_resolve_moderation_hold(hold_id):
 def admin_resolve_report(report_id):
     """Resolve a report (requires admin key)."""
     admin_key = request.headers.get("X-Admin-Key", "")
-    if not ADMIN_KEY or admin_key != ADMIN_KEY:
+    if not _secret_equals(admin_key, ADMIN_KEY):
         return jsonify({"error": "Unauthorized"}), 401
 
     db = get_db()
@@ -19072,6 +19170,7 @@ app.jinja_env.globals["build_breadcrumb_jsonld"] = build_breadcrumb_jsonld
 app.jinja_env.globals["get_organization_jsonld"] = get_organization_jsonld
 app.jinja_env.globals["get_website_jsonld"] = get_website_jsonld
 app.jinja_env.globals["get_faqpage_jsonld"] = get_faqpage_jsonld
+app.jinja_env.globals["get_payment_faq"] = get_payment_faq
 app.jinja_env.globals["json_dumps"] = lambda x: Markup(safe_jsonld(x))
 
 def jsonld_safe(value):
@@ -21662,7 +21761,7 @@ def _ts_admin_ok():
     """Check if the current request has admin privileges for trust-and-safety endpoints. Returns: True if admin."""
     key = request.headers.get("X-Admin-Key", "") or request.args.get("admin_key", "")
     expected = ADMIN_KEY
-    return bool(expected) and hmac.compare_digest(key, expected)
+    return _secret_equals(key, expected)
 
 
 @app.route("/admin/blocklist/add", methods=["POST"])
@@ -21718,6 +21817,7 @@ EMBEDDING_API_URL = (
 # In-memory cache for fast cosine similarity at query time.
 _EMB_CACHE = {"matrix": None, "ids": [], "loaded_at": 0.0}
 _EMB_CACHE_LOCK = _eng_Lock()
+_EMB_CACHE_WARMING = False
 
 # Free-tier Gemini embedContent quota is 100 requests/min/project. We
 # enforce a global ~80 RPM ceiling with a leaky-bucket gap of 0.75s
@@ -21767,6 +21867,7 @@ VISUAL_CAPTION_MAX_LEN = 600
 
 _UV_CACHE = {"matrix": None, "ids": [], "loaded_at": 0.0}
 _UV_CACHE_LOCK = _eng_Lock()
+_UV_CACHE_WARMING = False
 
 # Vision quota is independent of the text embedContent quota but still
 # rate-limited; 4 s gap = 15 RPM, matches free-tier ceiling.
@@ -21999,6 +22100,29 @@ def _uv_cache_warm():
     with _UV_CACHE_LOCK:
         _UV_CACHE.update({"matrix": M, "ids": ids, "loaded_at": time.time()})
     return True
+
+
+def _uv_cache_warm_async():
+    """Kick off a background refresh of the visual embedding cache.
+
+    Callers keep serving the (possibly stale) in-memory cache while this
+    runs, instead of blocking the request thread on the disk read below.
+    """
+    global _UV_CACHE_WARMING
+    with _UV_CACHE_LOCK:
+        if _UV_CACHE_WARMING:
+            return
+        _UV_CACHE_WARMING = True
+
+    def _run():
+        global _UV_CACHE_WARMING
+        try:
+            _uv_cache_warm()
+        finally:
+            with _UV_CACHE_LOCK:
+                _UV_CACHE_WARMING = False
+
+    threading.Thread(target=_run, daemon=True, name="uv-cache-warm").start()
 
 
 def _parse_admin_media_batch_request(
@@ -22360,12 +22484,18 @@ def _ue_record_for_video(video_id, video_row=None):
         return {"ok": False, "error": "numpy missing"}
 
     if video_row is None:
-        db = get_db()
-        video_row = db.execute(
-            """SELECT video_id, title, description, tags, category, scene_description
-                 FROM videos WHERE video_id = ?""",
-            (video_id,),
-        ).fetchone()
+        # Own connection, not get_db(): this also runs on the post-upload
+        # background thread (_ue_record_for_video_async), which has no app context.
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            video_row = conn.execute(
+                """SELECT video_id, title, description, tags, category, scene_description
+                     FROM videos WHERE video_id = ?""",
+                (video_id,),
+            ).fetchone()
+        finally:
+            conn.close()
         if not video_row:
             return {"ok": False, "error": "not_found"}
 
@@ -22469,6 +22599,29 @@ def _ue_cache_warm():
     with _EMB_CACHE_LOCK:
         _EMB_CACHE.update({"matrix": M, "ids": ids, "loaded_at": time.time()})
     return True
+
+
+def _ue_cache_warm_async():
+    """Kick off a background refresh of the text embedding cache.
+
+    Callers keep serving the (possibly stale) in-memory cache while this
+    runs, instead of blocking the request thread on the disk read below.
+    """
+    global _EMB_CACHE_WARMING
+    with _EMB_CACHE_LOCK:
+        if _EMB_CACHE_WARMING:
+            return
+        _EMB_CACHE_WARMING = True
+
+    def _run():
+        global _EMB_CACHE_WARMING
+        try:
+            _ue_cache_warm()
+        finally:
+            with _EMB_CACHE_LOCK:
+                _EMB_CACHE_WARMING = False
+
+    threading.Thread(target=_run, daemon=True, name="ue-cache-warm").start()
 
 
 def _ue_top_k_for_video(video_id, k=10, exclude_self=True):

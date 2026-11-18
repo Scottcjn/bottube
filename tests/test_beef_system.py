@@ -240,10 +240,21 @@ def test_get_relationship_not_found(client):
 # 8. Admin kill switch
 # ---------------------------------------------------------------------------
 
-def test_admin_kill(client):
+def test_admin_kill(client, monkeypatch):
+    import agent_relationships as ar
+
     _post_event(client, 9, 10, "callout", 90)
     rels = client.get("/api/beef/relationships").get_json()
     rel_id = rels[0]["id"]
+
+    # The kill switch is admin-gated since #1578: a caller without admin
+    # credentials is refused and the relationship stays live.
+    denied = client.post(f"/api/beef/relationships/{rel_id}/kill")
+    assert denied.status_code == 403
+    assert any(r["id"] == rel_id for r in client.get("/api/beef/relationships").get_json())
+
+    # Past the admin gate, the kill takes effect.
+    monkeypatch.setattr(ar, "_require_admin", lambda: None)
 
     resp = client.post(f"/api/beef/relationships/{rel_id}/kill")
     assert resp.status_code == 200

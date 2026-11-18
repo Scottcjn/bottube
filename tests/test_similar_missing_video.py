@@ -104,7 +104,7 @@ def test_similar_rejects_invalid_k_values_before_embedding_lookup(
         response = client.get(f"/api/videos/{video_id}/similar?{query}")
 
         assert response.status_code == 400
-        assert response.get_json() == {"error": expected_error}
+        assert response.get_json() == {"error": expected_error, "param": "k"}
 
     assert calls == []
 

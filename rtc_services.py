@@ -2,7 +2,7 @@
 RTC Service Gateway — Pay RTC for Real Services
 =================================================
 Turns RTC from a mined token into a prepaid service credit.
-Users buy RTC from miners (OTC), then spend it on BoTTube services.
+Users top up RTC at /credits (or earn it mining), then spend it on BoTTube services.
 
 Services:
   - Pro API Day Pass (10 RTC) — premium endpoints for 24 hours
@@ -10,7 +10,7 @@ Services:
   - POWER8 Inference (3 RTC) — chat with GPT-OSS 120B
 
 Flow:
-  1. User has rtc_balance (earned mining or bought OTC)
+  1. User has rtc_balance (earned mining or topped up at /credits)
   2. POST /api/rtc/pay → debit balance, return service_token
   3. Use service_token to access gated endpoints
   4. Token expires after TTL
@@ -30,6 +30,10 @@ from flask import Blueprint, g, jsonify, request
 log = logging.getLogger("bottube.rtc_services")
 
 rtc_services_bp = Blueprint("rtc_services", __name__)
+
+# Single source of truth for the RTC/USD reference (holder-scaled; $0.15 since
+# passing 1,500 wallet holders). An internal accounting unit, not a price.
+RTC_USD = 0.15
 
 # ---------------------------------------------------------------------------
 # Service Catalog
@@ -212,15 +216,15 @@ def init_app(app, db_path):
                 "name": svc["name"],
                 "description": svc.get("description", ""),
                 "price_rtc": svc["price_rtc"],
-                "price_usd_approx": round(svc["price_rtc"] * 0.10, 2),
+                "price_usd_approx": round(svc["price_rtc"] * RTC_USD, 2),
                 "ttl_hours": round(svc["token_ttl_sec"] / 3600, 1),
                 "uses": svc.get("uses_total", 1),
             })
         return jsonify({
             "services": services,
-            "rtc_reference_rate": 0.10,
+            "rtc_reference_rate": RTC_USD,
             "currency": "USD",
-            "note": "Pay with RTC. Need RTC? Buy from miners at /otc",
+            "note": "Pay with RTC. Need RTC? Top up at /credits",
         })
 
     # --- Purchase a Service ---
@@ -266,7 +270,7 @@ def init_app(app, db_path):
                 "balance": balance,
                 "cost": total_cost,
                 "need": round(total_cost - balance, 6),
-                "hint": "Buy RTC from miners at /otc or earn through mining",
+                "hint": "Top up at /credits or earn through mining",
             }), 402  # HTTP 402 Payment Required
 
         # Generate service token
@@ -301,7 +305,7 @@ def init_app(app, db_path):
                     "balance": fresh_balance,
                     "cost": total_cost,
                     "need": round(total_cost - fresh_balance, 6),
-                    "hint": "Buy RTC from miners at /otc or earn through mining",
+                    "hint": "Top up at /credits or earn through mining",
                 }), 402
             db.execute("""INSERT INTO service_purchases
                 (agent_id, service_key, quantity, amount_rtc, token_hash,
@@ -501,7 +505,7 @@ a { color: #e8a838; }
 <p>Pay with RTC — the token earned by real hardware operators.</p>
 """
         for key, svc in SERVICE_CATALOG.items():
-            usd = round(svc["price_rtc"] * 0.10, 2)
+            usd = round(svc["price_rtc"] * RTC_USD, 2)
             html += f"""
 <div class="card">
     <h3>{svc['name']}</h3>
@@ -514,10 +518,9 @@ a { color: #e8a838; }
         html += """
 <div class="otc">
     <h3>Need RTC?</h3>
-    <p>RTC is earned by mining with real hardware. Buy directly from miners.</p>
+    <p>Top up your BoTTube balance at <a href="/credits">/credits</a>, or earn RTC by mining with real hardware.</p>
     <p><a href="https://rustchain.org">Learn about RustChain</a> ·
        <a href="https://github.com/Scottcjn/Rustchain">GitHub</a></p>
-    <p>wRTC on Solana: <code>12TAdKXxcGf6oCv4rqDz2NkgxjyHq6HQKoxKZYGf5i4X</code></p>
 </div>
 </body></html>"""
         return html, 200, {"Content-Type": "text/html"}

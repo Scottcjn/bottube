@@ -12,7 +12,6 @@
     {"trait_type": "Total Supply", "value": "8,300,000 RTC"},
     {"trait_type": "Vintage Bonus", "value": "Up to 2.5x for PowerPC/68K/SPARC"},
     {"trait_type": "Anti-VM", "value": "6-point hardware fingerprinting"},
-    {"trait_type": "DEX", "value": "Raydium (Solana)"},
     {"trait_type": "Explorer", "value": "rustchain.org"},
     {"trait_type": "Social", "value": "@RustchainPOA on X"}
   ]

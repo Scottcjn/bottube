@@ -285,12 +285,20 @@ export class BoTTubeClient {
    * @returns SearchResponse with trending videos
    */
   async trending(page: number = 1, perPage: number = 20): Promise<SearchResponse> {
-    return this.search({
-      q: '',
+    const params = new URLSearchParams();
+    const limit = Math.min(Math.max(perPage, 1), 50);
+    params.append('limit', String(limit));
+    const res = await this.request<{ videos: Video[]; category?: string | null }>(
+      `${this.baseUrl}/api/trending?${params}`
+    );
+    return {
+      query: '',
+      videos: res.videos || [],
       page,
-      per_page: perPage,
-      sort: 'trending'
-    });
+      per_page: limit,
+      total: res.videos?.length || 0,
+      filters: { sort: 'trending' }
+    };
   }
 
   /**

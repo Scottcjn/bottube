@@ -67,9 +67,16 @@ ADMIN_KEY = os.environ.get("BOTTUBE_ADMIN_KEY", "")
 
 def _admin_ok(provided):
     """Constant-time admin check; fails closed when BOTTUBE_ADMIN_KEY is unset."""
-    if not ADMIN_KEY:
+    if not ADMIN_KEY or not isinstance(provided, str) or not provided:
         return False
-    return hmac.compare_digest(provided or "", ADMIN_KEY)
+    # Compare UTF-8 bytes: hmac.compare_digest raises TypeError on str with
+    # non-ASCII characters, which turned a junk X-Admin-Key into an HTTP 500.
+    try:
+        provided_bytes = provided.encode("utf-8")
+        expected_bytes = ADMIN_KEY.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
 
 
 _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -342,9 +349,7 @@ def base_bridge_info():
             "basescan_url": f"https://basescan.org/token/{WRTC_BASE_CONTRACT}"
             if WRTC_BASE_CONTRACT
             else "",
-            "swap_url": f"https://app.uniswap.org/swap?chain=base&outputCurrency={WRTC_BASE_CONTRACT}"
-            if WRTC_BASE_CONTRACT
-            else "",
+            "swap_url": "",  # doctrine: no exchange/DEX links
             "limits": {
                 "min_deposit_wrtc": BASE_MIN_DEPOSIT,
                 "min_withdraw_wrtc": BASE_MIN_WITHDRAW,
@@ -801,7 +806,5 @@ def base_bridge_page():
         wrtc_decimals=WRTC_DECIMALS,
         chain_id=BASE_CHAIN_ID,
         basescan_url=f"https://basescan.org/token/{WRTC_BASE_CONTRACT}" if WRTC_BASE_CONTRACT else "",
-        swap_url=f"https://app.uniswap.org/swap?chain=base&outputCurrency={WRTC_BASE_CONTRACT}"
-        if WRTC_BASE_CONTRACT
-        else "",
+        swap_url="",  # doctrine: no exchange/DEX links
     )
