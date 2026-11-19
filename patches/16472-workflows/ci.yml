@@ -1,0 +1,291 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# If several workflows fire on the same commit (push + PR, or rapid
+# pushes), don't queue a pile of redundant runs: cancel the superseded
+# ones. This reduces runner load and avoids the resource-exhaustion
+# pattern where jobs wait forever for a hosted runner.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    # Explicit job-level timeout: a hung step now fails the job with a
+    # clear "exceeded the maximum execution time" annotation instead of
+    # silently waiting (the default is 360 minutes).
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v7
+      id: checkout
+      timeout-minutes: 3
+
+    - name: Set up Python
+      id: setup-python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+      timeout-minutes: 5
+
+    - name: Install dependencies
+      id: install
+      run: |
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 flake8 pylint
+      timeout-minutes: 8
+
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      timeout-minutes: 5
+
+    # Advisory only: reports pylint errors (E/F) in the job log and shows the
+    # step as failed, but does not fail the lint job. flake8 above is the gate.
+    - name: Lint with pylint (advisory, non-blocking)
+      continue-on-error: true
+      run: |
+        pylint bottube_server.py --disable=C,R,W
+      timeout-minutes: 5
+
+    # Bounty rustchain-bounties#16472: if checkout/setup/install ended CANCELLED
+    # (its step timeout fired), the hang is CI infrastructure, not contributor
+    # code. Export that so the report job can name the kind instead of guessing.
+    - name: Classify failure kind
+      if: always()
+      id: classify
+      timeout-minutes: 1
+      env:
+        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
+      run: |
+        kind=code_failure
+        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
+        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
+
+  test:
+    runs-on: ubuntu-latest
+    # The suite takes ~8 min locally without coverage; leave headroom.
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+      id: checkout
+      timeout-minutes: 3
+
+    - name: Set up Python
+      id: setup-python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+      timeout-minutes: 5
+
+    - name: Install dependencies
+      id: install
+      run: |
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 -r requirements-ci.txt
+      timeout-minutes: 8
+
+    # Fail closed: a failing test fails this job. Known pre-existing failures
+    # are quarantined one node ID at a time in tests/ci_quarantine.py as
+    # strict xfails (tracked in the issue linked there); a quarantined test
+    # that starts passing also fails the job, so the list can only shrink.
+    # --timeout turns a hung test into a failure instead of eating the step.
+    - name: Run tests
+      run: |
+        pytest tests/ -v --timeout=120 --cov=. --cov-report=xml
+      timeout-minutes: 18
+
+    # A coverage-upload outage is not a code failure either: bound it and let
+    # it pass so the report's classification stays about lint/test/security.
+    - name: Upload coverage
+      uses: codecov/codecov-action@v7
+      if: always()
+      continue-on-error: true
+      timeout-minutes: 5
+
+    # See lint job: export failure kind for the report job (bounty #16472).
+    - name: Classify failure kind
+      if: always()
+      id: classify
+      timeout-minutes: 1
+      env:
+        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
+      run: |
+        kind=code_failure
+        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
+        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
+
+  # 2026-09-07: deployment-drift was added after the timeout hardening in
+  # #1742.  Without explicit timeouts it inherits the 360-minute default and
+  # would hang forever in a network outage — the same class of failure that
+  # bounty #16472 was opened to fix.  We add the same per-job / per-step
+  # timeout budget here so CI stays fast-failing.  (See also the report job
+  # which now distinguishes timeout vs real failure for this job.)
+  deployment-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v7
+      id: checkout
+      timeout-minutes: 3
+
+    - name: Set up Python
+      id: setup-python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+      timeout-minutes: 5
+
+    - name: Install drift check dependencies
+      id: install
+      run: |
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 pytest PyYAML
+      timeout-minutes: 8
+
+    - name: Test deployment drift sentinel
+      run: python -m pytest tests/test_deployment_drift.py tests/test_openapi_contract_preservation.py -q
+      timeout-minutes: 5
+
+    - name: Check OpenAPI and Flask route drift
+      run: python deployment_drift.py --config deployment-drift.json
+      timeout-minutes: 5
+
+    # See lint job: export failure kind for the report job (bounty #16472).
+    - name: Classify failure kind
+      if: always()
+      id: classify
+      timeout-minutes: 1
+      env:
+        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
+      run: |
+        kind=code_failure
+        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
+        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v7
+      id: checkout
+      timeout-minutes: 3
+
+    - name: Set up Python
+      id: setup-python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+      timeout-minutes: 5
+
+    - name: Install dependencies
+      id: install
+      run: |
+        python -m pip install --upgrade pip --timeout 30
+        pip install --timeout 30 bandit pip-audit
+      timeout-minutes: 8
+
+    # Full report of every severity, for reading in the log. Never blocks.
+    - name: Bandit full report (advisory, non-blocking)
+      continue-on-error: true
+      run: |
+        bandit -r . -x ./tests,./python-sdk/tests -q
+      timeout-minutes: 5
+
+    # High-severity AND high-confidence findings only (-lll -iii); this step
+    # is a hard gate.
+    - name: Bandit high severity / high confidence
+      run: |
+        bandit -r . -x ./tests,./python-sdk/tests -lll -iii
+      timeout-minutes: 5
+
+    # pip-audit replaces the deprecated `safety check`. Audits the pinned
+    # CI/runtime dependency list. Advisory: a new upstream CVE should not
+    # block unrelated PRs, but the step shows as failed in the log.
+    - name: Audit dependencies with pip-audit (advisory, non-blocking)
+      continue-on-error: true
+      run: |
+        pip-audit -r requirements-ci.txt
+      timeout-minutes: 5
+
+    # See lint job: export failure kind for the report job (bounty #16472).
+    - name: Classify failure kind
+      if: always()
+      id: classify
+      timeout-minutes: 1
+      env:
+        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
+      run: |
+        kind=code_failure
+        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
+        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
+
+  # Outcome report: tells the contributor *why* a check is red, so an
+  # infrastructure hang never masquerades as "your code failed".
+  # Three signals separate the two:
+  #   * needs.<job>.result == cancelled      -> the job itself hit its
+  #     timeout-minutes (runner never finished it; your code is innocent).
+  #   * failure_kind == step_timeout_or_infra -> a checkout/setup/install step
+  #     hit its step timeout (the classify steps export this); GitHub reports
+  #     such a job as "failure", which is exactly what used to be misread as
+  #     a contributor failure.
+  #   * failed with no classification output at all -> the job died before any
+  #     step ran (action-download / runner-allocation outage, e.g. the
+  #     2026-08-06 incident on bottube#1639/#1640). Also infrastructure.
+  # Only a plain step exit-code failure is blamed on the contributor.
+  report:
+    name: CI outcome report
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, deployment-drift]
+    if: always()
+    timeout-minutes: 2
+    steps:
+      - name: Distinguish timeout from failure
+        timeout-minutes: 2
+        env:
+          LINT: ${{ needs.lint.result }} ${{ needs.lint.outputs.failure_kind }}
+          TEST: ${{ needs.test.result }} ${{ needs.test.outputs.failure_kind }}
+          SECURITY: ${{ needs.security.result }} ${{ needs.security.outputs.failure_kind }}
+          DRIFT: ${{ needs.deployment-drift.result }} ${{ needs.deployment-drift.outputs.failure_kind }}
+        run: |
+          echo "results: lint=[$LINT] test=[$TEST] security=[$SECURITY] deployment_drift=[$DRIFT]"
+          infra=0
+          code=0
+          echo "| job | result | what it means for you |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for entry in "lint|$LINT" "test|$TEST" "security|$SECURITY" "deployment-drift|$DRIFT"; do
+            name="${entry%%|*}"
+            rest="${entry#*|}"
+            result="${rest%% *}"
+            kind="${rest#* }"
+            if [ "$result" = success ]; then
+              cls="ok"
+            elif [ "$result" = cancelled ]; then
+              cls="**timed out or cancelled before finishing - CI infrastructure, not your code. Re-run this job.**"; infra=1
+            elif [ "$kind" = step_timeout_or_infra ]; then
+              cls="**a checkout/setup/install step hit its timeout - CI infrastructure hang, not your code. Re-run this job.**"; infra=1
+            elif [ "$kind" = "$result" ] || [ -z "$kind" ]; then
+              cls="**failed before any step reported a result (runner or action-download outage) - CI infrastructure, not your code. Re-run this job.**"; infra=1
+            else
+              cls="failed on a step of your code - real failure; see the job log above"; code=1
+            fi
+            echo "| $name | $result | $cls |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          if [ "$infra" = 1 ]; then
+            echo "::error::CI timed out or hung on infrastructure (job timeout, checkout/setup/install step timeout, or action download). This is NOT a failure of your code - re-run the flagged job(s); it will pass."
+          fi
+          if [ "$code" = 1 ]; then
+            echo "::error::A CI job FAILED on a step of your code. Look at the failing job's logs above - that is a real failure."
+          fi
+          if [ "$infra" = 0 ] && [ "$code" = 0 ]; then
+            echo "All CI jobs completed successfully."
+          fi
+          if [ "$infra" = 1 ] || [ "$code" = 1 ]; then exit 1; fi
