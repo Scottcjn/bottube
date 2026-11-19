@@ -1,0 +1,32 @@
+name: RTC Reward on PR Merge
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  reward:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    # Bounty rustchain-bounties#16472: this step fetches a cross-repo action
+    # that calls rustchain.org over the network. With no timeout an API hang
+    # ran to the 360-minute default; bound it so it fails fast and visibly.
+    timeout-minutes: 10
+    steps:
+      - name: Award RTC to contributor
+        continue-on-error: true  # rewards are best-effort; never gate CI
+        timeout-minutes: 8
+        uses: Scottcjn/rustchain-bounties/actions/rtc-reward@06f36c870b40bdd89f0f92c25826f2d2b9561fa6 # pinned 2026-09-26: skip house accounts (rustchain-bounties#17060)
+        env:
+          # Action reads GITHUB_TOKEN from env; without it every run crashed
+          # ("Error: GITHUB_TOKEN not set"), masked by continue-on-error.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          node-url: https://rustchain.org
+          amount: 5
+          wallet-from: founder_community
+          admin-key: ${{ secrets.RTC_ADMIN_KEY }}

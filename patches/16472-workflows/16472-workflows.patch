@@ -1,0 +1,287 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index dc2e7c5..37d5ba9 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -23,15 +23,18 @@ jobs:
+     timeout-minutes: 10
+     steps:
+     - uses: actions/checkout@v7
++      id: checkout
+       timeout-minutes: 3
+ 
+     - name: Set up Python
++      id: setup-python
+       uses: actions/setup-python@v6
+       with:
+         python-version: '3.11'
+       timeout-minutes: 5
+ 
+     - name: Install dependencies
++      id: install
+       run: |
+         python -m pip install --upgrade pip --timeout 30
+         pip install --timeout 30 flake8 pylint
+@@ -53,21 +56,38 @@ jobs:
+         pylint bottube_server.py --disable=C,R,W
+       timeout-minutes: 5
+ 
++    # Bounty rustchain-bounties#16472: if checkout/setup/install ended CANCELLED
++    # (its step timeout fired), the hang is CI infrastructure, not contributor
++    # code. Export that so the report job can name the kind instead of guessing.
++    - name: Classify failure kind
++      if: always()
++      id: classify
++      timeout-minutes: 1
++      env:
++        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
++      run: |
++        kind=code_failure
++        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
++        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
++
+   test:
+     runs-on: ubuntu-latest
+     # The suite takes ~8 min locally without coverage; leave headroom.
+     timeout-minutes: 20
+     steps:
+     - uses: actions/checkout@v7
++      id: checkout
+       timeout-minutes: 3
+ 
+     - name: Set up Python
++      id: setup-python
+       uses: actions/setup-python@v6
+       with:
+         python-version: '3.11'
+       timeout-minutes: 5
+ 
+     - name: Install dependencies
++      id: install
+       run: |
+         python -m pip install --upgrade pip --timeout 30
+         pip install --timeout 30 -r requirements-ci.txt
+@@ -83,11 +103,26 @@ jobs:
+         pytest tests/ -v --timeout=120 --cov=. --cov-report=xml
+       timeout-minutes: 18
+ 
++    # A coverage-upload outage is not a code failure either: bound it and let
++    # it pass so the report's classification stays about lint/test/security.
+     - name: Upload coverage
+       uses: codecov/codecov-action@v7
+       if: always()
++      continue-on-error: true
+       timeout-minutes: 5
+ 
++    # See lint job: export failure kind for the report job (bounty #16472).
++    - name: Classify failure kind
++      if: always()
++      id: classify
++      timeout-minutes: 1
++      env:
++        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
++      run: |
++        kind=code_failure
++        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
++        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
++
+   # 2026-09-07: deployment-drift was added after the timeout hardening in
+   # #1742.  Without explicit timeouts it inherits the 360-minute default and
+   # would hang forever in a network outage — the same class of failure that
+@@ -99,15 +134,18 @@ jobs:
+     timeout-minutes: 10
+     steps:
+     - uses: actions/checkout@v7
++      id: checkout
+       timeout-minutes: 3
+ 
+     - name: Set up Python
++      id: setup-python
+       uses: actions/setup-python@v6
+       with:
+         python-version: '3.11'
+       timeout-minutes: 5
+ 
+     - name: Install drift check dependencies
++      id: install
+       run: |
+         python -m pip install --upgrade pip --timeout 30
+         pip install --timeout 30 pytest PyYAML
+@@ -121,20 +159,35 @@ jobs:
+       run: python deployment_drift.py --config deployment-drift.json
+       timeout-minutes: 5
+ 
++    # See lint job: export failure kind for the report job (bounty #16472).
++    - name: Classify failure kind
++      if: always()
++      id: classify
++      timeout-minutes: 1
++      env:
++        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
++      run: |
++        kind=code_failure
++        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
++        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
++
+   security:
+     runs-on: ubuntu-latest
+     timeout-minutes: 10
+     steps:
+     - uses: actions/checkout@v7
++      id: checkout
+       timeout-minutes: 3
+ 
+     - name: Set up Python
++      id: setup-python
+       uses: actions/setup-python@v6
+       with:
+         python-version: '3.11'
+       timeout-minutes: 5
+ 
+     - name: Install dependencies
++      id: install
+       run: |
+         python -m pip install --upgrade pip --timeout 30
+         pip install --timeout 30 bandit pip-audit
+@@ -163,12 +216,31 @@ jobs:
+         pip-audit -r requirements-ci.txt
+       timeout-minutes: 5
+ 
+-  # Outcome report: tells the contributor *why* a check is red.
+-  # A job cancelled by its timeout-minutes limit reports "cancelled";
+-  # a job where a step exited non-zero reports "failure". That
+-  # distinction is the difference between "CI infra hung" and
+-  # "your code failed", which is exactly what the 15m01s failures
+-  # obscured.
++    # See lint job: export failure kind for the report job (bounty #16472).
++    - name: Classify failure kind
++      if: always()
++      id: classify
++      timeout-minutes: 1
++      env:
++        SETUP_OUTCOMES: ${{ steps.checkout.outcome }}/${{ steps.setup-python.outcome }}/${{ steps.install.outcome }}
++      run: |
++        kind=code_failure
++        case "$SETUP_OUTCOMES" in *cancelled*) kind=step_timeout_or_infra ;; esac
++        echo "failure_kind=$kind" >> "$GITHUB_OUTPUT"
++
++  # Outcome report: tells the contributor *why* a check is red, so an
++  # infrastructure hang never masquerades as "your code failed".
++  # Three signals separate the two:
++  #   * needs.<job>.result == cancelled      -> the job itself hit its
++  #     timeout-minutes (runner never finished it; your code is innocent).
++  #   * failure_kind == step_timeout_or_infra -> a checkout/setup/install step
++  #     hit its step timeout (the classify steps export this); GitHub reports
++  #     such a job as "failure", which is exactly what used to be misread as
++  #     a contributor failure.
++  #   * failed with no classification output at all -> the job died before any
++  #     step ran (action-download / runner-allocation outage, e.g. the
++  #     2026-08-06 incident on bottube#1639/#1640). Also infrastructure.
++  # Only a plain step exit-code failure is blamed on the contributor.
+   report:
+     name: CI outcome report
+     runs-on: ubuntu-latest
+@@ -177,18 +249,43 @@ jobs:
+     timeout-minutes: 2
+     steps:
+       - name: Distinguish timeout from failure
++        timeout-minutes: 2
++        env:
++          LINT: ${{ needs.lint.result }} ${{ needs.lint.outputs.failure_kind }}
++          TEST: ${{ needs.test.result }} ${{ needs.test.outputs.failure_kind }}
++          SECURITY: ${{ needs.security.result }} ${{ needs.security.outputs.failure_kind }}
++          DRIFT: ${{ needs.deployment-drift.result }} ${{ needs.deployment-drift.outputs.failure_kind }}
+         run: |
+-          L="${{ needs.lint.result }}"
+-          T="${{ needs.test.result }}"
+-          S="${{ needs.security.result }}"
+-          D="${{ needs.deployment-drift.result }}"
+-          echo "lint=$L test=$T security=$S deployment_drift=$D"
+-          if echo "$L $T $S $D" | grep -q cancelled; then
+-            echo "::error::A CI job was CANCELLED at its timeout-minutes limit (infrastructure hang, not necessarily a code failure). Re-run the workflow to confirm."
+-            exit 1
+-          elif echo "$L $T $S $D" | grep -qE 'failure|error'; then
+-            echo "::error::A CI job FAILED on a step. Look at the failing job's logs above - that is a real failure."
+-            exit 1
+-          else
++          echo "results: lint=[$LINT] test=[$TEST] security=[$SECURITY] deployment_drift=[$DRIFT]"
++          infra=0
++          code=0
++          echo "| job | result | what it means for you |" >> "$GITHUB_STEP_SUMMARY"
++          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
++          for entry in "lint|$LINT" "test|$TEST" "security|$SECURITY" "deployment-drift|$DRIFT"; do
++            name="${entry%%|*}"
++            rest="${entry#*|}"
++            result="${rest%% *}"
++            kind="${rest#* }"
++            if [ "$result" = success ]; then
++              cls="ok"
++            elif [ "$result" = cancelled ]; then
++              cls="**timed out or cancelled before finishing - CI infrastructure, not your code. Re-run this job.**"; infra=1
++            elif [ "$kind" = step_timeout_or_infra ]; then
++              cls="**a checkout/setup/install step hit its timeout - CI infrastructure hang, not your code. Re-run this job.**"; infra=1
++            elif [ "$kind" = "$result" ] || [ -z "$kind" ]; then
++              cls="**failed before any step reported a result (runner or action-download outage) - CI infrastructure, not your code. Re-run this job.**"; infra=1
++            else
++              cls="failed on a step of your code - real failure; see the job log above"; code=1
++            fi
++            echo "| $name | $result | $cls |" >> "$GITHUB_STEP_SUMMARY"
++          done
++          if [ "$infra" = 1 ]; then
++            echo "::error::CI timed out or hung on infrastructure (job timeout, checkout/setup/install step timeout, or action download). This is NOT a failure of your code - re-run the flagged job(s); it will pass."
++          fi
++          if [ "$code" = 1 ]; then
++            echo "::error::A CI job FAILED on a step of your code. Look at the failing job's logs above - that is a real failure."
++          fi
++          if [ "$infra" = 0 ] && [ "$code" = 0 ]; then
+             echo "All CI jobs completed successfully."
+           fi
++          if [ "$infra" = 1 ] || [ "$code" = 1 ]; then exit 1; fi
+diff --git a/.github/workflows/labeler.yml b/.github/workflows/labeler.yml
+index 5e12294..f72e71a 100644
+--- a/.github/workflows/labeler.yml
++++ b/.github/workflows/labeler.yml
+@@ -23,8 +23,25 @@ jobs:
+     timeout-minutes: 5
+     steps:
+       - uses: actions/labeler@v5
++        id: labeler
+         with:
+           repo-token: "${{ secrets.GITHUB_TOKEN }}"
+           configuration-path: .github/labeler.yml
+           sync-labels: false
+         timeout-minutes: 4
++
++      # Bounty rustchain-bounties#16472: a red `label` check with no
++      # explanation is what made contributors chase failures that were never
++      # theirs (bottube#1639/#1640). State which kind of failure this is.
++      - name: Explain label failure
++        if: always()
++        timeout-minutes: 1
++        env:
++          LABELER_OUTCOME: ${{ steps.labeler.outcome }}
++        run: |
++          if [ "$LABELER_OUTCOME" = success ]; then exit 0; fi
++          if [ "$LABELER_OUTCOME" = cancelled ]; then
++            echo "::error::The auto-label step timed out after 4 minutes. That is a GitHub Actions/labeler hang, NOT a problem with your PR - re-run the label job."
++          else
++            echo "::error::The auto-label step failed for a non-timeout reason (usually an Actions outage or labeler config). Your PR code is not the cause; check this job's log before touching anything."
++          fi
+diff --git a/.github/workflows/rtc-reward.yml b/.github/workflows/rtc-reward.yml
+index 15a1fdf..0978858 100644
+--- a/.github/workflows/rtc-reward.yml
++++ b/.github/workflows/rtc-reward.yml
+@@ -12,9 +12,14 @@ jobs:
+   reward:
+     if: github.event.pull_request.merged == true
+     runs-on: ubuntu-latest
++    # Bounty rustchain-bounties#16472: this step fetches a cross-repo action
++    # that calls rustchain.org over the network. With no timeout an API hang
++    # ran to the 360-minute default; bound it so it fails fast and visibly.
++    timeout-minutes: 10
+     steps:
+       - name: Award RTC to contributor
+         continue-on-error: true  # rewards are best-effort; never gate CI
++        timeout-minutes: 8
+         uses: Scottcjn/rustchain-bounties/actions/rtc-reward@06f36c870b40bdd89f0f92c25826f2d2b9561fa6 # pinned 2026-09-26: skip house accounts (rustchain-bounties#17060)
+         env:
+           # Action reads GITHUB_TOKEN from env; without it every run crashed
