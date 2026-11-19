@@ -15,6 +15,7 @@ import sqlite3
 import struct
 import shutil
 import tempfile
+import threading
 import time
 import zlib
 from pathlib import Path
@@ -136,7 +137,22 @@ def app():
         with flask_app.app_context():
             bottube_server.init_db()
 
+        threads_before = set(threading.enumerate())
+
         yield flask_app
+
+        # A successful /api/upload starts fire-and-forget daemon threads
+        # (rendition-<id>, embed-<id>, captions) that open DB_PATH and write
+        # under this temp directory. If one is still running when the
+        # TemporaryDirectory is removed, rmtree fails with
+        # "OSError: [Errno 39] Directory not empty" and the test is reported
+        # as an ERROR at teardown even though it passed. Wait for the threads
+        # this test started before the directory goes away.
+        deadline = time.monotonic() + 30
+        for thread in threading.enumerate():
+            if thread in threads_before or thread is threading.current_thread():
+                continue
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 @pytest.fixture
