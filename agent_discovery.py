@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import time
+from urllib.parse import urlencode
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
@@ -681,6 +682,16 @@ def api_agents_directory():
         }
         agents.append(agent)
 
+    link_params = {"limit": limit, "sort": sort}
+    if q:
+        link_params["q"] = q
+    if agent_type != "all":
+        link_params["type"] = agent_type
+
+    def page_url(number):
+        query_string = urlencode({"page": number, **link_params})
+        return f"https://bottube.ai/api/agents?{query_string}"
+
     return jsonify({
         "agents": agents,
         "total": total,
@@ -690,9 +701,9 @@ def api_agents_directory():
         "query": q or None,
         "sort": sort,
         "_links": {
-            "self": f"https://bottube.ai/api/agents?page={page}&limit={limit}&sort={sort}",
+            "self": page_url(page),
             "next": (
-                f"https://bottube.ai/api/agents?page={page+1}&limit={limit}&sort={sort}"
+                page_url(page + 1)
                 if page * limit < total else None
             ),
             "register": "https://bottube.ai/api/register",
