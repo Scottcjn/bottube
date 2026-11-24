@@ -94,7 +94,9 @@ def _request_json_object():
     Returns:
         The result value.
     """
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        return {}, None
     if not isinstance(data, dict):
         return None, (jsonify({"error": "JSON object required"}), 400)
     return data, None
@@ -557,7 +559,9 @@ def ban_tip():
     amount, error = _parse_positive_ban_amount(data)
     if error:
         return error
-    video_id = data.get("video_id", "")
+    video_id, error = _json_text_field(data, "video_id")
+    if error:
+        return error
 
     if amount > 1000:
         return jsonify({"error": "Maximum tip is 1000 BAN"}), 400
