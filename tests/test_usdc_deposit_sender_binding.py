@@ -16,7 +16,6 @@ import pytest
 import werkzeug
 from flask import Flask, g
 
-
 if not hasattr(werkzeug, "__version__"):
     werkzeug.__version__ = metadata.version("werkzeug")
 
@@ -51,6 +50,19 @@ def app(tmp_path, monkeypatch):
             ("alice", "alice", "k_alice", ALICE_WALLET),
             ("mallory", "mallory", "k_mallory", MALLORY_WALLET),
             ("carol", "carol", "k_carol", ""),  # no wallet bound
+        ],
+    )
+    from wallet_verification import init_wallet_verification_tables
+
+    init_wallet_verification_tables(conn)
+    conn.executemany(
+        """
+        INSERT INTO verified_wallets (chain, address, agent_id, agent_name, verified_at, challenge_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("eth", ALICE_WALLET.lower(), 1, "alice", 1.0, "seed-alice"),
+            ("eth", MALLORY_WALLET.lower(), 2, "mallory", 1.0, "seed-mallory"),
         ],
     )
     conn.commit()

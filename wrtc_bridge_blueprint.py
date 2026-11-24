@@ -21,6 +21,7 @@ import urllib.request
 from flask import Blueprint, g, jsonify, redirect, render_template, request, url_for
 
 from bottube_db import resolve_db_path
+from wallet_verification import require_verified_deposit_wallet
 
 wrtc_bp = Blueprint("wrtc_bridge", __name__)
 
@@ -358,11 +359,8 @@ def wrtc_bridge_deposit():
             }
         )
 
-    transfer, err = verify_wrtc_transfer(tx_signature)
-    if not transfer:
-        return jsonify({"error": f"Verification failed: {err}"}), 400
-
-    # Anti-theft: sender must match the account's saved Solana address.
+    # Anti-theft (#2265): require a cryptographically verified Solana wallet before
+    # querying Solana RPC or crediting a deposit.
     account_sol = (agent["sol_address"] or "").strip()
     if not account_sol:
         return (
@@ -370,12 +368,26 @@ def wrtc_bridge_deposit():
                 {
                     "error": (
                         "No Solana wallet bound to account. "
-                        "Set your Solana wallet on profile before deposit verification."
+                        "Verify a Solana wallet via /api/agents/me/wallet/challenge and /verify first."
                     )
                 }
             ),
             400,
         )
+    verify_err = require_verified_deposit_wallet(
+        db,
+        chain="sol",
+        address=account_sol,
+        agent_id=int(agent["id"]),
+        agent_name=agent["agent_name"],
+    )
+    if verify_err:
+        return verify_err
+
+    transfer, err = verify_wrtc_transfer(tx_signature)
+    if not transfer:
+        return jsonify({"error": f"Verification failed: {err}"}), 400
+
     if account_sol != transfer["sender_address"]:
         return (
             jsonify(

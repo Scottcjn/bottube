@@ -56,6 +56,16 @@ from bottube_validators.validators import (
     parse_timestamp_iso as parse_ts_param,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
+from wallet_verification import (
+    DEPOSIT_BINDING_FIELDS as _WALLET_POP_CHAINS,
+    clear_verified_wallet,
+    create_wallet_challenge,
+    get_verified_wallet_flags,
+    init_wallet_verification_tables,
+    is_wallet_verified,
+    normalize_wallet_address,
+    verify_wallet_challenge,
+)
 
 # Mood Engine for Agent Mood System (Bounty #2283)
 try:
@@ -2382,6 +2392,8 @@ def init_db():
     for col, sql in agent_migrations.items():
         if col not in existing_cols:
             conn.execute(sql)
+
+    init_wallet_verification_tables(conn)
 
     # Referral program table
     conn.execute(
@@ -12399,21 +12411,27 @@ def manage_wallet():
 
     if request.method == "GET":
         a = dict(g.agent)
+        wallets = {
+            # RustChain on-chain wallet (RTC... address) used for on-chain tips
+            "rtc_wallet": a.get("rtc_wallet", ""),
+            # Legacy / external donation address
+            "rtc": a.get("rtc_address", ""),
+            "btc": a.get("btc_address", ""),
+            "eth": a.get("eth_address", ""),
+            "sol": a.get("sol_address", ""),
+            "ltc": a.get("ltc_address", ""),
+            "erg": a.get("erg_address", ""),
+            "paypal": a.get("paypal_email", ""),
+        }
         return jsonify({
             "agent_name": a["agent_name"],
             "rtc_balance": a.get("rtc_balance", 0),
-            "wallets": {
-                # RustChain on-chain wallet (RTC... address) used for on-chain tips
-                "rtc_wallet": a.get("rtc_wallet", ""),
-                # Legacy / external donation address
-                "rtc": a.get("rtc_address", ""),
-                "btc": a.get("btc_address", ""),
-                "eth": a.get("eth_address", ""),
-                "sol": a.get("sol_address", ""),
-                "ltc": a.get("ltc_address", ""),
-                "erg": a.get("erg_address", ""),
-                "paypal": a.get("paypal_email", ""),
-            },
+            "wallets": wallets,
+            "verified_wallets": get_verified_wallet_flags(
+                db,
+                agent_id=int(g.agent["id"]),
+                current_wallets=wallets,
+            ),
         })
 
     # POST: Update wallet addresses
@@ -12440,11 +12458,38 @@ def manage_wallet():
         if rtc_wallet and not _is_rustchain_rtc_address(rtc_wallet):
             return jsonify({"error": "Invalid RustChain wallet address format (expected RTC... address)"}), 400
 
+    # Security (#2265): deposit-binding chain addresses (eth, sol, erg) cannot be
+    # self-asserted directly here; non-empty values must first pass cryptographic
+    # proof-of-possession via /api/agents/me/wallet/challenge + /verify.
+    for chain in _WALLET_POP_CHAINS:
+        if chain in data:
+            candidate = data[chain].strip()
+            if candidate and not is_wallet_verified(
+                db,
+                chain=chain,
+                address=candidate,
+                agent_id=int(g.agent["id"]),
+                agent_name=g.agent["agent_name"],
+            ):
+                return jsonify({
+                    "error": (
+                        f"{chain.upper()} wallet binding requires cryptographic proof of possession "
+                        "via POST /api/agents/me/wallet/challenge and POST /api/agents/me/wallet/verify."
+                    ),
+                    "code": "WALLET_VERIFICATION_REQUIRED",
+                    "chain": chain,
+                }), 403
+
     updates = []
     params = []
     for key, col in allowed_fields.items():
         if key in data:
             val = data[key].strip()
+            if key in _WALLET_POP_CHAINS:
+                if val:
+                    val = normalize_wallet_address(key, val)
+                else:
+                    clear_verified_wallet(db, agent_id=int(g.agent["id"]), chain=key)
             updates.append(f"{col} = ?")
             params.append(val)
 
@@ -12466,6 +12511,68 @@ def manage_wallet():
         "message": "Wallet addresses updated.",
         "updated_fields": [k for k in allowed_fields if k in data],
     })
+
+
+@app.route("/api/agents/me/wallet/challenge", methods=["POST"])
+@require_api_key
+def wallet_verification_challenge():
+    """Issue a short-TTL single-use ownership challenge for eth, sol, or erg."""
+    if not _rate_limit(f"wallet_challenge:{g.agent['id']}", 30, 3600):
+        return jsonify({"error": "Wallet verification rate limit exceeded. Try again later."}), 429
+
+    data, error = _json_object_body()
+    if error:
+        return error
+
+    chain = data.get("chain")
+    address = data.get("address")
+    if not isinstance(chain, str) or not isinstance(address, str):
+        return jsonify({"error": "chain and address must be strings"}), 400
+
+    db = get_db()
+    result, err_resp = create_wallet_challenge(
+        db,
+        agent_id=int(g.agent["id"]),
+        agent_name=g.agent["agent_name"],
+        chain=chain.strip().lower(),
+        address=address,
+    )
+    if err_resp:
+        payload, status = err_resp
+        return jsonify(payload), status
+    return jsonify(result), 200
+
+
+@app.route("/api/agents/me/wallet/verify", methods=["POST"])
+@require_api_key
+def wallet_verification_confirm():
+    """Verify a signed wallet challenge and bind the verified address to this agent."""
+    if not _rate_limit(f"wallet_verify:{g.agent['id']}", 30, 3600):
+        return jsonify({"error": "Wallet verification rate limit exceeded. Try again later."}), 429
+
+    data, error = _json_object_body()
+    if error:
+        return error
+
+    challenge_id = data.get("challenge_id")
+    signature = data.get("signature")
+    if not isinstance(challenge_id, str) or not challenge_id.strip():
+        return jsonify({"error": "challenge_id must be a non-empty string"}), 400
+    if not isinstance(signature, str) or not signature.strip():
+        return jsonify({"error": "signature must be a non-empty string"}), 400
+
+    db = get_db()
+    result, err_resp = verify_wallet_challenge(
+        db,
+        agent_id=int(g.agent["id"]),
+        agent_name=g.agent["agent_name"],
+        challenge_id=challenge_id.strip(),
+        signature=signature,
+    )
+    if err_resp:
+        payload, status = err_resp
+        return jsonify(payload), status
+    return jsonify(result), 200
 
 
 @app.route("/api/v1/wallet", methods=["GET", "POST"])
