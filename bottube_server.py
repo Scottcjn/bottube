@@ -9,6 +9,8 @@ from __future__ import annotations
 import datetime
 import hashlib
 import hmac
+import http.client
+import ipaddress
 import json
 import math
 import mimetypes
@@ -17,7 +19,9 @@ import random
 import re
 import secrets
 import smtplib
+import socket
 import sqlite3
+import ssl
 import string
 import subprocess
 import threading
@@ -4328,12 +4332,322 @@ def _reserve_webhook_delivery_slot(
         return False
 
 
+_WEBHOOK_MAX_URL_LENGTH = 2048
+_WEBHOOK_BLOCKED_HOSTS = frozenset({
+    "localhost",
+    "ip6-localhost",
+    "ip6-loopback",
+})
+_WEBHOOK_BLOCKED_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".internal",
+    ".localdomain",
+    ".arpa",
+    ".intranet",
+    ".corp",
+    ".home",
+    ".lan",
+)
+
+
+class _WebhookURLRejected(ValueError):
+    """Raised when a webhook target violates outbound SSRF protections."""
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPSConnection pinned to a validated public IP while preserving TLS SNI."""
+
+    def __init__(self, host, port=None, *, pinned_ip: str, timeout=10, context=None):
+        super().__init__(host, port=port, timeout=timeout, context=context)
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        raw_sock = socket.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        try:
+            self.sock = self._context.wrap_socket(
+                raw_sock,
+                server_hostname=self.host,
+            )
+        except Exception:
+            raw_sock.close()
+            raise
+
+
+def _is_public_webhook_ip(ip_obj) -> bool:
+    """Return True only when ip_obj (and any embedded IPv4) is globally routable."""
+    if isinstance(ip_obj, ipaddress.IPv6Address):
+        if ip_obj.ipv4_mapped is not None and not _is_public_webhook_ip(ip_obj.ipv4_mapped):
+            return False
+        if ip_obj.sixtofour is not None and not _is_public_webhook_ip(ip_obj.sixtofour):
+            return False
+        if ip_obj.teredo is not None:
+            return False
+        if ip_obj.is_site_local:
+            return False
+    return bool(
+        ip_obj.is_global
+        and not ip_obj.is_private
+        and not ip_obj.is_loopback
+        and not ip_obj.is_link_local
+        and not ip_obj.is_multicast
+        and not ip_obj.is_reserved
+        and not ip_obj.is_unspecified
+    )
+
+
+def _is_numeric_ip_label(part: str) -> bool:
+    """Return True if a hostname label looks like a decimal, octal, or hex integer."""
+    if not part:
+        return False
+    low = part.lower()
+    if low.startswith("0x"):
+        return len(low) > 2 and all(ch in string.hexdigits for ch in low[2:])
+    if len(low) > 1 and low.startswith("0"):
+        return all(ch in "01234567" for ch in low)
+    return low.isdigit()
+
+
+def _is_obfuscated_ip_host(host: str) -> bool:
+    """Return True for non-canonical numeric/octal/hex/shorthand IPv4 hostnames."""
+    try:
+        socket.inet_aton(host)
+        return True
+    except OSError:
+        pass
+    parts = host.split(".")
+    return 1 <= len(parts) <= 4 and all(_is_numeric_ip_label(part) for part in parts)
+
+
+def _parse_webhook_host_and_port(
+    url: str,
+) -> Tuple[urllib.parse.SplitResult, str, int]:
+    """Parse and validate HTTPS scheme, authority, port, and host syntax."""
+    if not isinstance(url, str) or not url or len(url) > _WEBHOOK_MAX_URL_LENGTH:
+        raise _WebhookURLRejected("url must be a valid HTTPS URL")
+    if any(ord(ch) <= 0x20 or ord(ch) == 0x7F for ch in url) or "\\" in url:
+        raise _WebhookURLRejected("url must be a valid HTTPS URL")
+
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise _WebhookURLRejected("url must be a valid HTTPS URL")
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or "@" in parsed.netloc
+        or "%" in parsed.netloc
+    ):
+        raise _WebhookURLRejected("Webhook URL must not contain credentials")
+
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise _WebhookURLRejected("Webhook URL has an invalid port") from exc
+    if port is not None and not (1 <= port <= 65535):
+        raise _WebhookURLRejected("Webhook URL has an invalid port")
+
+    raw_host = parsed.hostname
+    if not raw_host or raw_host.startswith(".") or ".." in raw_host:
+        raise _WebhookURLRejected("Webhook URL has an invalid host")
+    host = raw_host.rstrip(".").lower()
+    if not host:
+        raise _WebhookURLRejected("Webhook URL has an invalid host")
+    return parsed, host, port or 443
+
+
+def _is_blocked_webhook_hostname(host: str) -> bool:
+    """Return True if a non-IP hostname targets localhost or an internal suffix."""
+    return (
+        "." not in host
+        or host in _WEBHOOK_BLOCKED_HOSTS
+        or host.endswith(_WEBHOOK_BLOCKED_SUFFIXES)
+    )
+
+
+def _extract_public_webhook_ip(info) -> Optional[str]:
+    """Validate one getaddrinfo entry and return its canonical public IP text."""
+    sockaddr = info[4]
+    if not sockaddr:
+        return None
+    raw_ip = str(sockaddr[0])
+    if "%" in raw_ip:
+        raise _WebhookURLRejected("Webhook URL must target a public host")
+    try:
+        resolved_ip = ipaddress.ip_address(raw_ip)
+    except ValueError as exc:
+        raise _WebhookURLRejected("Webhook URL must target a public host") from exc
+    if not _is_public_webhook_ip(resolved_ip):
+        raise _WebhookURLRejected("Webhook URL must target a public host")
+    return str(resolved_ip)
+
+
+def _resolve_public_webhook_ips(
+    ascii_host: str,
+    port: int,
+    *,
+    require_dns: bool,
+) -> List[str]:
+    """Resolve ascii_host and verify every returned IP is globally routable."""
+    try:
+        addr_infos = socket.getaddrinfo(ascii_host, port, 0, socket.SOCK_STREAM)
+    except OSError as exc:
+        if require_dns:
+            raise _WebhookURLRejected("Webhook host could not be resolved") from exc
+        return []
+
+    resolved_ips: List[str] = []
+    for info in addr_infos:
+        ip_text = _extract_public_webhook_ip(info)
+        if ip_text and ip_text not in resolved_ips:
+            resolved_ips.append(ip_text)
+
+    if not resolved_ips:
+        raise _WebhookURLRejected("Webhook host could not be resolved")
+    return resolved_ips
+
+
+def _validate_webhook_url(
+    url: str,
+    *,
+    require_dns: bool = False,
+) -> Tuple[urllib.parse.SplitResult, str, int, List[str]]:
+    """Validate a webhook URL against SSRF and return (parsed, ascii_host, port, public_ips)."""
+    parsed, host, effective_port = _parse_webhook_host_and_port(url)
+
+    try:
+        ip_obj = ipaddress.ip_address(host)
+    except ValueError:
+        ip_obj = None
+
+    if ip_obj is not None:
+        if not _is_public_webhook_ip(ip_obj):
+            raise _WebhookURLRejected("Webhook URL must target a public host")
+        return parsed, str(ip_obj), effective_port, [str(ip_obj)]
+
+    if _is_obfuscated_ip_host(host) or _is_blocked_webhook_hostname(host):
+        raise _WebhookURLRejected("Webhook URL must target a public host")
+
+    try:
+        ascii_host = host.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise _WebhookURLRejected("Webhook URL has an invalid host") from exc
+
+    if _is_blocked_webhook_hostname(ascii_host):
+        raise _WebhookURLRejected("Webhook URL must target a public host")
+
+    resolved_ips = _resolve_public_webhook_ips(
+        ascii_host, effective_port, require_dns=require_dns
+    )
+    return parsed, ascii_host, effective_port, resolved_ips
+
+
+def _send_webhook_request(
+    url: str,
+    body: bytes,
+    headers: Dict[str, str],
+    timeout: float = 10.0,
+) -> int:
+    """Deliver a webhook POST over pinned-IP HTTPS without following redirects.
+
+    Re-validates DNS at request time and connects directly to a verified public
+    IP address (preventing DNS rebinding), with TLS certificate and hostname
+    verification against the original hostname. Redirects (3xx) are never
+    followed.
+    """
+    parsed, ascii_host, port, resolved_ips = _validate_webhook_url(
+        url, require_dns=True
+    )
+    target_path = parsed.path or "/"
+    if parsed.query:
+        target_path = f"{target_path}?{parsed.query}"
+
+    ssl_ctx = ssl.create_default_context()
+    last_exc: Optional[Exception] = None
+    for pinned_ip in resolved_ips:
+        conn = _PinnedHTTPSConnection(
+            ascii_host,
+            port,
+            pinned_ip=pinned_ip,
+            timeout=timeout,
+            context=ssl_ctx,
+        )
+        try:
+            conn.request("POST", target_path, body=body, headers=headers)
+            resp = conn.getresponse()
+            status = int(resp.status)
+            # Drain a bounded prefix and close immediately to prevent memory abuse.
+            resp.read(1024)
+            return status
+        except OSError as exc:
+            last_exc = exc
+        finally:
+            conn.close()
+
+    if last_exc is not None:
+        raise last_exc
+    raise _WebhookURLRejected("Webhook host could not be resolved")
+
+
+def _deliver_single_webhook(
+    conn: sqlite3.Connection,
+    hook: sqlite3.Row,
+    canonical_event: str,
+    body: bytes,
+    now: float,
+) -> None:
+    """Attempt up to 3 SSRF-safe deliveries for one webhook row and update stats."""
+    sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "X-BoTTube-Event": canonical_event,
+        "X-BoTTube-Signature": f"sha256={sig}",
+        "User-Agent": "BoTTube-Webhook/1.0",
+    }
+
+    ok = False
+    for attempt in range(3):
+        try:
+            status = _send_webhook_request(hook["url"], body, headers, timeout=10.0)
+            if 200 <= status < 300:
+                ok = True
+                break
+            if 300 <= status < 400:
+                break
+        except _WebhookURLRejected:
+            break
+        except Exception:
+            pass
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+
+    if ok:
+        conn.execute(
+            "UPDATE webhooks SET last_triggered = ?, fail_count = 0 WHERE id = ?",
+            (now, hook["id"]),
+        )
+    else:
+        conn.execute(
+            "UPDATE webhooks SET fail_count = fail_count + 1 WHERE id = ?",
+            (hook["id"],),
+        )
+        conn.execute(
+            "UPDATE webhooks SET active = 0 WHERE id = ? AND fail_count >= 10",
+            (hook["id"],),
+        )
+    conn.commit()
+
+
 def fire_webhooks(agent_id: int, event: str, payload: dict):
     """Send webhook POST to all active hooks for this agent/event. Non-blocking.
 
     Features:
     - HMAC signature header
     - event filtering
+    - SSRF protection (public HTTPS hosts only, pinned-IP DNS, no redirects)
     - retry with exponential backoff (3 attempts)
     - rate limiting (max 100 events/hour per webhook)
     """
@@ -4343,76 +4657,34 @@ def fire_webhooks(agent_id: int, event: str, payload: dict):
     def _deliver():
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
-        hooks = conn.execute(
-            "SELECT id, url, secret, events, event_window_start, event_count FROM webhooks WHERE agent_id = ? AND active = 1",
-            (agent_id,),
-        ).fetchall()
+        try:
+            hooks = conn.execute(
+                "SELECT id, url, secret, events, event_window_start, event_count "
+                "FROM webhooks WHERE agent_id = ? AND active = 1",
+                (agent_id,),
+            ).fetchall()
 
-        now = time.time()
-        iso_ts = datetime.datetime.utcfromtimestamp(now).isoformat() + "Z"
+            now = time.time()
+            iso_ts = (
+                datetime.datetime.fromtimestamp(now, datetime.timezone.utc)
+                .replace(tzinfo=None)
+                .isoformat()
+                + "Z"
+            )
+            body = json.dumps(
+                {"event": canonical_event, "timestamp": iso_ts, "data": payload},
+                separators=(",", ":"),
+            ).encode()
 
-        envelope = {
-            "event": canonical_event,
-            "timestamp": iso_ts,
-            "data": payload,
-        }
-
-        for hook in hooks:
-            events = (hook["events"] or "*")
-            allowed = {e.strip() for e in events.split(",") if e.strip()}
-            if "*" not in allowed and canonical_event not in allowed and event not in allowed:
-                continue
-
-            # Reserve capacity before network I/O. Each delivery runs in its own
-            # thread, so a separate read followed by an absolute counter write
-            # would allow concurrent workers to reuse the same slot.
-            if not _reserve_webhook_delivery_slot(conn, hook["id"], now):
-                continue
-
-            body = json.dumps(envelope, separators=(",", ":")).encode()
-            sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
-
-            ok = False
-            for attempt in range(3):
-                req = urllib.request.Request(
-                    hook["url"],
-                    data=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-BoTTube-Event": canonical_event,
-                        "X-BoTTube-Signature": f"sha256={sig}",
-                        "User-Agent": "BoTTube-Webhook/1.0",
-                    },
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        if 200 <= getattr(resp, "status", 200) < 300:
-                            ok = True
-                            break
-                except Exception:
-                    if attempt < 2:
-                        time.sleep(2 ** attempt)
-
-            if ok:
-                conn.execute(
-                    """UPDATE webhooks
-                       SET last_triggered = ?, fail_count = 0
-                       WHERE id = ?""",
-                    (now, hook["id"]),
-                )
-            else:
-                conn.execute(
-                    "UPDATE webhooks SET fail_count = fail_count + 1 WHERE id = ?",
-                    (hook["id"],),
-                )
-                conn.execute(
-                    "UPDATE webhooks SET active = 0 WHERE id = ? AND fail_count >= 10",
-                    (hook["id"],),
-                )
-            conn.commit()
-
-        conn.close()
+            for hook in hooks:
+                events = hook["events"] or "*"
+                allowed = {e.strip() for e in events.split(",") if e.strip()}
+                if "*" not in allowed and canonical_event not in allowed and event not in allowed:
+                    continue
+                if _reserve_webhook_delivery_slot(conn, hook["id"], now):
+                    _deliver_single_webhook(conn, hook, canonical_event, body, now)
+        finally:
+            conn.close()
 
     threading.Thread(target=_deliver, daemon=True).start()
 
@@ -12251,6 +12523,10 @@ def create_webhook():
     url = url.strip()
     if not url or not url.startswith("https://"):
         return jsonify({"error": "url must be a valid HTTPS URL"}), 400
+    try:
+        _validate_webhook_url(url, require_dns=False)
+    except _WebhookURLRejected as exc:
+        return jsonify({"error": str(exc)}), 400
 
     events = data.get("events", "*")
     if isinstance(events, list):
@@ -12311,7 +12587,12 @@ def test_webhook(hook_id):
 
     test_payload = {
         "event": "test",
-        "timestamp": datetime.datetime.utcfromtimestamp(time.time()).isoformat() + "Z",
+        "timestamp": (
+            datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc)
+            .replace(tzinfo=None)
+            .isoformat()
+            + "Z"
+        ),
         "data": {
             "message": "This is a test webhook from BoTTube",
             "agent": g.agent["agent_name"],
@@ -12320,22 +12601,29 @@ def test_webhook(hook_id):
     body = json.dumps(test_payload, separators=(",", ":")).encode()
     sig = hmac.new(hook["secret"].encode(), body, hashlib.sha256).hexdigest()
 
-    req = urllib.request.Request(
-        hook["url"],
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-BoTTube-Event": "test",
-            "X-BoTTube-Signature": f"sha256={sig}",
-            "User-Agent": "BoTTube-Webhook/1.0",
-        },
-        method="POST",
-    )
+    headers = {
+        "Content-Type": "application/json",
+        "X-BoTTube-Event": "test",
+        "X-BoTTube-Signature": f"sha256={sig}",
+        "User-Agent": "BoTTube-Webhook/1.0",
+    }
     try:
-        resp = urllib.request.urlopen(req, timeout=10)
-        return jsonify({"ok": True, "status": resp.status})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        status = _send_webhook_request(hook["url"], body, headers, timeout=10.0)
+    except _WebhookURLRejected as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.warning(
+            "Webhook test delivery failed for hook_id=%s: %s",
+            hook_id,
+            type(exc).__name__,
+        )
+        return jsonify({"ok": False, "error": "Webhook delivery failed"}), 502
+
+    if 200 <= status < 300:
+        return jsonify({"ok": True, "status": status})
+    if 300 <= status < 400:
+        return jsonify({"ok": False, "error": "Webhook redirects are not allowed"}), 502
+    return jsonify({"ok": False, "error": f"Webhook endpoint returned HTTP {status}"}), 502
 
 
 # ---------------------------------------------------------------------------
