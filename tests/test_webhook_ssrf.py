@@ -2,6 +2,7 @@
 """Regression tests for webhook outbound SSRF protection."""
 
 import socket
+import ssl
 import threading
 
 import pytest
@@ -179,6 +180,8 @@ def test_pinned_https_connection_dials_pinned_ip_with_sni(app, monkeypatch):
     class _FakeContext:
         def __init__(self, fail=False):
             self.fail = fail
+            self.verify_mode = ssl.CERT_REQUIRED
+            self.check_hostname = True
 
         def wrap_socket(self, sock, *, server_hostname=None):
             wrapped.append((sock, server_hostname))
