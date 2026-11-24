@@ -62,26 +62,52 @@ def _address_from_pub(pub_hex: str) -> str:
     return "RTC" + hashlib.sha256(bytes.fromhex(pub_hex)).hexdigest()[:40]
 
 
+def _decode_hex_bytes(value) -> bytes | None:
+    """Decode hex string input to bytes, returning None for non-strings or malformed hex."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        return None
+
+
 def verify_envelope(env: dict) -> dict:
     """Offline crypto verification. Returns {ok, checks, commitment}.
     Media-binding and on-chain checks are performed by clients (the verifier
     re-fingerprints the actual video and queries the anchor)."""
+    if not isinstance(env, dict):
+        return {
+            "ok": False,
+            "checks": {
+                "version": False,
+                "address_binding": False,
+                "commitment": False,
+                "signature": False,
+            },
+            "commitment": "",
+        }
     checks = {}
-    sender = env.get("sender", {}) or {}
-    pub = sender.get("public_key", "") or ""
-    addr = sender.get("address", "") or ""
+    sender = env.get("sender")
+    sender = sender if isinstance(sender, dict) else {}
+    pub = sender.get("public_key")
+    pub_bytes = _decode_hex_bytes(pub)
+    addr = sender.get("address")
 
     checks["version"] = env.get("avap") == AVAP_VERSION
-    checks["address_binding"] = bool(pub) and addr == _address_from_pub(pub)
+    checks["address_binding"] = bool(pub_bytes) and isinstance(addr, str) and addr == _address_from_pub(pub)
 
     core = _canonical(_signed_core(env))
     commitment = _sha256_hex(core)
-    checks["commitment"] = commitment == (env.get("anchor", {}) or {}).get("commitment")
+    anchor = env.get("anchor")
+    anchor = anchor if isinstance(anchor, dict) else {}
+    checks["commitment"] = commitment == anchor.get("commitment")
 
+    sig_bytes = _decode_hex_bytes(env.get("sig"))
     sig_ok = False
-    if pub and env.get("sig"):
+    if pub_bytes and sig_bytes:
         try:
-            VerifyKey(bytes.fromhex(pub)).verify(core, bytes.fromhex(env["sig"]))
+            VerifyKey(pub_bytes).verify(core, sig_bytes)
             sig_ok = True
         except (BadSignatureError, ValueError):
             sig_ok = False
@@ -228,6 +254,13 @@ def avap_attach(video_id):
     if not result["ok"]:
         return jsonify({"error": "envelope failed verification", "checks": result["checks"]}), 422
 
+    recipient, error = _text_field(env, "recipient")
+    if error:
+        return error
+    msg_type, error = _text_field(env, "type")
+    if error:
+        return error
+
     sender = (env.get("sender") or {}).get("address", "")
     conn = _conn()
     try:
@@ -235,8 +268,8 @@ def avap_attach(video_id):
             "INSERT OR REPLACE INTO avap_envelopes "
             "(commitment, video_id, sender, recipient, msg_type, envelope, verified, created_at) "
             "VALUES (?,?,?,?,?,?,1,?)",
-            (result["commitment"], video_id, sender, env.get("recipient", ""),
-             env.get("type", ""), _canonical(env).decode("utf-8"), time.time()),
+            (result["commitment"], video_id, sender, recipient,
+             msg_type, _canonical(env).decode("utf-8"), time.time()),
         )
         conn.commit()
     finally:
