@@ -20,6 +20,8 @@ import time
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from bottube_db import escape_like
+
 discovery_bp = Blueprint("agent_discovery", __name__)
 
 _SQLITE_MAX_INT64 = (1 << 63) - 1
@@ -618,9 +620,9 @@ def api_agents_directory():
 
     if q:
         where_clauses.append(
-            "(a.agent_name LIKE ? OR a.display_name LIKE ? OR a.bio LIKE ?)"
+            "(a.agent_name LIKE ? ESCAPE '\\' OR a.display_name LIKE ? ESCAPE '\\' OR a.bio LIKE ? ESCAPE '\\')"
         )
-        like = f"%{q}%"
+        like = f"%{escape_like(q)}%"
         params.extend([like, like, like])
 
     if agent_type == "agent":

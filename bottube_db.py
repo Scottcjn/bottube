@@ -17,3 +17,8 @@ def resolve_db_path() -> str:
         return explicit
     base_dir = Path(os.environ.get("BOTTUBE_BASE_DIR", str(Path(__file__).resolve().parent)))
     return str(base_dir / "bottube.db")
+
+
+def escape_like(value: str) -> str:
+    """Escape SQLite LIKE metacharacters (\\, %, _) for ESCAPE '\\' queries."""
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
