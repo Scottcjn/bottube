@@ -704,6 +704,17 @@ def _json_object_body():
     return data, None
 
 
+def _extract_ip_field(data):
+    """Extract and validate a non-empty string IP field from a JSON body."""
+    raw_ip = data.get("ip")
+    if raw_ip is not None and not isinstance(raw_ip, str):
+        return None, (jsonify({"error": "ip must be a string"}), 400)
+    ip = (raw_ip or "").strip()
+    if not ip:
+        return None, (jsonify({"error": "ip required"}), 400)
+    return ip, None
+
+
 @scraper_bp.route("/api/admin/scrapers/block", methods=["POST"])
 def admin_block_ip():
     """Block an IP. Requires admin key."""
@@ -717,9 +728,9 @@ def admin_block_ip():
     data, err = _json_object_body()
     if err:
         return err
-    ip = str(data.get("ip") or "").strip()
-    if not ip:
-        return jsonify({"error": "ip required"}), 400
+    ip, err = _extract_ip_field(data)
+    if err:
+        return err
     detective.block_ip(ip)
     return jsonify({"ok": True, "blocked": ip})
 
@@ -737,9 +748,9 @@ def admin_unblock_ip():
     data, err = _json_object_body()
     if err:
         return err
-    ip = str(data.get("ip") or "").strip()
-    if not ip:
-        return jsonify({"error": "ip required"}), 400
+    ip, err = _extract_ip_field(data)
+    if err:
+        return err
     detective.unblock_ip(ip)
     return jsonify({"ok": True, "unblocked": ip})
 
@@ -805,43 +816,58 @@ code{background:#21262d;padding:1px 4px;border-radius:3px;font-size:12px}
 </table>
 </div>
 <script>
-var KEY=new URLSearchParams(location.search).get('key'),cd=5;
+var KEY=new URLSearchParams(location.search).get('key')||'',cd=5;
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function ago(t){var s=Math.floor(Date.now()/1000-t);if(s<5)return'now';if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h'}
-function sigs(o){return Object.entries(o).map(function(e){return'<span>'+e[0]+': '+(typeof e[1]==='object'?JSON.stringify(e[1]):e[1])+'</span>'}).join(' ')}
-function block(ip){if(!confirm('Block '+ip+'?'))return;fetch('/api/admin/scrapers/block?key='+KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip:ip})}).then(function(){load()})}
-function unblock(ip){fetch('/api/admin/scrapers/unblock?key='+KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip:ip})}).then(function(){load()})}
-function tog(ip){var r=document.getElementById('d-'+ip.replace(/[.:]/g,'_'));if(r)r.style.display=r.style.display==='none'?'table-row':'none'}
+function sigs(o){return Object.entries(o||{}).map(function(e){var val=typeof e[1]==='object'?JSON.stringify(e[1]):e[1];return'<span>'+esc(e[0])+': '+esc(val)+'</span>'}).join(' ')}
+function block(ip){if(!confirm('Block '+ip+'?'))return;fetch('/api/admin/scrapers/block?key='+encodeURIComponent(KEY),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip:ip})}).then(function(){load()})}
+function unblock(ip){fetch('/api/admin/scrapers/unblock?key='+encodeURIComponent(KEY),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip:ip})}).then(function(){load()})}
+function tog(idx){var r=document.getElementById('d-'+idx);if(r)r.style.display=r.style.display==='none'?'table-row':'none'}
+document.getElementById('rows').addEventListener('click',function(ev){
+  var btn=ev.target&&ev.target.closest?ev.target.closest('button[data-action]'):null;
+  if(btn){
+    ev.stopPropagation();
+    var act=btn.getAttribute('data-action'),ip=btn.getAttribute('data-ip')||'';
+    if(act==='block')block(ip);else if(act==='unblock')unblock(ip);
+    return;
+  }
+  var tr=ev.target&&ev.target.closest?ev.target.closest('tr[data-idx]'):null;
+  if(tr)tog(tr.getAttribute('data-idx'));
+});
 function load(){
-  fetch('/api/admin/scrapers?key='+KEY).then(function(r){return r.json()}).then(function(d){
-    var s=d.summary;
+  fetch('/api/admin/scrapers?key='+encodeURIComponent(KEY)).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(d){
+    var s=d.summary||{};
     document.getElementById('sum').innerHTML=
-      '<div class="card"><div class="n blu">'+s.total_active+'</div><div class="l">Active</div></div>'+
-      '<div class="card"><div class="n red">'+s.bots+'</div><div class="l">Bots</div></div>'+
-      '<div class="card"><div class="n ylw">'+s.suspicious+'</div><div class="l">Suspicious</div></div>'+
-      '<div class="card"><div class="n grn">'+s.humans+'</div><div class="l">Humans</div></div>'+
-      '<div class="card"><div class="n blu">'+s.requests_per_min+'</div><div class="l">Req/min</div></div>'+
-      '<div class="card"><div class="n">'+s.blocked+'</div><div class="l">Blocked</div></div>';
+      '<div class="card"><div class="n blu">'+esc(s.total_active)+'</div><div class="l">Active</div></div>'+
+      '<div class="card"><div class="n red">'+esc(s.bots)+'</div><div class="l">Bots</div></div>'+
+      '<div class="card"><div class="n ylw">'+esc(s.suspicious)+'</div><div class="l">Suspicious</div></div>'+
+      '<div class="card"><div class="n grn">'+esc(s.humans)+'</div><div class="l">Humans</div></div>'+
+      '<div class="card"><div class="n blu">'+esc(s.requests_per_min)+'</div><div class="l">Req/min</div></div>'+
+      '<div class="card"><div class="n">'+esc(s.blocked)+'</div><div class="l">Blocked</div></div>';
     var h='';
-    d.visitors.forEach(function(v){
+    (d.visitors||[]).forEach(function(v,idx){
       var cls=v.is_blocked?'blocked':v.classification;
-      var sid=v.ip.replace(/[.:]/g,'_');
-      h+='<tr onclick="tog(\''+v.ip+'\')" style="cursor:pointer">'+
-        '<td><code>'+v.ip+'</code></td>'+
-        '<td>'+v.asn+'</td>'+
-        '<td><span class="badge '+cls+'">'+(v.is_blocked?'BLOCKED':v.classification.toUpperCase())+'</span></td>'+
-        '<td>'+v.confidence.toFixed(2)+'</td>'+
-        '<td>'+v.request_count+' <span style="color:#484f58">('+v.page_count+'p/'+v.asset_count+'a/'+v.api_count+'api)</span></td>'+
-        '<td>'+(v.js_proved?'&#10003;':(v.webdriver?'&#9888; wd':(v.js_page_views>0?v.js_page_views+'v':'-')))+'</td>'+
+      var safeCls=esc(cls);
+      var safeIp=esc(v.ip);
+      var badgeText=esc(v.is_blocked?'BLOCKED':String(v.classification||'').toUpperCase());
+      var btnHtml=v.is_blocked?
+        '<button class="btn" data-action="unblock" data-ip="'+safeIp+'">Unblock</button>':
+        '<button class="btn ban" data-action="block" data-ip="'+safeIp+'">Block</button>';
+      h+='<tr data-idx="'+idx+'" style="cursor:pointer">'+
+        '<td><code>'+safeIp+'</code></td>'+
+        '<td>'+esc(v.asn)+'</td>'+
+        '<td><span class="badge '+safeCls+'">'+badgeText+'</span></td>'+
+        '<td>'+esc(Number(v.confidence||0).toFixed(2))+'</td>'+
+        '<td>'+esc(v.request_count)+' <span style="color:#484f58">('+esc(v.page_count)+'p/'+esc(v.asset_count)+'a/'+esc(v.api_count)+'api)</span></td>'+
+        '<td>'+(v.js_proved?'&#10003;':(v.webdriver?'&#9888; wd':(v.js_page_views>0?esc(v.js_page_views)+'v':'-')))+'</td>'+
         '<td class="sigs">'+sigs(v.signals)+'</td>'+
-        '<td>'+ago(v.last_seen)+'</td>'+
-        '<td>'+(v.is_blocked?
-          '<button class="btn" onclick="event.stopPropagation();unblock(\''+v.ip+'\')">Unblock</button>':
-          '<button class="btn ban" onclick="event.stopPropagation();block(\''+v.ip+'\')">Block</button>')+'</td></tr>';
-      h+='<tr class="det" id="d-'+sid+'" style="display:none"><td colspan="9"><div class="det-inner">'+
-        '<div><strong>User Agents:</strong><br>'+v.user_agents.map(function(u){return'<code>'+u+'</code>'}).join('<br>')+'</div>'+
-        '<div><strong>Recent Paths:</strong><div class="paths">'+v.paths_sample.join('<br>')+'</div></div>'+
-        '<div><strong>Unique Paths:</strong> '+v.unique_paths+' | <strong>First:</strong> '+ago(v.first_seen)+'</div>'+
-        '<div><strong>ASN#:</strong> '+v.asn_num+' | <strong>Hosting:</strong> '+v.is_hosting+'</div>'+
+        '<td>'+esc(ago(v.last_seen))+'</td>'+
+        '<td>'+btnHtml+'</td></tr>';
+      h+='<tr class="det" id="d-'+idx+'" style="display:none"><td colspan="9"><div class="det-inner">'+
+        '<div><strong>User Agents:</strong><br>'+(v.user_agents||[]).map(function(u){return'<code>'+esc(u)+'</code>'}).join('<br>')+'</div>'+
+        '<div><strong>Recent Paths:</strong><div class="paths">'+(v.paths_sample||[]).map(esc).join('<br>')+'</div></div>'+
+        '<div><strong>Unique Paths:</strong> '+esc(v.unique_paths)+' | <strong>First:</strong> '+esc(ago(v.first_seen))+'</div>'+
+        '<div><strong>ASN#:</strong> '+esc(v.asn_num)+' | <strong>Hosting:</strong> '+esc(v.is_hosting)+'</div>'+
         '</div></td></tr>';
     });
     document.getElementById('rows').innerHTML=h;
