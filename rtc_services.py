@@ -189,6 +189,84 @@ def _get_agent(db):
     return agent
 
 
+def _consume_service_token_use(db, purchase_id: int, now: float):
+    """Atomically claim one use of an active, unexpired service purchase.
+
+    Acquires SQLite's immediate write lock and enforces ``status = 'active'``,
+    ``uses_remaining > 0``, and ``expires_at >= now`` in the ``UPDATE`` clause
+    so concurrent ``/api/rtc/use`` calls can never double-spend a token or
+    drive ``uses_remaining`` negative.
+    """
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        fresh = db.execute(
+            """SELECT id, service_key, status, uses_remaining, expires_at
+               FROM service_purchases
+               WHERE id = ?""",
+            (purchase_id,),
+        ).fetchone()
+        if not fresh:
+            db.rollback()
+            return None, ("Invalid or expired token", 404)
+
+        if fresh["status"] == "expired" or now > fresh["expires_at"]:
+            if fresh["status"] == "active":
+                db.execute(
+                    "UPDATE service_purchases SET status = 'expired' "
+                    "WHERE id = ? AND status = 'active'",
+                    (fresh["id"],),
+                )
+                db.commit()
+            else:
+                db.rollback()
+            return None, ("Token expired", 410)
+
+        if fresh["status"] == "exhausted" or fresh["uses_remaining"] <= 0:
+            if fresh["status"] == "active":
+                db.execute(
+                    "UPDATE service_purchases SET status = 'exhausted' "
+                    "WHERE id = ? AND status = 'active'",
+                    (fresh["id"],),
+                )
+                db.commit()
+            else:
+                db.rollback()
+            return None, ("No uses remaining", 410)
+
+        if fresh["status"] != "active":
+            db.rollback()
+            return None, ("Invalid or expired token", 404)
+
+        cur = db.execute(
+            """UPDATE service_purchases
+               SET uses_remaining = uses_remaining - 1,
+                   redeemed_at = ?,
+                   status = CASE
+                       WHEN uses_remaining - 1 <= 0 THEN 'exhausted'
+                       ELSE status
+                   END
+               WHERE id = ?
+                 AND status = 'active'
+                 AND uses_remaining > 0
+                 AND expires_at >= ?""",
+            (now, fresh["id"], now),
+        )
+        if cur.rowcount != 1:
+            db.rollback()
+            return None, ("No uses remaining", 410)
+
+        remaining = int(fresh["uses_remaining"]) - 1
+        db.commit()
+        return {
+            "service_key": fresh["service_key"],
+            "uses_remaining": remaining,
+            "expires_at": fresh["expires_at"],
+        }, None
+    except sqlite3.OperationalError:
+        db.rollback()
+        return None, ("Service temporarily busy — please retry", 503)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -243,7 +321,7 @@ def init_app(app, db_path):
         # sails past the balance check below, so bound it before it is used.
         try:
             quantity = int(data.get("quantity", 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return jsonify({"error": "quantity must be an integer"}), 400
         if quantity < 1 or quantity > MAX_PURCHASE_QUANTITY:
             return jsonify({
@@ -408,57 +486,29 @@ def init_app(app, db_path):
 
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         db = _get_db()
+        try:
+            purchase = db.execute(
+                """SELECT id FROM service_purchases
+                   WHERE token_hash = ? AND status = 'active'""",
+                (token_hash,)
+            ).fetchone()
 
-        purchase = db.execute(
-            """SELECT * FROM service_purchases
-               WHERE token_hash = ? AND status = 'active'""",
-            (token_hash,)
-        ).fetchone()
+            if not purchase:
+                return jsonify({"error": "Invalid or expired token"}), 404
 
-        if not purchase:
-            return jsonify({"error": "Invalid or expired token"}), 404
-
-        now = time.time()
-        if now > purchase["expires_at"]:
-            db.execute(
-                "UPDATE service_purchases SET status = 'expired' WHERE id = ?",
-                (purchase["id"],)
+            result, error = _consume_service_token_use(
+                db, purchase["id"], time.time()
             )
-            db.commit()
-            return jsonify({"error": "Token expired"}), 410
+            if error:
+                message, status_code = error
+                return jsonify({"error": message}), status_code
 
-        if purchase["uses_remaining"] <= 0:
-            db.execute(
-                "UPDATE service_purchases SET status = 'exhausted' WHERE id = ?",
-                (purchase["id"],)
-            )
-            db.commit()
-            return jsonify({"error": "No uses remaining"}), 410
-
-        # Decrement
-        db.execute(
-            """UPDATE service_purchases
-               SET uses_remaining = uses_remaining - 1,
-                   redeemed_at = ?
-               WHERE id = ?""",
-            (now, purchase["id"])
-        )
-
-        remaining = purchase["uses_remaining"] - 1
-        if remaining <= 0:
-            db.execute(
-                "UPDATE service_purchases SET status = 'exhausted' WHERE id = ?",
-                (purchase["id"],)
-            )
-
-        db.commit()
-
-        return jsonify({
-            "ok": True,
-            "service_key": purchase["service_key"],
-            "uses_remaining": remaining,
-            "expires_at": purchase["expires_at"],
-        })
+            return jsonify({
+                "ok": True,
+                **result,
+            })
+        finally:
+            db.close()
 
     # --- Purchase History ---
     @app.route("/api/rtc/purchases", methods=["GET"])

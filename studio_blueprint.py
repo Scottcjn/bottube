@@ -18,6 +18,7 @@ Endpoints:
 
 RTC debit is atomic and refunds if generation fails.
 """
+import math
 import os
 import sqlite3
 import threading
@@ -49,8 +50,13 @@ def _video_cost(tier, seconds):
     """Clamp seconds to the tier's range and return (cost_rtc, clamped_seconds)."""
     t = VIDEO_TIERS[tier]
     try:
-        s = int(round(float(seconds)))
-    except (TypeError, ValueError):
+        if isinstance(seconds, bool):
+            raise TypeError("seconds must be numeric")
+        seconds_float = float(seconds)
+        if not math.isfinite(seconds_float):
+            raise ValueError("seconds must be finite")
+        s = int(round(seconds_float))
+    except (TypeError, ValueError, OverflowError):
         s = t["default_s"]
     s = max(t["min_s"], min(t["max_s"], s))
     return round(t["rtc_per_sec"] * s, 2), s

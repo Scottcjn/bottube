@@ -284,6 +284,10 @@ def trigger_transcription(video_id: str):
     if filename is None:
         return jsonify({"error": "Video not found", "video_id": video_id}), 404
 
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
     video_path = _video_path(filename)
     wt.enqueue_transcription(video_id, video_path, force=force)
 
@@ -330,7 +334,9 @@ def trigger_backfill():
     if error:
         return error
 
-    force = bool(body.get("force", False))
+    force = body.get("force", False)
+    if not isinstance(force, bool):
+        return jsonify({"error": "force must be a boolean"}), 400
     batch_size, error = _parse_positive_int(
         body, "batch_size", 50, max_value=_BACKFILL_BATCH_MAX
     )
