@@ -5,17 +5,27 @@ import json
 import re
 import shutil
 import subprocess
+import sys
+import types
 
 import pytest
 from flask import Flask
 
-import bottube_server
 import scraper_detective
 
 
 @pytest.fixture()
 def scraper_client(monkeypatch):
-    monkeypatch.setattr(bottube_server, "ADMIN_KEY", "test_admin_key")
+    monkeypatch.setenv("BOTTUBE_ADMIN_KEY", "test_admin_key")
+    server_mod = sys.modules.get("bottube_server")
+    if server_mod is None:
+        monkeypatch.setitem(
+            sys.modules,
+            "bottube_server",
+            types.SimpleNamespace(ADMIN_KEY="test_admin_key"),
+        )
+    else:
+        monkeypatch.setattr(server_mod, "ADMIN_KEY", "test_admin_key")
     det = scraper_detective.ScraperDetective()
     monkeypatch.setattr(scraper_detective, "detective", det)
 
