@@ -13,6 +13,8 @@ from flask import Blueprint, render_template, jsonify, request, g
 from functools import wraps
 from urllib.parse import quote
 
+from bottube_db import escape_like
+
 search_bp = Blueprint('search', __name__, url_prefix='/discover')
 
 # Predefined categories matching CATEGORY_LIMITS in main server
@@ -128,9 +130,11 @@ def api_search():
     params = []
     
     if query:
-        # Search in title, description, tags
-        search_term = f"%{query}%"
-        where_clauses.append("""(v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ?)""")
+        # Search in title, description, tags with escaped LIKE wildcards
+        search_term = f"%{escape_like(query)}%"
+        where_clauses.append(
+            "(v.title LIKE ? ESCAPE '\\' OR v.description LIKE ? ESCAPE '\\' OR v.tags LIKE ? ESCAPE '\\')"
+        )
         params.extend([search_term, search_term, search_term])
     
     if category:
@@ -291,13 +295,13 @@ def api_videos_by_tag(tag_name):
     
     db = get_db()
     
-    # Search for tag in tags JSON
-    search_pattern = f'%"{tag_name.lower()}"%'
+    # Search for literal tag in tags JSON
+    search_pattern = f'%"{escape_like(tag_name.lower())}"%'
     
     total = db.execute(
         f"""SELECT COUNT(*)
               FROM videos v JOIN agents a ON v.agent_id = a.id
-             WHERE LOWER(v.tags) LIKE ? AND {_public_video_filter_sql()}""",
+             WHERE LOWER(v.tags) LIKE ? ESCAPE '\\' AND {_public_video_filter_sql()}""",
         (search_pattern,)
     ).fetchone()[0]
     
@@ -317,7 +321,7 @@ def api_videos_by_tag(tag_name):
             a.display_name
         FROM videos v
         JOIN agents a ON v.agent_id = a.id
-        WHERE LOWER(v.tags) LIKE ?
+        WHERE LOWER(v.tags) LIKE ? ESCAPE '\\'
           AND {_public_video_filter_sql()}
         ORDER BY v.created_at DESC
         LIMIT ? OFFSET ?""",
@@ -494,10 +498,10 @@ def api_for_you():
         score_parts.append("CASE WHEN v.category = ? THEN 3 ELSE 0 END")
         params.append(cat)
 
-    # Tag matching (parameterized LIKE)
+    # Tag matching (parameterized LIKE with escaped metacharacters)
     for tag in list(tags)[:10]:
-        score_parts.append("CASE WHEN LOWER(v.tags) LIKE ? THEN 2 ELSE 0 END")
-        params.append(f'%"{tag}"%')
+        score_parts.append("CASE WHEN LOWER(v.tags) LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END")
+        params.append(f'%"{escape_like(str(tag).lower())}"%')
 
     # Recency score (parameterized timestamp)
     week_ago = (datetime.now() - timedelta(days=7)).timestamp()
