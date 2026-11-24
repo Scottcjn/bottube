@@ -450,8 +450,8 @@ def test_repository_configs_are_valid_offline():
     canary = build_report(REPO_ROOT, load_config(REPO_ROOT / "deployment-drift.issue-1410.example.json"))
 
     assert policy["status"] == "pass"
-    assert policy["inventory"]["openapi_operations"] == 30
-    assert policy["inventory"]["application_operations"] == 354
+    assert policy["inventory"]["openapi_operations"] == 32
+    assert policy["inventory"]["application_operations"] == 356
     assert len(policy["drift"]["missing_in_code"]) == 23
     assert canary["status"] == "pass"
     assert canary["inventory"]["canary_operations"] == 14

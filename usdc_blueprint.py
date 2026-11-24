@@ -14,6 +14,7 @@ import os
 import requests as http_requests
 
 from bottube_db import resolve_db_path
+from wallet_verification import require_verified_deposit_wallet
 
 usdc_bp = Blueprint('usdc', __name__)
 
@@ -312,6 +313,29 @@ def usdc_deposit():
     if existing:
         return jsonify({"error": "Transaction already recorded", "deposit": dict(existing)}), 409
 
+    # Anti-theft (#2265): the account must hold a cryptographically verified Base/ETH wallet
+    # BEFORE triggering on-chain RPC verification or claiming a treasury transfer.
+    account_row = db.execute(
+        "SELECT id, agent_name, eth_address FROM agents WHERE agent_name = ?", (agent_name,)
+    ).fetchone()
+    account_eth = ((account_row["eth_address"] if account_row else "") or "").strip().lower()
+    if not account_eth:
+        return jsonify({
+            "error": (
+                "No Ethereum wallet bound to your account. "
+                "Verify an ETH wallet via /api/agents/me/wallet/challenge and /verify first."
+            )
+        }), 400
+    verify_err = require_verified_deposit_wallet(
+        db,
+        chain="eth",
+        address=account_eth,
+        agent_id=int(account_row["id"]) if account_row else None,
+        agent_name=agent_name,
+    )
+    if verify_err:
+        return verify_err
+
     # Verify on-chain
     transfer, err = verify_usdc_transfer_onchain(tx_hash)
     if not transfer:
@@ -325,25 +349,6 @@ def usdc_deposit():
             "got": transfer["to_address"],
         }), 400
 
-    # Anti-theft: the on-chain sender must match the account's bound Base/ETH wallet.
-    # A treasury tx_hash is PUBLIC on-chain data, and dedup is only per-tx_hash, so
-    # without this binding any authenticated agent could front-run/claim someone
-    # else's (or any unclaimed) treasury USDC transfer as their own balance credit.
-    # Mirrors the wRTC Solana/Base bridges (base_wrtc_bridge_blueprint.py,
-    # wrtc_bridge_blueprint.py), which both require sender == account wallet.
-    # Bind to the agent already authenticated above rather than re-reading
-    # the credential from the request (agents.agent_name is UNIQUE).
-    account_row = db.execute(
-        "SELECT eth_address FROM agents WHERE agent_name = ?", (agent_name,)
-    ).fetchone()
-    account_eth = ((account_row["eth_address"] if account_row else "") or "").strip().lower()
-    if not account_eth:
-        return jsonify({
-            "error": (
-                "No Ethereum wallet bound to your account. "
-                "Set your ETH address in profile settings before deposit verification."
-            )
-        }), 400
     if account_eth != transfer["from_address"].lower():
         return jsonify({
             "error": "Sender wallet does not match your account's verified ETH address",

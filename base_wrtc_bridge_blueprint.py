@@ -26,6 +26,7 @@ import requests as http_requests
 from flask import Blueprint, g, jsonify, render_template, request
 
 from bottube_db import resolve_db_path
+from wallet_verification import require_verified_deposit_wallet
 
 base_wrtc_bp = Blueprint("base_wrtc_bridge", __name__)
 
@@ -399,6 +400,28 @@ def base_bridge_deposit():
             return jsonify({"error": "Transaction already claimed by another account"}), 409
         return jsonify({"ok": True, "idempotent": True, "deposit": dict(existing)})
 
+    # Anti-theft (#2265): require a cryptographically verified ETH wallet before
+    # performing on-chain lookup or crediting a deposit.
+    account_eth = (agent["eth_address"] or "").strip().lower()
+    if not account_eth:
+        return jsonify(
+            {
+                "error": (
+                    "No Ethereum wallet bound to your account. "
+                    "Verify an ETH wallet via /api/agents/me/wallet/challenge and /verify first."
+                )
+            }
+        ), 400
+    verify_err = require_verified_deposit_wallet(
+        db,
+        chain="eth",
+        address=account_eth,
+        agent_id=int(agent["id"]),
+        agent_name=agent["agent_name"],
+    )
+    if verify_err:
+        return verify_err
+
     # Verify on-chain
     transfer, err = verify_base_wrtc_transfer(tx_hash)
     if not transfer:
@@ -414,17 +437,6 @@ def base_bridge_deposit():
             }
         ), 400
 
-    # Anti-theft: sender must match account's bound Ethereum address
-    account_eth = (agent["eth_address"] or "").strip().lower()
-    if not account_eth:
-        return jsonify(
-            {
-                "error": (
-                    "No Ethereum wallet bound to your account. "
-                    "Set your ETH address in profile settings before deposit verification."
-                )
-            }
-        ), 400
     if account_eth != transfer["from_address"].lower():
         return jsonify(
             {

@@ -18,6 +18,8 @@ import time
 import requests as http_requests
 from flask import Blueprint, request, jsonify, g
 
+from wallet_verification import require_verified_deposit_wallet
+
 # ---------------------------------------------------------------------------
 # CONFIGURATION
 # ---------------------------------------------------------------------------
@@ -456,6 +458,22 @@ def bridge_deposit():
     if existing:
         return jsonify({"error": "This transaction has already been claimed"}), 409
 
+    # Anti-theft (D3 + #2265): require a cryptographically verified Solana wallet
+    # bound to THIS account before triggering RPC verification or claiming a deposit.
+    _sol_row = db.execute("SELECT sol_address FROM agents WHERE id = ?", (agent["id"],)).fetchone()
+    bound_sol = ((_sol_row[0] if _sol_row else "") or "").strip()
+    if not bound_sol:
+        return jsonify({"error": "Link your Solana address to your account before depositing"}), 400
+    verify_err = require_verified_deposit_wallet(
+        db,
+        chain="sol",
+        address=bound_sol,
+        agent_id=int(agent["id"]),
+        agent_name=agent.get("agent_name"),
+    )
+    if verify_err:
+        return verify_err
+
     # Verify on-chain
     info, err = verify_solana_deposit(tx_sig)
     if err:
@@ -467,13 +485,6 @@ def bridge_deposit():
             "error": f"Minimum deposit is {MIN_DEPOSIT} wRTC (got {amount})"
         }), 400
 
-    # Anti-theft (D3): the on-chain sender must match the Solana address linked
-    # to THIS account (mirrors the Ergo bridge). Without it, any authenticated
-    # user who observes a public tx signature can claim someone else's deposit.
-    _sol_row = db.execute("SELECT sol_address FROM agents WHERE id = ?", (agent["id"],)).fetchone()
-    bound_sol = ((_sol_row[0] if _sol_row else "") or "").strip()
-    if not bound_sol:
-        return jsonify({"error": "Link your Solana address to your account before depositing"}), 400
     if info["from_address"] != bound_sol:
         return jsonify({"error": "Transaction sender does not match the Solana address linked to your account"}), 403
 

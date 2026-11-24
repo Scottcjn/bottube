@@ -25,6 +25,7 @@ import time
 import urllib.request
 
 from bottube_db import resolve_db_path
+from wallet_verification import require_verified_deposit_wallet
 
 ergo_bp = Blueprint("ergo_bridge", __name__)
 log = logging.getLogger("ergo_bridge")
@@ -379,14 +380,14 @@ def ergo_deposit():
     db = get_db()
     if api_key:
         agent = db.execute(
-            "SELECT id, erg_address FROM agents WHERE api_key = ? AND COALESCE(is_banned, 0) = 0",
+            "SELECT id, agent_name, erg_address FROM agents WHERE api_key = ? AND COALESCE(is_banned, 0) = 0",
             (api_key,),
         ).fetchone()
         if not agent:
             return jsonify({"error": "Invalid API key"}), 401
     else:
         agent = db.execute(
-            "SELECT id, erg_address FROM agents WHERE id = ? AND COALESCE(is_banned, 0) = 0",
+            "SELECT id, agent_name, erg_address FROM agents WHERE id = ? AND COALESCE(is_banned, 0) = 0",
             (user_id,),
         ).fetchone()
         if not agent:
@@ -395,8 +396,8 @@ def ergo_deposit():
     bound_erg_address = (agent["erg_address"] or "").strip()
     if not bound_erg_address:
         return jsonify({
-            "error": "Link your ERG address first (POST /api/agents/me/wallet {\"erg\": ...}) "
-                     "so the deposit can be bound to its sender"
+            "error": "Link your ERG address first (POST /api/agents/me/wallet/challenge + /verify) "
+                     "so the deposit can be bound to its verified owner"
         }), 400
 
     data, error = _request_json_object()
@@ -422,6 +423,16 @@ def ergo_deposit():
     ).fetchone()
     if existing:
         return jsonify({"error": "Transaction already claimed"}), 409
+
+    verify_err = require_verified_deposit_wallet(
+        db,
+        chain="erg",
+        address=bound_erg_address,
+        agent_id=int(agent_id),
+        agent_name=agent["agent_name"],
+    )
+    if verify_err:
+        return verify_err
 
     # Verify on-chain
     result = verify_ergo_tx(tx_id)

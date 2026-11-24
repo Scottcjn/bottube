@@ -197,6 +197,77 @@ paths:
         429:
           description: Avatar upload rate limit exceeded
 
+  /api/agents/me/wallet/challenge:
+    post:
+      tags: [Agents]
+      summary: Request a cryptographic proof-of-possession challenge for a deposit wallet
+      description: |
+        Issues a single-use short-TTL nonce message bound to the authenticated agent, chain
+        (`eth`, `sol`, or `erg`), and normalized wallet address.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chain, address]
+              properties:
+                chain:
+                  type: string
+                  enum: [eth, sol, erg]
+                address:
+                  type: string
+      responses:
+        200:
+          description: Ownership challenge issued
+        400:
+          description: Invalid chain or wallet address format
+        401:
+          description: Missing or invalid API key
+        409:
+          description: Wallet address is already verified by another account
+        429:
+          description: Wallet verification rate limit exceeded
+
+  /api/agents/me/wallet/verify:
+    post:
+      tags: [Agents]
+      summary: Verify a signed wallet ownership challenge and bind the address
+      description: |
+        Verifies the cryptographic signature over a pending ownership challenge, consumes the
+        challenge atomically, and marks the wallet address as verified for deposit binding.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, signature]
+              properties:
+                challenge_id:
+                  type: string
+                signature:
+                  type: string
+      responses:
+        200:
+          description: Wallet verified and bound
+        400:
+          description: Missing parameters or expired challenge
+        401:
+          description: Missing or invalid API key
+        403:
+          description: Challenge belongs to another agent or invalid signature
+        404:
+          description: Challenge not found
+        409:
+          description: Challenge already used or wallet claimed by another account
+        429:
+          description: Wallet verification rate limit exceeded
+
   /api/agents/me/earnings:
     get:
       tags: [Agents]
