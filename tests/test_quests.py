@@ -1014,3 +1014,212 @@ def test_moderation_hold_release_restores_video(client):
     assert video_row[0] == 0
     assert video_row[1] == ""
     assert hold_status == "released"
+
+
+def test_new_account_quest_reward_is_deferred_past_daily_cap(client):
+    """#2266: new_account_reward_cap was computed and discarded on the quest path."""
+    agent_id = _insert_agent("freshquester", "bottube_sk_freshquester")
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute("UPDATE agents SET created_at = ? WHERE id = ?", (time.time(), agent_id))
+        db.commit()
+    _insert_video(agent_id, "freshquest01A")
+
+    resp = client.get("/api/quests/me", headers={"X-API-Key": "bottube_sk_freshquester"})
+    assert resp.status_code == 200
+    first_upload = next(q for q in resp.get_json()["quests"] if q["quest_key"] == "first_upload")
+    assert first_upload["completed"] is True
+    assert first_upload["rewarded_at"] == 0
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM earnings WHERE agent_id = ?", (agent_id,)
+        ).fetchone()[0] == 0
+        conn.execute(
+            "UPDATE agents SET created_at = ? WHERE id = ?",
+            (time.time() - 2 * 86400, agent_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    client.get("/api/quests/me", headers={"X-API-Key": "bottube_sk_freshquester"})
+    client.get("/api/quests/me", headers={"X-API-Key": "bottube_sk_freshquester"})
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        paid = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM earnings "
+            "WHERE agent_id = ? AND reason = 'quest_complete:first_upload'",
+            (agent_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert paid == (1, _quest_reward("first_upload"))
+
+
+def test_new_account_quest_reward_under_cap_still_pays(client, monkeypatch):
+    monkeypatch.setitem(bottube_server.ANTI_FARM_CONFIG, "new_account_reward_cap", 100.0)
+    agent_id = _insert_agent("capfitquester", "bottube_sk_capfitquester")
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute("UPDATE agents SET created_at = ? WHERE id = ?", (time.time(), agent_id))
+        db.commit()
+    _insert_video(agent_id, "capfitquest1A")
+
+    client.get("/api/quests/me", headers={"X-API-Key": "bottube_sk_capfitquester"})
+
+    conn = sqlite3.connect(bottube_server.DB_PATH)
+    try:
+        paid = conn.execute(
+            "SELECT COUNT(*) FROM earnings WHERE agent_id = ? AND reason = 'quest_complete:first_upload'",
+            (agent_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert paid == 1
+
+
+def test_daily_comment_cap_is_a_hard_stop(client):
+    """#2266: reaching the daily cap added risk 30, below the 40 hold threshold."""
+    commenter_id = _insert_agent("capcommenter", "bottube_sk_capcommenter")
+    owner_id = _insert_agent("capowner", "bottube_sk_capowner")
+    _insert_video(owner_id, "capvideo001A")
+    comment_id = _insert_comment(commenter_id, "capvideo001A", "x", created_at=time.time())
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, 'comment', '', ?)",
+            (commenter_id, bottube_server.COMMENT_REWARD_DAILY_CAP, time.time()),
+        )
+        decision = bottube_server._comment_reward_decision(
+            db,
+            agent_id=commenter_id,
+            video_id="capvideo001A",
+            comment_id=comment_id,
+            content="Thoughtful pacing notes about the opening sequence and colour grade",
+        )
+        db.commit()
+
+        assert decision["risk_score"] < bottube_server.COMMENT_REWARD_HOLD_THRESHOLD
+        assert decision["awarded"] is False
+        assert decision["held"] is True
+        assert db.execute(
+            "SELECT COUNT(*) FROM earnings WHERE agent_id = ? AND reason = 'comment'",
+            (commenter_id,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT status FROM reward_holds WHERE agent_id = ? AND event_type = 'comment'",
+            (commenter_id,),
+        ).fetchone()[0] == "dismissed"
+
+
+def test_daily_view_cap_is_a_hard_stop(client):
+    """#2266: reaching the daily view cap added risk 24, below the 36 hold threshold."""
+    owner_id = _insert_agent("capviewowner", "bottube_sk_capviewowner")
+    viewer_id = _insert_agent("capviewer", "bottube_sk_capviewer")
+    _insert_video(owner_id, "capview001A")
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, 'video_view', '', ?)",
+            (owner_id, bottube_server.VIEW_REWARD_DAILY_CAP, time.time()),
+        )
+        decision = bottube_server._view_reward_decision(
+            db,
+            owner_id=owner_id,
+            viewer_id=viewer_id,
+            video_id="capview001A",
+            view_event_ref="view-cap-1",
+            ip_address="203.0.113.10",
+        )
+        db.commit()
+
+        assert decision["risk_score"] < bottube_server.VIEW_REWARD_HOLD_THRESHOLD
+        assert decision["awarded"] is False
+        assert decision["held"] is True
+        assert "daily view reward cap reached" in decision["reasons"]
+        assert db.execute(
+            "SELECT COUNT(*) FROM earnings WHERE agent_id = ? AND reason = 'video_view'",
+            (owner_id,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT status FROM reward_holds WHERE agent_id = ? AND event_type = 'video_view'",
+            (owner_id,),
+        ).fetchone()[0] == "dismissed"
+
+
+def test_daily_like_cap_is_a_hard_stop(client):
+    """#2266: reaching the daily like cap added risk 25, below the 32 hold threshold."""
+    owner_id = _insert_agent("caplikeowner", "bottube_sk_caplikeowner")
+    voter_id = _insert_agent("capliker", "bottube_sk_capliker")
+    _insert_video(owner_id, "caplike001A")
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute(
+            "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, 'like_received', '', ?)",
+            (owner_id, bottube_server.LIKE_REWARD_DAILY_CAP, time.time()),
+        )
+        decision = bottube_server._like_reward_decision(
+            db,
+            owner_id=owner_id,
+            voter_id=voter_id,
+            video_id="caplike001A",
+            like_event_ref="like-cap-1",
+        )
+        db.commit()
+
+        assert decision["risk_score"] < bottube_server.LIKE_REWARD_HOLD_THRESHOLD
+        assert decision["awarded"] is False
+        assert decision["held"] is True
+        assert "daily like reward cap reached" in decision["reasons"]
+        assert db.execute(
+            "SELECT COUNT(*) FROM earnings WHERE agent_id = ? AND reason = 'like_received'",
+            (owner_id,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT status FROM reward_holds WHERE agent_id = ? AND event_type = 'like_received'",
+            (owner_id,),
+        ).fetchone()[0] == "dismissed"
+
+
+def test_comment_reward_respects_new_account_cap(client):
+    """#2266: new accounts at new_account_reward_cap cannot bypass via engagement rewards."""
+    commenter_id = _insert_agent("newcapcommenter", "bottube_sk_newcapcommenter")
+    owner_id = _insert_agent("newcapowner", "bottube_sk_newcapowner")
+    _insert_video(owner_id, "newcapvid01")
+    comment_id = _insert_comment(commenter_id, "newcapvid01", "x", created_at=time.time())
+
+    with bottube_server.app.app_context():
+        db = bottube_server.get_db()
+        db.execute("UPDATE agents SET created_at = ? WHERE id = ?", (time.time(), commenter_id))
+        db.execute(
+            "INSERT INTO earnings (agent_id, amount, reason, video_id, created_at) VALUES (?, ?, 'quest_complete:profile', '', ?)",
+            (commenter_id, bottube_server.ANTI_FARM_CONFIG["new_account_reward_cap"], time.time()),
+        )
+        decision = bottube_server._comment_reward_decision(
+            db,
+            agent_id=commenter_id,
+            video_id="newcapvid01",
+            comment_id=comment_id,
+            content="Thoughtful pacing notes about the opening sequence and colour grade",
+        )
+        db.commit()
+
+        assert decision["risk_score"] < bottube_server.COMMENT_REWARD_HOLD_THRESHOLD
+        assert decision["awarded"] is False
+        assert decision["held"] is True
+        assert "new account reward cap reached" in decision["reasons"]
+        assert db.execute(
+            "SELECT COUNT(*) FROM earnings WHERE agent_id = ? AND reason = 'comment'",
+            (commenter_id,),
+        ).fetchone()[0] == 0
+        assert "new account" in decision["reasons"]
+        assert db.execute(
+            "SELECT status FROM reward_holds WHERE agent_id = ? AND event_type = 'comment'",
+            (commenter_id,),
+        ).fetchone()[0] == "pending"

@@ -3217,13 +3217,20 @@ def _refresh_agent_quests(
                 "SELECT 1 FROM earnings WHERE agent_id = ? AND reason = ? LIMIT 1",
                 (agent_id, reward_reason),
             ).fetchone()
-            if not already_rewarded:
-                award_rtc(db, agent_id, float(quest["reward_rtc"]), reward_reason)
-            rewarded_at = now
-            db.execute(
-                "UPDATE agent_quests SET rewarded_at = ? WHERE agent_id = ? AND quest_key = ?",
-                (rewarded_at, agent_id, quest["quest_key"]),
+            # A new account over its daily cap is deferred, not forfeited:
+            # rewarded_at stays 0, so the reward pays on the first refresh after
+            # the account leaves the new-account window (#2266).
+            deferred = not already_rewarded and _new_account_cap_blocks(
+                db, agent_id, float(quest["reward_rtc"])
             )
+            if not deferred:
+                if not already_rewarded:
+                    award_rtc(db, agent_id, float(quest["reward_rtc"]), reward_reason)
+                rewarded_at = now
+                db.execute(
+                    "UPDATE agent_quests SET rewarded_at = ? WHERE agent_id = ? AND quest_key = ?",
+                    (rewarded_at, agent_id, quest["quest_key"]),
+                )
 
         snapshots.append({
             "quest_key": quest["quest_key"],
@@ -3622,6 +3629,8 @@ def _comment_reward_decision(
     if is_new:
         risk += 12
         reasons.append("new account")
+        if _new_account_cap_blocks(db, agent_id, RTC_REWARD_COMMENT):
+            reasons.append("new account reward cap reached")
 
     # Check for rapid activity (anti-farm)
     rapid = _check_rapid_activity(db, agent_id, "comment")
@@ -3675,7 +3684,7 @@ def _comment_reward_decision(
         risk += 20
         reasons.append("same-creator reward cap reached")
 
-    hold = risk >= COMMENT_REWARD_HOLD_THRESHOLD
+    hold = risk >= COMMENT_REWARD_HOLD_THRESHOLD or any("cap reached" in r for r in reasons)
     if hold:
         _queue_reward_hold(
             db,
@@ -3769,8 +3778,10 @@ def _view_reward_decision(
     if today_view_earnings >= VIEW_REWARD_DAILY_CAP:
         risk += 24
         reasons.append("daily view reward cap reached")
+    if _new_account_cap_blocks(db, owner_id, RTC_REWARD_VIEW):
+        reasons.append("new account reward cap reached")
 
-    hold = risk >= VIEW_REWARD_HOLD_THRESHOLD
+    hold = risk >= VIEW_REWARD_HOLD_THRESHOLD or any("cap reached" in r for r in reasons)
     if hold:
         _queue_reward_hold(
             db,
@@ -3842,8 +3853,10 @@ def _like_reward_decision(
     if today_like_earnings >= LIKE_REWARD_DAILY_CAP:
         risk += 25
         reasons.append("daily like reward cap reached")
+    if _new_account_cap_blocks(db, owner_id, RTC_REWARD_LIKE_RECEIVED):
+        reasons.append("new account reward cap reached")
 
-    hold = risk >= LIKE_REWARD_HOLD_THRESHOLD
+    hold = risk >= LIKE_REWARD_HOLD_THRESHOLD or any("cap reached" in r for r in reasons)
     if hold:
         _queue_reward_hold(
             db,
@@ -4005,7 +4018,11 @@ def _check_new_account_reward_cap(db: sqlite3.Connection, agent_id: int) -> Tupl
     """
     now = time.time()
     config = ANTI_FARM_CONFIG
-    
+
+    cols = {r[1] for r in db.execute("PRAGMA table_info(agents)").fetchall()}
+    if "created_at" not in cols:
+        return False, 0.0
+
     row = db.execute(
         "SELECT created_at FROM agents WHERE id = ?",
         (agent_id,),
@@ -4022,6 +4039,18 @@ def _check_new_account_reward_cap(db: sqlite3.Connection, agent_id: int) -> Tupl
         return True, config["new_account_reward_cap"]
     
     return False, 0.0
+
+
+def _new_account_cap_blocks(db: sqlite3.Connection, agent_id: int, amount: float) -> bool:
+    """True if paying `amount` would take a new account past its daily cap (#2266)."""
+    is_new, cap = _check_new_account_reward_cap(db, agent_id)
+    if not is_new:
+        return False
+    earned = float(db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM earnings WHERE agent_id = ? AND created_at >= ?",
+        (agent_id, time.time() - 86400),
+    ).fetchone()[0] or 0.0)
+    return earned + amount > cap
 
 
 # ---------------------------------------------------------------------------
