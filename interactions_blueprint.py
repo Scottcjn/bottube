@@ -266,28 +266,61 @@ def api_activity_feed():
     })
 
 
+def _table_columns(db, table_name):
+    """Return column names for a SQLite table without failing on custom mocks."""
+    return {row[1] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
 @interactions_bp.route('/api/threads/<video_id>')
 def api_comment_threads(video_id):
     """
-    Get threaded comments for a video with reply nesting.
+    Get threaded comments for a visible video with reply nesting.
     """
     db = get_db()
-    
-    # Get all comments for this video
-    comments = db.execute("""SELECT 
-            c.id,
-            c.content,
-            c.parent_id,
-            c.likes,
-            c.created_at,
-            a.id as agent_id,
-            a.agent_name,
-            a.display_name,
-            a.avatar_url
-        FROM comments c
-        JOIN agents a ON c.agent_id = a.id
-        WHERE c.video_id = ?
-        ORDER BY c.created_at ASC""", (video_id,)).fetchall()
+    video_cols = _table_columns(db, "videos")
+    agent_cols = _table_columns(db, "agents")
+    comment_cols = _table_columns(db, "comments")
+
+    video_filters = ["v.video_id = ?"]
+    if "is_removed" in video_cols:
+        video_filters.append("COALESCE(v.is_removed, 0) = 0")
+    if "is_banned" in agent_cols:
+        video_filters.append("COALESCE(owner.is_banned, 0) = 0")
+
+    video = db.execute(
+        f"""SELECT v.video_id
+            FROM videos v
+            JOIN agents owner ON v.agent_id = owner.id
+            WHERE {' AND '.join(video_filters)}""",
+        (video_id,),
+    ).fetchone()
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    comment_filters = ["c.video_id = ?"]
+    if "is_removed" in comment_cols:
+        comment_filters.append("COALESCE(c.is_removed, 0) = 0")
+    if "is_banned" in agent_cols:
+        comment_filters.append("COALESCE(a.is_banned, 0) = 0")
+
+    # Get visible comments for this video
+    comments = db.execute(
+        f"""SELECT
+                c.id,
+                c.content,
+                c.parent_id,
+                c.likes,
+                c.created_at,
+                a.id as agent_id,
+                a.agent_name,
+                a.display_name,
+                a.avatar_url
+            FROM comments c
+            JOIN agents a ON c.agent_id = a.id
+            WHERE {' AND '.join(comment_filters)}
+            ORDER BY c.created_at ASC""",
+        (video_id,),
+    ).fetchall()
     
     # Build thread structure
     comment_map = {}
@@ -310,13 +343,9 @@ def api_comment_threads(video_id):
         }
         comment_map[row['id']] = comment
         
-        if row['parent_id']:
-            # This is a reply
-            parent = comment_map.get(row['parent_id'])
-            if parent:
-                parent['replies'].append(comment)
+        if row['parent_id'] and row['parent_id'] in comment_map:
+            comment_map[row['parent_id']]['replies'].append(comment)
         else:
-            # Root comment
             root_comments.append(comment)
     
     return jsonify({
