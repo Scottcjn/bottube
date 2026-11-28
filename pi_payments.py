@@ -20,9 +20,12 @@ Security posture (do NOT weaken):
 """
 import math
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
+from typing import Optional
+from urllib.parse import quote
 
 import requests
 from flask import Blueprint, jsonify, request
@@ -34,6 +37,7 @@ PI_SANDBOX = os.environ.get("PI_SANDBOX", "1") != "0"   # default Testnet/sandbo
 PI_API_BASE = "https://api.minepi.com/v2"
 PI_TIMEOUT = float(os.environ.get("PI_TIMEOUT", "15"))
 AMOUNT_TOL = 1e-7
+_PI_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 # Server-authoritative prices. Frontend reads these via /pi/health.
 PI_PRODUCTS = {
@@ -93,23 +97,58 @@ def _pi_headers():
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 
+def _is_valid_pi_identifier(value: str) -> bool:
+    """Validate Pi payment IDs and txids against strict path-safe characters."""
+    return isinstance(value, str) and bool(_PI_IDENTIFIER_RE.fullmatch(value))
+
+
 def _pi_get_payment(payment_id: str):
     """Fetch the authoritative payment record from the Pi API."""
-    r = requests.get(f"{PI_API_BASE}/payments/{payment_id}",
+    if not _is_valid_pi_identifier(payment_id):
+        raise ValueError("invalid payment_id format")
+    safe_payment_id = quote(payment_id, safe="")
+    r = requests.get(f"{PI_API_BASE}/payments/{safe_payment_id}",
                      headers=_pi_headers(), timeout=PI_TIMEOUT)
     r.raise_for_status()
     return r.json()
 
 
-def _verify_against_products(p: dict):
+def _parse_pi_amount(raw_amount):
+    """Parse a finite non-boolean numeric Pi amount, or return None."""
+    if isinstance(raw_amount, bool) or raw_amount is None:
+        return None
+    try:
+        amount = float(raw_amount)
+    except (TypeError, ValueError):
+        return None
+    return amount if math.isfinite(amount) else None
+
+
+def _verify_against_products(p: dict, expected_payment_id: Optional[str] = None):
     """Check a Pi payment's product+amount against PI_PRODUCTS; return (product, amount) or (None, reason)."""
-    product = (p.get("metadata") or {}).get("product", "")
-    exp = PI_PRODUCTS.get(product)
-    if not exp:
-        return None, f"unknown product: {product!r}"
-    if not math.isclose(float(p.get("amount", 0)), float(exp["pi"]), abs_tol=AMOUNT_TOL):
+    if not isinstance(p, dict):
+        return None, "invalid payment payload"
+    identifier = p.get("identifier")
+    if expected_payment_id and isinstance(identifier, str) and identifier and identifier != expected_payment_id:
+        return None, "payment_id mismatch"
+    status_obj = p.get("status")
+    if isinstance(status_obj, dict) and (
+        status_obj.get("cancelled") is True or status_obj.get("user_cancelled") is True
+    ):
+        return None, "payment cancelled"
+    metadata = p.get("metadata")
+    if not isinstance(metadata, dict):
+        return None, "missing metadata"
+    product = metadata.get("product", "")
+    if not isinstance(product, str) or product not in PI_PRODUCTS:
+        return None, "unknown product"
+    exp = PI_PRODUCTS[product]
+    amount = _parse_pi_amount(p.get("amount"))
+    if amount is None:
+        return None, "invalid amount"
+    if not math.isclose(amount, float(exp["pi"]), abs_tol=AMOUNT_TOL):
         return None, "amount mismatch"
-    return product, float(p.get("amount", 0))
+    return product, amount
 
 
 def _grant_entitlement(pi_uid: str, product: str, payment_id: str) -> bool:
@@ -145,48 +184,89 @@ def _optional_str_field(data, name):
     return value.strip()
 
 
-@pi_pay_bp.route("/pi/approve", methods=["POST"])
-def pi_approve():
-    """Server-side approval leg: re-verify the payment against Pi and our product table, then call Pi /approve."""
+def _parse_pi_json_body():
+    """Verify PI_API_KEY configuration and parse a JSON object body."""
     if not PI_API_KEY:
-        return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
+        return None, (jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503)
     data = request.get_json(silent=True)
     if data is None:
         data = {}
     if not isinstance(data, dict):
-        return jsonify({"error": "JSON body must be an object"}), 400
+        return None, (jsonify({"error": "JSON body must be an object"}), 400)
+    return data, None
+
+
+def _lookup_and_verify_payment(payment_id: str, action: str):
+    """Fetch a Pi payment and verify product, amount, and fulfillment readiness."""
+    try:
+        p = _pi_get_payment(payment_id)
+    except (requests.RequestException, ValueError) as e:
+        print(f"[pi] lookup failed: {e}", flush=True)
+        return None, None, None, (jsonify({"error": "Pi lookup failed, try again"}), 502)
+    product, amount = _verify_against_products(p, expected_payment_id=payment_id)
+    if product is None:
+        return None, None, None, (jsonify({"error": f"refusing to {action}: {amount}"}), 400)
+    if product not in IMPLEMENTED_GRANTS:
+        # Never take a payment we cannot fulfill.
+        return None, None, None, (
+            jsonify({"error": "fulfillment for this product is not enabled yet", "product": product}),
+            503,
+        )
+    return p, product, amount, None
+
+
+def _pi_user_uid(payment: dict) -> str:
+    """Safely extract user_uid as a string."""
+    raw = payment.get("user_uid")
+    return raw if isinstance(raw, str) else ""
+
+
+@pi_pay_bp.route("/pi/approve", methods=["POST"])
+def pi_approve():
+    """Server-side approval leg: re-verify the payment against Pi and our product table, then call Pi /approve."""
+    data, err = _parse_pi_json_body()
+    if err:
+        return err
     payment_id = _optional_str_field(data, "payment_id")
     if payment_id is None:
         return jsonify({"error": "payment_id must be a string"}), 400
     if not payment_id:
         return jsonify({"error": "payment_id required"}), 400
-    try:
-        p = _pi_get_payment(payment_id)
-    except requests.RequestException as e:
-        print(f"[pi] lookup failed: {e}", flush=True)
-        return jsonify({"error": "Pi lookup failed, try again"}), 502
-    product, amount = _verify_against_products(p)
-    if product is None:
-        return jsonify({"error": f"refusing to approve: {amount}"}), 400
-    if product not in IMPLEMENTED_GRANTS:
-        # Never take a payment we cannot fulfill.
-        return jsonify({"error": "fulfillment for this product is not enabled yet",
-                        "product": product}), 503
+    if not _is_valid_pi_identifier(payment_id):
+        return jsonify({"error": "invalid payment_id format"}), 400
 
+    p, product, amount, err = _lookup_and_verify_payment(payment_id, "approve")
+    if err:
+        return err
+
+    safe_payment_id = quote(payment_id, safe="")
     conn = _conn()
     try:
         now = time.time()
         conn.execute(
             "INSERT OR IGNORE INTO pi_payments (payment_id, pi_uid, product, amount_pi, status, created_at, updated_at) "
             "VALUES (?,?,?,?, 'created', ?, ?)",
-            (payment_id, p.get("user_uid", ""), product, amount, now, now))
+            (payment_id, _pi_user_uid(p), product, amount, now, now))
         conn.commit()
-        r = requests.post(f"{PI_API_BASE}/payments/{payment_id}/approve",
+        existing = conn.execute(
+            "SELECT status FROM pi_payments WHERE payment_id=?", (payment_id,)
+        ).fetchone()
+        if existing and existing[0] in ("completing", "completed"):
+            return jsonify({
+                "error": "payment already completed",
+                "payment_id": payment_id,
+                "status": existing[0],
+            }), 409
+        r = requests.post(f"{PI_API_BASE}/payments/{safe_payment_id}/approve",
                           headers=_pi_headers(), timeout=PI_TIMEOUT)
         if r.status_code >= 300:
-            return jsonify({"error": "pi approve failed", "detail": r.text[:200]}), 502
-        conn.execute("UPDATE pi_payments SET status='approved', updated_at=? WHERE payment_id=?",
-                     (time.time(), payment_id))
+            print(f"[pi] approve rejected by upstream: status={r.status_code}", flush=True)
+            return jsonify({"error": "pi approve failed"}), 502
+        conn.execute(
+            "UPDATE pi_payments SET status='approved', updated_at=? "
+            "WHERE payment_id=? AND status='created'",
+            (time.time(), payment_id),
+        )
         conn.commit()
     except requests.RequestException as e:
         print(f"[pi] approve error: {e}", flush=True)
@@ -196,69 +276,79 @@ def pi_approve():
     return jsonify({"ok": True, "payment_id": payment_id, "status": "approved"})
 
 
-@pi_pay_bp.route("/pi/complete", methods=["POST"])
-def pi_complete():
-    """Server-side completion leg: re-verify, call Pi /complete, then grant the entitlement idempotently."""
-    if not PI_API_KEY:
-        return jsonify({"error": "Pi not configured (PI_API_KEY unset)"}), 503
-    data = request.get_json(silent=True)
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
-        return jsonify({"error": "JSON body must be an object"}), 400
+def _pi_complete_already_claimed_response(conn, payment_id: str):
+    """Report current payment state when another request already claimed completion."""
+    row = conn.execute(
+        "SELECT status, granted FROM pi_payments WHERE payment_id=?", (payment_id,)
+    ).fetchone()
+    if row and row[0] == "completed" and row[1] == 1:
+        return jsonify({"ok": True, "payment_id": payment_id, "status": "completed", "duplicate": True})
+    return jsonify({
+        "ok": False,
+        "payment_id": payment_id,
+        "status": (row[0] if row else "unknown"),
+        "pending": True,
+        "note": "completion in progress; retry shortly",
+    }), 202
+
+
+def _parse_pi_complete_identifiers(data: dict):
+    """Extract and validate payment_id and txid from /pi/complete payload."""
     payment_id = _optional_str_field(data, "payment_id")
     txid = _optional_str_field(data, "txid")
     if payment_id is None or txid is None:
-        return jsonify({"error": "payment_id and txid must be strings"}), 400
+        return None, None, (jsonify({"error": "payment_id and txid must be strings"}), 400)
     if not payment_id or not txid:
-        return jsonify({"error": "payment_id and txid required"}), 400
+        return None, None, (jsonify({"error": "payment_id and txid required"}), 400)
+    if not _is_valid_pi_identifier(payment_id) or not _is_valid_pi_identifier(txid):
+        return None, None, (jsonify({"error": "invalid payment_id or txid format"}), 400)
+    return payment_id, txid, None
 
-    try:
-        p = _pi_get_payment(payment_id)
-    except requests.RequestException as e:
-        print(f"[pi] lookup failed: {e}", flush=True)
-        return jsonify({"error": "Pi lookup failed, try again"}), 502
-    product, amount = _verify_against_products(p)
-    if product is None:
-        return jsonify({"error": f"refusing to complete: {amount}"}), 400
-    if product not in IMPLEMENTED_GRANTS:
-        return jsonify({"error": "fulfillment for this product is not enabled yet",
-                        "product": product}), 503
 
+@pi_pay_bp.route("/pi/complete", methods=["POST"])
+def pi_complete():
+    """Server-side completion leg: re-verify, call Pi /complete, then grant the entitlement idempotently."""
+    data, err = _parse_pi_json_body()
+    if err:
+        return err
+    payment_id, txid, err = _parse_pi_complete_identifiers(data)
+    if err:
+        return err
+
+    p, product, amount, err = _lookup_and_verify_payment(payment_id, "complete")
+    if err:
+        return err
+
+    safe_payment_id = quote(payment_id, safe="")
+    user_uid = _pi_user_uid(p)
     conn = _conn()
     try:
         now = time.time()
         conn.execute(
             "INSERT OR IGNORE INTO pi_payments (payment_id, pi_uid, product, amount_pi, status, created_at, updated_at) "
             "VALUES (?,?,?,?, 'approved', ?, ?)",
-            (payment_id, p.get("user_uid", ""), product, amount, now, now))
+            (payment_id, user_uid, product, amount, now, now))
         cur = conn.execute(
             "UPDATE pi_payments SET status='completing', txid=?, updated_at=? "
             "WHERE payment_id=? AND status IN ('created','approved')",
             (txid, now, payment_id))
         conn.commit()
         if cur.rowcount == 0:
-            # Someone else already moved it past created/approved. Report the TRUE state
-            # instead of a blanket success: only claim success if actually granted; a row
-            # stuck in 'completing' (crash mid-flight) is pending reconciliation, not done.
-            row = conn.execute(
-                "SELECT status, granted FROM pi_payments WHERE payment_id=?", (payment_id,)
-            ).fetchone()
-            if row and row[0] == "completed" and row[1] == 1:
-                return jsonify({"ok": True, "payment_id": payment_id, "status": "completed", "duplicate": True})
-            return jsonify({"ok": False, "payment_id": payment_id,
-                            "status": (row[0] if row else "unknown"),
-                            "pending": True, "note": "completion in progress; retry shortly"}), 202
+            return _pi_complete_already_claimed_response(conn, payment_id)
 
-        r = requests.post(f"{PI_API_BASE}/payments/{payment_id}/complete",
+        r = requests.post(f"{PI_API_BASE}/payments/{safe_payment_id}/complete",
                           headers=_pi_headers(), json={"txid": txid}, timeout=PI_TIMEOUT)
         if r.status_code >= 300:
-            conn.execute("UPDATE pi_payments SET status='approved', updated_at=? WHERE payment_id=?",
-                         (time.time(), payment_id))
+            conn.execute(
+                "UPDATE pi_payments SET status='approved', updated_at=? "
+                "WHERE payment_id=? AND status='completing'",
+                (time.time(), payment_id),
+            )
             conn.commit()
-            return jsonify({"error": "pi complete failed", "detail": r.text[:200]}), 502
+            print(f"[pi] complete rejected by upstream: status={r.status_code}", flush=True)
+            return jsonify({"error": "pi complete failed"}), 502
 
-        ok = _grant_entitlement(p.get("user_uid", ""), product, payment_id)
+        ok = _grant_entitlement(user_uid, product, payment_id)
         conn.execute(
             "UPDATE pi_payments SET status='completed', granted=?, updated_at=? WHERE payment_id=?",
             (1 if ok else 0, time.time(), payment_id))

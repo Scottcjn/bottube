@@ -21,14 +21,16 @@ Environment:
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import os
 import secrets
+import sqlite3
 import time
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import requests
-from flask import Blueprint, request, jsonify, g, redirect
+from flask import Blueprint, g, jsonify, redirect, request
 
 # ---------------------------------------------------------------------------
 # CONFIGURATION
@@ -138,6 +140,9 @@ CREATE INDEX IF NOT EXISTS idx_store_orders_agent ON store_orders(agent_id);
 CREATE INDEX IF NOT EXISTS idx_store_orders_paypal ON store_orders(paypal_order_id);
 CREATE INDEX IF NOT EXISTS idx_store_orders_capture ON store_orders(paypal_capture_id);
 CREATE INDEX IF NOT EXISTS idx_store_transactions_type_external ON store_transactions(transaction_type, external_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_store_transactions_type_external_unique
+    ON store_transactions(transaction_type, external_id)
+    WHERE external_id IS NOT NULL AND external_id != '';
 """
 
 def init_store_db(db_path: str = None):
@@ -150,7 +155,6 @@ def init_store_db(db_path: str = None):
             str(Path(__file__).resolve().parent / "bottube.db"),
         )
 
-    import sqlite3
     conn = sqlite3.connect(db_path)
     conn.executescript(STORE_SCHEMA)
     order_cols = {row[1] for row in conn.execute("PRAGMA table_info(store_orders)").fetchall()}
@@ -170,6 +174,12 @@ def init_store_db(db_path: str = None):
         "CREATE INDEX IF NOT EXISTS idx_store_transactions_type_external "
         "ON store_transactions(transaction_type, external_id)"
     )
+    with contextlib.suppress(sqlite3.IntegrityError):
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_store_transactions_type_external_unique "
+            "ON store_transactions(transaction_type, external_id) "
+            "WHERE external_id IS NOT NULL AND external_id != ''"
+        )
     conn.commit()
     conn.close()
 
@@ -269,9 +279,9 @@ def capture_paypal_order(paypal_order_id: str) -> dict:
 def get_db():
     """Get database connection from Flask g context."""
     if not hasattr(g, 'db') or g.db is None:
-        import sqlite3
         db_path = os.environ.get("BOTTUBE_DB_PATH", "/root/bottube/bottube.db")
-        g.db = sqlite3.connect(db_path)
+        g.db = sqlite3.connect(db_path, timeout=30)
+        g.db.execute("PRAGMA busy_timeout = 30000")
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -313,30 +323,75 @@ def _optional_int_field(data: dict, field_name: str):
     return value, None
 
 
+_COMPLETABLE_ORDER_STATUSES = ("pending", "approved")
+_REFUNDED_ORDER_STATUSES = ("partially_refunded", "refunded")
+_REFUNDABLE_ORDER_STATUSES = ("completed", "partially_refunded")
+_MAX_REFUND_CAS_ATTEMPTS = 4
+
+
 def _to_usd(value) -> Decimal:
-    """Quantize a value to 2 decimal places (USD cents)."""
-    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    """Quantize a finite value to 2 decimal places (USD cents)."""
+    if isinstance(value, bool):
+        raise TypeError("USD amount must not be a boolean")
+    amount = Decimal(str(value))
+    if not amount.is_finite():
+        raise InvalidOperation("USD amount must be finite")
+    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _to_rtc(value) -> Decimal:
-    """Quantize a value to 6 decimal places (RTC's smallest unit)."""
-    return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    """Quantize a finite value to 6 decimal places (RTC's smallest unit)."""
+    if isinstance(value, bool):
+        raise TypeError("RTC amount must not be a boolean")
+    amount = Decimal(str(value))
+    if not amount.is_finite():
+        raise InvalidOperation("RTC amount must be finite")
+    return amount.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+
+def _extract_str(value) -> str:
+    """Return a trimmed string value, or empty string for non-strings."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _parse_usd_amount(amount_obj):
+    """Parse a positive finite USD amount dict, returning None on invalid/non-USD values."""
+    if not isinstance(amount_obj, dict):
+        return None
+    currency = amount_obj.get("currency_code")
+    if currency is not None and (not isinstance(currency, str) or currency.strip().upper() != "USD"):
+        return None
+    value = amount_obj.get("value")
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        parsed = _to_usd(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _extract_capture_details(payload: dict):
     """Pull the first capture id and captured USD amount out of a PayPal order/webhook payload."""
     capture_id = ""
     amount_usd = None
-    for purchase_unit in payload.get("purchase_units", []):
-        captures = (purchase_unit.get("payments") or {}).get("captures") or []
+    if not isinstance(payload, dict):
+        return capture_id, amount_usd
+    purchase_units = payload.get("purchase_units")
+    if not isinstance(purchase_units, list):
+        return capture_id, amount_usd
+    for purchase_unit in purchase_units:
+        if not isinstance(purchase_unit, dict):
+            continue
+        payments = purchase_unit.get("payments")
+        captures = payments.get("captures") if isinstance(payments, dict) else None
+        if not isinstance(captures, list):
+            continue
         for capture in captures:
-            capture_id = capture.get("id", "") or capture_id
-            value = ((capture.get("amount") or {}).get("value"))
-            if value not in (None, ""):
-                try:
-                    amount_usd = _to_usd(value)
-                except (InvalidOperation, TypeError, ValueError):
-                    amount_usd = None
+            if not isinstance(capture, dict):
+                continue
+            capture_id = _extract_str(capture.get("id")) or capture_id
+            amount_usd = _parse_usd_amount(capture.get("amount"))
             if capture_id:
                 return capture_id, amount_usd
     return capture_id, amount_usd
@@ -366,25 +421,30 @@ def _record_store_transaction(
         if existing:
             return False
 
-    db.execute(
-        """
-        INSERT INTO store_transactions
-            (order_id, agent_id, package_id, amount_usd, rtc_credited,
-             transaction_type, external_id, note, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            order_id,
-            agent_id,
-            package_id,
-            float(amount_usd),
-            float(rtc_credited),
-            transaction_type,
-            external_id,
-            note,
-            int(time.time()),
-        ),
-    )
+    try:
+        db.execute(
+            """
+            INSERT INTO store_transactions
+                (order_id, agent_id, package_id, amount_usd, rtc_credited,
+                 transaction_type, external_id, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                order_id,
+                agent_id,
+                package_id,
+                float(amount_usd),
+                float(rtc_credited),
+                transaction_type,
+                external_id,
+                note,
+                int(time.time()),
+            ),
+        )
+    except sqlite3.IntegrityError:
+        if external_id:
+            return False
+        raise
     return True
 
 
@@ -418,45 +478,64 @@ def debit_rtc_from_agent(db, agent_id: int, amount: Decimal, reason: str) -> Non
     )
 
 
-def _complete_order(db, order, *, capture_id: str, capture_amount_usd=None):
-    """Mark an order completed and credit RTC, idempotently keyed on the PayPal capture id."""
+def _complete_order_conflict_result(db, order_id: str):
+    """Inspect current persisted status when an atomic completion claim loses a race."""
+    row = db.execute(
+        "SELECT status FROM store_orders WHERE id = ?",
+        (order_id,),
+    ).fetchone()
+    current_status = row[0] if row else ""
+    if current_status == "completed":
+        return True, "already_completed"
+    if current_status in _REFUNDED_ORDER_STATUSES:
+        return False, "already_refunded"
+    return False, "order_not_completable"
+
+
+def _validate_capture_amount(order_amount: Decimal, capture_amount_usd, require_amount: bool) -> bool:
+    """Verify capture amount matches the expected USD order amount."""
+    if capture_amount_usd is None:
+        return not require_amount
+    try:
+        normalized = _to_usd(capture_amount_usd)
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return normalized == order_amount
+
+
+def _complete_order(
+    db,
+    order,
+    *,
+    capture_id: str,
+    capture_amount_usd=None,
+    require_amount: bool = False,
+):
+    """Mark an order completed and credit RTC atomically, idempotently keyed on the PayPal capture id."""
     order_amount = _to_usd(order["amount_usd"])
     rtc_amount = _to_rtc(order["rtc_amount"])
-    if capture_amount_usd is not None and capture_amount_usd != order_amount:
+    if not _validate_capture_amount(order_amount, capture_amount_usd, require_amount):
         return False, "capture_amount_mismatch"
 
     if order["status"] == "completed":
         return True, "already_completed"
+    if order["status"] in _REFUNDED_ORDER_STATUSES:
+        return False, "already_refunded"
+    if order["status"] not in _COMPLETABLE_ORDER_STATUSES:
+        return False, "order_not_completable"
 
-    if capture_id:
-        existing = db.execute(
-            """
-            SELECT id FROM store_transactions
-            WHERE transaction_type = 'purchase' AND external_id = ?
-            """,
-            (capture_id,),
-        ).fetchone()
-        if existing:
-            return True, "already_completed"
-
-    db.execute(
+    cur = db.execute(
         """
         UPDATE store_orders
         SET status = 'completed', completed_at = ?, paypal_capture_id = ?
-        WHERE id = ?
+        WHERE id = ? AND status IN ('pending', 'approved')
         """,
         (int(time.time()), capture_id, order["id"]),
     )
+    if cur.rowcount != 1:
+        return _complete_order_conflict_result(db, order["id"])
 
-    if order["agent_id"]:
-        credit_rtc_to_agent(
-            db,
-            int(order["agent_id"]),
-            rtc_amount,
-            f"store_purchase:{order['package_id']}",
-        )
-
-    _record_store_transaction(
+    recorded = _record_store_transaction(
         db,
         order_id=order["id"],
         agent_id=order["agent_id"],
@@ -467,8 +546,153 @@ def _complete_order(db, order, *, capture_id: str, capture_amount_usd=None):
         external_id=capture_id,
         note="paypal_capture",
     )
+    if not recorded:
+        db.rollback()
+        existing = db.execute(
+            """
+            SELECT order_id FROM store_transactions
+            WHERE transaction_type = 'purchase' AND external_id = ?
+            """,
+            (capture_id,),
+        ).fetchone()
+        if existing and existing[0] == order["id"]:
+            return True, "already_completed"
+        return False, "duplicate_capture_id"
+
+    if order["agent_id"]:
+        credit_rtc_to_agent(
+            db,
+            int(order["agent_id"]),
+            rtc_amount,
+            f"store_purchase:{order['package_id']}",
+        )
+
     db.commit()
     return True, "completed"
+
+
+def _compute_refund_rtc(
+    db,
+    order_id: str,
+    rtc_total: Decimal,
+    order_amount: Decimal,
+    applied_refund: Decimal,
+) -> Decimal:
+    """Compute proportional RTC reversal capped so cumulative refunds never exceed rtc_total."""
+    raw_refund = ((rtc_total * applied_refund) / order_amount).quantize(
+        Decimal("0.000001"), rounding=ROUND_HALF_UP
+    )
+    row = db.execute(
+        """
+        SELECT COALESCE(SUM(-rtc_credited), 0)
+        FROM store_transactions
+        WHERE order_id = ? AND transaction_type = 'refund'
+        """,
+        (order_id,),
+    ).fetchone()
+    already_debited = _to_rtc(row[0] if row and row[0] is not None else 0)
+    remaining_rtc = max(Decimal("0.000000"), rtc_total - already_debited)
+    return min(raw_refund, remaining_rtc)
+
+
+def _refund_id_exists(db, refund_id: str) -> bool:
+    """Return True if a refund transaction with this external_id is already recorded."""
+    if not refund_id:
+        return False
+    return bool(
+        db.execute(
+            "SELECT id FROM store_transactions WHERE transaction_type = 'refund' AND external_id = ?",
+            (refund_id,),
+        ).fetchone()
+    )
+
+
+def _attempt_refund_order(
+    db,
+    order_id: str,
+    *,
+    refund_id: str,
+    requested_refund: Decimal,
+    note: str,
+):
+    """Run one compare-and-set refund attempt against live order state; returns None to retry."""
+    live = db.execute(
+        """
+        SELECT id, agent_id, package_id, amount_usd, rtc_amount, status, refund_amount_usd
+        FROM store_orders
+        WHERE id = ?
+        """,
+        (order_id,),
+    ).fetchone()
+    if not live:
+        return False, "order_not_found"
+
+    live_id, agent_id, package_id, raw_amount_usd, raw_rtc_amount, status, raw_refunded = (
+        live[0], live[1], live[2], live[3], live[4], live[5], live[6]
+    )
+    if status == "refunded" or _refund_id_exists(db, refund_id):
+        return True, "already_refunded"
+    if status not in _REFUNDABLE_ORDER_STATUSES:
+        return False, "order_not_refundable"
+
+    order_amount = _to_usd(raw_amount_usd)
+    if order_amount <= 0:
+        return False, "invalid_order_amount"
+    already_refunded = _to_usd(raw_refunded or 0)
+    applied_refund = min(requested_refund, max(Decimal("0.00"), order_amount - already_refunded))
+    if applied_refund <= 0:
+        return True, "already_refunded"
+
+    new_refunded_total = already_refunded + applied_refund
+    new_status = "refunded" if new_refunded_total >= order_amount else "partially_refunded"
+
+    cur = db.execute(
+        """
+        UPDATE store_orders
+        SET status = ?, refund_amount_usd = ?, refunded_at = ?
+        WHERE id = ?
+          AND status = ?
+          AND ROUND(COALESCE(refund_amount_usd, 0), 2) = ?
+        """,
+        (
+            new_status,
+            float(new_refunded_total),
+            int(time.time()),
+            live_id,
+            status,
+            float(already_refunded),
+        ),
+    )
+    if cur.rowcount != 1:
+        return None
+
+    rtc_total = _to_rtc(raw_rtc_amount)
+    rtc_refund = _compute_refund_rtc(db, live_id, rtc_total, order_amount, applied_refund)
+    recorded = _record_store_transaction(
+        db,
+        order_id=live_id,
+        agent_id=agent_id,
+        package_id=package_id,
+        amount_usd=applied_refund,
+        rtc_credited=-rtc_refund,
+        transaction_type="refund",
+        external_id=refund_id,
+        note=note or "paypal_refund",
+    )
+    if not recorded:
+        db.rollback()
+        return True, "already_refunded"
+
+    if agent_id and rtc_refund > 0:
+        debit_rtc_from_agent(
+            db,
+            int(agent_id),
+            rtc_refund,
+            f"store_refund:{package_id}",
+        )
+
+    db.commit()
+    return True, new_status
 
 
 def _refund_order(
@@ -479,62 +703,25 @@ def _refund_order(
     refund_amount_usd: Decimal,
     note: str = "",
 ):
-    """Apply a (possibly partial) refund to an order, debiting RTC proportionally and idempotent on refund_id."""
-    if refund_id:
-        existing = db.execute(
-            """
-            SELECT id FROM store_transactions
-            WHERE transaction_type = 'refund' AND external_id = ?
-            """,
-            (refund_id,),
-        ).fetchone()
-        if existing:
-            return True, "already_refunded"
+    """Apply a (possibly partial) refund atomically, debiting RTC proportionally and idempotent on refund_id."""
+    try:
+        requested_refund = _to_usd(refund_amount_usd)
+    except (InvalidOperation, TypeError, ValueError):
+        return False, "invalid_refund_amount"
+    if requested_refund <= 0:
+        return False, "invalid_refund_amount"
 
-    order_amount = _to_usd(order["amount_usd"])
-    already_refunded = _to_usd(order["refund_amount_usd"] or 0)
-    remaining = max(Decimal("0.00"), order_amount - already_refunded)
-    refund_amount_usd = min(refund_amount_usd, remaining)
-    if refund_amount_usd <= 0:
-        return True, "already_refunded"
-
-    rtc_total = _to_rtc(order["rtc_amount"])
-    rtc_refund = (
-        (rtc_total * refund_amount_usd) / order_amount
-    ).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-    new_refunded_total = already_refunded + refund_amount_usd
-    new_status = "refunded" if new_refunded_total >= order_amount else "partially_refunded"
-
-    db.execute(
-        """
-        UPDATE store_orders
-        SET status = ?, refund_amount_usd = ?, refunded_at = ?
-        WHERE id = ?
-        """,
-        (new_status, float(new_refunded_total), int(time.time()), order["id"]),
-    )
-
-    if order["agent_id"] and rtc_refund > 0:
-        debit_rtc_from_agent(
+    for _ in range(_MAX_REFUND_CAS_ATTEMPTS):
+        result = _attempt_refund_order(
             db,
-            int(order["agent_id"]),
-            rtc_refund,
-            f"store_refund:{order['package_id']}",
+            order["id"],
+            refund_id=refund_id,
+            requested_refund=requested_refund,
+            note=note,
         )
-
-    _record_store_transaction(
-        db,
-        order_id=order["id"],
-        agent_id=order["agent_id"],
-        package_id=order["package_id"],
-        amount_usd=refund_amount_usd,
-        rtc_credited=-rtc_refund,
-        transaction_type="refund",
-        external_id=refund_id,
-        note=note or "paypal_refund",
-    )
-    db.commit()
-    return True, new_status
+        if result is not None:
+            return result
+    return False, "refund_conflict"
 
 
 def verify_paypal_webhook_signature(headers, event: dict) -> tuple[bool, str]:
@@ -684,10 +871,32 @@ def create_checkout():
             }
         })
 
-    except requests.RequestException as e:
-        return jsonify({"error": f"PayPal API error: {str(e)}"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except requests.RequestException:
+        return jsonify({"error": "PayPal API error"}), 500
+    except Exception:
+        return jsonify({"error": "Checkout failed"}), 500
+
+
+def _capture_precheck_redirect(row):
+    """Return an early redirect URL when an order is already terminal or non-completable."""
+    if not row:
+        return f"{BASE_URL}/store?error=order_not_found"
+    if row["status"] == "completed":
+        return f"{BASE_URL}/store?success=1&order={row['id']}"
+    if row["status"] in _REFUNDED_ORDER_STATUSES:
+        return f"{BASE_URL}/store?error=already_refunded"
+    if row["status"] not in _COMPLETABLE_ORDER_STATUSES:
+        return f"{BASE_URL}/store?error=order_not_completable"
+    return None
+
+
+def _mark_order_failed_if_pending(db, order_id: str) -> None:
+    """Mark an order failed only if it has not already transitioned out of pending/approved."""
+    db.execute(
+        "UPDATE store_orders SET status = 'failed' WHERE id = ? AND status IN ('pending', 'approved')",
+        (order_id,),
+    )
+    db.commit()
 
 
 @store_bp.route("/capture", methods=["GET"])
@@ -715,18 +924,14 @@ def capture_payment():
         (paypal_order_id,),
     ).fetchone()
 
-    if not row:
-        return redirect(f"{BASE_URL}/store?error=order_not_found")
-
-    if row["status"] == "completed":
-        # Already processed
-        return redirect(f"{BASE_URL}/store?success=1&order={row['id']}")
+    early_redirect = _capture_precheck_redirect(row)
+    if early_redirect:
+        return redirect(early_redirect)
 
     try:
         capture_result = capture_paypal_order(paypal_order_id)
-        if capture_result.get("status") != "COMPLETED":
-            db.execute("UPDATE store_orders SET status = 'failed' WHERE id = ?", (row["id"],))
-            db.commit()
+        if not isinstance(capture_result, dict) or capture_result.get("status") != "COMPLETED":
+            _mark_order_failed_if_pending(db, row["id"])
             return redirect(f"{BASE_URL}/store?error=payment_failed")
 
         capture_id, capture_amount = _extract_capture_details(capture_result)
@@ -735,10 +940,10 @@ def capture_payment():
             row,
             capture_id=capture_id,
             capture_amount_usd=capture_amount,
+            require_amount=True,
         )
         if not ok:
-            db.execute("UPDATE store_orders SET status = 'failed' WHERE id = ?", (row["id"],))
-            db.commit()
+            _mark_order_failed_if_pending(db, row["id"])
             return redirect(f"{BASE_URL}/store?error={reason}")
 
         return redirect(f"{BASE_URL}/store?success=1&order={row['id']}&rtc={row['rtc_amount']}")
@@ -850,6 +1055,65 @@ def store_stats():
 # WEBHOOK (Optional - for async notifications)
 # ---------------------------------------------------------------------------
 
+def _related_ids(resource: dict) -> dict:
+    """Safely extract supplementary_data.related_ids as a dict."""
+    supp = resource.get("supplementary_data")
+    related = supp.get("related_ids") if isinstance(supp, dict) else None
+    return related if isinstance(related, dict) else {}
+
+
+def _handle_capture_completed_webhook(db, resource: dict) -> None:
+    """Process a verified PAYMENT.CAPTURE.COMPLETED webhook resource."""
+    capture_id = _extract_str(resource.get("id"))
+    order_id = _extract_str(_related_ids(resource).get("order_id"))
+    order = None
+    if order_id:
+        order = db.execute("SELECT * FROM store_orders WHERE paypal_order_id = ?", (order_id,)).fetchone()
+    if not order and capture_id:
+        order = db.execute("SELECT * FROM store_orders WHERE paypal_capture_id = ?", (capture_id,)).fetchone()
+    if not order:
+        return
+    capture_amount = _parse_usd_amount(resource.get("amount"))
+    _complete_order(
+        db,
+        order,
+        capture_id=capture_id,
+        capture_amount_usd=capture_amount,
+        require_amount=True,
+    )
+
+
+def _handle_capture_refunded_webhook(db, resource: dict) -> None:
+    """Process a verified PAYMENT.CAPTURE.REFUNDED webhook resource."""
+    related = _related_ids(resource)
+    refund_id = _extract_str(resource.get("id"))
+    capture_id = (
+        _extract_str(resource.get("sale_id"))
+        or _extract_str(resource.get("capture_id"))
+        or _extract_str(related.get("capture_id"))
+    )
+    order = None
+    if capture_id:
+        order = db.execute("SELECT * FROM store_orders WHERE paypal_capture_id = ?", (capture_id,)).fetchone()
+    if not order:
+        order_id = _extract_str(related.get("order_id"))
+        if order_id:
+            order = db.execute("SELECT * FROM store_orders WHERE paypal_order_id = ?", (order_id,)).fetchone()
+    if not order:
+        return
+
+    refund_amount = _parse_usd_amount(resource.get("amount"))
+    if refund_amount is None:
+        return
+    _refund_order(
+        db,
+        order,
+        refund_id=refund_id,
+        refund_amount_usd=refund_amount,
+        note=_extract_str(resource.get("status")) or "paypal_refund",
+    )
+
+
 @store_bp.route("/webhook/paypal", methods=["POST"])
 def paypal_webhook():
     """Handle PayPal webhooks for payment events.
@@ -866,68 +1130,19 @@ def paypal_webhook():
         return jsonify({"error": "invalid_webhook", "reason": reason}), 401
 
     event_type = event.get("event_type", "")
-    resource = event.get("resource", {}) or {}
+    if not isinstance(event_type, str):
+        return jsonify({"error": "event_type must be a string"}), 400
+    resource = event.get("resource")
+    if resource is None:
+        resource = {}
+    if not isinstance(resource, dict):
+        return jsonify({"error": "resource must be an object"}), 400
+
     db = get_db()
-
     if event_type == "PAYMENT.CAPTURE.COMPLETED":
-        capture_id = resource.get("id", "")
-        order_id = ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("order_id", "")
-        order = None
-        if order_id:
-            order = db.execute("SELECT * FROM store_orders WHERE paypal_order_id = ?", (order_id,)).fetchone()
-        if not order and capture_id:
-            order = db.execute("SELECT * FROM store_orders WHERE paypal_capture_id = ?", (capture_id,)).fetchone()
-        if order:
-            _, capture_amount = _extract_capture_details(
-                {
-                    "purchase_units": [
-                        {
-                            "payments": {
-                                "captures": [
-                                    {
-                                        "id": capture_id,
-                                        "amount": resource.get("amount") or {},
-                                    }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            )
-            _complete_order(
-                db,
-                order,
-                capture_id=capture_id,
-                capture_amount_usd=capture_amount,
-            )
-
+        _handle_capture_completed_webhook(db, resource)
     elif event_type == "PAYMENT.CAPTURE.REFUNDED":
-        refund_id = resource.get("id", "")
-        capture_id = (
-            resource.get("sale_id")
-            or resource.get("capture_id")
-            or ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("capture_id", "")
-        )
-        order = None
-        if capture_id:
-            order = db.execute("SELECT * FROM store_orders WHERE paypal_capture_id = ?", (capture_id,)).fetchone()
-        if not order:
-            order_id = ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("order_id", "")
-            if order_id:
-                order = db.execute("SELECT * FROM store_orders WHERE paypal_order_id = ?", (order_id,)).fetchone()
-
-        if order:
-            try:
-                refund_amount = _to_usd((resource.get("amount") or {}).get("value", "0"))
-            except (InvalidOperation, TypeError, ValueError):
-                refund_amount = Decimal("0.00")
-            _refund_order(
-                db,
-                order,
-                refund_id=refund_id,
-                refund_amount_usd=refund_amount,
-                note=resource.get("status", "") or "paypal_refund",
-            )
+        _handle_capture_refunded_webhook(db, resource)
 
     return jsonify({"ok": True})
 
