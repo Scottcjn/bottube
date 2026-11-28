@@ -12,15 +12,9 @@ import pytest
 
 from ci_quarantine import QUARANTINE_ISSUE, QUARANTINED
 
-# Modules that cannot be imported at all: each tests a helper that was never
-# merged to main (the test half of a squash-merged PR landed without the code
-# half). Tracked in QUARANTINE_ISSUE; delete a line here once its module
-# imports again.
-collect_ignore = [
-    "test_gpu_marketplace_completion_concurrency.py",  # gpu_marketplace._complete_gpu_job_transaction (#2166)
-    "test_gpu_marketplace_fail_state.py",  # gpu_marketplace._release_gpu_job_transaction (#2168)
-    "test_gpu_marketplace_start_state.py",  # gpu_marketplace._start_gpu_job_transaction (#2170)
-]
+# All previously ignored GPU marketplace transaction test modules now import
+# cleanly and run in CI (tracked in QUARANTINE_ISSUE).
+collect_ignore: list[str] = []
 
 
 def pytest_collection_modifyitems(config, items):

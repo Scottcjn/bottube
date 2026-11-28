@@ -14,6 +14,7 @@ Import and register with the main BoTTube app.
 """
 import hashlib
 import json
+import math
 import os
 import secrets
 import sqlite3
@@ -22,6 +23,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 
 from flask import Blueprint, request, jsonify, g
 
@@ -175,6 +177,92 @@ def _claim_gpu_job_transaction(db, provider_id: str, agent_id: int, job_id: str,
     db.commit()
     return "claimed"
 
+
+def _start_gpu_job_transaction(db, provider_id: str, job_id: str, now: int) -> bool:
+    """Atomically transition one claimed job owned by provider_id to running."""
+    started = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'running', started_at = ?
+        WHERE id = ? AND provider_id = ? AND status = 'claimed'
+        """,
+        (now, job_id, provider_id),
+    )
+    if int(getattr(started, "rowcount", 0) or 0) != 1:
+        db.rollback()
+        return False
+    db.commit()
+    return True
+
+
+def _complete_gpu_job_transaction(
+    db,
+    *,
+    job_id: str,
+    provider_id: str,
+    now: int,
+    duration_mins: float,
+    payment: float,
+    result_url: str,
+) -> bool:
+    """Atomically complete a running job, credit provider stats, and record history once."""
+    cursor = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'completed', completed_at = ?, actual_mins = ?, rtc_paid = ?, result_url = ?
+        WHERE id = ? AND provider_id = ? AND status = 'running'
+        """,
+        (now, duration_mins, payment, result_url, job_id, provider_id),
+    )
+    if int(getattr(cursor, "rowcount", 0) or 0) != 1:
+        db.rollback()
+        return False
+
+    db.execute(
+        """
+        UPDATE gpu_providers
+        SET status = 'online', total_jobs = total_jobs + 1, total_rtc_earned = total_rtc_earned + ?
+        WHERE id = ?
+        """,
+        (payment, provider_id),
+    )
+    db.execute(
+        """
+        INSERT INTO gpu_job_history (
+            job_id, provider_id, requester_id, job_type, status, rtc_amount, duration_mins, completed_at
+        )
+        SELECT id, provider_id, requester_id, job_type, 'completed', ?, ?, ?
+        FROM gpu_jobs WHERE id = ?
+        """,
+        (payment, duration_mins, now, job_id),
+    )
+    db.commit()
+    return True
+
+
+def _release_gpu_job_transaction(db, provider_id: str, job_id: str, error_msg: str) -> bool:
+    """Atomically release an active (claimed/running) job to pending and mark provider online."""
+    cursor = db.execute(
+        """
+        UPDATE gpu_jobs
+        SET status = 'pending', provider_id = NULL, claimed_at = NULL, started_at = NULL, error_message = ?
+        WHERE id = ? AND provider_id = ? AND status IN ('claimed', 'running')
+        """,
+        (error_msg, job_id, provider_id),
+    )
+    if int(getattr(cursor, "rowcount", 0) or 0) != 1:
+        db.rollback()
+        return False
+
+    db.execute(
+        """
+        UPDATE gpu_providers SET status = 'online' WHERE id = ?
+        """,
+        (provider_id,),
+    )
+    db.commit()
+    return True
+
 def get_db():
     """Get database connection from Flask g context."""
     if not hasattr(g, 'db') or g.db is None:
@@ -184,7 +272,7 @@ def get_db():
             "BOTTUBE_DB_PATH",
             str(Path(__file__).resolve().parent / "bottube.db"),
         )
-        g.db = sqlite3.connect(db_path)
+        g.db = sqlite3.connect(db_path, timeout=5)
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -296,9 +384,38 @@ def _coerce_float(value, default):
     if isinstance(value, bool):
         return None, (jsonify({"error": "Numeric value required"}), 400)
     try:
-        return float(value), None
+        num = float(value)
     except (TypeError, ValueError):
         return None, (jsonify({"error": "Numeric value required"}), 400)
+    if not math.isfinite(num):
+        return None, (jsonify({"error": "Numeric value required"}), 400)
+    return num, None
+
+
+def _coerce_bounded_float(value, default, field_name: str, *, allow_zero: bool = False):
+    """Coerce a finite float and enforce positive (> 0) or non-negative (>= 0) bounds."""
+    num, error = _coerce_float(value, default)
+    if error:
+        return None, error
+    if allow_zero and num < 0:
+        return None, (jsonify({"error": f"{field_name} must be non-negative"}), 400)
+    if not allow_zero and num <= 0:
+        return None, (jsonify({"error": f"{field_name} must be positive"}), 400)
+    return num, None
+
+
+def _validate_result_url(result_url: str):
+    """Allow empty string, safe http(s) URL, or single-slash relative path."""
+    if not result_url:
+        return None
+    if any(ch in result_url for ch in ("\r", "\n", "\x00")):
+        return jsonify({"error": "result_url contains illegal control characters"}), 400
+    parsed = urlparse(result_url)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return None
+    if not parsed.scheme and not parsed.netloc and result_url.startswith("/") and not result_url.startswith("//"):
+        return None
+    return jsonify({"error": "result_url must be a valid http(s) URL or relative path"}), 400
 
 
 def _coerce_string(value, field_name: str, default: str = ""):
@@ -337,11 +454,19 @@ def register_provider():
     if not gpu_model:
         return jsonify({"error": "gpu_model required"}), 400
 
-    gpu_vram = data.get("gpu_vram_gb", 0)
-    custom_price = data.get("price_per_min")
+    gpu_vram, error = _coerce_bounded_float(
+        data.get("gpu_vram_gb"), 0, "gpu_vram_gb", allow_zero=True
+    )
+    if error:
+        return error
 
-    # Use custom price or default based on GPU model
-    price = custom_price if custom_price else get_gpu_price(gpu_model)
+    raw_price = data.get("price_per_min")
+    if raw_price is None:
+        price = get_gpu_price(gpu_model)
+    else:
+        price, error = _coerce_bounded_float(raw_price, 0, "price_per_min", allow_zero=False)
+        if error:
+            return error
 
     provider_id = generate_id("gpu_")
 
@@ -511,16 +636,23 @@ def submit_job():
     if job_type not in ("video_render", "image_gen", "transcode", "llm_inference"):
         return jsonify({"error": "Invalid job_type"}), 400
 
-    params = data.get("params", {})
-    estimated_mins, error = _coerce_float(data.get("estimated_mins"), 5)
+    params = data.get("params")
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return jsonify({"error": "params must be a JSON object"}), 400
+
+    estimated_mins, error = _coerce_bounded_float(data.get("estimated_mins"), 5, "estimated_mins")
     if error:
         return error
-    max_price, error = _coerce_float(data.get("max_price_per_min"), 0.10)
+    max_price, error = _coerce_bounded_float(data.get("max_price_per_min"), 0.10, "max_price_per_min")
     if error:
         return error
 
     # Calculate escrow amount (use max price * estimated time * 1.5 buffer)
     escrow_amount = max_price * estimated_mins * 1.5
+    if not math.isfinite(escrow_amount) or escrow_amount <= 0:
+        return jsonify({"error": "Invalid escrow amount"}), 400
 
     # Check balance
     balance = get_agent_balance(agent['id'])
@@ -643,15 +775,13 @@ def start_job():
 
     if not row:
         return jsonify({"error": "Job not found"}), 404
-    if row[2] != agent['id']:
+    if row[2] != agent['id'] or row[1] != provider_id:
         return jsonify({"error": "Not your job"}), 403
     if row[0] != "claimed":
         return jsonify({"error": f"Job not in claimed state (status: {row[0]})"}), 400
 
-    db.execute("""
-        UPDATE gpu_jobs SET status = 'running', started_at = ? WHERE id = ?
-    """, (int(time.time()), job_id))
-    db.commit()
+    if not _start_gpu_job_transaction(db, provider_id, job_id, int(time.time())):
+        return jsonify({"error": "Job state changed concurrently or not claimed"}), 409
 
     return jsonify({"ok": True, "status": "running"})
 
@@ -680,6 +810,9 @@ def complete_job():
     result_url, error = _coerce_string(data.get("result_url"), "result_url")
     if error:
         return error
+    url_error = _validate_result_url(result_url)
+    if url_error:
+        return url_error
 
     db = get_db()
 
@@ -694,46 +827,29 @@ def complete_job():
 
     if not row:
         return jsonify({"error": "Job not found"}), 404
-    if row[5] != agent['id']:
+    if row[5] != agent['id'] or row[1] != provider_id:
         return jsonify({"error": "Not your job"}), 403
     if row[0] != "running":
         return jsonify({"error": f"Job not running (status: {row[0]})"}), 400
 
-    # Calculate payment
+    # Calculate payment (non-negative elapsed duration, finite non-negative price/escrow)
     now = int(time.time())
-    started_at = row[2]
-    duration_mins = (now - started_at) / 60.0
-    price_per_min = row[6]
+    started_at = row[2] if row[2] is not None else now
+    duration_mins = max(0.0, (now - started_at) / 60.0)
+    price_per_min = max(0.0, float(row[6] or 0.0))
+    escrowed = max(0.0, float(row[3] or 0.0))
+    payment = min(duration_mins * price_per_min, escrowed)
 
-    # Pay for actual time, capped at escrow
-    payment = min(duration_mins * price_per_min, row[3])
-
-    # Update job with atomic compare-and-set
-    cursor = db.execute("""
-        UPDATE gpu_jobs
-        SET status = 'completed', completed_at = ?, actual_mins = ?, rtc_paid = ?, result_url = ?
-        WHERE id = ? AND provider_id = ? AND status = 'running'
-    """, (now, duration_mins, payment, result_url, job_id, provider_id))
-
-    if cursor.rowcount == 0:
-        db.rollback()
+    if not _complete_gpu_job_transaction(
+        db,
+        job_id=job_id,
+        provider_id=provider_id,
+        now=now,
+        duration_mins=duration_mins,
+        payment=payment,
+        result_url=result_url,
+    ):
         return jsonify({"error": "Job state changed concurrently or not running"}), 409
-
-    # Update provider stats
-    db.execute("""
-        UPDATE gpu_providers
-        SET status = 'online', total_jobs = total_jobs + 1, total_rtc_earned = total_rtc_earned + ?
-        WHERE id = ?
-    """, (payment, provider_id))
-
-    # Record in history
-    db.execute("""
-        INSERT INTO gpu_job_history (job_id, provider_id, requester_id, job_type, status, rtc_amount, duration_mins, completed_at)
-        SELECT id, provider_id, requester_id, job_type, 'completed', ?, ?, ?
-        FROM gpu_jobs WHERE id = ?
-    """, (payment, duration_mins, now, job_id))
-
-    db.commit()
 
     return jsonify({
         "ok": True,
@@ -785,21 +901,8 @@ def fail_job():
     if row[0] not in ('claimed', 'running'):
         return jsonify({"error": f"Job cannot be released in '{row[0]}' state (must be claimed or running)"}), 400
 
-    # Release job back to queue with atomic compare-and-set, mark provider available
-    cursor = db.execute("""
-        UPDATE gpu_jobs
-        SET status = 'pending', provider_id = NULL, claimed_at = NULL, started_at = NULL, error_message = ?
-        WHERE id = ? AND provider_id = ? AND status IN ('claimed', 'running')
-    """, (error_msg, job_id, provider_id))
-
-    if cursor.rowcount == 0:
-        db.rollback()
+    if not _release_gpu_job_transaction(db, provider_id, job_id, error_msg):
         return jsonify({"error": "Job state changed concurrently or not in active state"}), 409
-
-    db.execute("""
-        UPDATE gpu_providers SET status = 'online' WHERE id = ?
-    """, (provider_id,))
-    db.commit()
 
     return jsonify({"ok": True, "message": "Job released back to queue"})
 
